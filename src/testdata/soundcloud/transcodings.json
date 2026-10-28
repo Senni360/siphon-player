@@ -1,0 +1,22 @@
+{
+  "id": 1,
+  "title": "A full-length public track",
+  "duration": 180000,
+  "full_duration": 180000,
+  "streamable": true,
+  "policy": "ALLOW",
+  "state": "finished",
+  "user": { "id": 2, "username": "Uploader", "avatar_url": "https://i1.sndcdn.com/avatars-test-large.jpg" },
+  "media": {
+    "transcodings": [
+      { "url": "https://api-v2.soundcloud.com/media/ctr", "preset": "aac_160k", "duration": 180000, "format": { "protocol": "ctr-encrypted-hls", "mime_type": "audio/mp4; codecs=\"mp4a.40.2\"" } },
+      { "url": "https://api-v2.soundcloud.com/media/cbc", "preset": "aac_160k", "duration": 180000, "format": { "protocol": "cbc-encrypted-hls", "mime_type": "audio/mp4" } },
+      { "url": "https://api-v2.soundcloud.com/media/opus", "preset": "opus_0_0", "duration": 180000, "format": { "protocol": "hls", "mime_type": "audio/ogg; codecs=\"opus\"" } },
+      { "url": "https://api-v2.soundcloud.com/media/hls-mp3", "preset": "mp3_0_0", "duration": 180000, "format": { "protocol": "hls", "mime_type": "audio/mpeg" } },
+      { "url": "https://api-v2.soundcloud.com/media/aac-96", "preset": "aac_96k", "duration": 180000, "format": { "protocol": "hls", "mime_type": "audio/mp4; codecs=\"mp4a.40.2\"" } },
+      { "url": "https://api-v2.soundcloud.com/media/aac-160", "preset": "aac_160k", "duration": 180000, "format": { "protocol": "hls", "mime_type": "audio/mp4; codecs=\"mp4a.40.2\"" } },
+      { "url": "https://api-v2.soundcloud.com/media/progressive-mp3", "preset": "mp3_0_0", "duration": 180000, "format": { "protocol": "progressive", "mime_type": "audio/mpeg" } },
+      { "url": "https://api-v2.soundcloud.com/media/abr", "preset": "abr_sq", "duration": 180000, "format": { "protocol": "hls", "mime_type": "audio/mpegurl" } }
+    ]
+  }
+}

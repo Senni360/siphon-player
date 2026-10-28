@@ -1,0 +1,50 @@
+{
+  "avatar_url": "https://a1.sndcdn.com/images/default_avatar_large.png",
+  "city": null,
+  "comments_count": 0,
+  "country_code": null,
+  "created_at": null,
+  "creator_subscriptions": [
+    {
+      "product": {
+        "id": "free"
+      }
+    }
+  ],
+  "creator_subscription": {
+    "product": {
+      "id": "free"
+    }
+  },
+  "description": null,
+  "followers_count": 73,
+  "followings_count": 11,
+  "first_name": "\u0110\u00e2y",
+  "full_name": "\u0110\u00e2y B\u00ecnh",
+  "groups_count": 0,
+  "id": 1372911462,
+  "kind": "user",
+  "last_modified": "2024-03-24T12:52:30Z",
+  "last_name": "B\u00ecnh",
+  "likes_count": 54,
+  "playlist_likes_count": 0,
+  "permalink": "y-b-nh-708353768",
+  "permalink_url": "https://soundcloud.com/y-b-nh-708353768",
+  "playlist_count": 1,
+  "reposts_count": null,
+  "track_count": 8,
+  "uri": "https://api.soundcloud.com/users/soundcloud%3Ausers%3A1372911462",
+  "urn": "soundcloud:users:1372911462",
+  "username": "\u0110\u00e2y B\u00ecnh",
+  "verified": false,
+  "visuals": null,
+  "badges": {
+    "pro": false,
+    "creator_mid_tier": false,
+    "pro_unlimited": false,
+    "verified": false
+  },
+  "station_urn": "soundcloud:system-playlists:artist-stations:1372911462",
+  "station_permalink": "artist-stations:1372911462",
+  "date_of_birth": null
+}

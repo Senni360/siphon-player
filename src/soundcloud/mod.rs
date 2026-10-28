@@ -22,6 +22,9 @@
 //! only as a preview are shown and played as previews; the paywall is not
 //! bypassed.
 
+pub mod api;
+pub mod models;
+
 /// The URI scheme prefix of a SoundCloud track.
 pub const TRACK_PREFIX: &str = "soundcloud:track:";
 /// The URI scheme prefix of a SoundCloud playlist or album ("set").

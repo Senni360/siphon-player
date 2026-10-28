@@ -1,0 +1,5 @@
+{
+  "provenance": "Handwritten minimal JavaScript discovery fixture, not a copied SoundCloud asset",
+  "script": "var ignored={other_client_id:\"ffffffffffffffffffffffffffffffff\",client_id:\"short\"}; window.web={client_id : \"aB012345678901234567890123456789\"};",
+  "expected_client_id": "aB012345678901234567890123456789"
+}

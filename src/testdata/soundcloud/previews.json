@@ -1,0 +1,7 @@
+[
+  { "id": 1, "policy": "SNIP", "duration": 30000, "full_duration": 180000 },
+  { "id": 2, "snipped": true, "duration": 30000 },
+  { "id": 3, "duration": 30000, "full_duration": 180000 },
+  { "id": 4, "policy": "ALLOW", "duration": 180000, "full_duration": 180000 },
+  { "id": 5, "policy": "ALLOW", "duration": 179980, "full_duration": 180000 }
+]

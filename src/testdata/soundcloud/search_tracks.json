@@ -1,0 +1,293 @@
+{
+  "collection": [
+    {
+      "artwork_url": "https://i1.sndcdn.com/artworks-2sAZzlyoS5BihX2W-cfzNYA-large.jpg",
+      "caption": null,
+      "commentable": true,
+      "comment_count": 17,
+      "created_at": "2026-09-27T05:56:33Z",
+      "description": "",
+      "downloadable": false,
+      "download_count": 0,
+      "duration": 244108,
+      "full_duration": 244062,
+      "embeddable_by": "all",
+      "genre": "",
+      "has_downloads_left": false,
+      "id": 2408461857,
+      "kind": "track",
+      "label_name": "",
+      "last_modified": "2026-09-27T05:56:33Z",
+      "license": "all-rights-reserved",
+      "likes_count": 2402,
+      "permalink": "dau-hao-mon-lofi",
+      "permalink_url": "https://soundcloud.com/y-b-nh-708353768/dau-hao-mon-lofi",
+      "playback_count": 303892,
+      "public": true,
+      "publisher_metadata": {
+        "id": 2408461857,
+        "urn": "soundcloud:tracks:2408461857",
+        "artist": "\u0110\u00e2y B\u00ecnh",
+        "explicit": false
+      },
+      "purchase_title": null,
+      "purchase_url": null,
+      "release_date": null,
+      "reposts_count": 90,
+      "secret_token": null,
+      "sharing": "public",
+      "state": "finished",
+      "streamable": true,
+      "tag_list": "",
+      "title": "D\u00e2u H\u00e0o M\u00f4n Lofi",
+      "uri": "https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A2408461857",
+      "urn": "soundcloud:tracks:2408461857",
+      "user_id": 1372911462,
+      "visuals": null,
+      "waveform_url": "https://wave.sndcdn.com/ZLraUMFwFUGz_m.json",
+      "display_date": "2026-09-27T05:56:33Z",
+      "media": {
+        "transcodings": [
+          {
+            "url": "https://api-v2.soundcloud.com/media/soundcloud:tracks:2408461857/cd5984a5-8ee0-41c1-a154-8ec98eb8a213/stream/hls",
+            "preset": "aac_96k",
+            "duration": 244108,
+            "snipped": false,
+            "format": {
+              "protocol": "hls",
+              "mime_type": "audio/mp4; codecs=\"mp4a.40.2\""
+            },
+            "quality": "lq",
+            "is_legacy_transcoding": false
+          },
+          {
+            "url": "https://api-v2.soundcloud.com/media/soundcloud:tracks:2408461857/0bfc5172-d299-4fe0-8f3e-138f48df0c2d/stream/hls",
+            "preset": "abr_sq",
+            "duration": 244108,
+            "snipped": false,
+            "format": {
+              "protocol": "hls",
+              "mime_type": "audio/mpegurl"
+            },
+            "quality": "sq",
+            "is_legacy_transcoding": false
+          }
+        ]
+      },
+      "station_urn": "soundcloud:system-playlists:track-stations:2408461857",
+      "station_permalink": "track-stations:2408461857",
+      "track_authorization": "fixture-track-authorization",
+      "monetization_model": "BLACKBOX",
+      "policy": "MONETIZE",
+      "user": {
+        "avatar_url": "https://a1.sndcdn.com/images/default_avatar_large.png",
+        "city": null,
+        "comments_count": 0,
+        "country_code": null,
+        "created_at": null,
+        "creator_subscriptions": [
+          {
+            "product": {
+              "id": "free"
+            }
+          }
+        ],
+        "creator_subscription": {
+          "product": {
+            "id": "free"
+          }
+        },
+        "description": null,
+        "followers_count": 73,
+        "followings_count": 11,
+        "first_name": "\u0110\u00e2y",
+        "full_name": "\u0110\u00e2y B\u00ecnh",
+        "groups_count": 0,
+        "id": 1372911462,
+        "kind": "user",
+        "last_modified": "2024-03-24T12:52:30Z",
+        "last_name": "B\u00ecnh",
+        "likes_count": 54,
+        "playlist_likes_count": 0,
+        "permalink": "y-b-nh-708353768",
+        "permalink_url": "https://soundcloud.com/y-b-nh-708353768",
+        "playlist_count": 1,
+        "reposts_count": null,
+        "track_count": 8,
+        "uri": "https://api.soundcloud.com/users/soundcloud%3Ausers%3A1372911462",
+        "urn": "soundcloud:users:1372911462",
+        "username": "\u0110\u00e2y B\u00ecnh",
+        "verified": false,
+        "visuals": null,
+        "badges": {
+          "pro": false,
+          "creator_mid_tier": false,
+          "pro_unlimited": false,
+          "verified": false
+        },
+        "station_urn": "soundcloud:system-playlists:artist-stations:1372911462",
+        "station_permalink": "artist-stations:1372911462",
+        "date_of_birth": null
+      }
+    },
+    {
+      "artwork_url": "https://i1.sndcdn.com/artworks-Q6DOEbZ6HmKyhJPL-qiLKyQ-large.jpg",
+      "caption": null,
+      "commentable": true,
+      "comment_count": 19,
+      "created_at": "2026-09-10T16:11:42Z",
+      "description": "",
+      "downloadable": false,
+      "download_count": 0,
+      "duration": 216190,
+      "full_duration": 216144,
+      "embeddable_by": "me",
+      "genre": null,
+      "has_downloads_left": false,
+      "id": 2398021050,
+      "kind": "track",
+      "label_name": "",
+      "last_modified": "2026-09-11T12:11:50Z",
+      "license": "all-rights-reserved",
+      "likes_count": 5741,
+      "permalink": "gi-nh-anh-l-em-lofi-hot-tiktok",
+      "permalink_url": "https://soundcloud.com/abcxyz16/gi-nh-anh-l-em-lofi-hot-tiktok",
+      "playback_count": 664347,
+      "public": true,
+      "publisher_metadata": {
+        "id": 2398021050,
+        "urn": "soundcloud:tracks:2398021050",
+        "artist": "S",
+        "publisher": "",
+        "explicit": false,
+        "p_line": "\u2117 ",
+        "p_line_for_display": "\u2117 "
+      },
+      "purchase_title": null,
+      "purchase_url": null,
+      "release_date": null,
+      "reposts_count": 55,
+      "secret_token": null,
+      "sharing": "public",
+      "state": "finished",
+      "streamable": true,
+      "tag_list": "",
+      "title": "Gi\u00e1 Nh\u01b0 Anh L\u00e0 Em |Lofi .| - L\u1ec7 Quy\u00ean",
+      "uri": "https://api.soundcloud.com/tracks/soundcloud%3Atracks%3A2398021050",
+      "urn": "soundcloud:tracks:2398021050",
+      "user_id": 1210135090,
+      "visuals": null,
+      "waveform_url": "https://wave.sndcdn.com/Ec7SyRgVVffn_m.json",
+      "display_date": "2026-09-10T16:11:42Z",
+      "media": {
+        "transcodings": [
+          {
+            "url": "https://api-v2.soundcloud.com/media/soundcloud:tracks:2398021050/6e3f518f-5ac1-49b4-80d8-a587837a5c35/stream/hls",
+            "preset": "aac_160k",
+            "duration": 216190,
+            "snipped": false,
+            "format": {
+              "protocol": "hls",
+              "mime_type": "audio/mp4; codecs=\"mp4a.40.2\""
+            },
+            "quality": "sq",
+            "is_legacy_transcoding": false
+          },
+          {
+            "url": "https://api-v2.soundcloud.com/media/soundcloud:tracks:2398021050/dc6112bf-0d2c-41a3-bded-61e9cdad2bcf/stream/hls",
+            "preset": "aac_96k",
+            "duration": 216190,
+            "snipped": false,
+            "format": {
+              "protocol": "hls",
+              "mime_type": "audio/mp4; codecs=\"mp4a.40.2\""
+            },
+            "quality": "lq",
+            "is_legacy_transcoding": false
+          },
+          {
+            "url": "https://api-v2.soundcloud.com/media/soundcloud:tracks:2398021050/d9727722-19ad-4e71-9ad3-2f498171442c/stream/hls",
+            "preset": "abr_sq",
+            "duration": 216190,
+            "snipped": false,
+            "format": {
+              "protocol": "hls",
+              "mime_type": "audio/mpegurl"
+            },
+            "quality": "sq",
+            "is_legacy_transcoding": false
+          }
+        ]
+      },
+      "station_urn": "soundcloud:system-playlists:track-stations:2398021050",
+      "station_permalink": "track-stations:2398021050",
+      "track_authorization": "fixture-track-authorization",
+      "monetization_model": "BLACKBOX",
+      "policy": "MONETIZE",
+      "user": {
+        "avatar_url": "https://i1.sndcdn.com/avatars-CSR8XaMy12XuoN5w-zGuguA-large.jpg",
+        "city": null,
+        "comments_count": 0,
+        "country_code": null,
+        "created_at": null,
+        "creator_subscriptions": [
+          {
+            "product": {
+              "id": "free"
+            }
+          }
+        ],
+        "creator_subscription": {
+          "product": {
+            "id": "free"
+          }
+        },
+        "description": "",
+        "followers_count": 445,
+        "followings_count": 0,
+        "first_name": "Randy",
+        "full_name": "Randy 25555",
+        "groups_count": 0,
+        "id": 1210135090,
+        "kind": "user",
+        "last_modified": "2026-10-22T03:24:12Z",
+        "last_name": "25555",
+        "likes_count": 17,
+        "playlist_likes_count": 0,
+        "permalink": "abcxyz16",
+        "permalink_url": "https://soundcloud.com/abcxyz16",
+        "playlist_count": 0,
+        "reposts_count": null,
+        "track_count": 4,
+        "uri": "https://api.soundcloud.com/users/soundcloud%3Ausers%3A1210135090",
+        "urn": "soundcloud:users:1210135090",
+        "username": "Olise",
+        "verified": false,
+        "visuals": {
+          "urn": "soundcloud:users:1210135090",
+          "enabled": true,
+          "visuals": [
+            {
+              "urn": "soundcloud:visuals:271408089",
+              "entry_time": 0,
+              "visual_url": "https://i1.sndcdn.com/visuals-SpcyxgyoAIYz4pjb-zzWUpA-original.jpg"
+            }
+          ],
+          "tracking": null
+        },
+        "badges": {
+          "pro": false,
+          "creator_mid_tier": false,
+          "pro_unlimited": false,
+          "verified": false
+        },
+        "station_urn": "soundcloud:system-playlists:artist-stations:1210135090",
+        "station_permalink": "artist-stations:1210135090",
+        "date_of_birth": null
+      }
+    }
+  ],
+  "total_results": 1476281,
+  "next_href": "https://api-v2.soundcloud.com/search/tracks?query_urn=soundcloud%3Asearch%3Ad3830cef05e34140b29a28fd4696a8df&limit=2&offset=2&q=lofi",
+  "query_urn": "soundcloud:search:d3830cef05e34140b29a28fd4696a8df"
+}
