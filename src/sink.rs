@@ -98,6 +98,9 @@ pub const BUFFER_MS_RANGE: std::ops::RangeInclusive<u32> = 20..=500;
 /// A confirmed seek also discards queued audio, without gating packets from
 /// the decoder that has already moved to the requested position.
 pub struct AudioControl {
+    external: Mutex<Weak<ExternalInner>>,
+    external_active: AtomicBool,
+    producer: Mutex<()>,
     target: Mutex<AudioTarget>,
     waiting_for_track: AtomicBool,
     reset_output: AtomicBool,
@@ -114,6 +117,9 @@ struct AudioTarget {
 impl AudioControl {
     pub fn new(buffer_ms: u32) -> Arc<Self> {
         Arc::new(Self {
+            external: Mutex::new(Weak::new()),
+            external_active: AtomicBool::new(false),
+            producer: Mutex::new(()),
             target: Mutex::new(AudioTarget::default()),
             waiting_for_track: AtomicBool::new(false),
             reset_output: AtomicBool::new(false),
@@ -125,6 +131,10 @@ impl AudioControl {
     /// Follows confirmed decoder transitions, including seeks requested by
     /// another Spotify client. Natural track changes retain gapless audio.
     pub(crate) fn handle_player_event(&self, event: &PlayerEvent) {
+        let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.external_active.load(Ordering::SeqCst) {
+            return;
+        }
         match event {
             PlayerEvent::TrackChanged { .. } => self.track_changed(),
             PlayerEvent::Seeked { .. } => {
@@ -147,6 +157,13 @@ impl AudioControl {
     /// Fades and discards the current output before a user-requested track
     /// change. Repeated skips share the same handoff.
     pub fn interrupt(&self) {
+        let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
+        if !self.external_active.load(Ordering::SeqCst) {
+            self.interrupt_output();
+        }
+    }
+
+    fn interrupt_output(&self) {
         if self.waiting_for_track.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -198,6 +215,330 @@ impl AudioControl {
         let mut target = self.target.lock().unwrap_or_else(PoisonError::into_inner);
         target.sink = Arc::downgrade(sink);
         target.envelope = Some(envelope);
+    }
+
+    /// A producer for the very same device and mixer as the Spotify sink.
+    /// Available once librespot has constructed its sink.
+    pub fn external_output(&self) -> Option<ExternalOutput> {
+        self.external
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .upgrade()
+            .map(|inner| ExternalOutput(inner, false))
+    }
+}
+
+/// An exclusive producer of stereo 44.1 kHz PCM, before EQ and the tap.
+/// All methods that touch audio can wait and must run off the UI thread.
+///
+/// Call `claim` before writing and `release` before starting Spotify again.
+/// Pause Spotify through its transport before claiming, and keep Connect
+/// from reactivating it until release. Even a late Spotify packet cannot
+/// mix with this producer: its writes and transport are gated while claimed.
+pub struct ExternalOutput(Arc<ExternalInner>, bool);
+
+struct ExternalInner {
+    sink: Mutex<ExternalPcm>,
+    control: Arc<AudioControl>,
+}
+
+/// SoundCloud's processing state is separate from Spotify's normalization
+/// and decoder history. Both paths write to the same physical RodioSink.
+pub(crate) struct ExternalPcm {
+    pub sink: Arc<Mutex<RodioSink>>,
+    pub control: Arc<AudioControl>,
+    pub tap: Arc<crate::vis::AudioTap>,
+    pub eq: crate::eq::Processor,
+    pub volume: Box<dyn VolumeGetter + Send>,
+    pub limiter: crate::limiter::Limiter,
+}
+
+impl Sink for ExternalPcm {
+    fn start(&mut self) -> SinkResult<()> {
+        self.sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .start()
+    }
+    fn stop(&mut self) -> SinkResult<()> {
+        self.tap.clear();
+        self.sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stop()
+    }
+    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
+        if self.control.take_processing_reset() {
+            self.eq.reset();
+            self.limiter = crate::limiter::Limiter::new(f64::from(SAMPLE_RATE));
+            self.tap.clear();
+        }
+        let AudioPacket::Samples(mut samples) = packet else {
+            return Err(SinkError::InvalidParams(
+                "External audio must be PCM".into(),
+            ));
+        };
+        self.eq.process(&mut samples);
+        // Same ordering as vis::Tapped, with unity normalization for this
+        // source: all visualizers see post-EQ, pre-volume PCM, even at mute.
+        self.tap.push(&samples, 1.0);
+        let volume = self.volume.attenuation_factor();
+        if volume > f64::EPSILON {
+            self.limiter.process(&mut samples, 1.0 / volume);
+        }
+        self.sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .write(AudioPacket::Samples(samples), converter)
+    }
+}
+
+/// Serializes access to the one RodioSink, without owning another device.
+pub(crate) struct LockedSink(pub Arc<Mutex<RodioSink>>);
+
+impl Sink for LockedSink {
+    fn start(&mut self) -> SinkResult<()> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .start()
+    }
+    fn stop(&mut self) -> SinkResult<()> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).stop()
+    }
+    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
+        self.0
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .write(packet, converter)
+    }
+}
+
+pub(crate) struct SharedSink {
+    spotify: Box<dyn Sink>,
+    external: ExternalOutput,
+}
+
+impl SharedSink {
+    pub(crate) fn new(
+        spotify: Box<dyn Sink>,
+        external: ExternalPcm,
+        control: Arc<AudioControl>,
+    ) -> Self {
+        let external = ExternalOutput(
+            Arc::new(ExternalInner {
+                sink: Mutex::new(external),
+                control: Arc::clone(&control),
+            }),
+            false,
+        );
+        *control
+            .external
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Arc::downgrade(&external.0);
+        Self { spotify, external }
+    }
+}
+
+impl Sink for SharedSink {
+    fn start(&mut self) -> SinkResult<()> {
+        let _guard = self
+            .external
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self
+            .external
+            .0
+            .control
+            .external_active
+            .load(Ordering::SeqCst)
+        {
+            return Ok(());
+        }
+        self.spotify.start()
+    }
+    fn stop(&mut self) -> SinkResult<()> {
+        let _guard = self
+            .external
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self
+            .external
+            .0
+            .control
+            .external_active
+            .load(Ordering::SeqCst)
+        {
+            return Ok(());
+        }
+        self.spotify.stop()
+    }
+    fn write(&mut self, packet: AudioPacket, converter: &mut Converter) -> SinkResult<()> {
+        {
+            let _guard = self
+                .external
+                .0
+                .control
+                .producer
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if !self
+                .external
+                .0
+                .control
+                .external_active
+                .load(Ordering::SeqCst)
+            {
+                return self.spotify.write(packet, converter);
+            }
+        }
+        // Preserve librespot's backpressure while its pause is in flight.
+        let frames = packet
+            .samples()
+            .map_or(0, |s| s.len() / NUM_CHANNELS as usize);
+        thread::sleep(Duration::from_secs_f64(frames as f64 / SAMPLE_RATE as f64));
+        Ok(())
+    }
+}
+
+impl ExternalOutput {
+    /// Queued frames not yet pulled by the device, for transport anchors.
+    pub fn pending_ms(&self) -> u32 {
+        let pcm = self.0.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        let raw = pcm.sink.lock().unwrap_or_else(PoisonError::into_inner);
+        raw.output.as_ref().map_or(0, |o| {
+            (o.queued.frames() * 1_000 / u64::from(o.sample_rate)) as u32
+        })
+    }
+    pub fn claim(&mut self) -> SinkResult<()> {
+        let _guard = self
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.1 {
+            return Ok(());
+        }
+        if self.0.control.external_active.swap(true, Ordering::SeqCst) {
+            return Err(SinkError::NotConnected(
+                "The output already has an external producer".into(),
+            ));
+        }
+        self.1 = true;
+        self.0.control.interrupt_output();
+        self.0.control.track_changed();
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stop()
+    }
+    pub fn start(&self) -> SinkResult<()> {
+        let _guard = self
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.1 {
+            return Err(SinkError::NotConnected(
+                "the external producer does not own the output".into(),
+            ));
+        }
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .start()
+    }
+    /// Drains the short output queue and suspends the physical device.
+    pub fn pause(&self) -> SinkResult<()> {
+        let _guard = self
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.1 {
+            return Err(SinkError::NotConnected(
+                "The external producer does not own the output".into(),
+            ));
+        }
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stop()
+    }
+    pub fn reset(&self) {
+        let _guard = self
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.1 {
+            self.0.control.interrupt_output();
+            self.0.control.track_changed();
+        }
+    }
+    pub fn write(&self, samples: Vec<f64>, converter: &mut Converter) -> SinkResult<()> {
+        let _guard = self
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.1 {
+            return Err(SinkError::NotConnected(
+                "the external producer does not own the output".into(),
+            ));
+        }
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .write(AudioPacket::Samples(samples), converter)
+    }
+    /// Returns the output to Spotify with no external samples left queued.
+    pub fn release(&mut self) -> SinkResult<()> {
+        let _guard = self
+            .0
+            .control
+            .producer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.1 {
+            return Ok(());
+        }
+        self.0.control.interrupt_output();
+        self.0.control.track_changed();
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .stop()?;
+        self.0
+            .control
+            .external_active
+            .store(false, Ordering::SeqCst);
+        self.1 = false;
+        Ok(())
+    }
+}
+
+impl Drop for ExternalOutput {
+    fn drop(&mut self) {
+        if self.1 {
+            let _ = self.release();
+        }
     }
 }
 
@@ -1092,6 +1433,139 @@ fn open_output(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    struct CountedSink(Arc<AtomicU32>);
+    impl Sink for CountedSink {
+        fn start(&mut self) -> SinkResult<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn stop(&mut self) -> SinkResult<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+        fn write(&mut self, _: AudioPacket, _: &mut Converter) -> SinkResult<()> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    fn external_pcm(
+        control: Arc<AudioControl>,
+        tap: Arc<crate::vis::AudioTap>,
+        eq: crate::eq::SharedEq,
+        volume: f64,
+    ) -> ExternalPcm {
+        struct FixedVolume(f64);
+        impl VolumeGetter for FixedVolume {
+            fn attenuation_factor(&self) -> f64 {
+                self.0
+            }
+        }
+        let sink = RodioSink {
+            open: no_device,
+            ..RodioSink::new(
+                None,
+                Arc::new(|_| {}),
+                Box::new(FixedVolume(volume)),
+                DEFAULT_BUFFER_MS,
+                Arc::clone(&control),
+            )
+        };
+        ExternalPcm {
+            sink: Arc::new(Mutex::new(sink)),
+            control,
+            tap,
+            eq: crate::eq::Processor::new(eq),
+            volume: Box::new(FixedVolume(volume)),
+            limiter: crate::limiter::Limiter::new(f64::from(SAMPLE_RATE)),
+        }
+    }
+
+    #[test]
+    fn external_ownership_gates_spotify_packets_and_transport_until_release() {
+        let control = AudioControl::new(DEFAULT_BUFFER_MS);
+        let calls = Arc::new(AtomicU32::new(0));
+        let pcm = external_pcm(
+            Arc::clone(&control),
+            crate::vis::AudioTap::new(),
+            crate::eq::shared(),
+            1.0,
+        );
+        let mut shared = SharedSink::new(
+            Box::new(CountedSink(Arc::clone(&calls))),
+            pcm,
+            Arc::clone(&control),
+        );
+        let mut external = control.external_output().unwrap();
+        let mut converter = Converter::new(None);
+        shared.start().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        external.claim().unwrap();
+        let mut other = control.external_output().unwrap();
+        assert!(other.claim().is_err());
+        assert!(other.start().is_err());
+        assert!(other.pause().is_err());
+        other.reset();
+        other.release().unwrap();
+        shared.start().unwrap();
+        shared.stop().unwrap();
+        shared
+            .write(AudioPacket::Samples(vec![0.0; 88]), &mut converter)
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        control.reset_output.store(false, Ordering::SeqCst);
+        control.interrupt();
+        assert!(
+            !control.take_reset(),
+            "a Spotify load cannot interrupt external PCM"
+        );
+        control.handle_player_event(&PlayerEvent::Seeked {
+            play_request_id: 1,
+            track_id: librespot_core::SpotifyUri::from_uri("spotify:track:14XWXWv5FoCbFzLksawpEe")
+                .unwrap(),
+            position_ms: 0,
+        });
+        assert!(
+            !control.take_reset(),
+            "a late Spotify seek must not discard external PCM"
+        );
+        external.release().unwrap();
+        shared.start().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(external.write(vec![0.0; 88], &mut converter).is_err());
+        other.claim().unwrap();
+        drop(other);
+        assert!(!control.external_active.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn external_visualizers_follow_eq_and_keep_dancing_at_zero_volume() {
+        let mut levels = vec![];
+        for volume in [0.0, 1.0] {
+            let control = AudioControl::new(DEFAULT_BUFFER_MS);
+            let tap = crate::vis::AudioTap::new();
+            let eq = crate::eq::shared();
+            {
+                let mut settings = eq.lock().unwrap();
+                settings.on = true;
+                settings.preamp_db = -6.0;
+            }
+            let mut pcm = external_pcm(control, Arc::clone(&tap), eq, volume);
+            // A failed device still leaves the processing/tap observable.
+            assert!(
+                pcm.write(
+                    AudioPacket::Samples(vec![0.25; 4096]),
+                    &mut Converter::new(None)
+                )
+                .is_err()
+            );
+            let level = tap.window(128, 0).iter().map(|s| s.abs()).sum::<f32>() / 128.0;
+            assert!((0.10..0.15).contains(&level), "post-EQ level {level}");
+            levels.push(level);
+        }
+        assert_eq!(levels[0], levels[1], "volume is applied after the tap");
+    }
 
     #[test]
     fn underruns_are_logged_when_they_grow_at_most_every_ten_seconds() {

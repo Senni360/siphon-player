@@ -398,6 +398,11 @@ pub struct Engine {
 }
 
 impl Engine {
+    /// The shared output, once the player's sink has been constructed.
+    /// Pause Spotify before handing it to the SoundCloud engine.
+    pub fn external_output(&self) -> Option<crate::sink::ExternalOutput> {
+        self.audio.external_output()
+    }
     pub(crate) fn credentials(&self) -> Option<Credentials> {
         self.session.cache().and_then(|cache| cache.credentials())
     }
@@ -871,21 +876,31 @@ fn sink_builder(
     // The output applies volume to queued audio. The wrapper reads the same
     // value to calculate the pre-volume limiter ceiling.
     let ceiling = mixer.get_soft_volume();
+    let external_ceiling = mixer.get_soft_volume();
     (
         Box::new(move || {
-            let sink = Box::new(
+            let sink = Arc::new(Mutex::new(
                 RodioSink::new(device, report, volume, buffer_ms, Arc::clone(&audio))
                     .on_device(saved),
-            );
-            Box::new(Tapped::new(
-                sink,
-                audio,
+            ));
+            let external = crate::sink::ExternalPcm {
+                sink: Arc::clone(&sink),
+                control: Arc::clone(&audio),
+                tap: Arc::clone(&tap),
+                volume: external_ceiling,
+                eq: crate::eq::Processor::new(Arc::clone(&eq)),
+                limiter: crate::limiter::Limiter::new(f64::from(librespot_playback::SAMPLE_RATE)),
+            };
+            let spotify = Box::new(Tapped::new(
+                Box::new(crate::sink::LockedSink(sink)),
+                Arc::clone(&audio),
                 tap,
                 ceiling,
                 false,
                 eq,
                 normalisation,
-            )) as Box<dyn Sink>
+            ));
+            Box::new(crate::sink::SharedSink::new(spotify, external, audio)) as Box<dyn Sink>
         }),
         Box::new(NoOpVolume),
     )
