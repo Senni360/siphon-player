@@ -32,6 +32,10 @@ pub struct Anchor {
     pub after: Option<TrackAnchor>,
     /// Original Spotify index of `after`. `None` with no `after` means top.
     pub position: Option<usize>,
+    /// A new insertion made before the complete Spotify snapshot arrived.
+    /// Resolve this absolute boundary once, then checkpoint occurrence anchors.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub position_only: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -113,7 +117,11 @@ pub fn merge(spotify_tracks: &[Track], overlay: &Overlay) -> Vec<MergedRow> {
     for row in &overlay.entries {
         let anchor = &row.anchor;
         let matched = anchor.after.as_ref().and_then(resolve);
-        let slot = if let Some(index) = matched {
+        let slot = if anchor.position_only {
+            anchor.position.map_or(0, |position| {
+                position.saturating_add(1).min(spotify_tracks.len())
+            })
+        } else if let Some(index) = matched {
             index + 1
         } else if let Some(position) = anchor.position {
             earlier[position.min(overlay.spotify_snapshot.len())]
@@ -140,6 +148,35 @@ pub fn merge(spotify_tracks: &[Track], overlay: &Overlay) -> Vec<MergedRow> {
 }
 
 impl Overlay {
+    /// Record a new local insertion against an unloaded absolute Spotify
+    /// boundary without checkpointing (and damaging) existing stable anchors.
+    pub fn insert_at_position(&mut self, position: usize, track: &Track) -> Option<String> {
+        if !crate::soundcloud::is_track_uri(&track.uri) {
+            return None;
+        }
+        let entry = Entry::new(track);
+        let id = entry.id.clone();
+        self.entries.push(OverlayEntry {
+            entry,
+            anchor: Anchor {
+                after: None,
+                position: position.checked_sub(1),
+                position_only: true,
+            },
+        });
+        Some(id)
+    }
+
+    /// Call only with a complete accepted Spotify snapshot. Reads of partial
+    /// windows must never turn provisional positions into occurrence anchors.
+    pub fn resolve_positions(&mut self, spotify_tracks: &[Track]) -> bool {
+        if !self.entries.iter().any(|entry| entry.anchor.position_only) {
+            return false;
+        }
+        self.checkpoint(spotify_tracks, merge(spotify_tracks, self));
+        true
+    }
+
     pub fn has_overlay(&self) -> bool {
         !self.entries.is_empty()
     }
@@ -188,7 +225,7 @@ impl Overlay {
         before != self.entries.len()
     }
 
-    fn checkpoint(&mut self, spotify_tracks: &[Track], rows: Vec<MergedRow>) {
+    pub(crate) fn checkpoint(&mut self, spotify_tracks: &[Track], rows: Vec<MergedRow>) {
         let mut counts = HashMap::new();
         self.spotify_snapshot = spotify_tracks
             .iter()
@@ -210,6 +247,7 @@ impl Overlay {
                     anchor = Anchor {
                         after: Some(self.spotify_snapshot[spotify_index].clone()),
                         position: Some(spotify_index),
+                        position_only: false,
                     };
                 }
                 MergedRow::Overlay { entry } => self.entries.push(OverlayEntry {
@@ -346,6 +384,41 @@ mod tests {
         empty.insert(&[], 1, &sc(2)).unwrap();
         assert_eq!(order(&[], &empty), ["1", "2"]);
         assert_eq!(order(&tracks, &empty), ["1", "2", "a", "b", "c"]);
+    }
+
+    #[test]
+    fn unloaded_insertions_preserve_existing_anchors_until_a_full_snapshot_arrives() {
+        let tracks = spotify(&["a", "b", "c"]);
+        let mut overlay = Overlay::default();
+        overlay.insert(&tracks, 2, &sc(1)).unwrap();
+        let stable = overlay.entries[0].clone();
+        let pending = overlay.insert_at_position(4, &sc(2)).unwrap();
+        assert_eq!(overlay.entries[0], stable);
+        let complete = spotify(&["a", "b", "c", "new", "last"]);
+        assert_eq!(
+            order(&complete, &overlay),
+            ["a", "b", "1", "c", "new", "2", "last"]
+        );
+        let round_trip: Overlay =
+            serde_json::from_str(&serde_json::to_string(&overlay).unwrap()).unwrap();
+        assert_eq!(round_trip, overlay);
+        assert!(overlay.resolve_positions(&complete));
+        assert_eq!(overlay.entries[1].entry.id, pending);
+        assert!(
+            !overlay
+                .entries
+                .iter()
+                .any(|entry| entry.anchor.position_only)
+        );
+        assert_eq!(
+            order(&complete, &overlay),
+            ["a", "b", "1", "c", "new", "2", "last"]
+        );
+        assert_eq!(
+            order(&spotify(&["new", "a", "last", "b", "c"]), &overlay),
+            ["new", "2", "a", "last", "b", "1", "c"]
+        );
+        assert!(!overlay.resolve_positions(&complete));
     }
 
     #[test]
@@ -664,6 +737,7 @@ mod tests {
                             occurrence: 0,
                         }),
                         position: Some(i),
+                        position_only: false,
                     },
                 })
                 .collect(),
