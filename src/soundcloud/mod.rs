@@ -22,6 +22,7 @@
 //! only as a preview are shown and played as previews; the paywall is not
 //! bypassed.
 
+pub mod account;
 pub mod api;
 pub mod engine;
 pub mod models;

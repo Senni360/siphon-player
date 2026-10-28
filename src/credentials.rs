@@ -1,4 +1,4 @@
-//! Durable Spotify grants and proxy passwords in the platform credential store.
+//! Durable grants and proxy passwords in the platform credential store.
 //!
 //! All native calls run on one dedicated thread. A locked store cannot hold
 //! the UI, command loop, or runtime shutdown hostage. Generation checks reject
@@ -29,11 +29,18 @@ pub enum Slot {
     Personal,
     Playback,
     Proxy,
+    SoundCloud,
 }
 
 impl Slot {
     pub const SPOTIFY: [Self; 3] = [Self::Shared, Self::Personal, Self::Playback];
-    pub const ALL: [Self; 4] = [Self::Shared, Self::Personal, Self::Playback, Self::Proxy];
+    pub const ALL: [Self; 5] = [
+        Self::Shared,
+        Self::Personal,
+        Self::Playback,
+        Self::Proxy,
+        Self::SoundCloud,
+    ];
     pub(crate) fn index(self) -> usize {
         self as usize
     }
@@ -43,6 +50,7 @@ impl Slot {
             Self::Personal => "personal-web",
             Self::Playback => "playback",
             Self::Proxy => "proxy-password",
+            Self::SoundCloud => "soundcloud-session",
         }
     }
 }
@@ -574,7 +582,7 @@ type Job = Box<dyn FnOnce(&mut dyn ProtectedStore) + Send>;
 struct Inner {
     dirs: AppDirs,
     profile: String,
-    generations: [AtomicU64; 4],
+    generations: [AtomicU64; Slot::ALL.len()],
     // Held only around the tiny local marker files, never a native store call.
     markers: Mutex<()>,
     jobs: mpsc::SyncSender<Job>,
@@ -783,6 +791,9 @@ impl Store {
     }
 
     fn legacy_paths(&self, slot: Slot) -> Vec<PathBuf> {
+        if slot == Slot::SoundCloud {
+            return Vec::new();
+        }
         if slot == Slot::Proxy {
             let path = self.inner.dirs.proxy_secret_file();
             return vec![path.clone(), path.with_extension("tmp")];
@@ -793,6 +804,7 @@ impl Store {
             Slot::Personal => dirs.personal_web_token_file(),
             Slot::Playback => dirs.credentials_dir().join("credentials.json"),
             Slot::Proxy => unreachable!("proxy legacy paths handled above"),
+            Slot::SoundCloud => unreachable!("SoundCloud has no legacy plaintext grant"),
         };
         let mut paths = vec![path.clone(), path.with_extension("json.tmp")];
         if slot != Slot::Playback {
@@ -1017,14 +1029,19 @@ impl Lease {
             grant,
         })
         .map_err(|_| Error::Invalid)?;
-        backend.write(&self.key(), &bytes)?;
+        self.save_bytes(backend, &bytes)
+    }
+
+    fn save_bytes(&self, backend: &mut dyn ProtectedStore, bytes: &[u8]) -> Result<(), Error> {
+        self.check()?;
+        backend.write(&self.key(), bytes)?;
         if !self.current() {
             // Operations on this store are serialized. No newer write can be
             // erased here; it is still queued behind this one.
             let _ = backend.delete(&self.key());
             return Err(Error::Stale);
         }
-        if backend.read(&self.key())?.as_deref() != Some(bytes.as_slice()) {
+        if backend.read(&self.key())?.as_deref() != Some(bytes) {
             return Err(Error::Verification);
         }
         let _guard = self
@@ -1036,6 +1053,61 @@ impl Lease {
         self.check()?;
         self.store.write_marker(self.slot, false)?;
         self.store.remove_legacy(self.slot)
+    }
+
+    /// Opaque service secrets use the same protected store, write verification,
+    /// generations and revocation markers as Spotify, without a Spotify Grant.
+    /// Only SoundCloud currently uses this format. Its caller validates bytes.
+    pub(crate) async fn load_secret(&self) -> Result<Option<Vec<u8>>, Error> {
+        self.request(true, |lease, backend| {
+            if lease.slot != Slot::SoundCloud {
+                return Err(Error::Invalid);
+            }
+            if lease.store.marker(lease.slot)?.is_some_and(|m| m.revoked) {
+                return Ok(None);
+            }
+            backend.read(&lease.key())
+        })
+        .await
+    }
+
+    pub(crate) async fn save_secret(&self, secret: Vec<u8>) -> Result<(), Error> {
+        self.request(true, move |lease, backend| {
+            if lease.slot != Slot::SoundCloud || secret.is_empty() {
+                return Err(Error::Invalid);
+            }
+            lease.save_bytes(backend, &secret)
+        })
+        .await
+    }
+
+    /// Call invalidate before taking this lease to reject older authorization
+    /// work. The marker reaches disk before deletion, even if the store locks.
+    /// Sign-out passes false: its immediately enqueued cleanup must run even
+    /// if a new connection begins while it waits. A network result passes true
+    /// so stale profile resolution cannot delete a newer session's secret.
+    pub(crate) fn clear_secret(
+        &self,
+        guard_generation: bool,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send>> {
+        self.request(guard_generation, move |lease, backend| {
+            if lease.slot != Slot::SoundCloud {
+                return Err(Error::Invalid);
+            }
+            {
+                let _guard = lease
+                    .store
+                    .inner
+                    .markers
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
+                if guard_generation {
+                    lease.check()?;
+                }
+                lease.store.write_marker(lease.slot, true)?;
+            }
+            backend.delete(&lease.key())
+        })
     }
 
     /// Enqueue immediately so refreshes preserve write order even when callers
@@ -1557,6 +1629,204 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn soundcloud_secret_is_separate_from_spotify_and_proxy_grants() {
+        let f = Fixture::new();
+        let secret = b"dummy-soundcloud-session-token".to_vec();
+        let lease = f.store.lease(Slot::SoundCloud);
+        lease.save_secret(secret.clone()).await.unwrap();
+        f.store
+            .lease(Slot::Shared)
+            .save(web(SHARED_CLIENT))
+            .await
+            .unwrap();
+        f.store.revoke_spotify().unwrap();
+        assert_eq!(
+            f.restart()
+                .lease(Slot::SoundCloud)
+                .load_secret()
+                .await
+                .unwrap(),
+            Some(secret)
+        );
+        f.store.invalidate(Slot::SoundCloud);
+        assert_eq!(
+            lease.save_secret(b"stale-token".to_vec()).await,
+            Err(Error::Stale)
+        );
+        f.store
+            .lease(Slot::SoundCloud)
+            .clear_secret(false)
+            .await
+            .unwrap();
+        assert!(!f.fake.lock().unwrap().values.contains_key(&lease.key()));
+        assert!(
+            f.restart()
+                .lease(Slot::SoundCloud)
+                .load_secret()
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_soundcloud_delete_is_blocked_by_its_revocation_marker() {
+        let f = Fixture::new();
+        f.store
+            .lease(Slot::SoundCloud)
+            .save_secret(b"dummy-soundcloud-session-token".to_vec())
+            .await
+            .unwrap();
+        f.fake.lock().unwrap().delete_error = Some(Error::Locked);
+        f.store.invalidate(Slot::SoundCloud);
+        assert_eq!(
+            f.store.lease(Slot::SoundCloud).clear_secret(false).await,
+            Err(Error::Locked)
+        );
+        assert!(!f.fake.lock().unwrap().values.is_empty());
+        f.fake.lock().unwrap().read_error = Some(Error::Locked);
+        assert!(
+            f.restart()
+                .lease(Slot::SoundCloud)
+                .load_secret()
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_public_soundcloud_profile_does_not_require_an_unlocked_store() {
+        use crate::soundcloud::account::{
+            Account, Connection, Profile, ProfileInput, ResolveError, Resolver, SessionToken,
+        };
+
+        struct PublicResolver;
+        impl Resolver for PublicResolver {
+            async fn resolve_profile(&self, _: &ProfileInput) -> Result<Profile, ResolveError> {
+                Ok(Profile {
+                    user_id: 42,
+                    username: "Public Name".into(),
+                    permalink: "public-name".into(),
+                    avatar: None,
+                })
+            }
+            async fn me(&self, _: &SessionToken) -> Result<Profile, ResolveError> {
+                panic!("a public profile must not use a session");
+            }
+        }
+
+        for previous_session in [false, true] {
+            let f = Fixture::new();
+            if previous_session {
+                f.store
+                    .lease(Slot::SoundCloud)
+                    .save_secret(b"dummy-soundcloud-session-token".to_vec())
+                    .await
+                    .unwrap();
+            }
+            f.fake.lock().unwrap().delete_error = Some(Error::Locked);
+            let connected = Connection::begin(&f.store)
+                .connect_profile(
+                    &PublicResolver,
+                    &ProfileInput::parse("public-name").unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(connected.cleanup_warning, Some(Error::Locked));
+            assert!(Account::Profile(connected.user).token().is_none());
+            assert!(
+                f.restart()
+                    .lease(Slot::SoundCloud)
+                    .load_secret()
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn soundcloud_secret_must_verify_before_being_remembered() {
+        let f = Fixture::new();
+        f.fake.lock().unwrap().discard_write = true;
+        assert_eq!(
+            f.store
+                .lease(Slot::SoundCloud)
+                .save_secret(b"dummy-soundcloud-session-token".to_vec())
+                .await,
+            Err(Error::Verification)
+        );
+    }
+
+    #[tokio::test]
+    async fn a_soundcloud_write_finishing_after_disconnect_cannot_restore_the_token() {
+        let f = Fixture::new();
+        let (entered, writing) = tokio::sync::oneshot::channel();
+        let (release, blocked) = mpsc::channel();
+        {
+            let mut fake = f.fake.lock().unwrap();
+            fake.entered = Some(entered);
+            fake.release = Some(blocked);
+        }
+        let lease = f.store.lease(Slot::SoundCloud);
+        let saving = tokio::spawn(async move {
+            lease
+                .save_secret(b"dummy-soundcloud-session-token".to_vec())
+                .await
+        });
+        writing.await.unwrap();
+        f.store.invalidate(Slot::SoundCloud);
+        let clearing = f.store.lease(Slot::SoundCloud).clear_secret(false);
+        release.send(()).unwrap();
+        assert_eq!(saving.await.unwrap(), Err(Error::Stale));
+        clearing.await.unwrap();
+        assert!(
+            f.restart()
+                .lease(Slot::SoundCloud)
+                .load_secret()
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(f.fake.lock().unwrap().values.is_empty());
+    }
+
+    #[tokio::test]
+    async fn soundcloud_disconnect_cleanup_survives_a_new_connection_generation() {
+        let f = Fixture::new();
+        f.store
+            .lease(Slot::SoundCloud)
+            .save_secret(b"old-session-token".to_vec())
+            .await
+            .unwrap();
+        f.store.invalidate(Slot::SoundCloud);
+        let old = f.store.lease(Slot::SoundCloud);
+        let clearing = old.clear_secret(false);
+        f.store.invalidate(Slot::SoundCloud);
+        clearing.await.unwrap();
+        assert!(
+            f.store
+                .lease(Slot::SoundCloud)
+                .load_secret()
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let replacement = b"replacement-session-token".to_vec();
+        f.store
+            .lease(Slot::SoundCloud)
+            .save_secret(replacement.clone())
+            .await
+            .unwrap();
+        assert_eq!(old.clear_secret(true).await, Err(Error::Stale));
+        assert_eq!(
+            f.store.lease(Slot::SoundCloud).load_secret().await.unwrap(),
+            Some(replacement)
+        );
+    }
+
+    #[tokio::test]
     #[ignore = "requires an unlocked platform credential store; uses dummy grants only"]
     async fn native_store_round_trip() {
         let f = Fixture::new();
@@ -1575,6 +1845,11 @@ mod tests {
         .await
         .unwrap();
         let store = Store::new(f.dirs.clone());
+        store
+            .lease(Slot::SoundCloud)
+            .save_secret(b"dummy-soundcloud-session-token".to_vec())
+            .await
+            .unwrap();
         let grants = [
             web(SHARED_CLIENT),
             web("dummy-personal-client"),
@@ -1585,11 +1860,21 @@ mod tests {
             store.lease(slot).save(grant.clone()).await.unwrap();
         }
         let restarted = Store::new(f.dirs.clone());
+        assert_eq!(
+            restarted
+                .lease(Slot::SoundCloud)
+                .load_secret()
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(b"dummy-soundcloud-session-token".as_slice())
+        );
         for (slot, grant) in Slot::ALL.into_iter().zip(grants) {
             assert!(restarted.lease(slot).load().await.unwrap().grant == Some(grant));
         }
         store.revoke_spotify().unwrap();
         store.revoke(Slot::Proxy).unwrap();
+        store.revoke(Slot::SoundCloud).unwrap();
         for slot in Slot::ALL {
             let lease = store.lease(slot);
             lease.delete().await.unwrap();

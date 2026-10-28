@@ -123,6 +123,11 @@ impl AppDirs {
         self.state.join("session.json")
     }
 
+    /// SoundCloud connection mode and public profile, never its session token.
+    pub fn soundcloud_account_file(&self) -> PathBuf {
+        self.state.join("soundcloud-account.json")
+    }
+
     /// What was played here, which Spotify never hears about and so
     /// cannot tell us later. See [`crate::history`].
     pub fn history_file(&self) -> PathBuf {
