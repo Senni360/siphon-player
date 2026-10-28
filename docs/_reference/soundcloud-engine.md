@@ -1,0 +1,94 @@
+---
+title: SoundCloud Engine Integration
+description: Resolved stream inputs, URL refresh, and exclusive use of the shared audio output in this personal fork.
+nav_order: 21
+---
+
+`soundcloud::engine` accepts already resolved audio URLs. This module does
+not resolve tracks, change a queue or add interface controls. Adapt the API's
+`StreamInfo` to `Stream { uri, url, protocol, mime, duration_ms, is_preview }`.
+`duration_ms = 0` means unknown. Preview streams are played as supplied;
+there is no attempt to obtain full audio for a preview.
+
+## Output ownership
+
+Keep the Spotify `player::Engine` alive. Pause its transport and prevent
+Connect from reactivating it, then obtain `player::Engine::external_output()`
+and construct the SoundCloud engine with the backend runtime, the shared
+`Http`, that output and a `Notify` callback. The output is available once
+librespot constructs its sink. Construction never opens another audio device.
+
+`Load` claims the existing RodioSink. Each external handle has its own claim;
+a second owner is rejected. Spotify packets, start/stop calls, explicit audio
+interrupts and late player events are gated while that claim is held. Claim,
+release, writes and event handling are serialized, so an in-flight Spotify
+write cannot mix with external PCM. This protects audio exclusivity; the
+integrator must still suppress conflicting Connect and queue state updates.
+
+Pause and end-of-track retain ownership. To return to Spotify, send `Stop`
+and wait for `Event::OutputReleased` before loading or resuming Spotify.
+An end-of-track `Stopped` state alone does not release
+ownership. Dropping the engine requests asynchronous shutdown; use the
+explicit Stop acknowledgement for a coordinated handoff.
+Keep the Tokio runtime alive until that acknowledgement as well.
+
+Both paths feed stereo 44.1 kHz PCM into the same RodioSink, rodio mixer and
+fastframe-audio device. External samples pass through their own EQ filter
+history, then the shared visualizer tap, then the limiter and existing output
+volume. The tap is post-EQ and pre-volume for every visualizer, including at
+zero volume. Source-rate conversion preserves state across packets and HLS
+segments; the sink performs its existing conversion to the device rate.
+Device selection, reopening, buffering and Spotify's processing stay intact.
+Route volume through the existing Spotify mixer commands for either source.
+
+## Commands and events
+
+`Engine::command` queues `Load`, `Play`, `Pause`, `Toggle`, `Seek`, `Stop`,
+`Preload`, `Refresh` or `Shutdown`. It returns false after the worker exits.
+It never waits for HTTP, decoding or device work. `state()` clones the latest
+snapshot. `Notify` runs on the feeder thread; forward events to the backend
+or UI channel and return promptly. Do not perform blocking work in it.
+
+`Event::State` reuses `player::LocalState`. Playback, loading, track URI and
+duration, position anchors, errors, track sequence and seek sequence describe
+this engine. Spotify remains the authority for volume, shuffle, repeat,
+account and Connect fields. Signed URLs never enter snapshots or Debug output.
+
+`Preload(next)` prepares a bounded decoder without advancing the queue.
+Load the identical stream at zero to reuse a completed preload. At EOF with
+a prepared successor, `EndOfTrack` is sent while the short output tail still
+plays. Respond with that Load and autoplay to append the successor without
+pausing or clearing the output. If no handoff arrives before the tail drains,
+the device pauses. Other loads and seeks discard the old output. Pause cancels
+preload work and HLS lookahead. Preload intent is retained, and requests made
+while paused are deferred until Play. Explicit paused loads/seeks may
+prepare their decoder, but a paused engine has no background decoding,
+network lookahead, polling or device callbacks.
+
+HTTP 403 or 404 on any range, playlist, initialization object or segment emits
+`RefreshRequired { request_id, uri, position_ms }`. Resolve a fresh stream and
+reply with `Refresh { request_id, stream }`. Matching replies resume at the
+retained position and preserve play/pause intent. Replies for older requests
+or another URI are ignored. Stop or a new Load invalidates the request.
+Other failures emit `Error` and pause with a readable error in state.
+
+## Network and format limits
+
+All requests use the app's configured HTTP client and proxy on its Tokio
+runtime, with a 15-second request deadline. A separate feeder performs
+blocking demuxing and decoding; it never runs on the UI thread. Transport
+commands cancel outstanding HTTP requests. Progressive audio uses 32 KiB
+byte ranges rather than downloading a whole track. HLS follows up to four
+master/media playlist levels and fetches one compressed segment ahead, with
+a 16 MiB limit per object. Nothing is written to disk.
+
+Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4. HLS seeking starts at
+the containing segment and discards decoded frames up to the requested
+sample. Opus has no decoder in the existing dependency stack and returns
+`Unsupported`; choose an MP3 or AAC transcoding. Encrypted HLS, MPEG-TS,
+byte-range HLS and live playlists are unsupported. No DRM support is added.
+
+Synthetic ffmpeg fixtures and a loopback HTTP server test transport,
+resampling, segment seeking, EOF, preload handoff and URL refresh without
+an account or audio hardware. Sink tests cover exclusivity and the tap's EQ
+and volume ordering. Native device playback still needs manual validation.

@@ -23,6 +23,7 @@
 //! bypassed.
 
 pub mod api;
+pub mod engine;
 pub mod models;
 
 /// The URI scheme prefix of a SoundCloud track.

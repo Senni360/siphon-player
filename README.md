@@ -144,6 +144,11 @@ is described in [PACKAGING.md](PACKAGING.md).
 Local mixed-playlist and Spotify-overlay storage formats are described in
 [Settings and files](docs/_reference/settings-and-files.md#local-mixed-playlist-files).
 
+This personal fork also has a SoundCloud playback engine for hybrid-player
+integration. Its [engine contract](docs/_reference/soundcloud-engine.md)
+describes stream inputs, URL refresh and exclusive use of the existing audio
+output. The engine is not yet connected to the interface.
+
 ## More native apps
 
 **Want WhatsApp just as fast and native?** [ZapFast](https://zapfast.rocks)

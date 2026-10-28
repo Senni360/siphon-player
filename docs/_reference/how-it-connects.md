@@ -4,6 +4,12 @@ description: Independent Spotify grants, what is stored, and how API traffic is 
 nav_order: 1
 ---
 
+This personal fork's SoundCloud engine accepts resolved audio URLs through
+the configured HTTP client and proxy. Its bounded range/segment reads, URL
+refresh and shared-output handoff are documented in the
+[SoundCloud engine contract](/soundcloud-engine/). It is not yet wired to
+the interface and makes no SoundCloud requests until explicitly commanded.
+
 ## Independent grants, once each
 
 Spotifast uses separate credentials for Web API access and local playback:
