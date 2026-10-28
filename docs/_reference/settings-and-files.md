@@ -23,6 +23,8 @@ Spotifast follows each platform's conventions. On Linux:
 | Proxy password | System credential store | Clear the password and apply the manual proxy settings |
 | Legacy proxy password | `~/.local/state/spotifast/proxy_password` | Removed after protected migration |
 | Last session | `~/.local/state/spotifast/session.json` | Yes |
+| SoundCloud connection | `~/.local/state/spotifast/soundcloud-account.json` | Yes, forgets the selected profile; disconnect to remove its protected token too |
+| SoundCloud session token | System credential store | Use SoundCloud disconnect when the connection interface is integrated |
 | Play history | `~/.local/state/spotifast/history.json` | Yes |
 | Local mixed playlists | `~/.local/state/spotifast/mixed-playlists.json` | Only if you want to lose these playlists |
 | Spotify playlist overlays | `~/.local/state/spotifast/playlist-overlay.json` | Only if you want to lose local SoundCloud insertions |
@@ -65,6 +67,15 @@ Non-secret settings and session data remain readable JSON. Native credential
 protection reduces exposure from copying ordinary application files. It does
 not protect a usable session from arbitrary code running as the same user;
 Linux protection also depends on the desktop keyring's configuration.
+
+This fork's optional [SoundCloud connection]({{ '/soundcloud/' | relative_url }}) keeps only its
+mode and public profile in `soundcloud-account.json`. The file is encoded in
+memory and replaced atomically by the background file writer. A missing file
+means disconnected. A session token uses the separate `soundcloud-session`
+protected entry, never ordinary JSON. SoundCloud disconnect clears that entry
+and saves a disconnected state; a revocation marker prevents restoration if
+protected deletion fails. Spotify sign-out leaves SoundCloud connected.
+These are account-module contracts; the connection interface is not wired yet.
 
 On Linux, enable and unlock a Secret Service provider such as GNOME Keyring or
 KWallet to remember a new sign-in. Flatpak is allowed to talk to
