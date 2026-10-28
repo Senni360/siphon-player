@@ -24,6 +24,8 @@ Spotifast follows each platform's conventions. On Linux:
 | Legacy proxy password | `~/.local/state/spotifast/proxy_password` | Removed after protected migration |
 | Last session | `~/.local/state/spotifast/session.json` | Yes |
 | Play history | `~/.local/state/spotifast/history.json` | Yes |
+| Local mixed playlists | `~/.local/state/spotifast/mixed-playlists.json` | Only if you want to lose these playlists |
+| Spotify playlist overlays | `~/.local/state/spotifast/playlist-overlay.json` | Only if you want to lose local SoundCloud insertions |
 | Audio cache | `~/.cache/spotifast/audio/` | Always |
 | Artwork cache | `~/.cache/spotifast/art/` | Always |
 | Lyrics cache | `~/.cache/spotifast/lyrics/` | Always |
@@ -271,6 +273,35 @@ On macOS, settings, state, and the logs are in
 `%APPDATA%\paolino\spotifast\config`, state and the logs in
 `%LOCALAPPDATA%\paolino\spotifast\data`, and the caches in
 `%LOCALAPPDATA%\paolino\spotifast\cache`.
+
+### Local mixed playlist files
+
+`mixed-playlists.json` holds this computer's Spotifast playlists
+(`spotifast:playlist:<16 hex digits>`), with names, descriptions,
+creation/modification times in Unix seconds, ordered entries and track metadata
+snapshots. Each entry has its own ID, so repeated tracks remain separate rows.
+These snapshots include artists, album artwork, duration and public links,
+not offline audio.
+
+`playlist-overlay.json` maps Spotify playlist IDs to local SoundCloud entries.
+Each insertion records the preceding Spotify track's URI, its zero-based
+occurrence and its Spotify index. A shared snapshot of Spotify order lets a
+removed anchor fall back to its nearest earlier surviving track, then to the
+saved index clamped to the current list. Top insertions stay at the top.
+Spotify never receives these local entries.
+
+Both files use readable JSON with a top-level `version` of `1` and a
+`playlists` field: an ordered array for mixed playlists, an object keyed by
+Spotify playlist ID for overlays. Missing fields receive defaults (including
+version 1 for unversioned files), and unknown fields are ignored. Entry IDs
+generated for older files become stable when saved. Save encoded bytes through
+the background file writer for atomic replacement. On startup, malformed files
+are kept beside the original as `<filename>.corrupt-<random-id>` and an empty
+store is returned.
+Unreadable files, failed backups and unsupported versions return an error
+and must not be overwritten. These files are local durable state, separate
+from account caches, and follow the state locations described above.
+This storage layer does not yet add playlist controls to the interface.
 
 ### Portable copies
 

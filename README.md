@@ -141,6 +141,9 @@ Translations live in `assets/i18n/`; see
 [Translating Spotifast](docs/_reference/translating.md). Release packaging
 is described in [PACKAGING.md](PACKAGING.md).
 
+Local mixed-playlist and Spotify-overlay storage formats are described in
+[Settings and files](docs/_reference/settings-and-files.md#local-mixed-playlist-files).
+
 ## More native apps
 
 **Want WhatsApp just as fast and native?** [ZapFast](https://zapfast.rocks)

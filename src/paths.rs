@@ -129,6 +129,16 @@ impl AppDirs {
         self.state.join("history.json")
     }
 
+    /// Playlists stored only on this computer, containing either source.
+    pub fn mixed_playlists_file(&self) -> PathBuf {
+        self.state.join("mixed-playlists.json")
+    }
+
+    /// Local SoundCloud insertions into Spotify playlists.
+    pub fn playlist_overlay_file(&self) -> PathBuf {
+        self.state.join("playlist-overlay.json")
+    }
+
     pub fn shared_web_token_file(&self) -> PathBuf {
         self.state.join("shared_web_api_token.json")
     }
@@ -326,5 +336,24 @@ mod tests {
             project.state_dir().unwrap_or(project.data_local_dir())
         );
         assert_eq!(dirs.cache, project.cache_dir());
+    }
+
+    #[test]
+    fn mixed_playlist_files_are_durable_state_in_each_profile() {
+        for root in ["installed", "portable/spotifast-data"] {
+            let dirs = AppDirs {
+                config: PathBuf::from(root).join("config"),
+                state: PathBuf::from(root).join("state"),
+                cache: PathBuf::from(root).join("cache"),
+            };
+            assert_eq!(
+                dirs.mixed_playlists_file(),
+                dirs.state.join("mixed-playlists.json")
+            );
+            assert_eq!(
+                dirs.playlist_overlay_file(),
+                dirs.state.join("playlist-overlay.json")
+            );
+        }
     }
 }
