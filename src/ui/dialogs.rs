@@ -56,6 +56,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     });
                 }
                 Dialog::CreatePlaylist { .. } => create_playlist(app, ui),
+                Dialog::MixedPlaylist { .. } => mixed_playlist(app, ui),
                 Dialog::EditPlaylist { .. } => edit_playlist(app, ui),
                 Dialog::ConfirmDeletePlaylist { id, name, owned } => {
                     theme::text(
@@ -69,7 +70,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         palette.text,
                     );
                     ui.add_space(8.0);
-                    let body = if owned {
+                    let body = if id.starts_with(crate::mixed_playlists::PLAYLIST_PREFIX) {
+                        gettext(locale, "Delete “{name}” from this computer? This cannot be undone.")
+                    } else if owned {
                         // Translators: {name} is a playlist name.
                         gettext(locale, "Delete “{name}”? You can recover it from Spotify for 90 days.")
                     } else {
@@ -718,4 +721,76 @@ mod cover_art_tests {
         assert_eq!(cover_art_side(egui::vec2(760.0, 620.0)), 524.0);
         assert_eq!(cover_art_side(egui::vec2(100.0, 100.0)), 120.0);
     }
+}
+
+fn mixed_playlist(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let Some(Dialog::MixedPlaylist {
+        id,
+        name,
+        description,
+        tracks,
+    }) = &mut app.dialog
+    else {
+        return;
+    };
+    theme::text(
+        ui,
+        if id.is_some() {
+            "Edit mixed playlist"
+        } else {
+            "New mixed playlist"
+        },
+        theme::bold(20.0),
+        palette.text,
+    );
+    ui.add_space(12.0);
+    theme::text(ui, "Name", theme::medium(13.0), palette.secondary);
+    let field = text_field(
+        ui,
+        &palette,
+        locale,
+        "mixed-name",
+        name,
+        "My playlist",
+        true,
+    );
+    ui.add_space(10.0);
+    theme::text(ui, "Description", theme::medium(13.0), palette.secondary);
+    text_field(
+        ui,
+        &palette,
+        locale,
+        "mixed-description",
+        description,
+        "Optional description",
+        false,
+    );
+    ui.add_space(10.0);
+    theme::text(
+        ui,
+        "Spotify and SoundCloud songs. Saved on this computer.",
+        theme::regular(13.0),
+        palette.secondary,
+    );
+    let submit = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+    let action = Action::SaveMixedPlaylist {
+        id: id.clone(),
+        name: name.trim().into(),
+        description: description.clone(),
+        tracks: tracks.clone(),
+    };
+    let valid = !name.trim().is_empty();
+    ui.add_space(20.0);
+    buttons(ui, |ui| {
+        if (theme::pill_button(ui, &palette, &gettext(locale, "Save"), true).clicked() || submit)
+            && valid
+        {
+            app.actions.push(action);
+        }
+        if theme::pill_button(ui, &palette, &gettext(locale, "Cancel"), false).clicked() {
+            app.actions.push(Action::CloseDialog);
+        }
+    });
 }

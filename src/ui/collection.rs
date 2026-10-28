@@ -400,7 +400,9 @@ pub fn actions_row(
             egui::Popup::menu(&more)
                 .frame(widgets::menu_frame(&palette))
                 .show(|ui| {
-                    if let Some(seed) = &actions.save_radio {
+                    if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
+                        mixed_playlist_menu(app, ui, id);
+                    } else if let Some(seed) = &actions.save_radio {
                         // As narrow as every other item menu.
                         ui.set_min_width(200.0);
                         ui.set_max_width(300.0);
@@ -420,6 +422,16 @@ pub fn actions_row(
                             actions.name,
                             actions.owned_playlist.as_ref(),
                         );
+                    }
+                    if let Some(id) = uri.strip_prefix("spotify:playlist:")
+                        && widgets::menu_item(
+                            ui,
+                            &palette,
+                            Some(Icon::ListPlus),
+                            "Import into a mixed playlist",
+                        )
+                    {
+                        app.actions.push(Action::ImportMixedPlaylist(id.into()));
                     }
                     if let Some((page, loading)) = &actions.reload {
                         widgets::menu_separator(ui, &palette);
@@ -1277,7 +1289,9 @@ fn playlist_position(table: &Table<'_>, index: usize) -> Option<u32> {
     else {
         return None;
     };
-    if !uri.starts_with("spotify:playlist:") {
+    if !uri.starts_with("spotify:playlist:")
+        && !uri.starts_with(crate::mixed_playlists::PLAYLIST_PREFIX)
+    {
         return None;
     }
     let local = match table.pagination.and_then(|page| page.positions) {
@@ -1465,14 +1479,17 @@ fn hidden_rows(
     id: &str,
     playlist_uri: &str,
     items: &Arc<Vec<TableItem>>,
+    items_revision: u64,
 ) -> Arc<Vec<TableItem>> {
-    type Marked = (usize, u64, Arc<Vec<TableItem>>);
+    type Marked = (usize, u64, u64, Arc<Vec<TableItem>>);
     let key = egui::Id::new("hidden-rows").with(id);
     let source = Arc::as_ptr(items) as usize;
     let revision = app.hidden_songs_revision;
-    if let Some((cached_source, cached_revision, rows)) = ui.data(|d| d.get_temp::<Marked>(key))
+    if let Some((cached_source, cached_revision, cached_items, rows)) =
+        ui.data(|d| d.get_temp::<Marked>(key))
         && cached_source == source
         && cached_revision == revision
+        && cached_items == items_revision
     {
         return rows;
     }
@@ -1493,7 +1510,9 @@ fn hidden_rows(
             })
             .collect(),
     );
-    ui.data_mut(|d| d.insert_temp::<Marked>(key, (source, revision, Arc::clone(&rows))));
+    ui.data_mut(|d| {
+        d.insert_temp::<Marked>(key, (source, revision, items_revision, Arc::clone(&rows)))
+    });
     rows
 }
 
@@ -1693,12 +1712,74 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 .hidden_songs
                 .get(&playlist.uri)
                 .is_some_and(|songs| !songs.is_empty());
-            let items = if hides {
-                hidden_rows(ui, app, id, &playlist.uri, &items)
+            let overlaid = app.playlist_overlay.has_overlay(id);
+            let ready = page.items.base_offset == 0 && page.items.is_complete();
+            let items = if overlaid && ready {
+                type MergedCache = (u64, u64, u64, Arc<Vec<TableItem>>);
+                let key = egui::Id::new("overlay-table-items")
+                    .with(id)
+                    .with(page.generation);
+                let cached = ui.data(|data| data.get_temp::<MergedCache>(key));
+                if let Some((_, _, _, rows)) = cached.filter(|(revision, local, names, _)| {
+                    *revision == page.items.revision
+                        && *local == app.playlist_sources_revision
+                        && *names == app.user_names_revision
+                }) {
+                    rows
+                } else {
+                    let rows = Arc::new(
+                        crate::app::playlist_sources::overlay_rows(
+                            &page,
+                            app.playlist_overlay.get(id).unwrap(),
+                        )
+                        .into_iter()
+                        .map(|(mut row, _)| {
+                            row.2 = row.2.map(|id| {
+                                if playlist.owner.id.as_deref() == Some(id.as_str()) {
+                                    playlist.owner_name().to_string()
+                                } else {
+                                    app.user_names.get(&id).and_then(Clone::clone).unwrap_or(id)
+                                }
+                            });
+                            row
+                        })
+                        .collect(),
+                    );
+                    ui.data_mut(|data| {
+                        data.insert_temp(
+                            key,
+                            (
+                                page.items.revision,
+                                app.playlist_sources_revision,
+                                app.user_names_revision,
+                                Arc::clone(&rows),
+                            ),
+                        )
+                    });
+                    rows
+                }
             } else {
                 items
             };
-            let items_revision = page.items.revision.wrapping_add(app.hidden_songs_revision);
+            let items_revision = page
+                .items
+                .revision
+                .wrapping_add(app.hidden_songs_revision)
+                .wrapping_add(if overlaid {
+                    app.playlist_sources_revision.wrapping_add(page.generation)
+                } else {
+                    0
+                });
+            let items = if hides {
+                hidden_rows(ui, app, id, &playlist.uri, &items, items_revision)
+            } else {
+                items
+            };
+            let duration_ms = if overlaid {
+                items.iter().map(|row| row.0.duration_ms() as u64).sum()
+            } else {
+                duration_ms
+            };
             if items.is_empty() && !app.network_reachable {
                 widgets::empty_state(
                     ui,
@@ -1716,6 +1797,13 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 .items
                 .total
                 .unwrap_or_else(|| playlist.track_total())
+                .saturating_add(if overlaid {
+                    app.playlist_overlay
+                        .get(id)
+                        .map_or(0, |overlay| overlay.entries.len() as u32)
+                } else {
+                    0
+                })
                 .max(items.len() as u32);
             // Spotify's collaborative flag covers secret collaborations; a
             // playlist made together today is recognised by who added songs.
@@ -1767,11 +1855,15 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 ViewOptions {
                     needle: &needle,
                     sort,
-                    plays_shown_rows: hides,
+                    plays_shown_rows: hides || overlaid,
                 },
                 items_revision,
             );
-            let view_play = table_view.view_uris.as_ref().map(Arc::clone);
+            let view_play = if overlaid && !ready {
+                None
+            } else {
+                table_view.view_uris.as_ref().map(Arc::clone)
+            };
             let reload_action = if app.network_reachable {
                 Some((Page::Playlist(id.to_string()), page.items.loading))
             } else {
@@ -1779,7 +1871,7 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
             };
             let mut actions =
                 playlist_actions(app.locale, playlist, owned, saved, view_play, reload_action);
-            actions.plays_shown_rows = hides;
+            actions.plays_shown_rows = hides || overlaid;
             if !app.network_reachable {
                 disabled_actions_row(app, ui, actions, Some(&mut page.filter));
             } else {
@@ -1789,16 +1881,35 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 app.actions
                     .push(Action::LoadMore(Page::Playlist(id.to_string())));
             }
-            let editable = app
-                .can_edit_playlist(playlist)
-                .then(|| (playlist.id.clone(), playlist.snapshot_id.clone()));
+            let editable = app.can_edit_playlist(playlist).then(|| {
+                (
+                    if overlaid {
+                        format!("{}{}", crate::app::playlist_sources::OVERLAY_TARGET, id)
+                    } else {
+                        playlist.id.clone()
+                    },
+                    playlist.snapshot_id.clone(),
+                )
+            });
+            if overlaid && !ready {
+                widgets::loading_row(ui, &app.palette, app.locale);
+                if !page.items.loading && page.items.error.is_none() {
+                    app.actions
+                        .push(Action::LoadMore(Page::Playlist(id.into())));
+                }
+                if let Some(error) = &page.items.error {
+                    theme::text(ui, error, theme::regular(13.0), app.palette.secondary);
+                }
+                app.playlist_pages.insert(id.into(), page);
+                return;
+            }
             table(
                 app,
                 ui,
                 Table {
                     items: &items,
-                    row_offset: page.items.base_offset,
-                    pagination: Some(TablePagination {
+                    row_offset: if overlaid { 0 } else { page.items.base_offset },
+                    pagination: (!overlaid).then_some(TablePagination {
                         total: page.items.total.unwrap_or(count),
                         loaded_count: page.items.items.len(),
                         positions: Some(&positions),
@@ -1824,7 +1935,7 @@ pub fn playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
                     can_load_more: page.items.can_load_more(),
                     filter: &page.filter,
                     items_revision,
-                    plays_shown_rows: hides,
+                    plays_shown_rows: hides || overlaid,
                 },
             );
         }
@@ -2577,6 +2688,161 @@ fn rect_after(ui: &egui::Ui, height: f32) -> Rect {
 #[allow(dead_code)]
 fn palette_of(app: &App) -> Palette {
     app.palette
+}
+
+/// Local playlists share the collection shell and table, including selection,
+/// filtering, sorting, keyboard edits and positional drag/drop.
+pub fn mixed_playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
+    let Some(playlist) = app.mixed_playlists.get(id).cloned() else {
+        widgets::empty_state(
+            ui,
+            &app.palette,
+            Icon::Music,
+            "Playlist unavailable",
+            "This mixed playlist was deleted from this computer.",
+        );
+        return;
+    };
+    let uri = playlist.uri();
+    let page = Page::MixedPlaylist(id.into());
+    let tracks = playlist.to_tracks();
+    let items: Vec<TableItem> = tracks
+        .into_iter()
+        .map(|track| (PlayableItem::Track(track), None, None))
+        .collect();
+    let image = items
+        .iter()
+        .find_map(|row| app.item_image(&row.0, u32::MAX));
+    let duration = items.iter().map(|row| row.0.duration_ms() as u64).sum();
+    hero(
+        app,
+        ui,
+        Hero {
+            images: HeroImages {
+                image: image.as_deref(),
+                enlarged: image.as_deref(),
+                ..Default::default()
+            },
+            liked: false,
+            kind: "Mixed playlist".into(),
+            title: &playlist.name,
+            description: Some(playlist.description.clone()),
+            byline: vec![
+                ("On this computer".into(), None),
+                (
+                    songs_and_duration(app.locale, items.len() as u32, duration),
+                    None,
+                ),
+            ],
+            avatar: None,
+            round: false,
+        },
+    );
+    let mut filter = app.mixed_filters.remove(id).unwrap_or_default();
+    let sort = app.table_sorts.get(&page).copied();
+    let revision = app.playlist_sources_revision;
+    let view = prepare_table_view(
+        ui,
+        app,
+        &page,
+        &items,
+        ViewOptions {
+            needle: &filter.trim().to_lowercase(),
+            sort,
+            plays_shown_rows: true,
+        },
+        revision,
+    );
+    actions_row(
+        app,
+        ui,
+        Actions {
+            play_uri: Some(uri.clone()),
+            view: view.view_uris.clone(),
+            saved: None,
+            saved_icons: (Icon::CirclePlus, Icon::CircleCheck),
+            saved_tooltips: ("".into(), "".into()),
+            owned_playlist: None,
+            reload: None,
+            name: &playlist.name,
+            save_radio: None,
+            plays_shown_rows: true,
+        },
+        Some(&mut filter),
+    );
+    table(
+        app,
+        ui,
+        Table {
+            items: &items,
+            row_offset: 0,
+            pagination: None,
+            context: RowContext::Context {
+                uri: uri.clone(),
+                editable_playlist: Some((uri, None)),
+            },
+            show_album: true,
+            show_cover: true,
+            show_added: false,
+            show_added_by: false,
+            show_plays: false,
+            page,
+            loading: false,
+            error: None,
+            can_load_more: false,
+            filter: &filter,
+            items_revision: revision,
+            plays_shown_rows: true,
+        },
+    );
+    app.mixed_filters.insert(id.into(), filter);
+}
+
+pub(super) fn mixed_playlist_menu(app: &mut App, ui: &mut egui::Ui, id: &str) {
+    let Some(playlist) = app.mixed_playlists.get(id).cloned() else {
+        return;
+    };
+    ui.set_min_width(200.0);
+    let palette = app.palette;
+    if widgets::menu_item(ui, &palette, Some(Icon::Play), &gettext(app.locale, "Play")) {
+        app.actions.push(Action::PlayContext {
+            uri: playlist.uri(),
+            offset_uri: None,
+            offset_index: None,
+        });
+    }
+    if widgets::menu_item(
+        ui,
+        &palette,
+        Some(Icon::Shuffle),
+        &gettext(app.locale, "Shuffle play"),
+    ) {
+        app.actions.push(Action::ShufflePlay(playlist.uri()));
+    }
+    if widgets::menu_item(ui, &palette, None, "Edit details") {
+        app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
+            id: Some(id.into()),
+            name: playlist.name.clone(),
+            description: playlist.description.clone(),
+            tracks: Vec::new(),
+        }));
+    }
+    if widgets::menu_item(ui, &palette, None, "Duplicate playlist") {
+        app.actions.push(Action::DuplicateMixedPlaylist(id.into()));
+    }
+    if widgets::menu_item(
+        ui,
+        &palette,
+        Some(Icon::Minus),
+        &gettext(app.locale, "Delete"),
+    ) {
+        app.actions
+            .push(Action::ShowDialog(Dialog::ConfirmDeletePlaylist {
+                id: playlist.uri(),
+                name: playlist.name,
+                owned: true,
+            }));
+    }
 }
 
 #[cfg(test)]

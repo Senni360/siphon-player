@@ -400,6 +400,37 @@ pub fn populate(app: &mut App) {
     playlist_page.contributors.insert("kasia".into());
     playlist_page.contributors.insert("sam".into());
     app.playlist_pages.insert("pl1".into(), playlist_page);
+    app.mixed_playlists = Default::default();
+    app.playlist_overlay = Default::default();
+    let mut sc = tracks[3].clone();
+    sc.uri = crate::soundcloud::track_uri(424242);
+    sc.id = Some("424242".into());
+    sc.name = "SoundCloud sunset session".into();
+    let mixed_id = app.mixed_playlists.import(
+        "Across the streams".into(),
+        "Spotify and SoundCloud, together on this computer".into(),
+        vec![tracks[0].clone(), sc.clone(), tracks[1].clone()],
+    );
+    app.mixed_playlists.get_mut(&mixed_id).unwrap().id = "demo-mixed".into();
+    let mut overlay_playlist = playlists[1].clone();
+    overlay_playlist.id = "pl-overlay".into();
+    overlay_playlist.uri = "spotify:playlist:pl-overlay".into();
+    overlay_playlist.name = "Across the streams on Spotify".into();
+    if let Some(playlists) = app.library.playlists.get_mut() {
+        playlists.push(overlay_playlist.clone());
+    }
+    app.playlist_pages.insert(
+        "pl-overlay".into(),
+        PlaylistPage {
+            playlist: Loadable::Loaded(overlay_playlist),
+            items: app.playlist_pages["pl1"].items.clone(),
+            ..Default::default()
+        },
+    );
+    app.playlist_overlay
+        .get_mut("pl-overlay")
+        .insert(&tracks, 2, &sc);
+
     app.user_names.insert("kasia".into(), Some("Kasia".into()));
     app.user_names.insert("sam".into(), Some("Sam".into()));
     // The playlist owner's picture, as the profile view would answer.
@@ -9897,6 +9928,14 @@ mod tests {
             .into_iter()
             .chain((1..PLAYLISTS.len()).filter(|index| *index != 4))
             .map(|index| format!("spotify:playlist:pl{index}"))
+            .chain(
+                [
+                    "spotify:playlist:pl-overlay",
+                    "spotifast:playlist:demo-mixed",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            )
             .collect();
         assert_eq!(app.settings.sidebar_order, expected);
         assert_eq!(
@@ -9919,6 +9958,14 @@ mod tests {
             app.settings.sidebar_order = (0..PLAYLISTS.len())
                 .filter(|index| *index != 2)
                 .map(|index| format!("spotify:playlist:pl{index}"))
+                .chain(
+                    [
+                        "spotify:playlist:pl-overlay",
+                        "spotifast:playlist:demo-mixed",
+                    ]
+                    .into_iter()
+                    .map(str::to_string),
+                )
                 .collect();
             let row = |tree: &egui::accesskit::TreeUpdate, label: &str| {
                 let bounds = tree

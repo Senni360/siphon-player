@@ -119,6 +119,7 @@ pub enum Page {
     Podcasts,
     Episodes,
     Playlist(String),
+    MixedPlaylist(String),
     Album(String),
     Artist(String),
     Show(String),
@@ -142,6 +143,7 @@ impl Page {
             Page::Podcasts => "podcasts".into(),
             Page::Episodes => "episodes".into(),
             Page::Playlist(id) => format!("playlist:{id}"),
+            Page::MixedPlaylist(id) => format!("mixed-playlist:{id}"),
             Page::Album(id) => format!("album:{id}"),
             Page::Artist(id) => format!("artist:{id}"),
             Page::Show(id) => format!("show:{id}"),
@@ -168,6 +170,7 @@ impl Page {
                 let (kind, id) = other.split_once(':')?;
                 match kind {
                     "playlist" => Page::Playlist(id.into()),
+                    "mixed-playlist" => Page::MixedPlaylist(id.into()),
                     "album" => Page::Album(id.into()),
                     "artist" => Page::Artist(id.into()),
                     "show" => Page::Show(id.into()),
@@ -180,6 +183,9 @@ impl Page {
 
     /// Opens whatever a Spotify URI points at.
     pub fn from_uri(uri: &str) -> Option<Self> {
+        if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
+            return Some(Page::MixedPlaylist(id.into()));
+        }
         let mut parts = uri.split(':');
         let _ = parts.next()?;
         let kind = parts.next()?;
@@ -1060,6 +1066,12 @@ pub enum Dialog {
         shown: Option<String>,
         title: String,
     },
+    MixedPlaylist {
+        id: Option<String>,
+        name: String,
+        description: String,
+        tracks: Vec<Track>,
+    },
     CreatePlaylist {
         name: String,
         public: bool,
@@ -1242,6 +1254,14 @@ pub enum Action {
         from: u32,
         to: u32,
     },
+    SaveMixedPlaylist {
+        id: Option<String>,
+        name: String,
+        description: String,
+        tracks: Vec<Track>,
+    },
+    DuplicateMixedPlaylist(String),
+    ImportMixedPlaylist(String),
     ShowDialog(Dialog),
     CloseDialog,
     CreatePlaylist {

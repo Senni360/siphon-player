@@ -299,7 +299,10 @@ Each insertion records the preceding Spotify track's URI, its zero-based
 occurrence and its Spotify index. A shared snapshot of Spotify order lets a
 removed anchor fall back to its nearest earlier surviving track, then to the
 saved index clamped to the current list. Top insertions stay at the top.
-Spotify never receives these local entries.
+Spotify never receives these local entries. An insertion made before the
+Spotify rows load temporarily records an absolute boundary (`position_only`).
+The first complete accepted snapshot resolves it into the same occurrence
+anchors. Existing anchors stay intact while partial windows are loading.
 
 Both files use readable JSON with a top-level `version` of `1` and a
 `playlists` field: an ordered array for mixed playlists, an object keyed by
@@ -312,7 +315,30 @@ store is returned.
 Unreadable files, failed backups and unsupported versions return an error
 and must not be overwritten. These files are local durable state, separate
 from account caches, and follow the state locations described above.
-This storage layer does not yet add playlist controls to the interface.
+
+The library lists local mixed playlists alongside Spotify playlists. Choose
+**+ > New mixed playlist**, or **Import into a mixed playlist** from a Spotify
+playlist's More menu. Import loads the full playlist before copying its rows.
+Local playlists support
+rename, description, duplication, confirmed deletion, selection, sorting,
+filtering, keyboard cut/copy/paste/delete, and track drops.
+
+**Add to playlist** accepts songs from either source. SoundCloud rows added to
+a Spotify playlist are saved only in its local overlay, including the chosen
+drop position. Spotify rows still use Spotify's normal editing path. Overlay
+pages load their full Spotify context before showing the merged table so
+unavailable slots, duplicate occurrences and window offsets cannot become
+incorrect Spotify edit positions. Spotify moves translate to original Spotify
+boundaries and update local anchors to keep the exact shown drop position.
+Crossing only SoundCloud rows needs no Spotify write. Moving a SoundCloud row
+changes its local anchor. Overlay tracks
+are visible only on this computer. Removing or editing Spotify anchors keeps
+local rows through the fallback described above.
+
+Every local edit updates the interface immediately, then encodes the store
+and hands bytes to the app's background Writer for atomic private-file writes.
+Demo mode keeps these edits in memory. If a store cannot be read, its file is
+preserved and edits to that store are refused until the load error is fixed.
 
 ### Portable copies
 

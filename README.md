@@ -146,6 +146,13 @@ Translations live in `assets/i18n/`; see
 [Translating Spotifast](docs/_reference/translating.md). Release packaging
 is described in [PACKAGING.md](PACKAGING.md).
 
+The library's **+** menu offers **New mixed playlist** alongside the usual
+Spotify playlist. Mixed playlists hold Spotify and SoundCloud tracks together,
+with the same sorting, filtering, selection and drag controls. **Add to
+playlist** lists both kinds. SoundCloud songs added to a Spotify playlist stay
+on this computer as local insertions; they do not change its Spotify contents.
+A Spotify playlist's More menu can copy its rows into a mixed playlist.
+
 Local mixed-playlist and Spotify-overlay storage formats are described in
 [Settings and files](docs/_reference/settings-and-files.md#local-mixed-playlist-files).
 

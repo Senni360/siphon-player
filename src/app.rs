@@ -1,5 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
+pub(crate) mod playlist_sources;
+
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -494,6 +496,13 @@ pub struct App {
     pub plays: crate::history::History,
     /// Writes settings, session and history off the UI thread.
     files: fastframe_file::Writer,
+    pub mixed_playlists: crate::mixed_playlists::Store,
+    pub playlist_overlay: crate::playlist_overlay::Store,
+    mixed_playlists_writable: bool,
+    playlist_overlay_writable: bool,
+    pub mixed_filters: HashMap<String, String>,
+    pub playlist_sources_revision: u64,
+    pending_mixed_imports: HashSet<String>,
     /// Current track timing used to decide when a play counts.
     listening: Option<Listening>,
     pub recents: crate::model::CursorList<crate::api::models::PlayHistory>,
@@ -1046,6 +1055,16 @@ impl App {
             .filter(|page| !matches!(page, Page::Settings | Page::Queue))
             .unwrap_or(Page::Home);
 
+        let mixed = crate::mixed_playlists::Store::load(&dirs.mixed_playlists_file());
+        let overlay = crate::playlist_overlay::Store::load(&dirs.playlist_overlay_file());
+        if let Err(error) = &mixed {
+            log::error!("Could not load mixed playlists: {error}");
+        }
+        if let Err(error) = &overlay {
+            log::error!("Could not load playlist overlays: {error}");
+        }
+        let mixed_playlists_writable = mixed.is_ok();
+        let playlist_overlay_writable = overlay.is_ok();
         let palette = settings.fixed_palette().unwrap_or_else(Palette::dark);
         let mut app = Self {
             custom_themes: theme::Catalog::default(),
@@ -1152,6 +1171,13 @@ impl App {
             home: HomeData::default(),
             plays,
             files: fastframe_file::Writer::new(),
+            mixed_playlists: mixed.unwrap_or_default(),
+            playlist_overlay: overlay.unwrap_or_default(),
+            mixed_playlists_writable,
+            playlist_overlay_writable,
+            mixed_filters: HashMap::new(),
+            playlist_sources_revision: 0,
+            pending_mixed_imports: HashSet::new(),
             listening: None,
             recents: crate::model::CursorList::default(),
             recents_view: std::sync::Arc::from([]),
@@ -2904,6 +2930,7 @@ impl App {
                     self.load_new_release_page(true);
                 }
             }
+            Page::MixedPlaylist(_) => {}
             Page::Search => {}
             Page::LikedSongs => {
                 if !self.liked_songs.cache_checked {
@@ -5134,6 +5161,9 @@ impl App {
     }
 
     pub fn ensure_loaded(&mut self, page: Page) {
+        if matches!(page, Page::MixedPlaylist(_)) {
+            return;
+        }
         if !self.is_connected() {
             return;
         }
@@ -5155,6 +5185,7 @@ impl App {
                     self.load_new_release_page(false);
                 }
             }
+            Page::MixedPlaylist(_) => {}
             Page::Search => {}
             Page::LikedSongs => self.ensure_liked_songs(),
             Page::Albums => {
@@ -5714,7 +5745,9 @@ impl App {
                 }
                 let restart_from_top = self.playlist_pages.get(&id).is_some_and(|page| {
                     page.items.base_offset > 0
-                        && (!page.filter.trim().is_empty()
+                        && (self.pending_mixed_imports.contains(&id)
+                            || self.playlist_overlay.has_overlay(&id)
+                            || !page.filter.trim().is_empty()
                             || self.table_sorts.contains_key(&Page::Playlist(id.clone())))
                 });
                 if restart_from_top {
@@ -7581,10 +7614,41 @@ impl App {
                 }
                 self.request_contains(uris);
                 self.request_user_names(adders);
+                if self.playlist_overlay.get(&id).is_some_and(|overlay| {
+                    overlay
+                        .entries
+                        .iter()
+                        .any(|entry| entry.anchor.position_only)
+                }) && self
+                    .playlist_pages
+                    .get(&id)
+                    .is_some_and(|page| page.items.is_complete())
+                {
+                    let tracks = self.source_tracks(&id);
+                    if self
+                        .playlist_overlay
+                        .get_mut(&id)
+                        .resolve_positions(&tracks)
+                    {
+                        self.save_playlist_sources();
+                    }
+                }
                 self.sample_playlist_tail(&id);
                 self.checkpoint_playlist_cache(&id);
                 // A sorted table means the whole list, not the loaded part.
-                if self.table_sorts.contains_key(&Page::Playlist(id.clone())) {
+                if self.table_sorts.contains_key(&Page::Playlist(id.clone()))
+                    || self.playlist_overlay.has_overlay(&id)
+                    || self.pending_mixed_imports.contains(&id)
+                {
+                    if self.pending_mixed_imports.contains(&id)
+                        && self
+                            .playlist_pages
+                            .get(&id)
+                            .is_some_and(|page| page.items.is_complete())
+                    {
+                        self.pending_mixed_imports.remove(&id);
+                        self.actions.push(Action::ImportMixedPlaylist(id.clone()));
+                    }
                     self.load_more(Page::Playlist(id));
                 }
             }
@@ -10601,6 +10665,9 @@ impl App {
         items: Vec<PlayableItem>,
         position: Option<u32>,
     ) {
+        if self.add_playlist_sources(&playlist_id, &playlist_name, &items, position) {
+            return;
+        }
         match self.local_playlist_duplicates(&playlist_id, &items) {
             Some(duplicate_uris) if duplicate_uris.is_empty() => {
                 self.add_to_playlist_now(playlist_id, playlist_name, items, position);
@@ -10633,6 +10700,9 @@ impl App {
         items: Vec<PlayableItem>,
         position: Option<u32>,
     ) {
+        if self.add_playlist_sources(&playlist_id, &playlist_name, &items, position) {
+            return;
+        }
         if items.is_empty() {
             return;
         }
@@ -10711,18 +10781,34 @@ impl App {
     /// Songs this app already knows add their rows at once; the rest are
     /// asked of Spotify first, so that every row has its name.
     fn paste_songs(&mut self, playlist_id: String, text: &str) {
-        let Some(playlist_name) = self
-            .playlist_pages
-            .get(&playlist_id)
-            .and_then(|page| page.playlist.get())
-            .filter(|playlist| self.can_edit_playlist(playlist))
-            .map(|playlist| playlist.name.clone())
-        else {
+        let playlist_id = playlist_id
+            .strip_prefix(playlist_sources::OVERLAY_TARGET)
+            .unwrap_or(&playlist_id)
+            .to_string();
+        let playlist_name =
+            if let Some(id) = playlist_id.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
+                self.mixed_playlists
+                    .get(id)
+                    .map(|playlist| playlist.name.clone())
+            } else {
+                self.playlist_pages
+                    .get(&playlist_id)
+                    .and_then(|page| page.playlist.get())
+                    .filter(|playlist| self.can_edit_playlist(playlist))
+                    .map(|playlist| playlist.name.clone())
+            };
+        let Some(playlist_name) = playlist_name else {
             return;
         };
         let uris: Vec<String> = text
             .split(|c: char| c.is_whitespace() || c == ',')
-            .filter_map(crate::link::parse)
+            .filter_map(|text| {
+                if crate::soundcloud::track_id(text).is_some() {
+                    Some(text.to_string())
+                } else {
+                    crate::link::parse(text)
+                }
+            })
             .filter(|uri| matches!(util::uri_kind(uri), Some("track" | "episode")))
             .collect();
         if uris.is_empty() {
@@ -10873,6 +10959,9 @@ impl App {
     /// Apply one queued UI action after drawing, updating optimistic local state
     /// and scheduling any backend work or preference persistence it requires.
     pub(crate) fn apply(&mut self, action: Action, ctx: &egui::Context) {
+        let Some(action) = self.apply_playlist_source_action(action, ctx) else {
+            return;
+        };
         if matches!(
             &action,
             Action::Open(_)
@@ -10902,6 +10991,11 @@ impl App {
             self.supersede_play_search();
         }
         match action {
+            Action::SaveMixedPlaylist { .. }
+            | Action::DuplicateMixedPlaylist(_)
+            | Action::ImportMixedPlaylist(_) => {
+                unreachable!("local playlist actions are applied by the source adapter")
+            }
             Action::Open(page) => self.open(page),
             Action::OpenSongRadio { uri, track } => self.open_song_radio(&uri, &track),
             Action::PrepareTint(url) => {
@@ -12601,10 +12695,17 @@ impl App {
 
     /// The library's playlists that take songs, as id and name pairs.
     pub fn editable_playlists(&self) -> Vec<(String, String)> {
+        let mut destinations: Vec<_> = self
+            .mixed_playlists
+            .playlists
+            .iter()
+            .map(|playlist| (playlist.uri(), format!("{} (Mixed)", playlist.name)))
+            .collect();
         if self.user_id().is_none() {
-            return Vec::new();
+            return destinations;
         }
-        self.library
+        let spotify: Vec<_> = self
+            .library
             .playlists
             .get()
             .map(|playlists| {
@@ -12614,7 +12715,9 @@ impl App {
                     .map(|playlist| (playlist.id.clone(), playlist.name.clone()))
                     .collect()
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        destinations.extend(spotify);
+        destinations
     }
 }
 

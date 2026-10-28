@@ -868,16 +868,34 @@ pub(crate) fn playlist_picker(
         highlighted = (!query.trim().is_empty()).then_some(0);
     }
     ui.add_space(4.0);
-    if menu_item(
-        ui,
-        &palette,
-        Some(Icon::Plus),
-        &gettext(locale, "New playlist"),
-    ) {
+    if !items
+        .iter()
+        .any(|item| item.uri().starts_with("soundcloud:track:"))
+        && menu_item(
+            ui,
+            &palette,
+            Some(Icon::Plus),
+            &gettext(locale, "New playlist"),
+        )
+    {
         app.actions.push(Action::ShowDialog(Dialog::CreatePlaylist {
             name: String::new(),
             public: false,
             add_uris: items.iter().map(|item| item.uri().to_string()).collect(),
+        }));
+    }
+    if menu_item(ui, &palette, Some(Icon::Plus), "New mixed playlist") {
+        app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
+            id: None,
+            name: String::new(),
+            description: String::new(),
+            tracks: items
+                .iter()
+                .filter_map(|item| match item {
+                    PlayableItem::Track(track) => Some(track.clone()),
+                    _ => None,
+                })
+                .collect(),
         }));
     }
     menu_separator(ui, &palette);
@@ -1205,6 +1223,10 @@ pub fn context_menu_items(
     name: &str,
     owned_playlist: Option<&Playlist>,
 ) {
+    if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
+        super::collection::mixed_playlist_menu(app, ui, id);
+        return;
+    }
     let palette = app.palette;
     let locale = app.locale;
     ui.set_min_width(200.0);
@@ -1526,6 +1548,10 @@ fn track_row_contents(
             RowContext::Context {
                 editable_playlist: Some((id, _)),
                 ..
+            }
+            | RowContext::View {
+                editable_playlist: Some((id, _)),
+                ..
             } => Some(id.clone()),
             _ => None,
         };
@@ -1536,7 +1562,13 @@ fn track_row_contents(
                 RowContext::Context {
                     editable_playlist: Some((id, _)),
                     ..
-                } => Some((id.clone(), row.index as u32)),
+                } => Some((id.clone(), row.position.unwrap_or(row.index as u32))),
+                RowContext::View {
+                    editable_playlist: Some((id, _)),
+                    ..
+                } if id.starts_with("spotifast:") => {
+                    row.position.map(|position| (id.clone(), position))
+                }
                 RowContext::Queue
                     if row.index < app.queued_rows_len() && app.queue_locally_reorderable() =>
                 {

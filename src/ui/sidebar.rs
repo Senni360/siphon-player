@@ -2,6 +2,7 @@
 
 use egui::{Align, CornerRadius, Frame, Layout, Margin, Rect, Sense, Vec2, pos2, vec2};
 
+use crate::api::models::PlayableItem;
 use crate::api::models::pick_image;
 use crate::app::App;
 use crate::i18n::{Locale, gettext};
@@ -263,9 +264,13 @@ fn finish_entry_interaction(
                     .collect(),
                 saved: true,
             });
-        } else if let Page::Playlist(id) = &entry.page {
+        } else if let Page::Playlist(id) | Page::MixedPlaylist(id) = &entry.page {
             app.actions.push(Action::AddToPlaylist {
-                playlist_id: id.clone(),
+                playlist_id: if matches!(entry.page, Page::MixedPlaylist(_)) {
+                    entry.uri.clone()
+                } else {
+                    id.clone()
+                },
                 playlist_name: entry.name.clone(),
                 items: track.items.clone(),
             });
@@ -752,6 +757,36 @@ fn playlist_rows(app: &App, sort: LibrarySort, needle: &str, entries: &mut Vec<E
             ));
         }
     }
+    for playlist in &app.mixed_playlists.playlists {
+        if !needle.is_empty() && !playlist.name.to_lowercase().contains(needle) {
+            continue;
+        }
+        entries.push(mixed_entry(app, playlist));
+    }
+}
+
+fn mixed_entry(app: &App, playlist: &crate::mixed_playlists::Playlist) -> Entry {
+    let image = playlist
+        .entries
+        .iter()
+        .find_map(|entry| app.item_image(&PlayableItem::Track(entry.to_track()), 64));
+    Entry {
+        image: image.clone(),
+        grid_image: image,
+        name: playlist.name.clone(),
+        subtitle: "Mixed playlist · On this computer".into(),
+        grid_subtitle: "Mixed playlist".into(),
+        page: Page::MixedPlaylist(playlist.id.clone()),
+        uri: playlist.uri(),
+        round: false,
+        liked: false,
+        owned: true,
+        editable: true,
+        playlist_index: None,
+        folder: None,
+        depth: 0,
+        added_at: Some(playlist.created.saturating_mul(1000)),
+    }
 }
 
 /// Playlist rows in account order, including collapsible folders (#95).
@@ -1033,23 +1068,43 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             {
                 app.actions.push(Action::SetLibraryGrid(!grid));
             }
-            // One item never deserved a menu: the plus creates directly.
-            if theme::icon_button(
+            let create = theme::icon_button(
                 ui,
                 Icon::Plus,
                 16.0,
                 palette.secondary,
                 palette.text,
                 &gettext(locale, "Create a playlist"),
-            )
-            .clicked()
-            {
-                app.actions.push(Action::ShowDialog(Dialog::CreatePlaylist {
-                    name: String::new(),
-                    public: false,
-                    add_uris: Vec::new(),
-                }));
-            }
+            );
+            egui::Popup::menu(&create)
+                .frame(super::widgets::menu_frame(&palette))
+                .show(|ui| {
+                    if super::widgets::menu_item(
+                        ui,
+                        &palette,
+                        Some(Icon::Plus),
+                        &gettext(locale, "New playlist"),
+                    ) {
+                        app.actions.push(Action::ShowDialog(Dialog::CreatePlaylist {
+                            name: String::new(),
+                            public: false,
+                            add_uris: Vec::new(),
+                        }));
+                    }
+                    if super::widgets::menu_item(
+                        ui,
+                        &palette,
+                        Some(Icon::Plus),
+                        "New mixed playlist",
+                    ) {
+                        app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
+                            id: None,
+                            name: String::new(),
+                            description: String::new(),
+                            tracks: Vec::new(),
+                        }));
+                    }
+                });
             if theme::icon_button(
                 ui,
                 Icon::Search,
@@ -2030,6 +2085,11 @@ fn pin_menu(app: &mut App, ui: &mut egui::Ui, key: &str) {
 fn drop_playlist_row(app: &mut App, entries: &[Entry], pinned_rows: usize, slot: usize, key: &str) {
     if key != LIKED_SONGS_KEY
         && !app
+            .mixed_playlists
+            .playlists
+            .iter()
+            .any(|playlist| playlist.uri() == key)
+        && !app
             .library
             .playlists
             .get()
@@ -2078,9 +2138,12 @@ fn drop_playlist_row(app: &mut App, entries: &[Entry], pinned_rows: usize, slot:
 /// rows hidden by a search or collapsed folder. A drag snapshots this
 /// whole arrangement before applying its new local position.
 fn full_playlist_order(app: &App) -> Vec<String> {
-    let Some(playlists) = app.library.playlists.get() else {
-        return Vec::new();
-    };
+    let playlists = app
+        .library
+        .playlists
+        .get()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
     let mut entries: Vec<_> = playlists
         .iter()
         .enumerate()
@@ -2096,6 +2159,12 @@ fn full_playlist_order(app: &App) -> Vec<String> {
             )
         })
         .collect();
+    entries.extend(
+        app.mixed_playlists
+            .playlists
+            .iter()
+            .map(|playlist| mixed_entry(app, playlist)),
+    );
     entries.push(liked_entry(app));
     order_entries(
         app,
@@ -2216,6 +2285,8 @@ mod ordering_tests {
             },
         );
         crate::demo::populate(&mut app);
+        app.mixed_playlists = Default::default();
+        app.playlist_overlay = Default::default();
         app.library.playlists = Loadable::Loaded(
             [
                 ("a", "Zebra"),
@@ -2304,6 +2375,25 @@ mod ordering_tests {
             &mut entries,
         );
         entries
+    }
+
+    #[test]
+    fn mixed_playlists_share_sidebar_sort_filter_and_owned_listing() {
+        let mut app = app("mixed-listing");
+        let id = app
+            .mixed_playlists
+            .create("Amber mix".into(), String::new());
+        app.settings.library_by_you = true;
+        app.settings
+            .library_sort
+            .insert(Filter::Playlists, LibrarySort::Name);
+        let entries = projected(&app, "amber");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].page, Page::MixedPlaylist(id.clone()));
+        assert_eq!(entries[0].uri, format!("spotifast:playlist:{id}"));
+        assert!(entries[0].owned && entries[0].editable);
+        assert!(entries[0].subtitle.contains("Mixed playlist"));
+        app.backend.shutdown();
     }
 
     /// Verify that ownership filtering composes with search and pins while
