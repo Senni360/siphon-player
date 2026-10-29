@@ -114,6 +114,7 @@ pub enum Page {
     NewReleases,
     Search,
     LikedSongs,
+    SoundCloudLikes,
     Albums,
     Artists,
     Podcasts,
@@ -139,6 +140,7 @@ impl Page {
             Page::NewReleases => "new-releases".into(),
             Page::Search => "search".into(),
             Page::LikedSongs => "liked".into(),
+            Page::SoundCloudLikes => "soundcloud-likes".into(),
             Page::Albums => "albums".into(),
             Page::Artists => "artists".into(),
             Page::Podcasts => "podcasts".into(),
@@ -167,6 +169,7 @@ impl Page {
             "new-releases" => Page::NewReleases,
             "search" => Page::Search,
             "liked" => Page::LikedSongs,
+            "soundcloud-likes" => Page::SoundCloudLikes,
             "albums" => Page::Albums,
             "artists" => Page::Artists,
             "podcasts" => Page::Podcasts,
@@ -1194,6 +1197,7 @@ pub struct DragEntry {
 
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    SoundCloudConnect(crate::soundcloud::connect::Draft),
     /// A page's header cover, enlarged. Clicking anywhere or Esc closes it.
     CoverArt {
         /// The largest artwork Spotify has.
@@ -1257,6 +1261,9 @@ pub struct Toast {
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
+    ConnectSoundCloud,
+    ToggleSoundCloudLike(String),
+    DisconnectSoundCloud,
     Open(Page),
     /// Opens the radio of a song shown in a list, after caching the row's
     /// song so the page has its name and cover (#644).

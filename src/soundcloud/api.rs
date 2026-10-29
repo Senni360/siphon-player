@@ -31,6 +31,7 @@
 //! across clones instead of keeping a runtime task asleep for hours.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
@@ -54,6 +55,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("SoundCloud needs an OAuth token for this request")]
     NotSignedIn,
+    #[error(
+        "Your SoundCloud session expired. Reconnect SoundCloud with a current oauth_token cookie."
+    )]
+    SessionExpired,
     #[error("SoundCloud request failed (HTTP {0})")]
     Status(u16),
     #[error("SoundCloud is rate limiting requests; try again after {retry_after:?}")]
@@ -84,7 +89,11 @@ impl super::account::Resolver for Client {
         input: &super::account::ProfileInput,
     ) -> std::result::Result<super::account::Profile, super::account::ResolveError> {
         // Profile mode is public, even when another session was connected.
-        let anonymous = Self::new(self.shared.http.clone(), self.client_id(), None);
+        let anonymous = Self {
+            shared: Arc::clone(&self.shared),
+            oauth_token: None,
+            access: Arc::default(),
+        };
         let url = match input {
             super::account::ProfileInput::Permalink(name) => {
                 format!("https://soundcloud.com/{name}")
@@ -101,11 +110,11 @@ impl super::account::Resolver for Client {
         &self,
         token: &super::account::SessionToken,
     ) -> std::result::Result<super::account::Profile, super::account::ResolveError> {
-        let authenticated = Self::new(
-            self.shared.http.clone(),
-            self.client_id(),
-            Some(token.expose().to_owned()),
-        );
+        let authenticated = Self {
+            shared: Arc::clone(&self.shared),
+            oauth_token: Some(token.expose().to_owned()),
+            access: Arc::default(),
+        };
         authenticated
             .me()
             .await
@@ -130,7 +139,9 @@ fn account_profile(user: User) -> super::account::Profile {
 
 fn account_error(error: Error) -> super::account::ResolveError {
     match error {
-        Error::Status(401 | 403) | Error::NotSignedIn => super::account::ResolveError::Unauthorized,
+        Error::Status(401 | 403) | Error::NotSignedIn | Error::SessionExpired => {
+            super::account::ResolveError::Unauthorized
+        }
         Error::Status(404) => super::account::ResolveError::NotFound,
         _ => super::account::ResolveError::Unavailable,
     }
@@ -152,9 +163,49 @@ struct Shared {
 pub struct Client {
     shared: Arc<Shared>,
     oauth_token: Option<String>,
+    access: Arc<Access>,
+}
+
+#[derive(Default)]
+struct Access {
+    expired: AtomicBool,
+    revoked: AtomicBool,
+    // Private share tokens stay in memory, scoped to this connection.
+    secrets: RwLock<HashMap<String, String>>,
+    on_expired: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Client {
+    /// Stop old account-scoped clones before installing another connection.
+    pub(crate) fn revoke(&self) {
+        self.access.revoked.store(true, Ordering::SeqCst);
+        self.access
+            .secrets
+            .write()
+            .unwrap_or_else(|lock| lock.into_inner())
+            .clear();
+    }
+
+    pub fn on_session_expired(mut self, notify: impl Fn() + Send + Sync + 'static) -> Self {
+        Arc::get_mut(&mut self.access)
+            .expect("new connection")
+            .on_expired = Some(Box::new(notify));
+        self
+    }
+
+    fn expire_session(&self) {
+        if !self.access.expired.swap(true, Ordering::SeqCst) {
+            self.access
+                .secrets
+                .write()
+                .unwrap_or_else(|lock| lock.into_inner())
+                .clear();
+            if let Some(notify) = &self.access.on_expired {
+                notify();
+            }
+        }
+    }
+
     pub fn new(
         http: impl Into<Http>,
         client_id: Option<String>,
@@ -171,6 +222,7 @@ impl Client {
                 home: Url::parse(HOME).expect("constant homepage URL"),
             }),
             oauth_token: oauth_token.filter(|token| !token.is_empty()),
+            access: Arc::default(),
         }
     }
 
@@ -188,6 +240,7 @@ impl Client {
         Self {
             shared: Arc::clone(&self.shared),
             oauth_token: None,
+            access: Arc::default(),
         }
     }
 
@@ -247,7 +300,7 @@ impl Client {
             [
                 "users",
                 id,
-                "track_likes" | "playlist_likes" | "playlists" | "tracks",
+                "track_likes" | "playlist_likes" | "playlists" | "tracks" | "followings",
             ]
             | ["users", id, "playlists", "liked_and_owned"] => id.parse::<u64>().is_ok(),
             _ => false,
@@ -300,7 +353,22 @@ impl Client {
             .filter(|track| track.is_stub())
             .map(|track| track.id)
             .collect::<Vec<_>>();
-        let filled = self.tracks(&ids).await?;
+        let mut batch = Vec::new();
+        let mut filled = Vec::new();
+        for id in ids {
+            let has_secret = self
+                .access
+                .secrets
+                .read()
+                .unwrap_or_else(|lock| lock.into_inner())
+                .contains_key(&super::track_uri(id));
+            if has_secret {
+                filled.push(self.track(id).await?);
+            } else {
+                batch.push(id);
+            }
+        }
+        filled.extend(self.tracks(&batch).await?);
         fill_stubs(playlist, filled)
     }
 
@@ -386,6 +454,83 @@ impl Client {
             .await
     }
 
+    pub async fn user_followings(&self, id: u64, limit: u32, offset: u32) -> Result<Page<User>> {
+        self.user_page(id, "followings", limit, offset).await
+    }
+
+    /// One explicit mutation. The caller supplies the configured no-redirect,
+    /// no-retry collection client so a credential cannot follow a redirect.
+    pub async fn set_liked(
+        &self,
+        http: &reqwest::Client,
+        user: u64,
+        track: u64,
+        liked: bool,
+    ) -> Result<()> {
+        let token = self.oauth_token.as_ref().ok_or(Error::NotSignedIn)?;
+        if self.access.expired.load(Ordering::SeqCst) || self.access.revoked.load(Ordering::SeqCst)
+        {
+            return Err(Error::SessionExpired);
+        }
+        let mut url = self.api_url(&format!("users/{user}/track_likes/{track}"))?;
+        let client_id = self.ensure_client_id(None).await?;
+        url.query_pairs_mut().append_pair("client_id", &client_id);
+        let mut authorization = header::HeaderValue::from_str(&format!("OAuth {token}"))
+            .map_err(|_| Error::NotSignedIn)?;
+        authorization.set_sensitive(true);
+        let permit = self
+            .shared
+            .limiter
+            .acquire()
+            .await
+            .map_err(|_| Error::ClientIdUnavailable)?;
+        let remaining = self
+            .shared
+            .cooldown
+            .lock()
+            .await
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+            .unwrap_or_default();
+        if !remaining.is_zero() {
+            return Err(Error::RateLimited {
+                retry_after: remaining,
+            });
+        }
+        if self.access.expired.load(Ordering::SeqCst) || self.access.revoked.load(Ordering::SeqCst)
+        {
+            return Err(Error::SessionExpired);
+        }
+        let method = if liked {
+            reqwest::Method::PUT
+        } else {
+            reqwest::Method::DELETE
+        };
+        let response = http
+            .request(method, url)
+            .header(header::AUTHORIZATION, authorization)
+            .send()
+            .await?;
+        // Session verification needs its own request slot. Release this one
+        // first, even when other like writes occupy the remaining slots.
+        drop(permit);
+        if response.status() == StatusCode::TOO_MANY_REQUESTS {
+            let delay = retry_after(response.headers(), 0);
+            *self.shared.cooldown.lock().await = Instant::now().checked_add(delay);
+            Err(Error::RateLimited { retry_after: delay })
+        } else if matches!(response.status().as_u16(), 401 | 403) {
+            // A forbidden track need not mean an expired account.
+            if matches!(self.me().await, Err(Error::SessionExpired)) {
+                Err(Error::SessionExpired)
+            } else {
+                Err(Error::Status(response.status().as_u16()))
+            }
+        } else if response.status().is_success() {
+            Ok(())
+        } else {
+            Err(Error::Status(response.status().as_u16()))
+        }
+    }
+
     pub async fn user_tracks(&self, id: u64, limit: u32, offset: u32) -> Result<Page<Track>> {
         self.user_page(id, "tracks", limit, offset).await
     }
@@ -433,11 +578,21 @@ impl Client {
             {
                 return Err(Error::InvalidUrl);
             }
-            let query = track
+            let mut query = track
                 .track_authorization
                 .as_ref()
                 .map(|auth| vec![("track_authorization", auth.clone())])
                 .unwrap_or_default();
+            if let Some(secret) = self
+                .access
+                .secrets
+                .read()
+                .unwrap_or_else(|lock| lock.into_inner())
+                .get(&super::track_uri(track.id))
+                .cloned()
+            {
+                query.push(("secret_token", secret));
+            }
             let response: StreamResponse = match self.get(&transcoding.url, &query).await {
                 // Old MP3 endpoints may still be advertised after removal.
                 Err(Error::Status(404 | 410)) => continue,
@@ -508,7 +663,14 @@ impl Client {
     }
 
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
+        if self.access.revoked.load(Ordering::SeqCst) {
+            return Err(Error::NotSignedIn);
+        }
         let mut url = self.api_url(path)?;
+        let requires_session = url.path() == "/me" || url.path().ends_with("/liked_and_owned");
+        if requires_session && self.access.expired.load(Ordering::SeqCst) {
+            return Err(Error::SessionExpired);
+        }
         let retained = url
             .query_pairs()
             .filter(|(key, _)| key != "client_id" && key != "oauth_token" && key != "access_token")
@@ -518,24 +680,119 @@ impl Client {
         url.query_pairs_mut()
             .extend_pairs(retained)
             .extend_pairs(query.iter().map(|(key, value)| (*key, value)));
+        let parts = url
+            .path()
+            .trim_start_matches('/')
+            .split('/')
+            .collect::<Vec<_>>();
+        if let [kind @ ("tracks" | "playlists"), id] = parts.as_slice() {
+            let key = format!(
+                "soundcloud:{}:{id}",
+                if *kind == "tracks" {
+                    "track"
+                } else {
+                    "playlist"
+                }
+            );
+            if let Some(secret) = self
+                .access
+                .secrets
+                .read()
+                .unwrap_or_else(|lock| lock.into_inner())
+                .get(&key)
+            {
+                url.query_pairs_mut().append_pair("secret_token", secret);
+            }
+        }
         let mut id = self.ensure_client_id(None).await?;
         for attempt in 0..2 {
             let mut authenticated = url.clone();
             authenticated
                 .query_pairs_mut()
                 .append_pair("client_id", &id);
-            match self.send(authenticated, true).await {
+            let oauth = self.oauth_token.is_some() && !self.access.expired.load(Ordering::SeqCst);
+            let response = match self.send(authenticated, oauth).await {
+                Err(error @ Error::Status(401 | 403)) if oauth => {
+                    // A rejected public client ID can look like a rejected
+                    // session. Preserve the ordinary one-time discovery retry.
+                    if attempt == 0 {
+                        if let Ok(fresh) = self.ensure_client_id(Some(&id)).await {
+                            id = fresh;
+                            continue;
+                        }
+                        // Discovery can itself be blocked. Keep the last ID
+                        // while checking the session and falling back publicly.
+                        self.shared
+                            .client_id
+                            .write()
+                            .unwrap_or_else(|lock| lock.into_inner())
+                            .get_or_insert_with(|| id.clone());
+                    }
+                    let mut me = self.api_url("me")?;
+                    me.query_pairs_mut().append_pair("client_id", &id);
+                    if url.path() == "/me"
+                        || matches!(self.send(me, true).await, Err(Error::Status(401 | 403)))
+                    {
+                        self.expire_session();
+                        if requires_session {
+                            return Err(Error::SessionExpired);
+                        }
+                        // Public content remains available after a session expires.
+                        let mut public = url.clone();
+                        let pairs = public
+                            .query_pairs()
+                            .filter(|(key, _)| key != "secret_token")
+                            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+                            .collect::<Vec<_>>();
+                        public.set_query(None);
+                        public
+                            .query_pairs_mut()
+                            .extend_pairs(pairs)
+                            .append_pair("client_id", &id);
+                        self.send(public, false).await
+                    } else {
+                        return Err(error);
+                    }
+                }
                 Err(Error::Status(401 | 403)) if attempt == 0 => {
                     id = self.ensure_client_id(Some(&id)).await?;
+                    continue;
                 }
-                response => return response?.json().await.map_err(|_| Error::Decode),
+                response => response,
+            }?;
+            let value: serde_json::Value = response.json().await.map_err(|_| Error::Decode)?;
+            {
+                let mut secrets = self
+                    .access
+                    .secrets
+                    .write()
+                    .unwrap_or_else(|lock| lock.into_inner());
+                let hint = if url.path().starts_with("/tracks") || url.path().ends_with("/tracks") {
+                    Some("track")
+                } else if url.path().starts_with("/playlists")
+                    || url.path().ends_with("/playlists")
+                    || url.path().ends_with("/liked_and_owned")
+                {
+                    Some("playlist")
+                } else {
+                    None
+                };
+                if !self.access.expired.load(Ordering::SeqCst)
+                    && !self.access.revoked.load(Ordering::SeqCst)
+                {
+                    remember_secrets(&value, hint, &mut secrets);
+                }
             }
+            return serde_json::from_value(value).map_err(|_| Error::Decode);
         }
         unreachable!("the second attempt always returns")
     }
 
     async fn send(&self, url: Url, oauth: bool) -> Result<reqwest::Response> {
         for attempt in 0..=RATE_LIMIT_RETRIES {
+            if self.access.revoked.load(Ordering::SeqCst) {
+                return Err(Error::NotSignedIn);
+            }
             let permit = self
                 .shared
                 .limiter
@@ -557,6 +814,9 @@ impl Client {
                 }
                 tokio::time::sleep(remaining).await;
             }
+            if self.access.revoked.load(Ordering::SeqCst) {
+                return Err(Error::NotSignedIn);
+            }
             let mut request = self
                 .shared
                 .http
@@ -564,7 +824,10 @@ impl Client {
                 .map_err(Error::Network)?
                 .get(url.clone())
                 .timeout(Duration::from_secs(30));
-            if oauth && let Some(token) = &self.oauth_token {
+            if oauth
+                && !self.access.expired.load(Ordering::SeqCst)
+                && let Some(token) = &self.oauth_token
+            {
                 let mut value = header::HeaderValue::from_str(&format!("OAuth {token}"))
                     .map_err(|_| Error::NotSignedIn)?;
                 value.set_sensitive(true);
@@ -591,6 +854,47 @@ impl Client {
             return Ok(response);
         }
         unreachable!("the last attempt always returns")
+    }
+}
+
+fn remember_secrets(
+    value: &serde_json::Value,
+    hint: Option<&str>,
+    secrets: &mut HashMap<String, String>,
+) {
+    match value {
+        serde_json::Value::Object(object) => {
+            let kind = object
+                .get("kind")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| object.contains_key("tracks").then_some("playlist"))
+                .or(hint);
+            if let (Some(kind @ ("track" | "playlist")), Some(id), Some(secret)) = (
+                kind,
+                object.get("id").and_then(serde_json::Value::as_u64),
+                object
+                    .get("secret_token")
+                    .and_then(serde_json::Value::as_str),
+            ) && secrets.len() < 20_000
+            {
+                secrets.insert(format!("soundcloud:{kind}:{id}"), secret.to_owned());
+            }
+            for (key, value) in object {
+                let hint = match key.as_str() {
+                    "track" | "tracks" => Some("track"),
+                    "playlist" | "playlists" => Some("playlist"),
+                    "collection" => kind,
+                    _ => None,
+                };
+                remember_secrets(value, hint, secrets);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                remember_secrets(value, hint, secrets);
+            }
+        }
+        _ => {}
     }
 }
 

@@ -37,8 +37,11 @@ pub enum HybridCommand {
 
 #[derive(Default)]
 pub(super) struct HybridRuntime {
+    pub(super) account: crate::soundcloud::account::Account,
     client: Option<Client>,
     pub(super) account_generation: u64,
+    account_request: u64,
+    account_lease: Option<crate::credentials::Lease>,
     pub(super) engine: Option<sc::Engine>,
     tag: Option<PlaybackTag>,
     track: Option<Track>,
@@ -88,7 +91,63 @@ impl Worker {
             .ok()
             .and_then(|s| serde_json::from_str::<String>(&s).ok());
         self.hybrid.client = Some(Client::new(self.http.clone(), saved, None));
-        let _ = self.commands.send(Command::RestoreSoundCloud);
+    }
+
+    pub(super) fn connect_soundcloud(
+        &mut self,
+        input: crate::soundcloud::connect::Input,
+        request: u64,
+    ) {
+        self.hybrid.account_request = request;
+        use crate::soundcloud::{
+            account::{Account, Connection},
+            connect::Input,
+        };
+        let connection = Connection::begin(&self.credentials);
+        let client = self.soundcloud_client().expect("SoundCloud initialized");
+        let commands = self.commands.clone();
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        tokio::spawn(async move {
+            let result = match input {
+                Input::Profile(input) => {
+                    connection
+                        .connect_profile(&client, &input)
+                        .await
+                        .map(|connected| {
+                            if let Some(warning) = connected.cleanup_warning {
+                                let _ = events.send(Event::Error(warning.to_string()));
+                                waker.wake();
+                            }
+                            Account::Profile(connected.user)
+                        })
+                }
+                Input::Session(token) => connection.connect_session(&client, token).await,
+            };
+            let _ = commands.send(Command::SoundCloudAccountRestored {
+                connection,
+                result,
+                request,
+            });
+        });
+    }
+
+    pub(super) fn disconnect_soundcloud(&mut self, request: u64) {
+        let mut account = crate::soundcloud::account::Account::Disconnected;
+        let clear = account.sign_out(&self.credentials);
+        let lease = self.credentials.lease(CredentialSlot::SoundCloud);
+        self.set_soundcloud_account(account, request);
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        tokio::spawn(async move {
+            if clear.await.is_err() && lease.current() {
+                let _ = events.send(Event::Error(
+                    "Could not remove the protected SoundCloud session. Disconnect again to retry."
+                        .into(),
+                ));
+                waker.wake();
+            }
+        });
     }
 
     pub(super) fn restore_soundcloud_account(&self) {
@@ -105,27 +164,118 @@ impl Worker {
             if let Ok(Ok(state)) = state {
                 let result = connection.restore(&state, &client).await;
                 if connection.current() {
-                    let _ =
-                        commands.send(Command::SoundCloudAccountRestored { connection, result });
+                    let _ = commands.send(Command::SoundCloudAccountRestored {
+                        connection,
+                        result,
+                        request: 0,
+                    });
                 }
             }
         });
     }
 
-    pub(super) fn set_soundcloud_account(&mut self, account: crate::soundcloud::account::Account) {
+    pub(super) fn set_soundcloud_account(
+        &mut self,
+        account: crate::soundcloud::account::Account,
+        request: u64,
+    ) {
+        self.hybrid.account_request = request;
+        self.install_soundcloud_account(account.clone());
+        self.emit(Event::SoundCloudAccount { account, request });
+    }
+
+    // Cancel can race a completed verification whose event has not reached
+    // the UI. Restore the account the UI kept showing, including its secret.
+    pub(super) fn cancel_soundcloud_connect(
+        &mut self,
+        account: crate::soundcloud::account::Account,
+        request: u64,
+    ) {
+        self.hybrid.account_request = request;
+        self.credentials
+            .invalidate(crate::credentials::Slot::SoundCloud);
+        let lease = self.credentials.lease(crate::credentials::Slot::SoundCloud);
+        self.install_soundcloud_account(account.clone());
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        tokio::spawn(async move {
+            let result = if let Some(token) = account.token() {
+                lease.save_secret(token.expose().as_bytes().to_vec()).await
+            } else {
+                lease.clear_secret(true).await
+            };
+            if result.is_err() && lease.current() {
+                let _ = events.send(Event::Error(
+                    "Could not restore the previous protected SoundCloud session. Connect again."
+                        .into(),
+                ));
+                waker.wake();
+            }
+        });
+    }
+
+    fn install_soundcloud_account(&mut self, account: crate::soundcloud::account::Account) {
+        self.hybrid.account_lease = Some(self.credentials.lease(CredentialSlot::SoundCloud));
         let id = self.hybrid.client.as_ref().and_then(Client::client_id);
-        self.hybrid.client = Some(Client::new(
-            self.http.clone(),
-            id,
-            account.token().map(|s| s.expose().to_owned()),
-        ));
-        self.hybrid.account_generation = self.hybrid.account_generation.wrapping_add(1);
+        if let Some(previous) = &self.hybrid.client {
+            previous.revoke();
+        }
+        let generation = self.hybrid.account_generation.wrapping_add(1);
+        let commands = self.commands.clone();
+        self.hybrid.client = Some(
+            Client::new(
+                self.http.clone(),
+                id,
+                account.token().map(|s| s.expose().to_owned()),
+            )
+            .on_session_expired(move || {
+                let _ = commands.send(Command::SoundCloudSessionExpired(generation));
+            }),
+        );
+        self.hybrid.account_generation = generation;
         self.hybrid.streams.clear();
         self.hybrid.preload_uri = None;
         if let Some(engine) = &self.hybrid.engine {
             engine.command(sc::Command::ClearPreload);
         }
-        self.emit(Event::SoundCloudAccount(account));
+        self.hybrid.account = account;
+    }
+
+    pub(super) fn expire_soundcloud_session(&mut self, generation: u64) {
+        use crate::soundcloud::account::Account;
+        if generation != self.hybrid.account_generation {
+            return;
+        }
+        let Account::Session { user, .. } = &self.hybrid.account else {
+            return;
+        };
+        self.hybrid.account = Account::Profile(user.clone());
+        self.hybrid.streams.clear();
+        self.hybrid.preload_uri = None;
+        if let Some(engine) = &self.hybrid.engine {
+            engine.command(sc::Command::ClearPreload);
+        }
+        if let Some(lease) = self
+            .hybrid
+            .account_lease
+            .as_ref()
+            .filter(|lease| lease.current())
+            .cloned()
+        {
+            let clear = lease.clear_secret(true);
+            let events = self.events.clone();
+            let waker = self.waker.clone();
+            tokio::spawn(async move {
+                if clear.await.is_err() && lease.current() {
+                    let _ = events.send(Event::Error("Could not remove the expired protected SoundCloud session. Disconnect SoundCloud to retry.".into()));
+                    waker.wake();
+                }
+            });
+        }
+        // Keep the generation: a pending public load still needs its result.
+        self.emit(Event::SoundCloudSessionExpired {
+            request: self.hybrid.account_request,
+        });
     }
 
     pub(super) async fn hybrid_command(&mut self, command: HybridCommand) {
@@ -656,6 +806,10 @@ impl Worker {
                         tracks,
                     });
                 }
+                if let Some(id) = uri.strip_prefix("soundcloud:likes:").and_then(|id| id.parse::<u64>().ok()) {
+                    let page = super::soundcloud_library::refresh_likes(&client, id, usize::MAX).await.map_err(|error| error.to_string())?;
+                    return Ok(crate::hybrid_queue::Context { uri: uri.clone(), name: "SoundCloud Likes".into(), tracks: page.collection });
+                }
                 if uri.starts_with("spotify:") { return Err("Open a complete song list to keep the mixed queue when starting this collection".into()); }
                 let resolved = if let Some(id) = crate::soundcloud::track_id(&uri) {
                     wire::Resolved::Track(client.track(id).await.map_err(|e| e.to_string())?)
@@ -896,7 +1050,7 @@ mod tests {
             worker.hybrid.preload_uri = Some("soundcloud:track:7".into());
             // The old account's resolution was already in flight when the
             // account was disconnected. Its result must not refill the cache.
-            worker.set_soundcloud_account(crate::soundcloud::account::Account::Disconnected);
+            worker.set_soundcloud_account(crate::soundcloud::account::Account::Disconnected, 0);
             worker
                 .soundcloud_stream(
                     tag,

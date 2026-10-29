@@ -21,6 +21,7 @@ pub mod search;
 pub mod settings;
 pub mod show;
 pub mod sidebar;
+pub(crate) mod soundcloud;
 pub mod topbar;
 mod update;
 pub mod widgets;
@@ -335,6 +336,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                 Page::NewReleases => new_releases::page(app, ui),
                                 Page::Search => search::show(app, ui),
                                 Page::LikedSongs => collection::liked(app, ui),
+                                Page::SoundCloudLikes => soundcloud::show(app, ui, page),
                                 Page::Albums | Page::Artists | Page::Podcasts | Page::Episodes => {
                                     library::show(app, ui, page)
                                 }

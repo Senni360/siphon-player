@@ -45,15 +45,19 @@ The interface includes complete
 
 This personal fork plays SoundCloud beside Spotify. One search field holds
 both, with source chips, native SoundCloud playlist and artist pages, and
-public URL lookup; SoundCloud search needs no account connection. Anonymous
-listening and the optional profile or session connections are described in
-the [SoundCloud reference](docs/_reference/soundcloud.md), with playback
-limits. SoundCloud items use their real SoundCloud links; Spotify saves,
-radio, album navigation, lyrics and remote Spotify outputs are unavailable
-for them. The connection interface is not wired yet.
+public URL lookup; SoundCloud search needs no account connection. Connect a
+public profile from the sidebar or account menu to browse cached Likes,
+playlists, uploads and followed artists. Advanced session connections include
+your private playlists and uploads, and allow liking and unliking tracks.
+Tokens stay in protected storage. Expired sessions offer a reconnect prompt
+while public browsing remains available. The
+[SoundCloud reference](docs/_reference/soundcloud.md) describes connections
+and playback limits. SoundCloud items use their real SoundCloud links;
+Spotify saves, radio, album navigation, lyrics and remote Spotify outputs
+are unavailable for them.
 
-**Playback needs Spotify Premium.** Free accounts can browse and search, but
-cannot play music through Siphon.
+**Spotify playback needs Spotify Premium.** Free Spotify accounts can browse
+and search, but cannot play Spotify music through Siphon.
 
 ![Siphon Home with the playlist library, recommendations, queue, and player visible](docs/screenshot.png)
 

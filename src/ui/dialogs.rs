@@ -7,6 +7,86 @@ use crate::i18n::{Locale, gettext, ngettext};
 use crate::model::{Action, Dialog};
 use crate::theme;
 
+fn soundcloud_connect(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let connected_name = app
+        .soundcloud_account
+        .user()
+        .map(|user| user.username.clone());
+    let Some(Dialog::SoundCloudConnect(draft)) = &mut app.dialog else {
+        return;
+    };
+    theme::text(
+        ui,
+        gettext(locale, "Connect SoundCloud"),
+        theme::bold(20.0),
+        palette.text,
+    );
+    ui.add_space(12.0);
+    if let Some(name) = connected_name {
+        ui.label(gettext(locale, "Connected as {name}").replace("{name}", &name));
+        if theme::pill_button(
+            ui,
+            &palette,
+            &gettext(locale, "Disconnect SoundCloud"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions.push(Action::DisconnectSoundCloud);
+        }
+        ui.add_space(12.0);
+    }
+    ui.add_enabled_ui(!draft.busy, |ui| {
+        theme::text(ui, gettext(locale, "Profile URL or username"), theme::medium(13.0), palette.secondary);
+        let profile = text_field(ui, &palette, locale, "soundcloud-profile", &mut draft.profile, "https://soundcloud.com/username", !draft.advanced);
+        ui.label(egui::RichText::new(gettext(locale, "Add public likes, playlists, reposts and followings. No sign-in needed.")).color(palette.secondary));
+        ui.add_space(12.0);
+        let advanced = egui::CollapsingHeader::new(gettext(locale, "Advanced: use a session token")).id_salt("soundcloud-advanced").open(Some(draft.advanced)).show(ui, |ui| {
+            ui.label(gettext(locale, "1. Sign in at soundcloud.com in your browser."));
+            ui.label(gettext(locale, "2. Open DevTools (F12), then Application > Cookies > https://soundcloud.com. In Firefox, use Storage > Cookies."));
+            ui.label(gettext(locale, "3. Copy the value of oauth_token and paste it below."));
+            ui.label(egui::RichText::new(gettext(locale, "This token can act as your SoundCloud account. Treat it like a password. It is saved in your computer's protected credential store.")).color(palette.secondary));
+            let token = Frame::new().fill(palette.surface).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+                super::widgets::text_edit(ui, locale, egui::TextEdit::singleline(&mut draft.token).id(crate::soundcloud::connect::token_field_id()).password(true).font(theme::regular(14.0)).frame(egui::Frame::NONE).hint_text(egui::RichText::new(gettext(locale, "Session token")).color(palette.dim)).desired_width(f32::INFINITY))
+            }).inner;
+            if ui.memory(|memory| memory.focused().is_none()) { token.request_focus(); }
+            token
+        });
+        if advanced.header_response.clicked() {
+            draft.advanced = !draft.advanced;
+            ui.memory_mut(|memory| {
+                if draft.advanced { memory.request_focus(crate::soundcloud::connect::token_field_id()); }
+                else { memory.surrender_focus(crate::soundcloud::connect::token_field_id()); }
+            });
+        }
+        if let Some(error) = &draft.error {
+            ui.label(error);
+        }
+        ui.add_space(16.0);
+        let submit = (profile.lost_focus() || advanced.body_returned.as_ref().is_some_and(|response| response.lost_focus())) && ui.input(|input| input.key_pressed(egui::Key::Enter));
+        let label = if draft.advanced { gettext(locale, "Connect session") } else { gettext(locale, "Connect public profile") };
+        if theme::pill_button(ui, &palette, &label, true).clicked() || submit {
+            app.actions.push(Action::ConnectSoundCloud);
+        }
+    });
+    if draft.busy {
+        super::widgets::loading_row(ui, &palette, locale);
+    }
+    ui.add_space(8.0);
+    if theme::pill_button(
+        ui,
+        &palette,
+        &gettext(locale, "Continue without connecting"),
+        false,
+    )
+    .clicked()
+    {
+        app.actions.push(Action::CloseDialog);
+    }
+}
+
 pub fn show(app: &mut App, ctx: &egui::Context) {
     let Some(dialog) = app.dialog.clone() else {
         return;
@@ -40,6 +120,14 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             match dialog {
                 // Drawn by cover_art above.
                 Dialog::CoverArt { .. } => {}
+                Dialog::SoundCloudConnect(_) => {
+                    let height = (ctx.viewport_rect().height() - 96.0).max(120.0);
+                    // A modal's initial area is small. Let this scroller use
+                    // the window height before it decides to clip its buttons.
+                    ui.set_max_height(height);
+                    egui::ScrollArea::vertical().max_height(height)
+                        .show(ui, |ui| soundcloud_connect(app, ui));
+                }
                 Dialog::PersonalAppIntro => {
                     theme::text(ui, gettext(locale, "Move to your own Spotify app"), theme::bold(20.0), palette.text);
                     ui.add_space(12.0);

@@ -378,6 +378,383 @@ fn ok(body: impl Into<String>) -> (u16, String, &'static str) {
 }
 
 #[tokio::test]
+async fn disconnect_revokes_old_client_clones_and_their_private_access_tokens() {
+    let client = Client::new(
+        Http::default(),
+        Some(OLD_ID.into()),
+        Some("fixture-token".into()),
+    );
+    client
+        .access
+        .secrets
+        .write()
+        .unwrap()
+        .insert("soundcloud:track:7".into(), "s-private".into());
+    let old = client.clone();
+    client.revoke();
+    assert!(old.access.secrets.read().unwrap().is_empty());
+    assert!(matches!(old.track(7).await, Err(Error::NotSignedIn)));
+    let http = crate::http::build_collection_client(&crate::settings::ProxyConfig::Off).unwrap();
+    assert!(matches!(
+        old.set_liked(&http, 2, 7, true).await,
+        Err(Error::SessionExpired)
+    ));
+}
+
+#[tokio::test]
+async fn disconnect_cancels_reads_and_like_writes_waiting_for_a_request_slot() {
+    use std::future::Future;
+    let client = Client::new(
+        Http::default(),
+        Some(OLD_ID.into()),
+        Some("fixture-token".into()),
+    );
+    let http = crate::http::build_collection_client(&crate::settings::ProxyConfig::Off).unwrap();
+    let permits = client.shared.limiter.acquire_many(4).await.unwrap();
+    let mut read = std::pin::pin!(client.track(7));
+    let mut write = std::pin::pin!(client.set_liked(&http, 2, 7, true));
+    std::future::poll_fn(|cx| {
+        assert!(read.as_mut().poll(cx).is_pending());
+        assert!(write.as_mut().poll(cx).is_pending());
+        std::task::Poll::Ready(())
+    })
+    .await;
+    client.revoke();
+    drop(permits);
+    assert!(matches!(read.await, Err(Error::NotSignedIn)));
+    assert!(matches!(write.await, Err(Error::SessionExpired)));
+}
+
+#[tokio::test]
+async fn rejected_like_releases_its_request_slot_before_verifying_the_session() {
+    let (client, task) = server(vec![
+        (401, String::new(), ""),
+        (401, String::new(), ""),
+        ok("<html>Discovery unavailable</html>"),
+    ])
+    .await;
+    let reserved = client.shared.limiter.acquire_many(3).await.unwrap();
+    let http = crate::http::build_collection_client(&crate::settings::ProxyConfig::Off).unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(5), client.set_liked(&http, 2, 7, true))
+        .await
+        .unwrap();
+    assert!(matches!(result, Err(Error::SessionExpired)));
+    drop(reserved);
+    let requests = task.await.unwrap();
+    assert!(requests[0].starts_with("PUT /users/2/track_likes/7?"));
+    assert!(requests[1].starts_with("GET /me?"));
+    assert!(requests[2].starts_with("GET /home "));
+}
+
+#[tokio::test]
+async fn session_library_includes_private_owned_collected_and_liked_playlists() {
+    let (client, task) = server(vec![
+        ok(r#"{"collection":[{"id":7,"title":"Private owned set","public":false,"secret_token":"s-private-set"}],"next_href":"users/2/playlists?cursor=owned"}"#),
+        ok(r#"{"collection":[{"id":8,"title":"Another private set","public":false}],"next_href":null}"#),
+        ok(r#"{"collection":[{"id":7,"title":"Private owned set"},{"id":9,"title":"Collected set"}],"next_href":"users/2/playlists/liked_and_owned?cursor=collected"}"#),
+        ok(r#"{"collection":[{"id":10,"title":"More collected"}],"next_href":null}"#),
+        ok(r#"{"collection":[{"playlist":{"id":9,"title":"Collected set"}}],"next_href":"users/2/playlist_likes?cursor=liked"}"#),
+        ok(r#"{"collection":[{"playlist":{"id":11,"title":"Liked set"}}],"next_href":null}"#),
+    ]).await;
+    let lists = crate::backend::soundcloud_library::playlists(&client, 2, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        lists
+            .iter()
+            .map(|list| list.uri.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "soundcloud:playlist:7",
+            "soundcloud:playlist:8",
+            "soundcloud:playlist:9",
+            "soundcloud:playlist:10",
+            "soundcloud:playlist:11"
+        ]
+    );
+    assert_eq!(lists[0].public, Some(false));
+    assert!(
+        !serde_json::to_string(&lists)
+            .unwrap()
+            .contains("s-private-set")
+    );
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 6);
+    for request in requests {
+        assert!(request.contains("authorization: OAuth fixture-oauth-token"));
+        assert!(
+            !request
+                .lines()
+                .next()
+                .unwrap()
+                .contains("fixture-oauth-token")
+        );
+    }
+}
+
+#[tokio::test]
+async fn private_track_secrets_survive_playlist_hydration_and_fresh_stream_resolution() {
+    let mut raw = fixture_formats();
+    raw.id = 7;
+    raw.track_authorization = Some("private-track-authorization".into());
+    let mut encoding = raw
+        .media
+        .as_ref()
+        .unwrap()
+        .transcodings
+        .iter()
+        .find(|item| item.preference().is_some())
+        .unwrap()
+        .clone();
+    encoding.url = "media/private-track".into();
+    raw.media = Some(super::super::models::Media {
+        transcodings: vec![encoding],
+    });
+    let mut value = serde_json::to_value(&raw).unwrap();
+    value["secret_token"] = json!("s-private-track");
+    let (client, task) = server(vec![
+        ok(r#"{"collection":[{"id":7,"title":"Private set","secret_token":"s-private-set","tracks":[{"id":7,"secret_token":"s-private-track"}]}],"next_href":null}"#),
+        ok(r#"{"id":7,"title":"Private set","tracks":[{"id":7},{"id":8}]}"#),
+        ok(value.to_string()),
+        ok(r#"[{"id":8,"title":"Public song"}]"#),
+        ok(value.to_string()),
+        ok(r#"{"url":"https://cdn.soundcloud.invalid/private.mp3"}"#),
+    ]).await;
+    client.user_playlists(2, 100, 0).await.unwrap();
+    let list = client.playlist(7).await.unwrap();
+    assert_eq!(
+        list.tracks.iter().map(|track| track.id).collect::<Vec<_>>(),
+        [7, 8]
+    );
+    let track = client.track(7).await.unwrap();
+    client.resolve_stream(&track).await.unwrap();
+    assert!(!format!("{track:?}").contains("s-private-track"));
+    assert!(
+        !serde_json::to_string(&track.to_track(None))
+            .unwrap()
+            .contains("s-private-track")
+    );
+    let requests = task.await.unwrap();
+    assert!(requests[1].contains("secret_token=s-private-set"));
+    for index in [2, 4, 5] {
+        assert!(requests[index].contains("secret_token=s-private-track"));
+        assert!(!requests[index].contains("s-private-set"));
+    }
+    assert!(requests[5].contains("track_authorization=private-track-authorization"));
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.contains("authorization: OAuth fixture-oauth-token"))
+    );
+}
+
+#[tokio::test]
+async fn expired_session_prompts_once_and_public_reads_continue_anonymously() {
+    for status in [401, 403] {
+        let (client, task) = server(vec![
+            (status, String::new(), ""),
+            ok("<html>Discovery unavailable</html>"),
+            (status, String::new(), ""),
+            ok(r#"{"id":7,"title":"Public song"}"#),
+            ok(r#"{"id":8,"title":"Another public song"}"#),
+        ])
+        .await;
+        let notifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let count = Arc::clone(&notifications);
+        let client = client.on_session_expired(move || {
+            count.fetch_add(1, Ordering::SeqCst);
+        });
+        let clone = client.clone();
+        client.track(7).await.unwrap();
+        clone.track(8).await.unwrap();
+        assert!(matches!(clone.me().await, Err(Error::SessionExpired)));
+        let http =
+            crate::http::build_collection_client(&crate::settings::ProxyConfig::Off).unwrap();
+        assert!(matches!(
+            clone.set_liked(&http, 2, 7, true).await,
+            Err(Error::SessionExpired)
+        ));
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+        let requests = task.await.unwrap();
+        assert!(requests[1].starts_with("GET /home "));
+        assert!(requests[2].starts_with("GET /me?"));
+        for index in [0, 2] {
+            assert!(requests[index].contains("authorization: OAuth fixture-oauth-token"));
+        }
+        for index in [1, 3, 4] {
+            assert!(!requests[index].contains("authorization:"));
+        }
+    }
+}
+
+#[tokio::test]
+async fn forbidden_private_track_does_not_expire_a_valid_session() {
+    let (client, task) = server(vec![
+        (403, String::new(), ""),
+        ok("<html>Discovery unavailable</html>"),
+        ok(r#"{"id":2,"username":"Listener"}"#),
+        ok(r#"{"id":7,"title":"Accessible song"}"#),
+    ])
+    .await;
+    assert!(matches!(client.track(9).await, Err(Error::Status(403))));
+    assert!(!client.access.expired.load(Ordering::SeqCst));
+    client.track(7).await.unwrap();
+    let requests = task.await.unwrap();
+    for index in [0, 2, 3] {
+        assert!(requests[index].contains("authorization: OAuth fixture-oauth-token"));
+    }
+    assert!(!requests[1].contains("authorization:"));
+}
+
+#[tokio::test]
+async fn private_uploads_and_likes_are_requested_with_session_authorization() {
+    let (client, task) = server(vec![
+        ok(r#"{"collection":[{"id":7,"title":"Private upload","secret_token":"s-upload"}],"next_href":"users/2/tracks?cursor=private"}"#),
+        ok(r#"{"collection":[{"id":8,"title":"Another private upload"}],"next_href":null}"#),
+        ok(r#"{"collection":[{"track":{"id":9,"title":"Private like","secret_token":"s-like"}}],"next_href":null}"#),
+    ]).await;
+    let uploads = client.user_tracks(2, 50, 0).await.unwrap();
+    assert_eq!(uploads.collection[0].id, 7);
+    let next: Page<Track> = client
+        .next_page(uploads.next_href.as_deref().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(next.collection[0].id, 8);
+    assert_eq!(
+        client.user_likes(2, 100, 0).await.unwrap().collection[0].id,
+        9
+    );
+    {
+        let secrets = client.access.secrets.read().unwrap();
+        assert_eq!(secrets["soundcloud:track:7"], "s-upload");
+        assert_eq!(secrets["soundcloud:track:9"], "s-like");
+    }
+    let requests = task.await.unwrap();
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.contains("authorization: OAuth fixture-oauth-token"))
+    );
+}
+
+#[tokio::test]
+async fn soundcloud_profile_verification_is_anonymous_and_session_identity_uses_the_pasted_token() {
+    let user = r#"{"kind":"user","id":2,"username":"Listener","permalink_url":"https://soundcloud.com/listener"}"#;
+    let (client, task) = server(vec![ok(user), ok(user)]).await;
+    let profile = crate::soundcloud::account::Resolver::resolve_profile(
+        &client,
+        &crate::soundcloud::account::ProfileInput::Permalink("listener".into()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(profile.user_id, 2);
+    let token =
+        crate::soundcloud::account::SessionToken::parse("2-000000-pasted_fixture_session").unwrap();
+    let session = crate::soundcloud::account::Resolver::me(&client, &token)
+        .await
+        .unwrap();
+    assert_eq!(session, profile);
+    let requests = task.await.unwrap();
+    assert!(requests[0].starts_with("GET /resolve?url="));
+    assert!(!requests[0].to_ascii_lowercase().contains("authorization:"));
+    assert!(requests[1].starts_with("GET /me?"));
+    assert!(
+        requests[1]
+            .to_ascii_lowercase()
+            .contains("authorization: oauth 2-000000-pasted_fixture_session")
+    );
+    assert!(
+        !requests[1]
+            .lines()
+            .next()
+            .unwrap()
+            .contains("pasted_fixture_session")
+    );
+}
+
+#[tokio::test]
+async fn soundcloud_like_writes_are_session_only_and_never_retry_or_follow_redirects() {
+    let (mut client, task) = server(vec![
+        (204, String::new(), ""),
+        (204, String::new(), ""),
+        (
+            302,
+            String::new(),
+            "Location: https://attacker.invalid/\r\n",
+        ),
+        (429, String::new(), "Retry-After: 10\r\n"),
+    ])
+    .await;
+    let http = crate::http::build_collection_client(&crate::settings::ProxyConfig::Off).unwrap();
+    client.set_liked(&http, 2, 7, true).await.unwrap();
+    client.set_liked(&http, 2, 7, false).await.unwrap();
+    assert!(matches!(
+        client.set_liked(&http, 2, 7, true).await,
+        Err(Error::Status(302))
+    ));
+    assert!(matches!(
+        client.set_liked(&http, 2, 7, true).await,
+        Err(Error::RateLimited { .. })
+    ));
+    assert!(matches!(
+        client.set_liked(&http, 2, 7, true).await,
+        Err(Error::RateLimited { .. })
+    ));
+    client.oauth_token = None;
+    assert!(matches!(
+        client.set_liked(&http, 2, 7, true).await,
+        Err(Error::NotSignedIn)
+    ));
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[0].starts_with("PUT /users/2/track_likes/7?client_id="));
+    assert!(requests[1].starts_with("DELETE /users/2/track_likes/7?client_id="));
+    for request in requests {
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("authorization: oauth fixture-oauth-token")
+        );
+        assert!(
+            !request
+                .lines()
+                .next()
+                .unwrap()
+                .contains("fixture-oauth-token")
+        );
+    }
+}
+
+#[tokio::test]
+async fn soundcloud_followings_allow_only_same_origin_feed_cursors() {
+    let (client, task) = server(vec![
+        ok(r#"{"collection":[{"id":9,"username":"An artist"}],"next_href":null}"#),
+        ok(r#"{"collection":[],"next_href":null}"#),
+    ])
+    .await;
+    let page = client.user_followings(2, 100, 0).await.unwrap();
+    assert_eq!(page.collection[0].id, 9);
+    let next = client
+        .shared
+        .api
+        .join("users/2/followings?cursor=opaque")
+        .unwrap();
+    let page: Page<User> = client.next_page(next.as_str()).await.unwrap();
+    assert!(page.collection.is_empty());
+    assert!(matches!(
+        client
+            .next_page::<User>("https://attacker.invalid/users/2/followings")
+            .await,
+        Err(Error::InvalidUrl)
+    ));
+    let requests = task.await.unwrap();
+    assert!(
+        requests[0]
+            .starts_with("GET /users/2/followings?limit=100&offset=0&linked_partitioning=1&")
+    );
+}
+
+#[tokio::test]
 async fn search_endpoints_encode_queries_and_return_typed_pages() {
     let (client, task) = server(vec![
         ok(include_str!("../testdata/soundcloud/search_tracks.json")),
@@ -569,13 +946,14 @@ async fn anonymous_browsing_shares_playback_discovery_without_forwarding_its_tok
 
 #[tokio::test]
 async fn discovery_does_not_loop_after_a_second_auth_failure() {
-    let (client, task) = server(vec![
+    let (mut client, task) = server(vec![
         (401, String::new(), ""),
         ok("<script crossorigin src='/new.js'></script>"),
         ok(format!("client_id:\"{NEW_ID}\"")),
         (403, String::new(), ""),
     ])
     .await;
+    client.oauth_token = None;
     assert!(matches!(client.track(1).await, Err(Error::Status(403))));
     assert_eq!(task.await.unwrap().len(), 4);
 }

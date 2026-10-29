@@ -34,3 +34,7 @@ src/ui/winamp/mod.rs
 src/ui/winamp/playlist.rs
 src/util.rs
 src/window.rs
+src/soundcloud/connect.rs
+src/app/soundcloud_library.rs
+src/ui/soundcloud.rs
+src/app/hybrid.rs

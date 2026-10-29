@@ -485,6 +485,27 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                                 .push(Action::ShowDialog(crate::model::Dialog::Shortcuts));
                         }
                         super::widgets::menu_separator(ui, &palette);
+                        let connected = app.soundcloud_account.user().is_some();
+                        if super::widgets::menu_item(
+                            ui,
+                            &palette,
+                            Some(Icon::Music),
+                            &gettext(locale, "Connect SoundCloud"),
+                        ) {
+                            app.actions.push(Action::ShowDialog(
+                                crate::model::Dialog::SoundCloudConnect(Default::default()),
+                            ));
+                        }
+                        if connected
+                            && super::widgets::menu_item(
+                                ui,
+                                &palette,
+                                Some(Icon::LogOut),
+                                &gettext(locale, "Disconnect SoundCloud"),
+                            )
+                        {
+                            app.actions.push(Action::DisconnectSoundCloud);
+                        }
                         if super::widgets::menu_item(
                             ui,
                             &palette,

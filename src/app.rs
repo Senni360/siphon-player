@@ -2,6 +2,7 @@
 
 mod hybrid;
 pub(crate) mod playlist_sources;
+mod soundcloud_library;
 pub use hybrid::{PendingHybridSnapshot, PlaybackOwner};
 
 use std::borrow::Cow;
@@ -314,6 +315,9 @@ pub struct App {
     pub playback_owner: PlaybackOwner,
     hybrid: hybrid::HybridPlayback,
     pub soundcloud_account: crate::soundcloud::account::Account,
+    pub soundcloud_reconnect: bool,
+    pub soundcloud_library: crate::soundcloud::library::Library,
+    soundcloud_request: u64,
     pub dirs: AppDirs,
     pub settings: Settings,
     /// Proxy policy actually handed to network workers. Manual form edits are
@@ -1077,6 +1081,9 @@ impl App {
             playback_owner: PlaybackOwner::SpotifyConnect,
             hybrid: hybrid::HybridPlayback::default(),
             soundcloud_account: crate::soundcloud::account::Account::Disconnected,
+            soundcloud_reconnect: false,
+            soundcloud_library: Default::default(),
+            soundcloud_request: 0,
             custom_themes: theme::Catalog::default(),
             dirs,
             settings,
@@ -1798,6 +1805,11 @@ impl App {
     }
 
     pub fn is_saved(&self, uri: &str) -> Option<bool> {
+        if let Some(id) = crate::soundcloud::track_id(uri) {
+            return self
+                .can_like_soundcloud()
+                .then(|| self.soundcloud_library.is_liked(id));
+        }
         util::uri_kind(uri)?;
         let exact = self.saved.get(uri).copied();
         if exact == Some(true)
@@ -2738,18 +2750,16 @@ impl App {
                     more,
                     result,
                 } => {
-                    if let Some(page) = self.soundcloud_pages.get_mut(&uri)
-                        && page.generation == generation
+                    if self.soundcloud_pages.get(&uri).is_some_and(|page| page.generation == generation)
                     {
+                        if let Ok(value) = &result {
+                            self.cache_soundcloud_tracks(&value.tracks);
+                        }
+                        let page = self.soundcloud_pages.get_mut(&uri).unwrap();
                         page.generation += 1;
                         page.loading = false;
                         match result {
                             Ok(mut value) => {
-                                for track in &value.tracks {
-                                    if let Some(id) = crate::util::uri_id(&track.uri) {
-                                        self.track_cache.insert(id.into(), track.clone());
-                                    }
-                                }
                                 if more && let Some(content) = page.content.get_mut() {
                                     content.tracks.append(&mut value.tracks);
                                     content.next = value.next;
@@ -2836,17 +2846,16 @@ impl App {
                 Event::HybridContext { generation, result } => {
                     self.handle_hybrid_context(generation, result)
                 }
-                Event::SoundCloudAccount(account) => {
-                    self.cancel_soundcloud_playlist_adds();
-                    self.soundcloud_account = account;
-                    if let Err(error) =
-                        crate::soundcloud::account::State::from_account(&self.soundcloud_account)
-                            .save(&self.files, &self.dirs.soundcloud_account_file(), || {
-                                log::warn!("Unable to save the SoundCloud account")
-                            })
-                    {
-                        self.toast_error(error.to_string());
-                    }
+                Event::SoundCloudLibrary(response) => self.handle_soundcloud_library(response),
+                Event::SoundCloudSaveFailed => self.toast_error(gettext(self.locale, "Could not save the SoundCloud connection or library on this computer. Try again.")),
+                Event::SoundCloudConnectFailed { error, request } => {
+                    self.soundcloud_connect_failed(error, request)
+                }
+                Event::SoundCloudAccount { account, request } => {
+                    self.accept_soundcloud_account(account, request)
+                }
+                Event::SoundCloudSessionExpired { request } => {
+                    self.expire_soundcloud_session(request)
                 }
                 Event::Local(state) => self.handle_local(*state),
                 Event::Api(response) => self.handle_api(*response),
@@ -3213,7 +3222,7 @@ impl App {
                     self.load_new_release_page(true);
                 }
             }
-            Page::MixedPlaylist(_) | Page::SoundCloud(_) => {}
+            Page::MixedPlaylist(_) | Page::SoundCloud(_) | Page::SoundCloudLikes => {}
             Page::Search => {}
             Page::LikedSongs => {
                 if !self.liked_songs.cache_checked {
@@ -5473,6 +5482,12 @@ impl App {
     }
 
     pub fn ensure_loaded(&mut self, page: Page) {
+        if matches!(page, Page::SoundCloudLikes) {
+            if !self.soundcloud_library.snapshot.likes_loaded && !self.soundcloud_library.loading {
+                self.refresh_soundcloud_library();
+            }
+            return;
+        }
         if let Page::SoundCloud(uri) = &page {
             self.load_soundcloud_page(uri.clone(), false);
             return;
@@ -5489,6 +5504,7 @@ impl App {
             return;
         }
         match page {
+            Page::SoundCloudLikes => {}
             Page::Home => {
                 if self.network_reachable {
                     // A refresh that failed behind cached shelves is read
@@ -6013,6 +6029,10 @@ impl App {
     }
 
     pub fn load_more(&mut self, page: Page) {
+        if page == Page::SoundCloudLikes {
+            self.load_more_soundcloud_likes();
+            return;
+        }
         if matches!(&page, Page::Artist(id) | Page::Playlist(id) | Page::Album(id) | Page::Show(id) if id.contains(':'))
         {
             return;
@@ -6257,6 +6277,10 @@ impl App {
     }
 
     fn reload(&mut self, page: Page) {
+        if page == Page::SoundCloudLikes {
+            self.refresh_soundcloud_library();
+            return;
+        }
         if let Page::SoundCloud(uri) = &page {
             if self.soundcloud_pages.get(uri).is_some_and(|state| {
                 state.error.is_some()
@@ -11984,6 +12008,10 @@ impl App {
                     self.backend.api(ApiRequest::SetSaved { uris, saved });
                 }
             }
+            Action::ToggleSoundCloudLike(uri) => self.toggle_soundcloud_like(&uri),
+            Action::ToggleSaved(uri) if crate::soundcloud::is_track_uri(&uri) => {
+                self.toggle_soundcloud_like(&uri)
+            }
             Action::ToggleSaved(uri) => {
                 // SoundCloud likes belong at the account-aware action seam.
                 // They must never enter Spotify's optimistic library writes.
@@ -12169,7 +12197,56 @@ impl App {
                     });
                 }
             }
+            Action::ConnectSoundCloud => {
+                if let Some(Dialog::SoundCloudConnect(draft)) = &mut self.dialog
+                    && !draft.busy
+                {
+                    crate::soundcloud::connect::clear_token_editor(ctx);
+                    match draft.take_input() {
+                        Ok(input) => {
+                            draft.busy = true;
+                            draft.error = None;
+                            self.soundcloud_request = self.soundcloud_request.wrapping_add(1);
+                            self.backend.send(Command::ConnectSoundCloud {
+                                input,
+                                request: self.soundcloud_request,
+                            });
+                        }
+                        Err(error) => {
+                            draft.error = Some(
+                                match error {
+                                    crate::soundcloud::account::InputError::Profile => gettext(
+                                        self.locale,
+                                        "Enter a SoundCloud profile URL or username.",
+                                    ),
+                                    crate::soundcloud::account::InputError::Token => gettext(
+                                        self.locale,
+                                        "Paste only the SoundCloud oauth_token cookie value.",
+                                    ),
+                                }
+                                .into_owned(),
+                            )
+                        }
+                    }
+                }
+            }
+            Action::DisconnectSoundCloud => {
+                crate::soundcloud::connect::clear_token_editor(ctx);
+                self.cancel_soundcloud_playlist_adds();
+                self.soundcloud_reconnect = false;
+                self.soundcloud_account = crate::soundcloud::account::Account::Disconnected;
+                self.reset_soundcloud_collections();
+                self.soundcloud_library.reset();
+                self.save_soundcloud_account();
+                self.soundcloud_request = self.soundcloud_request.wrapping_add(1);
+                self.backend
+                    .send(Command::DisconnectSoundCloud(self.soundcloud_request));
+                self.dialog = None;
+            }
             Action::ShowDialog(mut dialog) => {
+                if matches!(self.dialog, Some(Dialog::SoundCloudConnect(_))) {
+                    crate::soundcloud::connect::clear_token_editor(ctx);
+                }
                 if let Dialog::EditPlaylist { id, cover, .. } = &mut dialog
                     && let Some(request) = self.cover_uploads.get(id)
                 {
@@ -12178,6 +12255,16 @@ impl App {
                 self.dialog = Some(dialog);
             }
             Action::CloseDialog => {
+                if matches!(self.dialog, Some(Dialog::SoundCloudConnect(_))) {
+                    crate::soundcloud::connect::clear_token_editor(ctx);
+                }
+                if matches!(&self.dialog, Some(Dialog::SoundCloudConnect(draft)) if draft.busy) {
+                    self.soundcloud_request = self.soundcloud_request.wrapping_add(1);
+                    self.backend.send(Command::CancelSoundCloudConnect {
+                        account: self.soundcloud_account.clone(),
+                        request: self.soundcloud_request,
+                    });
+                }
                 if matches!(self.dialog, Some(Dialog::PersonalAppIntro)) {
                     self.intro_answered(jiff::Timestamp::now());
                 }

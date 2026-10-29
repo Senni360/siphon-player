@@ -64,9 +64,27 @@ impl From<reqwest::Client> for Http {
 
 pub fn build_client(proxy: &ProxyConfig) -> Result<reqwest::Client, String> {
     client_builder(proxy)?
+        .redirect(redirect_policy())
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|error| error.without_url().to_string())
+}
+
+fn redirect_policy() -> reqwest::redirect::Policy {
+    let default = reqwest::redirect::Policy::default();
+    reqwest::redirect::Policy::custom(move |attempt| {
+        // SoundCloud session headers belong only on the original API
+        // request. Other services retain reqwest's ten-redirect limit.
+        if attempt
+            .previous()
+            .iter()
+            .any(|url| url.host_str() == Some("api-v2.soundcloud.com"))
+        {
+            attempt.stop()
+        } else {
+            default.redirect(attempt)
+        }
+    })
 }
 
 /// Collection mutations must not be replayed after an uncertain response.
@@ -142,6 +160,55 @@ fn user_agent() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn soundcloud_api_redirects_never_receive_session_headers() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for destination in [
+            "http://api-v2.soundcloud.com/redirected",
+            "http://attacker.invalid/",
+        ] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let client = reqwest::Client::builder()
+                .no_proxy()
+                .redirect(redirect_policy())
+                .resolve("api-v2.soundcloud.com", address)
+                .build()
+                .unwrap();
+            let response = format!(
+                "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\nLocation: {destination}\r\n\r\n"
+            );
+            let server = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut buffer = [0; 2048];
+                let mut request = Vec::new();
+                loop {
+                    let count = socket.read(&mut buffer).await.unwrap();
+                    assert!(count > 0);
+                    request.extend_from_slice(&buffer[..count]);
+                    if request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                socket.write_all(response.as_bytes()).await.unwrap();
+            });
+            let response = client
+                .get(format!(
+                    "http://api-v2.soundcloud.com:{}/me",
+                    address.port()
+                ))
+                .header(
+                    reqwest::header::AUTHORIZATION,
+                    "OAuth fixture-session-token",
+                )
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+            server.await.unwrap();
+        }
+    }
 
     #[test]
     fn invalid_proxy_configuration_never_falls_back_to_a_direct_client() {

@@ -991,6 +991,146 @@ fn nav_row(
     response
 }
 
+/// Keep SoundCloud identities out of Spotify folders and edit targets.
+fn soundcloud_rows(app: &App, needle: &str) -> Vec<(String, Page, Icon)> {
+    if app.soundcloud_account.user().is_none() {
+        return Vec::new();
+    }
+    let mut rows = vec![(
+        gettext(app.locale, "Likes").into_owned(),
+        Page::SoundCloudLikes,
+        Icon::Heart,
+    )];
+    rows.push((
+        if app.can_like_soundcloud() {
+            gettext(app.locale, "Your uploads")
+        } else {
+            gettext(app.locale, "Uploads")
+        }
+        .into_owned(),
+        Page::SoundCloud(crate::soundcloud::user_uri(
+            app.soundcloud_account.user().unwrap().user_id,
+        )),
+        Icon::User,
+    ));
+    rows.extend(
+        app.soundcloud_library
+            .snapshot
+            .playlists
+            .iter()
+            .filter_map(|playlist| {
+                crate::soundcloud::playlist_id(&playlist.uri).map(|id| {
+                    (
+                        playlist.name.clone(),
+                        Page::SoundCloud(crate::soundcloud::playlist_uri(id)),
+                        Icon::Music,
+                    )
+                })
+            }),
+    );
+    rows.extend(
+        app.soundcloud_library
+            .snapshot
+            .artists
+            .iter()
+            .filter_map(|artist| {
+                crate::soundcloud::user_id(&artist.uri).map(|id| {
+                    (
+                        artist.name.clone(),
+                        Page::SoundCloud(crate::soundcloud::user_uri(id)),
+                        Icon::User,
+                    )
+                })
+            }),
+    );
+    rows.retain(|(name, _, _)| name.to_lowercase().contains(needle));
+    rows
+}
+
+fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
+    let palette = app.palette;
+    let locale = app.locale;
+    if app.soundcloud_account.user().is_none() {
+        if nav_row(
+            ui,
+            &palette,
+            Icon::Music,
+            &gettext(locale, "Connect SoundCloud"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions
+                .push(Action::ShowDialog(Dialog::SoundCloudConnect(
+                    Default::default(),
+                )));
+        }
+        return;
+    }
+    ui.add_space(8.0);
+    let header = ui.label(
+        egui::RichText::new(gettext(locale, "SoundCloud"))
+            .font(theme::bold(13.0))
+            .color(palette.secondary),
+    );
+    if app.soundcloud_reconnect
+        && nav_row(
+            ui,
+            &palette,
+            Icon::Music,
+            &gettext(locale, "Reconnect SoundCloud"),
+            false,
+        )
+        .clicked()
+    {
+        app.actions
+            .push(Action::ShowDialog(Dialog::SoundCloudConnect(
+                crate::soundcloud::connect::Draft {
+                    advanced: true,
+                    ..Default::default()
+                },
+            )));
+    }
+    header.context_menu(|ui| {
+        if let Some(user) = app.soundcloud_account.user() {
+            ui.label(gettext(locale, "Connected as {name}").replace("{name}", &user.username));
+        }
+        if super::widgets::menu_item(
+            ui,
+            &palette,
+            Some(Icon::Music),
+            &gettext(locale, "Connect SoundCloud"),
+        ) {
+            app.actions
+                .push(Action::ShowDialog(Dialog::SoundCloudConnect(
+                    Default::default(),
+                )));
+        }
+        if super::widgets::menu_item(
+            ui,
+            &palette,
+            Some(Icon::LogOut),
+            &gettext(locale, "Disconnect SoundCloud"),
+        ) {
+            app.actions.push(Action::DisconnectSoundCloud);
+        }
+    });
+    let rows = soundcloud_rows(app, needle);
+    super::widgets::virtual_rows(ui, rows.len(), 40.0, |ui, index| {
+        let (name, page, icon) = &rows[index];
+        if nav_row(ui, &palette, *icon, name, app.page() == page).clicked() {
+            app.actions.push(Action::Open(page.clone()));
+        }
+    });
+    ui.add_space(8.0);
+    theme::text(
+        ui,
+        gettext(locale, "Spotify"),
+        theme::bold(13.0),
+        palette.secondary,
+    );
+}
+
 /// Draw Library navigation, shelf controls, search, and the visible rows.
 /// Playlist ownership and text filters are applied before ordering and pin placement.
 fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
@@ -1378,6 +1518,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             {
                 super::widgets::scroll_during_drag(ui);
             }
+            soundcloud_section(app, ui, &needle);
             if loading {
                 super::widgets::loading_row(ui, &palette, app.locale);
             }
@@ -1423,7 +1564,9 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             // before drawing.
             let list_top = ui.cursor().top();
             let pointer = ui.ctx().pointer_latest_pos().filter(|pos| {
-                ui.clip_rect().contains(*pos) && ui.rect_contains_pointer(ui.clip_rect())
+                pos.y >= list_top
+                    && ui.clip_rect().contains(*pos)
+                    && ui.rect_contains_pointer(ui.clip_rect())
             });
             // Tracks may drop on Liked Songs or playlists that take songs
             // from this account.
@@ -1795,7 +1938,8 @@ fn library_grid(
     let layout = grid_layout(ui.available_width());
     let origin = ui.cursor().min;
     let pointer = ui.ctx().pointer_latest_pos().filter(|pos| {
-        ui.clip_rect().contains(*pos)
+        pos.y >= origin.y
+            && ui.clip_rect().contains(*pos)
             && ui.rect_contains_pointer(ui.clip_rect())
             && !grid_art.is_some_and(|art| art.contains(*pos))
     });
@@ -2307,6 +2451,31 @@ mod ordering_tests {
         );
         app.recent_contexts = vec![uri("d"), uri("a")];
         app
+    }
+
+    #[test]
+    fn soundcloud_sidebar_lists_only_connected_library_and_filters_names() {
+        let mut app = app("soundcloud-sidebar");
+        assert!(soundcloud_rows(&app, "").is_empty());
+        crate::demo::soundcloud_profile(&mut app);
+        let rows = soundcloud_rows(&app, "");
+        assert!(
+            rows.iter()
+                .any(|(_, page, _)| *page == Page::SoundCloudLikes)
+        );
+        assert!(
+            rows.iter()
+                .any(|(_, page, _)| *page
+                    == Page::SoundCloud(crate::soundcloud::playlist_uri(424244)))
+        );
+        assert!(
+            rows.iter()
+                .any(|(_, page, _)| *page == Page::SoundCloud(crate::soundcloud::user_uri(424245)))
+        );
+        assert_eq!(soundcloud_rows(&app, "sunset").len(), 1);
+        app.soundcloud_account = crate::soundcloud::account::Account::Disconnected;
+        assert!(soundcloud_rows(&app, "").is_empty());
+        app.backend.shutdown();
     }
 
     /// Drain queued UI actions through the real handler before checking the

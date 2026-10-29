@@ -499,11 +499,10 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
             app.actions.push(Action::SettingsChanged);
         }
     }
-    let heart_width = if now.is_episode || crate::soundcloud::is_uri(&now.uri) {
-        0.0
-    } else {
-        42.0
-    };
+    let show_heart = !now.is_episode
+        && (crate::util::uri_kind(&now.uri) == Some("track")
+            || (crate::soundcloud::is_track_uri(&now.uri) && app.can_like_soundcloud()));
+    let heart_width = if show_heart { 42.0 } else { 0.0 };
     let text_left = cover_rect.right() + 12.0;
     let text_width = (region.right() - text_left - heart_width).max(40.0);
     let displayed_text_width: f32 = {
@@ -607,10 +606,26 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         }
     }
 
-    if !now.is_episode && crate::util::uri_kind(&now.uri) == Some("track") {
+    if show_heart {
         let saved = app.is_saved(&now.uri).unwrap_or(false);
         // A liked heart stays green under the pointer, like shuffle.
-        let (icon, color, hover, tooltip) = if saved {
+        let (icon, color, hover, tooltip) = if crate::soundcloud::is_track_uri(&now.uri) {
+            if saved {
+                (
+                    Icon::HeartFilled,
+                    palette.accent,
+                    palette.accent_hover,
+                    gettext(app.locale, "Remove from SoundCloud Likes"),
+                )
+            } else {
+                (
+                    Icon::Heart,
+                    palette.secondary,
+                    palette.text,
+                    gettext(app.locale, "Like on SoundCloud"),
+                )
+            }
+        } else if saved {
             (
                 Icon::HeartFilled,
                 palette.accent,
@@ -639,11 +654,19 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         // A liked song's heart opens Add to playlist, as Spotify's does,
         // with Remove from Liked Songs below the playlists (#792). The first
         // click on a song not yet liked still likes it at once.
-        match song.as_ref().filter(|_| saved) {
+        match song
+            .as_ref()
+            .filter(|_| saved && !crate::soundcloud::is_track_uri(&now.uri))
+        {
             None => {
                 egui::Popup::close_id(ui.ctx(), popup_id);
                 if response.clicked() {
-                    app.actions.push(Action::ToggleSaved(now.uri.clone()));
+                    app.actions
+                        .push(if crate::soundcloud::is_track_uri(&now.uri) {
+                            Action::ToggleSoundCloudLike(now.uri.clone())
+                        } else {
+                            Action::ToggleSaved(now.uri.clone())
+                        });
                 }
             }
             Some(item) => {

@@ -25,7 +25,9 @@
 pub mod account;
 pub mod api;
 pub mod browse;
+pub mod connect;
 pub mod engine;
+pub mod library;
 pub mod models;
 
 /// The URI scheme prefix of a SoundCloud track.

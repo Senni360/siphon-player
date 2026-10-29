@@ -649,6 +649,9 @@ impl App {
         let pending = self.hybrid.pending.take().unwrap();
         match result {
             Ok(mut context) => {
+                if self.own_soundcloud_likes_context(&context.uri) {
+                    self.overlay_soundcloud_likes(&mut context.tracks);
+                }
                 if let Some(id) = context.uri.strip_prefix("spotify:playlist:")
                     && let Some(overlay) = self.playlist_overlay.get(id)
                 {
@@ -657,17 +660,25 @@ impl App {
                         .map(|r| r.to_track())
                         .collect();
                 }
-                let index = pending
-                    .request
-                    .offset_position
-                    .map(|i| i as usize)
-                    .or_else(|| {
-                        pending
-                            .request
-                            .offset_uri
-                            .as_ref()
-                            .and_then(|uri| context.tracks.iter().position(|t| &t.uri == uri))
-                    });
+                let index =
+                    if self.own_soundcloud_likes_context(&context.uri) {
+                        pending.request.offset_uri.as_ref().and_then(|uri| {
+                            context.tracks.iter().position(|track| &track.uri == uri)
+                        })
+                    } else {
+                        None
+                    }
+                    .or(pending
+                        .request
+                        .offset_position
+                        .map(|i| i as usize)
+                        .or_else(|| {
+                            pending
+                                .request
+                                .offset_uri
+                                .as_ref()
+                                .and_then(|uri| context.tracks.iter().position(|t| &t.uri == uri))
+                        }));
                 if !context.uri.is_empty() {
                     self.note_recent_context(&context.uri);
                 }
@@ -728,6 +739,15 @@ impl App {
     }
 
     fn loaded_hybrid_context(&self, uri: &str) -> Option<Context> {
+        if self.own_soundcloud_likes_context(uri) {
+            return (self.soundcloud_library.snapshot.likes_loaded
+                && self.soundcloud_library.snapshot.next_likes.is_none())
+            .then(|| Context {
+                uri: uri.into(),
+                name: gettext(self.locale, "SoundCloud Likes").into_owned(),
+                tracks: self.soundcloud_library.snapshot.likes.clone(),
+            });
+        }
         if uri.starts_with("spotify:")
             && uri.ends_with(":collection")
             && self.library.liked.is_complete()
@@ -828,6 +848,36 @@ impl App {
     }
 
     fn hybrid_context_name(&self, uri: &str) -> String {
+        if uri.starts_with("soundcloud:likes:") {
+            return gettext(self.locale, "SoundCloud Likes").into_owned();
+        }
+        if crate::soundcloud::playlist_id(uri).is_some()
+            || crate::soundcloud::user_id(uri).is_some()
+        {
+            return self
+                .soundcloud_pages
+                .get(uri)
+                .and_then(|page| page.content.get())
+                .map(|page| page.title.clone())
+                .filter(|title| !title.is_empty())
+                .or_else(|| {
+                    self.soundcloud_library
+                        .snapshot
+                        .playlists
+                        .iter()
+                        .find(|playlist| playlist.uri == uri)
+                        .map(|playlist| playlist.name.clone())
+                })
+                .or_else(|| {
+                    self.soundcloud_library
+                        .snapshot
+                        .artists
+                        .iter()
+                        .find(|artist| artist.uri == uri)
+                        .map(|artist| artist.name.clone())
+                })
+                .unwrap_or_else(|| gettext(self.locale, "SoundCloud").into_owned());
+        }
         if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             return self
                 .mixed_playlists

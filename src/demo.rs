@@ -466,6 +466,67 @@ pub fn populate(app: &mut App) {
     sc.uri = crate::soundcloud::track_uri(424242);
     sc.id = Some("424242".into());
     sc.name = "SoundCloud sunset session".into();
+    sc.artists = vec![ArtistRef {
+        id: Some("424245".into()),
+        name: "Independent sessions".into(),
+        uri: Some(crate::soundcloud::user_uri(424245)),
+    }];
+    if let Some(album) = &mut sc.album {
+        album.id.clear();
+        album.uri.clear();
+        album.name = "SoundCloud".into();
+    }
+    app.soundcloud_account = crate::soundcloud::account::Account::Disconnected;
+    let mut sc_second = sc.clone();
+    sc_second.uri = crate::soundcloud::track_uri(424243);
+    sc_second.id = Some("424243".into());
+    sc_second.name = "Late-night live set".into();
+    app.soundcloud_library.snapshot = crate::soundcloud::library::Snapshot {
+        likes: vec![sc.clone(), sc_second],
+        likes_loaded: true,
+        playlists: vec![Playlist {
+            id: "424244".into(),
+            uri: crate::soundcloud::playlist_uri(424244),
+            name: "Sunset discoveries".into(),
+            ..Default::default()
+        }],
+        artists: vec![Artist {
+            id: "424245".into(),
+            uri: crate::soundcloud::user_uri(424245),
+            name: "Independent sessions".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    app.soundcloud_library.rebuild_membership();
+    let sc_tracks = app.soundcloud_library.snapshot.likes.clone();
+    app.cache_soundcloud_tracks(&sc_tracks);
+    for (page, title) in [
+        (
+            Page::SoundCloud(crate::soundcloud::playlist_uri(424244)),
+            "Sunset discoveries",
+        ),
+        (
+            Page::SoundCloud(crate::soundcloud::user_uri(424245)),
+            "Independent sessions",
+        ),
+    ] {
+        let Page::SoundCloud(uri) = page else {
+            unreachable!()
+        };
+        app.soundcloud_pages.insert(
+            uri,
+            SoundCloudPage {
+                content: Loadable::Loaded(SoundCloudCollection {
+                    title: title.into(),
+                    tracks: sc_tracks.clone(),
+                    ..Default::default()
+                }),
+                generation: 1,
+                ..Default::default()
+            },
+        );
+    }
     let mixed_id = app.mixed_playlists.import(
         "Across the streams".into(),
         "Spotify and SoundCloud, together on this computer".into(),
@@ -1180,6 +1241,17 @@ fn demo_sound() -> Vec<f64> {
         .collect()
 }
 
+/// Account UI is opt-in so Spotify-only demos keep their ordinary sidebar.
+pub(crate) fn soundcloud_profile(app: &mut App) {
+    app.soundcloud_account =
+        crate::soundcloud::account::Account::Profile(crate::soundcloud::account::Profile {
+            user_id: 4242,
+            username: "Carmine".into(),
+            permalink: "demo-listener".into(),
+            avatar: None,
+        });
+}
+
 /// A Client ID of the right shape that Spotify never issued.
 #[cfg(feature = "demo")]
 const DEMO_CLIENT_ID: &str = "0123456789abcdef0123456789abcdef";
@@ -1215,10 +1287,14 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
         }
     }
     if let Some(page) = page.and_then(Page::decode) {
+        if page == Page::SoundCloudLikes {
+            soundcloud_profile(app);
+        }
         app.open(page);
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            "soundcloud-profile" => soundcloud_profile(app),
             "soundcloud" => app.search.source = SearchSource::SoundCloud,
             "soundcloud-all" => {
                 app.search.source = SearchSource::All;
@@ -1233,6 +1309,40 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                         tracks.items.truncate(2);
                     }
                 }
+            }
+            "soundcloud-connect" => {
+                app.dialog = Some(Dialog::SoundCloudConnect(Default::default()))
+            }
+            "soundcloud-token" => {
+                app.dialog = Some(Dialog::SoundCloudConnect(
+                    crate::soundcloud::connect::Draft {
+                        advanced: true,
+                        ..Default::default()
+                    },
+                ))
+            }
+            "soundcloud-session" => {
+                soundcloud_profile(app);
+                if let Some(user) = app.soundcloud_account.user().cloned() {
+                    app.soundcloud_account = crate::soundcloud::account::Account::Session {
+                        user,
+                        token: crate::soundcloud::account::SessionToken::parse(
+                            "2-000000-dummy_session_token",
+                        )
+                        .unwrap(),
+                    };
+                }
+            }
+            "soundcloud-playing" => {
+                if let Some(track) = app.soundcloud_library.snapshot.likes.first().cloned()
+                    && let Some(remote) = &mut app.remote
+                {
+                    remote.state.item = Some(PlayableItem::Track(track));
+                }
+            }
+            "soundcloud-disconnected" => {
+                app.soundcloud_account = crate::soundcloud::account::Account::Disconnected;
+                app.soundcloud_library.reset();
             }
             "presaved" => {
                 for page in app.album_pages.values_mut() {
@@ -1890,6 +2000,151 @@ mod tests {
         // These frames never advance the clock or take pictures.
         app.reveal_theme_changes = false;
         (ctx, app)
+    }
+
+    #[test]
+    fn soundcloud_sidebar_rows_never_take_spotify_reorder_drops() {
+        let (ctx, mut app) = accessible_app("soundcloud-drop-boundary");
+        soundcloud_profile(&mut app);
+        for grid in [false, true] {
+            app.settings.sidebar_grid = grid;
+            accessible_frame(&ctx, &mut app, vec![]);
+            let tree = accessible_frame(&ctx, &mut app, vec![]);
+            let bounds = tree
+                .nodes
+                .iter()
+                .find_map(|(_, node)| {
+                    let bounds = node.bounds()?;
+                    (node.role() == egui::accesskit::Role::Button
+                        && node.label() == Some("Likes")
+                        && bounds.x0 < 300.0)
+                        .then_some(bounds)
+                })
+                .expect("SoundCloud Likes row");
+            let pos = egui::pos2(
+                bounds.x0 as f32 + 100.0,
+                (bounds.y0 + bounds.y1) as f32 / 2.0,
+            );
+            let pins = app.settings.library_pins();
+            egui::DragAndDrop::set_payload(
+                &ctx,
+                DragEntry {
+                    uri: "spotify:playlist:pl4".into(),
+                    title: "Release Radar".into(),
+                    image: None,
+                },
+            );
+            frame_events(&ctx, &mut app, vec![egui::Event::PointerMoved(pos)]);
+            frame_events(
+                &ctx,
+                &mut app,
+                vec![egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+            egui::DragAndDrop::clear_payload(&ctx);
+            assert_eq!(app.settings.library_pins(), pins);
+            assert!(app.settings.sidebar_order.is_empty());
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_row_like_actions_are_visible_only_for_sessions() {
+        use crate::soundcloud::account::{Account, SessionToken};
+        let (ctx, mut app) = accessible_app("soundcloud-session-heart");
+        soundcloud_profile(&mut app);
+        let profile = app.soundcloud_account.user().unwrap().clone();
+        let item = PlayableItem::Track(app.soundcloud_library.snapshot.likes[0].clone());
+        for (account, visible) in [
+            (Account::Disconnected, false),
+            (Account::Profile(profile.clone()), false),
+            (
+                Account::Session {
+                    user: profile,
+                    token: SessionToken::parse("2-000000-dummy_session_token").unwrap(),
+                },
+                true,
+            ),
+        ] {
+            app.soundcloud_account = account;
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                crate::ui::widgets::item_menu(ui, &mut app, &item, None, None);
+            });
+            output.textures_delta.clear();
+            let labels = menu_text(&output);
+            assert_eq!(
+                labels.iter().any(|(text, _)| matches!(
+                    text.as_str(),
+                    "Like on SoundCloud" | "Remove from SoundCloud Likes"
+                )),
+                visible
+            );
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_session_dialog_explains_cookie_login_in_both_themes() {
+        for light in [false, true] {
+            for width in [520.0, 1280.0] {
+                let (ctx, mut app) = accessible_app("soundcloud-cookie-dialog");
+                soundcloud_profile(&mut app);
+                app.palette = if light {
+                    crate::theme::Palette::light()
+                } else {
+                    crate::theme::Palette::dark()
+                };
+                crate::theme::apply(&ctx, &app.palette);
+                ctx.all_styles_mut(|style| style.animation_time = 0.0);
+                app.dialog = Some(Dialog::SoundCloudConnect(
+                    crate::soundcloud::connect::Draft {
+                        advanced: true,
+                        ..Default::default()
+                    },
+                ));
+                for _ in 0..3 {
+                    view_frame_sized(
+                        &ctx,
+                        &mut app,
+                        vec![],
+                        crate::ui::show,
+                        egui::vec2(width, 1100.0),
+                    );
+                }
+                let text = view_frame_sized(
+                    &ctx,
+                    &mut app,
+                    vec![],
+                    crate::ui::show,
+                    egui::vec2(width, 1100.0),
+                );
+                for expected in [
+                    "Application > Cookies",
+                    "value of oauth_token",
+                    "Connect session",
+                    "Disconnect SoundCloud",
+                    "Connected as",
+                ] {
+                    assert!(
+                        text.iter().any(|(label, _)| label.contains(expected)),
+                        "missing {expected} at width {width}, light {light}"
+                    );
+                }
+                assert_eq!(
+                    ctx.memory(|memory| memory.focused()),
+                    Some(crate::soundcloud::connect::token_field_id())
+                );
+                assert!(
+                    text.iter()
+                        .all(|(label, _)| !label.contains("dummy_session_token"))
+                );
+                app.backend.shutdown();
+            }
+        }
     }
 
     /// #576: the Library heading never runs under the header's buttons. It
@@ -3410,6 +3665,8 @@ mod tests {
         use egui::accesskit::Role;
         let (ctx, mut app) = accessible_app("library-grid-drop-highlight");
         app.settings.sidebar_grid = true;
+        accessible_frame(&ctx, &mut app, vec![]);
+        accessible_frame(&ctx, &mut app, vec![]);
         let tree = accessible_frame(&ctx, &mut app, vec![]);
         let liked = tree
             .nodes
@@ -3418,6 +3675,7 @@ mod tests {
                 (node.role() == Role::Button && node.label() == Some("Liked Songs"))
                     .then(|| node.bounds())
                     .flatten()
+                    .filter(|bounds| bounds.x0 < 300.0)
             })
             .expect("Liked Songs card");
         let pos = egui::pos2(liked.x0 as f32 + 24.0, liked.y0 as f32 + 24.0);
@@ -5433,6 +5691,103 @@ mod tests {
             assert!(text.iter().any(|(label, _)| label == "SC"));
         }
         app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_badges_and_session_hearts_fit_rows_and_player_in_both_themes() {
+        use egui::accesskit::{Action as AccessibleAction, Role};
+        for light in [false, true] {
+            for width in [760.0, 1280.0] {
+                for player in [false, true] {
+                    let (ctx, mut app) = accessible_app("soundcloud-heart-layout");
+                    soundcloud_profile(&mut app);
+                    let upload = app.soundcloud_library.snapshot.likes[0].clone();
+                    app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload));
+                    app.palette = if light {
+                        crate::theme::Palette::light()
+                    } else {
+                        crate::theme::Palette::dark()
+                    };
+                    crate::theme::apply(&ctx, &app.palette);
+                    let draw = |app: &mut App, events| {
+                        let mut output = ctx.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    egui::vec2(width, 800.0),
+                                )),
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| {
+                                if player {
+                                    crate::ui::player_bar::show(app, ui);
+                                } else {
+                                    crate::ui::soundcloud::show(app, ui, Page::SoundCloudLikes);
+                                }
+                            },
+                        );
+                        output.textures_delta.clear();
+                        output.platform_output.accesskit_update.unwrap()
+                    };
+                    draw(&mut app, vec![]);
+                    let profile = draw(&mut app, vec![]);
+                    assert!(!profile.nodes.iter().any(|(_, node)| {
+                        matches!(
+                            node.label(),
+                            Some("Like on SoundCloud" | "Remove from SoundCloud Likes")
+                        )
+                    }));
+                    app.soundcloud_account = crate::soundcloud::account::Account::Session {
+                        user: app.soundcloud_account.user().unwrap().clone(),
+                        token: crate::soundcloud::account::SessionToken::parse(
+                            "2-000000-dummy_session_token",
+                        )
+                        .unwrap(),
+                    };
+                    draw(&mut app, vec![]);
+                    let tree = draw(&mut app, vec![]);
+                    let (heart_id, heart) = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.label() == Some("Remove from SoundCloud Likes")
+                                && node.role() == Role::Button
+                        })
+                        .expect("session heart");
+                    let heart_bounds = heart.bounds().unwrap();
+                    let badge = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| {
+                            node.value() == Some("SoundCloud") && node.role() == Role::Label
+                        })
+                        .and_then(|(_, node)| node.bounds())
+                        .expect("source badge");
+                    assert!(
+                        badge.x1 < heart_bounds.x0,
+                        "badge and heart overlap at {width}"
+                    );
+                    assert!(heart_bounds.x1 <= f64::from(width));
+                    app.actions.clear();
+                    draw(
+                        &mut app,
+                        vec![accessible_action(*heart_id, AccessibleAction::Click, None)],
+                    );
+                    assert!(
+                        app.actions
+                            .iter()
+                            .any(|action| matches!(action, Action::ToggleSoundCloudLike(_)))
+                    );
+                    assert!(
+                        !app.actions
+                            .iter()
+                            .any(|action| matches!(action, Action::ToggleSaved(_)))
+                    );
+                    app.backend.shutdown();
+                }
+            }
+        }
     }
 
     #[test]
@@ -8537,6 +8892,9 @@ mod tests {
             Page::TopSongs,
             Page::Search,
             Page::LikedSongs,
+            Page::SoundCloudLikes,
+            Page::SoundCloud(crate::soundcloud::playlist_uri(424244)),
+            Page::SoundCloud(crate::soundcloud::user_uri(424245)),
             Page::Albums,
             Page::Artists,
             Page::Podcasts,
@@ -8580,6 +8938,11 @@ mod tests {
         app.show_lyrics_panel = false;
         for dialog in [
             Dialog::Shortcuts,
+            Dialog::SoundCloudConnect(Default::default()),
+            Dialog::SoundCloudConnect(crate::soundcloud::connect::Draft {
+                advanced: true,
+                ..Default::default()
+            }),
             Dialog::CreatePlaylist {
                 name: "x".into(),
                 public: true,
@@ -10299,6 +10662,7 @@ mod tests {
             cache: root.join("cache"),
         };
         let ctx = egui::Context::default();
+        ctx.enable_accesskit();
         let waker = crate::backend::Waker::default();
         waker.attach(&ctx);
         let mut app = App::new(
@@ -10320,38 +10684,41 @@ mod tests {
             frame(&ctx, &mut app);
         }
 
-        // Sweep from the top; the first slot inside the list is the one
-        // right under Liked Songs, between what were the first two
-        // unpinned playlists.
-        let mut dropped = false;
-        for step in 0..40 {
-            let pos = egui::pos2(120.0, 100.0 + step as f32 * 10.0);
-            egui::DragAndDrop::set_payload(
-                &ctx,
-                DragEntry {
-                    uri: "spotify:playlist:pl4".into(),
-                    title: "Release Radar".into(),
-                    image: None,
-                },
-            );
-            frame_events(&ctx, &mut app, vec![egui::Event::PointerMoved(pos)]);
-            frame_events(
-                &ctx,
-                &mut app,
-                vec![egui::Event::PointerButton {
-                    pos,
-                    button: egui::PointerButton::Primary,
-                    pressed: false,
-                    modifiers: egui::Modifiers::NONE,
-                }],
-            );
-            egui::DragAndDrop::clear_payload(&ctx);
-            if !app.settings.sidebar_order.is_empty() {
-                dropped = true;
-                break;
-            }
-        }
-        assert!(dropped, "no sweep position landed below Liked Songs");
+        // Resolve the real sidebar row so an added source section cannot
+        // move the drop outside this fixture's coordinate sweep.
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let first = tree
+            .nodes
+            .iter()
+            .find_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                (node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some(PLAYLISTS[0])
+                    && bounds.x0 < 300.0)
+                    .then_some(bounds)
+            })
+            .expect("first unpinned playlist in the sidebar");
+        let pos = egui::pos2(first.x0 as f32 + 100.0, first.y1 as f32);
+        egui::DragAndDrop::set_payload(
+            &ctx,
+            DragEntry {
+                uri: "spotify:playlist:pl4".into(),
+                title: "Release Radar".into(),
+                image: None,
+            },
+        );
+        frame_events(&ctx, &mut app, vec![egui::Event::PointerMoved(pos)]);
+        frame_events(
+            &ctx,
+            &mut app,
+            vec![egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        egui::DragAndDrop::clear_payload(&ctx);
         let expected: Vec<String> = [0, 4]
             .into_iter()
             .chain((1..PLAYLISTS.len()).filter(|index| *index != 4))

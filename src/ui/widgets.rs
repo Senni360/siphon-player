@@ -1118,17 +1118,34 @@ fn item_menu_at(
         });
     }
     if item.is_track() {
-        let saved = app.is_saved(&uri).unwrap_or(false);
-        let (icon, text) = if saved {
-            (
-                Icon::HeartFilled,
-                gettext(locale, "Remove from Liked Songs"),
-            )
-        } else {
-            (Icon::Heart, gettext(locale, "Save to Liked Songs"))
-        };
-        if util::uri_kind(&uri) == Some("track") && menu_item(ui, &palette, Some(icon), &text) {
-            app.actions.push(Action::ToggleSaved(uri.clone()));
+        if util::uri_kind(&uri) == Some("track")
+            || (crate::soundcloud::is_track_uri(&uri) && app.can_like_soundcloud())
+        {
+            let saved = app.is_saved(&uri).unwrap_or(false);
+            let (icon, text) = if crate::soundcloud::is_track_uri(&uri) {
+                if saved {
+                    (
+                        Icon::HeartFilled,
+                        gettext(locale, "Remove from SoundCloud Likes"),
+                    )
+                } else {
+                    (Icon::Heart, gettext(locale, "Like on SoundCloud"))
+                }
+            } else if saved {
+                (
+                    Icon::HeartFilled,
+                    gettext(locale, "Remove from Liked Songs"),
+                )
+            } else {
+                (Icon::Heart, gettext(locale, "Save to Liked Songs"))
+            };
+            if menu_item(ui, &palette, Some(icon), &text) {
+                app.actions.push(if crate::soundcloud::is_track_uri(&uri) {
+                    Action::ToggleSoundCloudLike(uri.clone())
+                } else {
+                    Action::ToggleSaved(uri.clone())
+                });
+            }
         }
         add_to_playlist_menu(ui, app, std::slice::from_ref(item));
     } else if menu_item(
@@ -2159,7 +2176,10 @@ fn track_row_contents(
     if cols.heart > 0.0 {
         let saved = app.is_saved(row.item.uri());
         let heart_rect = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.heart, row_height));
-        if row.item.is_track() && util::uri_kind(row.item.uri()) == Some("track") {
+        if row.item.is_track()
+            && (util::uri_kind(row.item.uri()) == Some("track")
+                || (crate::soundcloud::is_track_uri(row.item.uri()) && app.can_like_soundcloud()))
+        {
             let mut child = ui.new_child(
                 UiBuilder::new()
                     .max_rect(heart_rect)
@@ -2171,20 +2191,35 @@ fn track_row_contents(
             {
                 child.set_opacity(0.0);
             }
+            if crate::soundcloud::track_id(row.item.uri())
+                .is_some_and(|id| app.soundcloud_library.pending.contains_key(&id))
+            {
+                child.disable();
+            }
             // A liked heart stays green under the pointer.
             let (icon, color, hover) = if saved == Some(true) {
                 (Icon::HeartFilled, palette.accent, palette.accent_hover)
             } else {
                 (Icon::Heart, palette.secondary, palette.text)
             };
-            let tooltip = if saved == Some(true) {
+            let tooltip = if crate::soundcloud::is_track_uri(row.item.uri()) {
+                if saved == Some(true) {
+                    gettext(app.locale, "Remove from SoundCloud Likes")
+                } else {
+                    gettext(app.locale, "Like on SoundCloud")
+                }
+            } else if saved == Some(true) {
                 gettext(app.locale, "Remove from Liked Songs")
             } else {
                 gettext(app.locale, "Save to Liked Songs")
             };
             if theme::icon_button(&mut child, icon, 16.0, color, hover, &tooltip).clicked() {
                 app.actions
-                    .push(Action::ToggleSaved(row.item.uri().to_string()));
+                    .push(if crate::soundcloud::is_track_uri(row.item.uri()) {
+                        Action::ToggleSoundCloudLike(row.item.uri().to_owned())
+                    } else {
+                        Action::ToggleSaved(row.item.uri().to_owned())
+                    });
             }
         }
         x += cols.heart;

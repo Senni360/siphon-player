@@ -6,19 +6,37 @@ nav_order: 11
 
 SoundCloud is a separate source alongside Spotify in this personal fork.
 Search and public playback do not need a SoundCloud connection. A connection
-will supply a profile's library. It does not replace Spotify sign-in.
+adds a profile's library. It does not replace Spotify sign-in.
 
-This page describes the connection contract. The account module supplies the
-model, parsing and protected storage; the API client and interface integrate
-those pieces separately.
+## Connect and browse your library
 
-The default is **Connect public profile**, with **Continue without connecting**
-always available. Keep **Use a session token** under **Advanced**. Explain that
-a public connection can read public likes, playlists, reposts and followings,
-but cannot change them. The advanced option uses a masked field and warns:
+Choose **Connect SoundCloud** in the sidebar or account menu. The default
+field accepts a **Profile URL or username**. Choose **Connect public profile**
+to verify the profile and see **Connected as [display name]**. Public likes,
+playlists, reposts and followings need no sign-in. **Continue without
+connecting** leaves anonymous search and playback available.
+
+**Advanced: use a session token** opens a masked field. The dialog explains:
 "This token can act as your SoundCloud account. Treat it like a password. It
-is saved in your computer's protected credential store." Verify `/me` before
-showing **Connected as [display name]**. Clear the pasted draft after use.
+is saved in your computer's protected credential store." **Connect session**
+verifies `/me` before saving the session or showing a connected account. The
+pasted token is cleared after every submission, including an invalid one.
+Canceling the dialog or disconnecting prevents a late verification from
+reconnecting the account.
+
+Once connected, the sidebar's **SoundCloud** section shows **Likes**, uploads,
+own and liked or collected playlists, and followed artists. Session connections
+include private playlists and uploads that the account can access. Open
+**Your uploads** for your own public and private tracks. Likes use the normal song table with
+filtering, sorting, paged loading, Play and Shuffle. Playlist and artist rows
+open their SoundCloud pages. Playback uses the shared local hybrid queue.
+A public profile is read-only: SoundCloud hearts are hidden. A verified
+session shows **Like on SoundCloud** or **Remove from SoundCloud Likes**.
+Changes appear immediately; a failed write restores the previous heart and
+row and shows an error. SoundCloud likes never change Spotify's Liked Songs.
+
+Choose **Disconnect SoundCloud** from the account menu or the SoundCloud
+section's context menu. Spotify remains connected independently.
 
 ## Search and browsing
 
@@ -36,8 +54,10 @@ Spotify songs do not have a source badge. Playing a SoundCloud search result
 uses the loaded SoundCloud songs as its context. Spotify search keeps its
 existing single-song context.
 
-Public search runs anonymously on the backend runtime through the configured
-shared HTTP transport. Typing uses the existing search debounce. Changing the
+Search runs on the backend runtime through the configured shared HTTP
+transport. Public search stays anonymous; library and playback reads use the
+current session when connected. Playback, search and library reads share discovery and the
+persisted public client ID. Typing uses the existing search debounce. Changing the
 query or leaving the source cancels pending SoundCloud work, and stale query
 or request generations cannot replace the current results. Spotify and
 SoundCloud have independent loading and error states. A failed section leaves
@@ -79,7 +99,12 @@ playlist contents.
 Demo mode includes invented, deterministic SoundCloud results. Use
 `--demo-page search --demo-show soundcloud,dark` for SoundCloud alone or
 `--demo-show soundcloud-all,light` for both services. Save review captures
-outside the repository.
+outside the repository. Library captures use `--demo-page soundcloud-likes`;
+the default demo stays disconnected. Use `--demo-show soundcloud-profile`
+to show a connected public library on another page, or
+add `--demo-show soundcloud-session,soundcloud-playing,light` for a session
+heart beside the source badge, or `soundcloud-connect` / `soundcloud-token`
+for the connection dialog. Replace `light` with `dark` for the other palette.
 
 ## How requests reach SoundCloud
 
@@ -93,6 +118,10 @@ A session connection adds `Authorization: OAuth <token>` to requests to
 the SoundCloud API. The token must never go in a query string, a log, a
 redirect request or a request to an audio or artwork host. Profile lookup
 uses anonymous requests even when another account is connected.
+Session hearts send a single `PUT` or `DELETE` to
+`/users/<user-id>/track_likes/<track-id>`. Writes never follow redirects or
+retry automatically, and a rate-limit response holds later writes until its
+cooldown ends.
 
 The web-client discovery and cookie-header approach also appear in
 [yt-dlp's SoundCloud integration](https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/soundcloud.py).
@@ -105,7 +134,7 @@ No browser engine is embedded and no SoundCloud password is collected.
 | --- | --- | --- |
 | Disconnected | Public search and playable public tracks | Nothing on an account |
 | Profile | That profile's public likes, playlists, reposts and followings | Nothing on an account |
-| Session | The signed-in user's public library and private playlists the session can access | Account actions such as liking and unliking, when supported by the API client |
+| Session | The signed-in user's public library and private playlists the session can access | Like and unlike tracks |
 
 ### Connect by profile
 
@@ -134,8 +163,19 @@ saving it and uses that response as the account identity. A pasted profile
 name never determines the owner of a session.
 
 There is no refresh grant in a pasted cookie. If SoundCloud expires or
-revokes the session, paste a current token or connect by profile. Do not
-promise a fixed lifetime or that every private item is available.
+revokes the session, Siphon shows **Reconnect SoundCloud**, forgets private
+library views and continues reading public content anonymously. Choose that
+prompt and paste a current cookie value. A forbidden track alone does not
+disconnect a valid session: the client checks `/me` first. No fixed session
+lifetime or access to every private item is promised.
+
+Session library reads combine authorized `/users/<id>/playlists`,
+`/users/<id>/playlists/liked_and_owned` and `/users/<id>/playlist_likes`,
+following each feed's cursor and removing duplicate sets. Likes and uploads
+use authorized `/users/<id>/track_likes` and `/users/<id>/tracks`.
+Private `secret_token` values returned with catalogue items stay in memory
+for playlist hydration, fresh track lookup and stream resolution. They are
+scoped to the connection and never saved in library or session snapshots.
 
 Disconnecting forgets the local account and token. It does not call remote
 session sign-out, which could also sign out the browser using the same
@@ -167,6 +207,16 @@ client registration from SoundCloud. No shared secret belongs in a binary.
 connection mode, numeric user ID, display name, permalink and optional avatar
 URL. It contains no token. The file is replaced atomically through the
 app's background file writer. A missing file means disconnected.
+
+The last loaded likes, playlist list and followed artists are cached under
+`soundcloud-library/<user-id>-<mode>.json` in the application cache directory.
+Snapshots are metadata, contain no session token, and are atomically written
+by the background file writer. Public-profile and session snapshots are kept
+separate, so session-only playlist metadata cannot appear in profile mode.
+The saved library appears as soon as its account is restored, while fresh
+requests run in the background. Failed refreshes keep the last good rows.
+Disconnecting hides the library; these disposable cache files may remain
+until the application cache is cleared.
 
 Session tokens use the existing credential layer under
 `com.siphon.player`, with a separate `soundcloud-session` entry for
@@ -220,8 +270,7 @@ playlist with local additions).
 The computer's own audio-output picker remains usable.
 Artwork uses the existing URL-based image cache, including sndcdn.com URLs.
 
-For page integration, `Page::from_uri` currently carries a SoundCloud user as
-`Page::Artist(full_uri)` and a SoundCloud set as `Page::Playlist(full_uri)`.
-These keys round-trip through navigation history and are guarded from Spotify
-page loaders. The SoundCloud page implementation can replace this handoff with
-its dedicated page variants without stripping the scheme.
+SoundCloud users and playlists use the canonical `Page::SoundCloud(full_uri)`;
+Likes use `Page::SoundCloudLikes`. These keys round-trip through navigation
+history without entering Spotify page loaders. Track metadata is cached by
+full SoundCloud URI so numeric IDs cannot collide with Spotify entries.

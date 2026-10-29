@@ -797,13 +797,27 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 }
 
 mod hybrid;
+pub(crate) mod soundcloud_library;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
     Hybrid(HybridCommand),
+    SoundCloudLibrary(soundcloud_library::Request),
     SoundCloudAccount(crate::soundcloud::account::Account),
     RestoreSoundCloud,
+    SoundCloudSaveFailed,
+    SoundCloudSessionExpired(u64),
+    ConnectSoundCloud {
+        input: crate::soundcloud::connect::Input,
+        request: u64,
+    },
+    DisconnectSoundCloud(u64),
+    CancelSoundCloudConnect {
+        account: crate::soundcloud::account::Account,
+        request: u64,
+    },
     SoundCloudAccountRestored {
+        request: u64,
         connection: crate::soundcloud::account::Connection,
         result:
             Result<crate::soundcloud::account::Account, crate::soundcloud::account::ConnectError>,
@@ -1103,7 +1117,6 @@ pub enum Event {
         generation: u64,
         result: Result<crate::hybrid_queue::Context, String>,
     },
-    SoundCloudAccount(crate::soundcloud::account::Account),
     SoundCloudPlaylistAdd {
         request: u64,
         complete: bool,
@@ -1119,6 +1132,19 @@ pub enum Event {
         more: bool,
         result: Result<crate::model::SoundCloudCollection, String>,
     },
+    SoundCloudAccount {
+        account: crate::soundcloud::account::Account,
+        request: u64,
+    },
+    SoundCloudConnectFailed {
+        error: crate::soundcloud::account::ConnectError,
+        request: u64,
+    },
+    SoundCloudSessionExpired {
+        request: u64,
+    },
+    SoundCloudLibrary(soundcloud_library::Response),
+    SoundCloudSaveFailed,
     /// The folder picked in the local files dialog; `None` when cancelled.
     LocalFilesFolderChosen(Option<std::path::PathBuf>),
     /// The songs in `folder`, by the `spotify:local:` URIs they play for.
@@ -1403,6 +1429,7 @@ impl Backend {
                     );
                     if restore_sign_in {
                         worker.restore_session();
+                        let _ = worker.commands.send(Command::RestoreSoundCloud);
                     }
                     worker.run(command_rx).await;
                 });
@@ -1465,6 +1492,13 @@ impl Backend {
     #[cfg_attr(not(any(test, feature = "demo")), allow(dead_code))]
     pub fn set_offline(&mut self, offline: bool) {
         self.offline = offline;
+    }
+
+    pub(crate) fn soundcloud_write_failure(&self) -> impl FnOnce() + Send + 'static {
+        let commands = self.commands.clone();
+        move || {
+            let _ = commands.send(Command::SoundCloudSaveFailed);
+        }
     }
 
     pub fn send(&self, command: Command) {
@@ -2332,19 +2366,31 @@ impl Worker {
             }
             match command {
                 Command::Hybrid(command) => self.hybrid_command(command).await,
+                Command::SoundCloudLibrary(request) => self.soundcloud_library(request),
                 Command::SoundCloudAccount(account) => {
                     self.credentials.invalidate(CredentialSlot::SoundCloud);
-                    self.set_soundcloud_account(account);
+                    self.set_soundcloud_account(account, 0);
                 }
                 Command::RestoreSoundCloud => self.restore_soundcloud_account(),
-                Command::SoundCloudAccountRestored { connection, result }
-                    if connection.current() =>
-                {
-                    match result {
-                        Ok(account) => self.set_soundcloud_account(account),
-                        Err(error) => self.emit(Event::Error(error.to_string())),
-                    }
+                Command::SoundCloudSaveFailed => self.emit(Event::SoundCloudSaveFailed),
+                Command::SoundCloudSessionExpired(generation) => {
+                    self.expire_soundcloud_session(generation)
                 }
+                Command::ConnectSoundCloud { input, request } => {
+                    self.connect_soundcloud(input, request)
+                }
+                Command::DisconnectSoundCloud(request) => self.disconnect_soundcloud(request),
+                Command::CancelSoundCloudConnect { account, request } => {
+                    self.cancel_soundcloud_connect(account, request)
+                }
+                Command::SoundCloudAccountRestored {
+                    connection,
+                    result,
+                    request,
+                } if connection.current() => match result {
+                    Ok(account) => self.set_soundcloud_account(account, request),
+                    Err(error) => self.emit(Event::SoundCloudConnectFailed { error, request }),
+                },
                 Command::SoundCloudAccountRestored { .. } => {}
                 Command::SoundCloudEngine(event) => self.soundcloud_event(event).await,
                 Command::HybridContextResolved {
@@ -2693,18 +2739,15 @@ impl Worker {
                     generation,
                     cursor,
                 } => {
-                    let client = self
-                        .soundcloud_client()
-                        .expect("SoundCloud initialized before commands")
-                        .anonymous();
-                    let path = self.dirs.state.join("soundcloud-client.json");
+                    let client = self.soundcloud_client().expect("SoundCloud initialized");
+                    let client_path = self.dirs.state.join("soundcloud-client.json");
                     let events = self.events.clone();
                     let waker = self.waker.clone();
                     tokio::spawn(async move {
                         let result =
                             crate::soundcloud::browse::collection(&client, &uri, cursor.as_deref())
                                 .await;
-                        hybrid::persist_client_id(&client, path).await;
+                        hybrid::persist_client_id(&client, client_path).await;
                         let _ = events.send(Event::SoundCloudCollection {
                             uri,
                             generation,
