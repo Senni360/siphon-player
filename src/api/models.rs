@@ -331,6 +331,10 @@ pub struct Track {
     pub is_local: bool,
     #[serde(default)]
     pub is_playable: Option<bool>,
+    /// SoundCloud identifies this track as preview only. Older snapshots
+    /// and Spotify responses omit this field.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub preview_only: bool,
     #[serde(default)]
     pub popularity: Option<u8>,
     #[serde(default)]

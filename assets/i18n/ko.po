@@ -3748,3 +3748,17 @@ msgstr "SoundCloud가 이 요청을 완료할 수 없습니다. 다시 시도해
 #: src/ui/widgets.rs:3144
 msgid "SoundCloud cannot play this track."
 msgstr "SoundCloud가 이 트랙을 재생할 수 없습니다."
+
+
+#: src/ui/widgets.rs:49
+#, rust-format
+msgid "{source}. Playlist additions are stored on this computer only."
+msgstr "{source}. 재생 목록 추가 항목은 이 컴퓨터에만 저장됩니다."
+
+#: src/ui/widgets.rs:58
+msgid "Preview only"
+msgstr "미리 듣기 전용"
+
+#: src/ui/widgets.rs:62
+msgid "SoundCloud only offers a preview of this track."
+msgstr "SoundCloud에서는 이 곡의 일부만 미리 들을 수 있습니다."

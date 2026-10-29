@@ -165,6 +165,7 @@ impl Track {
                 ..Default::default()
             }),
             is_playable: Some(self.is_playable()),
+            preview_only: self.is_preview(),
             external_urls: external_urls(self.permalink_url.as_deref()),
             ..Default::default()
         }

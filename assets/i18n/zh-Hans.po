@@ -3700,3 +3700,17 @@ msgstr "SoundCloud 无法完成此请求。再试一次。"
 #: src/ui/widgets.rs:3144
 msgid "SoundCloud cannot play this track."
 msgstr "SoundCloud 无法播放该曲目。"
+
+
+#: src/ui/widgets.rs:49
+#, rust-format
+msgid "{source}. Playlist additions are stored on this computer only."
+msgstr "{source}。添加的播放列表仅存储在此计算机上。"
+
+#: src/ui/widgets.rs:58
+msgid "Preview only"
+msgstr "仅供试听"
+
+#: src/ui/widgets.rs:62
+msgid "SoundCloud only offers a preview of this track."
+msgstr "SoundCloud 仅提供此曲目的试听片段。"

@@ -2,6 +2,7 @@
 
 use egui::{Align, Color32, Frame, Layout, Margin, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
 
+use crate::api::models::PlayableItem;
 use crate::app::{App, NowPlaying};
 use crate::i18n::gettext;
 use crate::model::{Action, DragTrack, Page};
@@ -547,6 +548,14 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         ui.spacing_mut().item_spacing.x = 0.0;
         if super::widgets::source_badge(ui, &palette, app.locale, &now.uri).is_some() {
             ui.add_space(6.0);
+            if app.now_playing_item().is_some_and(|item| {
+                matches!(item, PlayableItem::Track(track) if track.preview_only
+                    || (now.duration_ms > 0
+                        && crate::soundcloud::models::shortened(now.duration_ms, track.duration_ms)))
+            }) {
+                super::widgets::preview_badge(ui, &palette, app.locale);
+                ui.add_space(6.0);
+            }
         }
         if now.artists.is_empty() {
             let response = theme::link(ui, &now.subtitle, theme::regular(12.0), palette.secondary)

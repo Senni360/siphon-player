@@ -56,6 +56,10 @@ It follows the light or dark palette and has a SoundCloud screen-reader label.
 Spotify songs do not have a source badge. Playing a SoundCloud search result
 uses the loaded SoundCloud songs as its context. Spotify search keeps its
 existing single-song context.
+When SoundCloud identifies a preview, **Preview only** appears beside the
+source badge in rows, the queue and the player bar. Rows retain the full
+catalogue duration; the player bar uses the available stream's duration once
+playback loads. Preview availability is kept in local playlist snapshots.
 
 Search runs on the backend runtime through the configured shared HTTP
 transport. Public search stays anonymous; library and playback reads use the

@@ -3861,3 +3861,17 @@ msgstr "SoundCloud konnte diese Anfrage nicht abschließen. Versuche es erneut."
 #: src/ui/widgets.rs:3144
 msgid "SoundCloud cannot play this track."
 msgstr "SoundCloud kann diesen Titel nicht abspielen."
+
+
+#: src/ui/widgets.rs:49
+#, rust-format
+msgid "{source}. Playlist additions are stored on this computer only."
+msgstr "{source}. Playlist-Ergänzungen werden nur auf diesem Computer gespeichert."
+
+#: src/ui/widgets.rs:58
+msgid "Preview only"
+msgstr "Nur Vorschau"
+
+#: src/ui/widgets.rs:62
+msgid "SoundCloud only offers a preview of this track."
+msgstr "SoundCloud bietet nur eine Vorschau dieses Titels."

@@ -1646,10 +1646,12 @@ impl App {
     /// Foreign metadata stays keyed by its full URI, including when bare IDs collide.
     fn soundcloud_track(&self, uri: &str) -> Option<&Track> {
         // The shared Spotify cache may contain older restored entries, so always
-        // compare the complete URI before using their metadata.
+        // compare the complete URI before using their metadata. Fresh reads
+        // keyed by that URI take precedence over legacy copies with bare IDs.
         self.track_cache
-            .values()
-            .find(|track| track.uri == uri)
+            .get(uri)
+            .filter(|track| track.uri == uri)
+            .or_else(|| self.track_cache.values().find(|track| track.uri == uri))
             .or_else(|| {
                 self.search
                     .results
@@ -33516,6 +33518,37 @@ mod tests {
         app.sync_power(&ctx);
         assert!(app.playback_activity.is_none());
         assert!(app.keep_awake.is_none(), "a paused computer may sleep");
+    }
+
+    #[test]
+    fn fresh_soundcloud_metadata_wins_over_legacy_cache_copies() {
+        let mut app = headless_app();
+        let uri = "soundcloud:track:7";
+        let old = Track {
+            name: "Old details".into(),
+            ..song(uri)
+        };
+        app.track_cache.insert("7".into(), old.clone());
+        let fresh = Track {
+            name: "Current details".into(),
+            preview_only: true,
+            ..old.clone()
+        };
+        app.cache_soundcloud_tracks(std::slice::from_ref(&fresh));
+        assert_eq!(app.soundcloud_track(uri), Some(&fresh));
+        app.track_cache.remove(uri);
+        assert_eq!(
+            app.soundcloud_track(uri),
+            Some(&old),
+            "old caches remain readable"
+        );
+        app.track_cache.insert(uri.into(), song("spotify:track:7"));
+        assert_eq!(
+            app.soundcloud_track(uri),
+            Some(&old),
+            "a mismatched URI cannot supply metadata"
+        );
+        app.backend.shutdown();
     }
 
     #[test]

@@ -3602,6 +3602,7 @@ mod tests {
                     explicit: false,
                     is_local: false,
                     is_playable: Some(true),
+                    preview_only: false,
                     artists: vec![
                         ArtistRef {
                             id: Some(format!("a_{i}")),

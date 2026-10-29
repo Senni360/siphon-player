@@ -153,6 +153,13 @@ fn preview_detection_includes_policy_flags_and_shorter_duration() {
         tracks.iter().map(Track::is_preview).collect::<Vec<_>>(),
         [true, true, true, false, false]
     );
+    assert_eq!(
+        tracks
+            .iter()
+            .map(|track| track.to_track(None).preview_only)
+            .collect::<Vec<_>>(),
+        [true, true, true, false, false]
+    );
     let track = fixture_formats();
     let mut item = track.media.as_ref().unwrap().transcodings[4].clone();
     item.duration = 30_000;
@@ -187,6 +194,15 @@ fn converts_tracks_with_full_duration_uploader_identity_and_artwork() {
     assert_eq!(converted.duration_ms, raw.full_duration.unwrap());
     assert!(!converted.explicit);
     assert_eq!(converted.is_playable, Some(true));
+    assert!(converted.preview_only);
+    let restored: crate::api::models::Track =
+        serde_json::from_value(serde_json::to_value(&converted).unwrap()).unwrap();
+    assert!(
+        restored.preview_only,
+        "local playlist snapshots keep preview availability"
+    );
+    let old: crate::api::models::Track = serde_json::from_str("{}").unwrap();
+    assert!(!old.preview_only, "old snapshots remain readable");
     assert_eq!(
         converted.artists[0].name,
         raw.publisher_metadata

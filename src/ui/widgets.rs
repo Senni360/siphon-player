@@ -45,9 +45,35 @@ pub fn source_badge(
         theme::semibold(9.5),
         palette.secondary,
     );
-    Some(response.on_hover_text(format!(
-        "{label}. Playlist additions are stored on this computer only."
-    )))
+    Some(
+        response.on_hover_text(
+            gettext(
+                locale,
+                "{source}. Playlist additions are stored on this computer only.",
+            )
+            .replace("{source}", &label),
+        ),
+    )
+}
+
+/// Availability belongs next to the source and artist, before playback.
+pub fn preview_badge(ui: &mut Ui, palette: &Palette, locale: Locale) {
+    theme::text(
+        ui,
+        gettext(locale, "Preview only"),
+        theme::medium(11.0),
+        palette.secondary,
+    )
+    .on_hover_text(gettext(
+        locale,
+        "SoundCloud only offers a preview of this track.",
+    ));
+}
+
+fn track_source_badges(ui: &mut Ui, palette: &Palette, locale: Locale, track: &Track) {
+    if source_badge(ui, palette, locale, &track.uri).is_some() && track.preview_only {
+        preview_badge(ui, palette, locale);
+    }
 }
 
 /// Draws an image (or a placeholder) in a square.
@@ -1948,7 +1974,9 @@ fn track_row_contents(
         );
         child.set_clip_rect(title_rect.intersect(ui.clip_rect()));
         child.spacing_mut().item_spacing = vec2(6.0, 0.0);
-        let _ = source_badge(&mut child, &palette, app.locale, row.item.uri());
+        if let PlayableItem::Track(track) = row.item {
+            track_source_badges(&mut child, &palette, app.locale, track);
+        }
         theme::text(
             &mut child,
             row.item.name(),
@@ -2051,7 +2079,7 @@ fn track_row_contents(
             ui.set_max_width(title_rect.width());
             match row.item {
                 PlayableItem::Track(track) => {
-                    let _ = source_badge(ui, &palette, app.locale, &track.uri);
+                    track_source_badges(ui, &palette, app.locale, track);
                     if track.explicit {
                         explicit_badge(ui, &palette);
                     }
@@ -3964,6 +3992,34 @@ mod tests {
             ),
         ] {
             assert_eq!(sanitize_error_message(raw, Locale::English), expected);
+        }
+    }
+
+    #[test]
+    fn preview_labels_require_soundcloud_and_preview_metadata() {
+        for palette in [Palette::dark(), Palette::light()] {
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            for (uri, preview_only, expected) in [
+                ("soundcloud:track:1", true, true),
+                ("soundcloud:track:1", false, false),
+                ("spotify:track:1", true, false),
+            ] {
+                let track = Track {
+                    uri: uri.into(),
+                    preview_only,
+                    ..Default::default()
+                };
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                    track_source_badges(ui, &palette, Locale::English, &track);
+                });
+                output.textures_delta.clear();
+                assert_eq!(
+                    output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == "Preview only")),
+                    expected
+                );
+            }
         }
     }
 

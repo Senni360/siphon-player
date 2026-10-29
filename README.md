@@ -61,6 +61,8 @@ Spotify saves, radio, album navigation, lyrics and remote Spotify outputs
 are unavailable for them.
 SoundCloud search offers **Retry** when it fails, keeps successful results
 visible, and shows short recovery messages instead of HTTP or network details.
+Known previews are marked **Preview only** in song rows, the queue and the
+player bar.
 
 The owner's browser extension can open **Add to playlist** with
 `siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,

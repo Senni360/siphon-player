@@ -1321,6 +1321,20 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             ),
             "soundcloud-profile" => soundcloud_profile(app),
             "soundcloud" => app.search.source = SearchSource::SoundCloud,
+            "soundcloud-preview" => {
+                let mut previews = Vec::new();
+                if let Some(results) = app.search.soundcloud.get_mut()
+                    && let Some(track) = results.tracks.first_mut()
+                {
+                    track.preview_only = true;
+                    previews.push(track.clone());
+                }
+                if let Some(track) = app.soundcloud_library.snapshot.likes.first_mut() {
+                    track.preview_only = true;
+                    previews.push(track.clone());
+                }
+                app.cache_soundcloud_tracks(&previews);
+            }
             "soundcloud-error" => {
                 app.search.source = SearchSource::SoundCloud;
                 app.search.soundcloud =
@@ -5730,6 +5744,71 @@ mod tests {
             view_frame(&ctx, &mut app, vec![], view);
             let text = view_frame(&ctx, &mut app, vec![], view);
             assert!(text.iter().any(|(label, _)| label == "SC"));
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_previews_are_marked_in_search_queue_and_player_in_both_themes() {
+        for palette in [
+            crate::theme::Palette::dark(),
+            crate::theme::Palette::light(),
+        ] {
+            for width in [760.0, 1280.0] {
+                let (ctx, mut app) = accessible_app("soundcloud-preview-surfaces");
+                app.palette = palette;
+                crate::theme::apply(&ctx, &app.palette);
+                app.search.source = SearchSource::SoundCloud;
+                app.search.filter = SearchFilter::Songs;
+                let mut upload = soundcloud_search_results().tracks.remove(0);
+                upload.preview_only = true;
+                app.search.soundcloud.get_mut().unwrap().tracks[0] = upload.clone();
+                app.cache_soundcloud_tracks(std::slice::from_ref(&upload));
+                app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload.clone()));
+                app.queue = Loadable::Loaded(Queue {
+                    currently_playing: Some(PlayableItem::Track(upload.clone())),
+                    queue: vec![PlayableItem::Track(upload)],
+                });
+                for (surface, view) in [
+                    (
+                        "search",
+                        crate::ui::search::show as fn(&mut App, &mut egui::Ui),
+                    ),
+                    ("queue", crate::ui::queue::page),
+                    ("player", crate::ui::player_bar::show),
+                ] {
+                    view_frame_sized(&ctx, &mut app, vec![], view, egui::vec2(width, 800.0));
+                    let text =
+                        view_frame_sized(&ctx, &mut app, vec![], view, egui::vec2(width, 800.0));
+                    let preview = text
+                        .iter()
+                        .find(|(label, _)| label == "Preview only")
+                        .unwrap_or_else(|| {
+                            panic!("preview missing from {surface} at width {width}: {text:?}")
+                        })
+                        .1;
+                    assert!(preview.left() >= 0.0 && preview.right() <= width);
+                }
+                app.backend.shutdown();
+            }
+        }
+    }
+
+    #[test]
+    fn a_shortened_soundcloud_stream_is_marked_as_a_preview_in_the_player() {
+        let (ctx, mut app) = accessible_app("soundcloud-shortened-preview");
+        let upload = soundcloud_search_results().tracks.remove(0);
+        app.cache_soundcloud_tracks(std::slice::from_ref(&upload));
+        for (duration, expected) in [(30_000, true), (upload.duration_ms, false)] {
+            let mut playing = upload.clone();
+            playing.duration_ms = duration;
+            app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(playing));
+            view_frame(&ctx, &mut app, vec![], crate::ui::player_bar::show);
+            let text = view_frame(&ctx, &mut app, vec![], crate::ui::player_bar::show);
+            assert_eq!(
+                text.iter().any(|(label, _)| label == "Preview only"),
+                expected
+            );
         }
         app.backend.shutdown();
     }

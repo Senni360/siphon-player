@@ -3811,3 +3811,17 @@ msgstr "SoundCloud kunde inte slutföra denna begäran. Försök igen."
 #: src/ui/widgets.rs:3144
 msgid "SoundCloud cannot play this track."
 msgstr "SoundCloud kan inte spela det här spåret."
+
+
+#: src/ui/widgets.rs:49
+#, rust-format
+msgid "{source}. Playlist additions are stored on this computer only."
+msgstr "{source}. Tillägg till spellistor lagras endast på den här datorn."
+
+#: src/ui/widgets.rs:58
+msgid "Preview only"
+msgstr "Endast smakprov"
+
+#: src/ui/widgets.rs:62
+msgid "SoundCloud only offers a preview of this track."
+msgstr "SoundCloud erbjuder bara ett smakprov av den här låten."
