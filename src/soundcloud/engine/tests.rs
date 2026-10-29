@@ -298,6 +298,29 @@ async fn progressive_load_pause_resume_seek_and_end() {
 }
 
 #[tokio::test]
+async fn tagged_loads_stamp_each_completion_and_the_release_acknowledgement() {
+    let server = Server::new().await;
+    let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);
+    let (mut worker, recorded, events) = worker();
+    tokio::task::spawn_blocking(move || {
+        for generation in [1, 3] {
+            let tag = crate::player::PlaybackTag { generation, occurrence: crate::hybrid_queue::EntryId(5) };
+            worker.apply(Command::Tagged { tag, command: Box::new(Command::Load { stream: stream.clone(), start_position_ms: 0, autoplay: true }) }).unwrap();
+            finish(&mut worker);
+        }
+        worker.apply(Command::Stop).unwrap();
+        assert!(!recorded.lock().unwrap().claimed);
+        let events = events.lock().unwrap();
+        let completions: Vec<_> = events.iter().filter_map(|event| match event {
+            Event::Tagged { tag, event } if matches!(event.as_ref(), Event::EndOfTrack { .. }) => Some(tag.generation),
+            _ => None,
+        }).collect();
+        assert_eq!(completions, [1, 3]);
+        assert!(matches!(events.last(), Some(Event::Tagged { tag, event }) if tag.generation == 3 && matches!(event.as_ref(), Event::OutputReleased)));
+    }).await.unwrap();
+}
+
+#[tokio::test]
 async fn hls_seek_starts_at_the_later_segment_and_decodes_forward() {
     let server = Server::new().await;
     let stream = server.stream("/aac.m3u8", Protocol::Hls, 1223);

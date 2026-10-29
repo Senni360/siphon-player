@@ -28,7 +28,7 @@ framework behind a family of native desktop apps. It plays music through
 The interface includes complete
 [translations for all supported languages](docs/_reference/translating.md#languages-and-coverage).
 
-This personal fork is preparing a separate SoundCloud source with anonymous
+This personal fork supports a separate SoundCloud source with anonymous
 listening and optional profile or session connections. The
 [SoundCloud reference](docs/_reference/soundcloud.md) describes the account
 contract and playback limits. The connection interface is not wired yet.
@@ -156,10 +156,19 @@ A Spotify playlist's More menu can copy its rows into a mixed playlist.
 Local mixed-playlist and Spotify-overlay storage formats are described in
 [Settings and files](docs/_reference/settings-and-files.md#local-mixed-playlist-files).
 
-This personal fork also has a SoundCloud playback engine for hybrid-player
-integration. Its [engine contract](docs/_reference/soundcloud-engine.md)
-describes stream inputs, URL refresh and exclusive use of the existing audio
-output. The engine is not yet connected to the interface.
+Mixed playlists, Spotify playlists with local SoundCloud insertions, and
+song lists containing SoundCloud play on this computer through one queue.
+Shuffle, repeat, transport, seeking and media keys use the same controls for
+both sources. Starting mixed playback brings it here; remote transfer is
+unavailable until a Spotify-only collection replaces it. Closing the app saves
+the complete mixed queue and restores it paused. Paste a SoundCloud song or
+playlist link into search and press Enter to resolve and play it.
+
+SoundCloud uses the existing local audio output, EQ, visualizers and volume.
+Local Spotify playback must be enabled first. Its
+[engine contract](docs/_reference/soundcloud-engine.md) describes stream inputs,
+URL refresh and exclusive use of the output. No account connection is needed
+for public streams; the optional connection interface is not wired yet.
 
 ## More native apps
 

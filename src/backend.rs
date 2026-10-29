@@ -700,7 +700,25 @@ pub fn autostart() -> fastframe_autostart::Autostart {
     fastframe_autostart::Autostart::new("spotifast", "Spotifast")
 }
 
+mod hybrid;
+pub use hybrid::HybridCommand;
+
 pub enum Command {
+    Hybrid(HybridCommand),
+    SoundCloudAccount(crate::soundcloud::account::Account),
+    RestoreSoundCloud,
+    SoundCloudAccountRestored {
+        connection: crate::soundcloud::account::Connection,
+        result:
+            Result<crate::soundcloud::account::Account, crate::soundcloud::account::ConnectError>,
+    },
+    SoundCloudEngine(crate::soundcloud::engine::Event),
+    SoundCloudStream {
+        tag: crate::player::PlaybackTag,
+        preload: bool,
+        refresh: Option<u64>,
+        result: Result<crate::soundcloud::engine::Stream, String>,
+    },
     OpenThemesFolder,
     /// Read or change the login registration, off the UI thread: it reads
     /// and writes a file, the registry or D-Bus, and the Flatpak portal may
@@ -965,6 +983,15 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    Hybrid {
+        tag: crate::player::PlaybackTag,
+        event: crate::player::HybridEvent,
+    },
+    HybridContext {
+        generation: u64,
+        result: Result<crate::hybrid_queue::Context, String>,
+    },
+    SoundCloudAccount(crate::soundcloud::account::Account),
     /// The folder picked in the local files dialog; `None` when cancelled.
     LocalFilesFolderChosen(Option<std::path::PathBuf>),
     /// The songs in `folder`, by the `spotify:local:` URIs they play for.
@@ -1184,6 +1211,8 @@ pub struct Backend {
     #[cfg(test)]
     player_commands: std::sync::Mutex<Vec<PlayerCommand>>,
     #[cfg(test)]
+    hybrid_commands: std::sync::Mutex<Vec<HybridCommand>>,
+    #[cfg(test)]
     album_type_requests: std::sync::Mutex<Vec<Vec<String>>>,
     #[cfg(test)]
     home_episode_requests: std::sync::Mutex<Vec<(Vec<String>, u64)>>,
@@ -1283,6 +1312,8 @@ impl Backend {
             #[cfg(test)]
             player_commands: std::sync::Mutex::new(Vec::new()),
             #[cfg(test)]
+            hybrid_commands: std::sync::Mutex::new(Vec::new()),
+            #[cfg(test)]
             album_type_requests: std::sync::Mutex::new(Vec::new()),
             #[cfg(test)]
             home_episode_requests: std::sync::Mutex::new(Vec::new()),
@@ -1310,6 +1341,10 @@ impl Backend {
     }
 
     pub fn send(&self, command: Command) {
+        #[cfg(test)]
+        if let Command::Hybrid(command) = &command {
+            self.hybrid_commands.lock().unwrap().push(command.clone());
+        }
         #[cfg(test)]
         if let Command::StoreLibraryCache(cache) = &command {
             self.library_cache_stores
@@ -1600,6 +1635,11 @@ impl Backend {
         std::mem::take(&mut *self.player_commands.lock().unwrap())
     }
 
+    #[cfg(test)]
+    pub(crate) fn take_hybrid_commands(&self) -> Vec<HybridCommand> {
+        std::mem::take(&mut *self.hybrid_commands.lock().unwrap())
+    }
+
     pub fn player(&self, command: PlayerCommand) {
         #[cfg(test)]
         self.player_commands.lock().unwrap().push(command.clone());
@@ -1812,6 +1852,7 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    hybrid: hybrid::HybridRuntime,
     dirs: AppDirs,
     credentials: CredentialStore,
     web_tokens: [Option<Arc<WebTokens>>; 2],
@@ -1937,6 +1978,7 @@ impl Worker {
         waker: Waker,
     ) -> Self {
         Self {
+            hybrid: hybrid::HybridRuntime::default(),
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2137,6 +2179,7 @@ impl Worker {
     }
 
     async fn run(&mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
+        self.init_soundcloud();
         let (cache_writes, cache_write_receiver) = mpsc::channel(1);
         let cache_writer = tokio::spawn(store_playlist_caches(
             cache_write_receiver,
@@ -2159,6 +2202,28 @@ impl Worker {
                 continue;
             }
             match command {
+                Command::Hybrid(command) => self.hybrid_command(command).await,
+                Command::SoundCloudAccount(account) => {
+                    self.credentials.invalidate(CredentialSlot::SoundCloud);
+                    self.set_soundcloud_account(account);
+                }
+                Command::RestoreSoundCloud => self.restore_soundcloud_account(),
+                Command::SoundCloudAccountRestored { connection, result }
+                    if connection.current() =>
+                {
+                    match result {
+                        Ok(account) => self.set_soundcloud_account(account),
+                        Err(error) => self.emit(Event::Error(error.to_string())),
+                    }
+                }
+                Command::SoundCloudAccountRestored { .. } => {}
+                Command::SoundCloudEngine(event) => self.soundcloud_event(event).await,
+                Command::SoundCloudStream {
+                    tag,
+                    preload,
+                    refresh,
+                    result,
+                } => self.soundcloud_stream(tag, preload, refresh, result).await,
                 Command::ListOutputDevices => {
                     let events = self.events.clone();
                     let waker = self.waker.clone();
@@ -2290,7 +2355,14 @@ impl Worker {
                         waker.wake();
                     });
                 }
-                Command::Shutdown => break,
+                Command::Shutdown => {
+                    if self.hybrid.holds_output() {
+                        self.hybrid.shutdown_pending = true;
+                        self.hybrid_command(HybridCommand::Release).await;
+                    } else {
+                        break;
+                    }
+                }
                 Command::SignIn {
                     request,
                     config,
@@ -2313,6 +2385,14 @@ impl Worker {
                     self.pending_authorization = None;
                 }
                 Command::SignOut => {
+                    if self.hybrid.holds_output() {
+                        self.hybrid.signout_pending = true;
+                        self.hybrid_command(HybridCommand::Release).await;
+                        continue;
+                    }
+                    if self.hybrid.owned {
+                        self.hybrid_command(HybridCommand::Release).await;
+                    }
                     self.sign_out();
                     // The account caches go in command order, so nothing a
                     // sign-in after this stores goes with them. This loop
@@ -2337,6 +2417,23 @@ impl Worker {
                 }
                 Command::ApplyProxy { request, config } => self.change_proxy(request, config, None),
                 Command::Player(command) => {
+                    if self.hybrid.owned
+                        && !matches!(
+                            command,
+                            PlayerCommand::Volume(_)
+                                | PlayerCommand::VolumePreview(_)
+                                | PlayerCommand::Load(_)
+                        )
+                    {
+                        continue;
+                    }
+                    if matches!(command, PlayerCommand::Load(_)) && self.hybrid.owned {
+                        self.hybrid_command(HybridCommand::Release).await;
+                    }
+                    if self.hybrid.releasing {
+                        self.hybrid.player_waiting.push(command);
+                        continue;
+                    }
                     if matches!(&command, PlayerCommand::Load(_)) {
                         self.resume = None;
                     }
@@ -3381,6 +3478,7 @@ impl Worker {
 
     /// Cancels in-flight account work and drops cached Home data on sign-out.
     fn sign_out(&mut self) {
+        self.hybrid.engine = None;
         self.spotify_restore_started = true;
         self.cancel_search();
         self.signed_in = false;
@@ -3452,6 +3550,10 @@ impl Worker {
                 return;
             }
             match event {
+                EngineEvent::Hybrid { tag, event } => {
+                    let _ = events.send(Event::Hybrid { tag, event });
+                    waker.wake();
+                }
                 EngineEvent::State(state) => {
                     let _ = events.send(Event::Local(Box::new(state)));
                     waker.wake();
@@ -3505,6 +3607,11 @@ impl Worker {
     /// an HTTP proxy). Does not count toward the drop limiter: flipping a
     /// setting is not the session falling over.
     fn replace_engine(&mut self) {
+        if self.hybrid.holds_output() {
+            self.hybrid.restart_pending = true;
+            self.release_soundcloud();
+            return;
+        }
         if !self.signed_in {
             return;
         }
@@ -3616,7 +3723,9 @@ impl Worker {
         self.playlist_header_lookup.requeue_active_for_new_engine();
         self.carry_volume();
         if let Some(engine) = self.engine.take() {
-            self.resume = engine.resume_point();
+            self.resume = (!self.hybrid.owned)
+                .then(|| engine.resume_point())
+                .flatten();
             engine.shutdown();
         }
     }
@@ -3633,7 +3742,9 @@ impl Worker {
             // A replacement that dropped before picking the song up has no
             // playback of its own to give: the first pickup stands.
             if !engine.carrying() || self.resume.is_none() {
-                self.resume = engine.resume_point();
+                self.resume = (!self.hybrid.owned)
+                    .then(|| engine.resume_point())
+                    .flatten();
             }
             self.kept_player = Some(engine.keep_player());
         }
@@ -3931,6 +4042,14 @@ impl Worker {
                 self.start_rootlist();
                 self.reconnects.clear();
                 self.emit(Event::Playback(LocalPlayback::Ready { device_id }));
+                if self.hybrid.owned
+                    && let Some(tag) = self.hybrid.tag()
+                {
+                    self.emit(Event::Hybrid {
+                        tag,
+                        event: crate::player::HybridEvent::Interrupted,
+                    });
+                }
                 self.start_album_type_lookup();
                 self.start_audiobook_lookup();
                 self.start_playlist_header_lookup();
@@ -4061,6 +4180,12 @@ impl Worker {
 
     /// Sends the stored playback credential to a receiver so it can sign in.
     fn activate_receiver(&self, receiver: crate::zeroconf::Receiver) {
+        if self.hybrid.owned {
+            self.emit(Event::Error(
+                "Mixed playback is available only on this computer".into(),
+            ));
+            return;
+        }
         if receiver.cast {
             return self.activate_cast(receiver);
         }
@@ -4772,6 +4897,21 @@ impl Worker {
 
     /// Cancel requests on sign-out and report completion under their original generation.
     fn dispatch(&self, request: ApiRequest) -> tokio::task::AbortHandle {
+        if self.hybrid.owned
+            && matches!(
+                request,
+                ApiRequest::Remote { .. }
+                    | ApiRequest::Transfer { .. }
+                    | ApiRequest::ShufflePlay { .. }
+                    | ApiRequest::AddToQueue { .. }
+                    | ApiRequest::AddManyToQueue { .. }
+            )
+        {
+            self.emit(Event::Error(
+                "Mixed playback is available only on this computer".into(),
+            ));
+            return tokio::spawn(async {}).abort_handle();
+        }
         let api = Arc::clone(&self.api);
         let made_for_you = Arc::clone(&self.made_for_you);
         let new_releases = Arc::clone(&self.new_releases);

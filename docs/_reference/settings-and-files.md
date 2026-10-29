@@ -24,6 +24,7 @@ Spotifast follows each platform's conventions. On Linux:
 | Legacy proxy password | `~/.local/state/spotifast/proxy_password` | Removed after protected migration |
 | Last session | `~/.local/state/spotifast/session.json` | Yes |
 | SoundCloud connection | `~/.local/state/spotifast/soundcloud-account.json` | Yes, forgets the selected profile; disconnect to remove its protected token too |
+| SoundCloud public client ID | `~/.local/state/spotifast/soundcloud-client.json` | Yes, discovered again on the next request |
 | SoundCloud session token | System credential store | Use SoundCloud disconnect when the connection interface is integrated |
 | Play history | `~/.local/state/spotifast/history.json` | Yes |
 | Local mixed playlists | `~/.local/state/spotifast/mixed-playlists.json` | Only if you want to lose these playlists |
@@ -76,6 +77,14 @@ protected entry, never ordinary JSON. SoundCloud disconnect clears that entry
 and saves a disconnected state; a revocation marker prevents restoration if
 protected deletion fails. Spotify sign-out leaves SoundCloud connected.
 These are account-module contracts; the connection interface is not wired yet.
+
+The backend discovers and atomically saves SoundCloud's public client ID in
+`soundcloud-client.json` off the interface thread. It contains no account token.
+Mixed playback stores its full context, occurrence identities, shuffle order,
+manual queue, history cursor and position in the optional `hybrid` value in
+`session.json`. Older sessions remain readable. Restoring that value never
+starts audio: press Play to resume. Stream URLs are resolved again and are
+never saved in either file.
 
 On Linux, enable and unlock a Secret Service provider such as GNOME Keyring or
 KWallet to remember a new sign-in. Flatpak is allowed to talk to

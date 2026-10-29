@@ -10,6 +10,51 @@ not resolve tracks, change a queue or add interface controls. Adapt the API's
 `duration_ms = 0` means unknown. Preview streams are played as supplied;
 there is no attempt to obtain full audio for a preview.
 
+## Application integration
+
+`App::dispatch_hybrid_action` owns mixed transport and queue edits, with the
+same source check in `start_play` for internal callers. Views keep emitting
+ordinary playback actions. Search adapters should cache complete converted
+tracks through `App::cache_soundcloud_tracks` before emitting `PlayUris` or
+`PlayFromRow`. Use `OpenLink` for a SoundCloud permalink or short link.
+Backend search adapters clone `Worker::soundcloud_client()` to share playback's
+client ID, cooldown and optional session. Persist discoveries with
+`backend::hybrid::persist_client_id` after a request, off the UI thread.
+Local playlist changes keep using `save_playlist_sources`, including its
+unreadable-file safeguards.
+
+`Backend::HybridCommand` performs child loads, transport, stream resolution
+and lookahead. A hybrid Spotify child is an explicit one-track load with
+shuffle, repeat and autoplay disabled. Librespot and SoundCloud completions
+carry both a load generation and a queue occurrence ID; only the current
+pair can advance the authoritative queue. Spotify playback and queue reads
+cannot overwrite it. Source switches acknowledge the old decoder stop or
+SoundCloud's `OutputReleased` before loading the replacement.
+
+The pinned Spirc fork resolves autoplay even for an explicit track list when
+the Spotify session enables it. For hybrid loads the adapter first detaches
+Connect and waits for its acknowledgement, which clears Spirc's contexts.
+It validates the one-item list and loads its sole item directly on the
+librespot decoder. Hybrid pause, play and seek also address that decoder.
+Returning to Spotify-only playback uses the existing Spirc load path again.
+
+Mixed playback stays on this computer, including Spotify rows. A remote
+transfer or receiver activation is refused in both the application and backend.
+Adding SoundCloud to an existing local Spotify queue promotes it only when
+the complete context and current occurrence are known. A remote queue, an
+unknown tail or an ambiguous repeated occurrence is refused with an
+explanation. Starting a local mixed playlist always establishes its own order.
+
+The shared player bar, queue panel, media controls, local listening history
+and sleep protection read the hybrid projection. The complete queue snapshot
+is saved with the session and restores paused without contacting an engine.
+If a context has not resolved yet, its pending request is saved separately;
+Play resolves its full order instead of resuming a truncated preview.
+SoundCloud account restoration is independent of Spotify and waits for the
+configured proxy. `App::soundcloud_account` holds the restored account;
+after a verified account change, send `Command::SoundCloudAccount` to update
+the backend client and persist only the non-secret account state.
+
 ## Output ownership
 
 Keep the Spotify `player::Engine` alive. Pause its transport and prevent

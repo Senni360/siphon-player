@@ -7,8 +7,13 @@ nav_order: 1
 This personal fork's SoundCloud engine accepts resolved audio URLs through
 the configured HTTP client and proxy. Its bounded range/segment reads, URL
 refresh and shared-output handoff are documented in the
-[SoundCloud engine contract](/soundcloud-engine/). It is not yet wired to
-the interface and makes no SoundCloud requests until explicitly commanded.
+[SoundCloud engine contract](/soundcloud-engine/). Mixed contexts use the
+application's local queue. Playing or preloading a SoundCloud row resolves
+its stream through the SoundCloud client, and an expiring URL is refreshed
+without sending account credentials to the audio host. Playback and queue
+polls from Spotify cannot replace that local order. Optional SoundCloud
+account restoration runs after the proxy is ready; its credentials remain
+independent of Spotify's grants.
 
 ## Independent grants, once each
 

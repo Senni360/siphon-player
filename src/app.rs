@@ -1,6 +1,8 @@
 //! The application: state, event handling, and the actions views ask for.
 
+mod hybrid;
 pub(crate) mod playlist_sources;
+pub use hybrid::{PendingHybridSnapshot, PlaybackOwner};
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
@@ -309,6 +311,9 @@ pub enum PlayCountRead {
 const PLAY_COUNT_RETRY: Duration = Duration::from_secs(60);
 
 pub struct App {
+    pub playback_owner: PlaybackOwner,
+    hybrid: hybrid::HybridPlayback,
+    pub soundcloud_account: crate::soundcloud::account::Account,
     pub dirs: AppDirs,
     pub settings: Settings,
     /// Proxy policy actually handed to network workers. Manual form edits are
@@ -1067,6 +1072,9 @@ impl App {
         let playlist_overlay_writable = overlay.is_ok();
         let palette = settings.fixed_palette().unwrap_or_else(Palette::dark);
         let mut app = Self {
+            playback_owner: PlaybackOwner::SpotifyConnect,
+            hybrid: hybrid::HybridPlayback::default(),
+            soundcloud_account: crate::soundcloud::account::Account::Disconnected,
             custom_themes: theme::Catalog::default(),
             dirs,
             settings,
@@ -1350,6 +1358,8 @@ impl App {
             pixels_per_point: 1.0,
         };
         app.local.volume = app.settings.volume;
+        app.restore_hybrid(session.hybrid.clone());
+        app.restore_hybrid_start(session.hybrid_start.clone());
         if let Some(folder) = app.settings.local_files_folder() {
             app.backend.send(Command::ScanLocalFiles(folder));
         }
@@ -1708,6 +1718,9 @@ impl App {
 
     /// Where playback commands go: this computer's player or a remote device.
     pub fn target(&self) -> Target {
+        if self.hybrid_owned() {
+            return Target::Local;
+        }
         if self.local_ready && self.local.is_active() {
             return Target::Local;
         }
@@ -1734,6 +1747,9 @@ impl App {
 
     /// Context shown as playing, including pending local play requests.
     pub fn playing_context_uri(&self) -> Option<String> {
+        if self.hybrid_owned() {
+            return self.hybrid_context_uri();
+        }
         let remote = self
             .remote
             .as_ref()
@@ -1773,6 +1789,9 @@ impl App {
     /// of the song there are ordinary rows. Anywhere else, and once the
     /// remembered row no longer holds the song, every copy shows it.
     pub fn row_is_played_copy(&self, context: &RowContext, index: usize, uri: &str) -> bool {
+        if self.hybrid_owned() {
+            return self.hybrid_row_is_played_copy(context, index);
+        }
         let Some(played) = self.played_row.as_ref().filter(|played| played.uri == uri) else {
             return true;
         };
@@ -1934,6 +1953,9 @@ impl App {
 
     /// Current item for menus, using cached track details when available.
     pub fn now_playing_item(&self) -> Option<PlayableItem> {
+        if self.hybrid_owned() {
+            return self.hybrid_current_item();
+        }
         let now = self.now_playing()?;
         if now.is_episode {
             return None;
@@ -1970,6 +1992,9 @@ impl App {
     /// Keep the player bar on the same requested song as the playlist marker
     /// while the responsible playback surface catches up.
     fn requested_track_preview(&self) -> Option<NowPlaying> {
+        if self.hybrid_owned() {
+            return None;
+        }
         let intent = self.intent_track.as_ref()?;
         if intent.at.elapsed() >= PLAYBACK_HOLD && self.queued_play.is_none() {
             return None;
@@ -1996,6 +2021,9 @@ impl App {
 
     /// What a device is actually playing, here or elsewhere.
     fn now_playing_live(&self) -> Option<NowPlaying> {
+        if self.hybrid_owned() {
+            return self.hybrid_now_playing();
+        }
         if self.local.is_active() && self.local_transfer_sequence != Some(self.local.track_sequence)
         {
             let track = self.local.track.as_ref()?;
@@ -2169,6 +2197,11 @@ impl App {
     }
 
     fn cached_track_preview(&self, uri: &str, position_ms: u32) -> Option<NowPlaying> {
+        if self.hybrid_owned() && self.hybrid_current_item().is_some_and(|i| i.uri() == uri) {
+            let mut now = self.hybrid_now_playing()?;
+            now.position_ms = position_ms;
+            return Some(now);
+        }
         let track = self.track_cache.get(util::uri_id(uri)?)?;
         Some(NowPlaying {
             local: true,
@@ -2205,6 +2238,9 @@ impl App {
     /// The play request for `key` (a context or track URI) is still waiting
     /// for Spotify to react.
     pub fn play_pending(&self, key: &str) -> bool {
+        if self.hybrid_owned() {
+            return self.hybrid_play_pending(key);
+        }
         self.pending_fresh() && self.pending_play_keys.iter().any(|k| k == key)
     }
 
@@ -2234,6 +2270,9 @@ impl App {
     }
 
     pub fn any_play_pending(&self) -> bool {
+        if self.hybrid_owned() {
+            return self.now_playing().is_some_and(|n| n.loading);
+        }
         self.pending_fresh() && !self.pending_play_keys.is_empty()
     }
 
@@ -2553,6 +2592,9 @@ impl App {
                     }
                 }
                 Event::ReceiverActivated { name, result } => {
+                    if self.hybrid_owned() {
+                        continue;
+                    }
                     self.activating_receiver = None;
                     match result {
                         Ok(()) => {
@@ -2566,6 +2608,21 @@ impl App {
                             self.refresh_devices();
                         }
                         Err(error) => self.toast_error(format!("{name}: {error}")),
+                    }
+                }
+                Event::Hybrid { tag, event } => self.handle_hybrid_event(tag, event),
+                Event::HybridContext { generation, result } => {
+                    self.handle_hybrid_context(generation, result)
+                }
+                Event::SoundCloudAccount(account) => {
+                    self.soundcloud_account = account;
+                    if let Err(error) =
+                        crate::soundcloud::account::State::from_account(&self.soundcloud_account)
+                            .save(&self.files, &self.dirs.soundcloud_account_file(), || {
+                                log::warn!("Unable to save the SoundCloud account")
+                            })
+                    {
+                        self.toast_error(error.to_string());
                     }
                 }
                 Event::Local(state) => self.handle_local(*state),
@@ -2794,6 +2851,9 @@ impl App {
             }
             AuthStatus::WaitingForBrowser { url } => self.sign_in_url = Some(url.clone()),
             AuthStatus::SignedOut => {
+                if self.hybrid_owned() {
+                    self.hybrid_pause_for_signout();
+                }
                 if matches!(self.dialog, Some(Dialog::PersonalAppIntro)) {
                     self.dialog = None;
                 }
@@ -3137,6 +3197,9 @@ impl App {
         self.track_used.clear();
         self.copied_songs.clear();
         self.pending_pastes.clear();
+        if self.hybrid_owned() {
+            self.project_hybrid();
+        }
     }
 
     /// Drop table-row caches whose pages are gone, and cap what remains.
@@ -3187,6 +3250,18 @@ impl App {
     }
 
     fn handle_local(&mut self, state: LocalState) {
+        if self.hybrid_owned() {
+            let held = self.held_local_volume(state.volume);
+            self.local = state;
+            if let Some(volume) = held {
+                self.local.volume = volume;
+            } else if self.settings.volume != self.local.volume {
+                self.settings.volume = self.local.volume;
+                self.settings_dirty = true;
+            }
+            self.frame_now = None;
+            return;
+        }
         if self
             .local_transfer_sequence
             .is_some_and(|sequence| sequence != state.track_sequence)
@@ -3321,6 +3396,9 @@ impl App {
 
     /// Loads details for the remembered track before playback starts.
     fn request_resume_track(&mut self) {
+        if self.hybrid_owned() {
+            return;
+        }
         if self.now_playing_live().is_some() {
             return;
         }
@@ -3370,6 +3448,9 @@ impl App {
     /// a song radio as plain text because a station has no page. A context
     /// whose name has not loaded is still named by kind so it can open.
     pub fn playing_from(&self) -> Option<PlayingFrom> {
+        if self.hybrid_owned() {
+            return self.hybrid_playing_from();
+        }
         let context = self.playing_context_uri()?;
         if context.ends_with(":collection") {
             return Some(PlayingFrom {
@@ -3594,6 +3675,9 @@ impl App {
     }
 
     fn on_now_playing_changed(&mut self) {
+        if self.hybrid_owned() {
+            return;
+        }
         // Queue consumption and saved session state follow confirmed playback,
         // not the song shown optimistically while a command is still pending.
         let Some(now) = self.now_playing_live() else {
@@ -3738,7 +3822,7 @@ impl App {
         self.lyrics_uri = Some(now.uri.clone());
         self.lyrics_following = true;
         self.lyrics_line_shown = None;
-        if now.is_episode || self.offline {
+        if now.is_episode || self.offline || crate::soundcloud::is_track_uri(&now.uri) {
             self.lyrics = Loadable::Loaded(None);
             return;
         }
@@ -6012,6 +6096,9 @@ impl App {
     }
 
     fn poll_remote(&mut self, _immediate: bool) {
+        if self.hybrid_owned() {
+            return;
+        }
         if !self.is_connected() {
             return;
         }
@@ -6032,6 +6119,10 @@ impl App {
     }
 
     fn refresh_queue(&mut self, force: bool) {
+        if self.hybrid_owned() {
+            self.project_hybrid();
+            return;
+        }
         if !self.is_connected() || !self.network_reachable {
             return;
         }
@@ -6150,7 +6241,7 @@ impl App {
     /// and re-add its songs in the new order, which only reaches the
     /// engine actually playing them.
     pub fn queue_locally_reorderable(&self) -> bool {
-        self.local.is_active() && matches!(self.target(), Target::Local)
+        self.hybrid_owned() || (self.local.is_active() && matches!(self.target(), Target::Local))
     }
 
     /// Whether the active local queue has rows that can be cleared.
@@ -6790,6 +6881,20 @@ impl App {
 
     /// Applies an API response to the current page and ignores stale Home data.
     fn handle_api(&mut self, mut response: ApiResponse) {
+        if self.hybrid_owned()
+            && matches!(
+                response,
+                ApiResponse::PlaybackState { .. }
+                    | ApiResponse::Queue { .. }
+                    | ApiResponse::Transferred { .. }
+                    | ApiResponse::Remote { .. }
+                    | ApiResponse::QueueAdded { .. }
+                    | ApiResponse::QueueBatchAdded { .. }
+            )
+        {
+            self.remote_poll_pending = false;
+            return;
+        }
         match &mut response {
             ApiResponse::Playlist {
                 id,
@@ -8601,6 +8706,11 @@ impl App {
         let Some(uri) = self.pending_link.clone() else {
             return;
         };
+        if crate::soundcloud::is_uri(&uri) || crate::link::soundcloud_url(&uri).is_some() {
+            self.pending_link = None;
+            self.try_hybrid_start(PlayRequest::context(uri), false, None);
+            return;
+        }
         if self.user.is_none() {
             return;
         }
@@ -9169,6 +9279,9 @@ impl App {
     }
 
     fn start_play(&mut self, request: PlayRequest, shuffle_first: bool) {
+        if self.try_hybrid_start(request.clone(), shuffle_first, None) {
+            return;
+        }
         // Shuffle applies across contexts until disabled. A selected row still
         // starts first; otherwise choose a random starting track.
         let mut request = request;
@@ -9636,6 +9749,10 @@ impl App {
     }
 
     fn toggle_play(&mut self) {
+        if self.hybrid_owned() {
+            self.hybrid_toggle();
+            return;
+        }
         let playing = self.now_playing().map(|now| now.playing);
         match self.target() {
             Target::Local => {
@@ -9696,6 +9813,10 @@ impl App {
     }
 
     fn seek(&mut self, position_ms: u32) {
+        if self.hybrid_owned() {
+            self.hybrid_seek(position_ms);
+            return;
+        }
         // Dragging the bar under the remembered song moves the point a press
         // of play will resume from; there is no stream to seek yet.
         if self.now_playing_live().is_none() && self.resume_track.is_some() {
@@ -9844,6 +9965,10 @@ impl App {
     }
 
     fn set_shuffle(&mut self, shuffle: bool) {
+        if self.hybrid_owned() {
+            self.hybrid_shuffle(shuffle);
+            return;
+        }
         self.shuffle_wanted = shuffle;
         self.shuffle_set_at = Some(Instant::now());
         self.session_dirty = true;
@@ -9880,6 +10005,9 @@ impl App {
     /// The repeat mode local playback follows: the engine's once it has a
     /// song, until then the one the last run saved.
     fn local_repeat(&self) -> RepeatMode {
+        if self.hybrid_owned() {
+            return self.hybrid_repeat_mode();
+        }
         if self.local.track.is_some() {
             self.local.repeat
         } else {
@@ -9926,6 +10054,10 @@ impl App {
     }
 
     fn set_repeat(&mut self, mode: RepeatMode) {
+        if self.hybrid_owned() {
+            self.hybrid_repeat(mode);
+            return;
+        }
         match self.target() {
             Target::Local => {
                 self.local.repeat = mode;
@@ -9959,6 +10091,10 @@ impl App {
     }
 
     fn transfer(&mut self, device_id: String) {
+        if self.hybrid_owned() {
+            self.toast("Mixed playback is available only on this computer");
+            return;
+        }
         if self
             .pending_remote_volume
             .as_ref()
@@ -10124,6 +10260,10 @@ impl App {
     }
 
     fn queue_album_tracks(&mut self, tracks: Vec<Track>, label: String) {
+        if self.hybrid_owned() {
+            self.hybrid_queue_tracks(tracks);
+            return;
+        }
         let pending_start = self.pending_queue_adds.len();
         let mut uris = Vec::new();
         for track in tracks {
@@ -10174,6 +10314,11 @@ impl App {
     /// Queues several songs after the ones already queued, skipping any
     /// queued again within `QUEUE_ADD_DEBOUNCE`, with one combined toast.
     fn queue_many(&mut self, songs: Vec<(String, String)>) {
+        if self.dispatch_hybrid_action(&Action::QueueMany {
+            songs: songs.clone(),
+        }) {
+            return;
+        }
         // Each picked row is its own ask, so a song picked twice is queued
         // twice. Only an add from an earlier click can make one of them a
         // repeat, so decide that before adding any.
@@ -10214,6 +10359,10 @@ impl App {
     /// current order. librespot can only append to or clear a live queue,
     /// so a move or positional insert clears it and re-adds every song.
     fn resync_local_queue(&mut self) {
+        if self.hybrid_owned() {
+            self.project_hybrid();
+            return;
+        }
         self.backend.player(PlayerCommand::ClearQueue);
         for uri in self.manual_queue.clone() {
             if engine_queues(&uri) {
@@ -10235,6 +10384,12 @@ impl App {
     ///
     /// `announce` is false when a batch should produce one toast.
     fn queue_one(&mut self, uri: String, label: String, announce: bool) {
+        if self.dispatch_hybrid_action(&Action::AddToQueue {
+            uri: uri.clone(),
+            label: label.clone(),
+        }) {
+            return;
+        }
         if !self.can_queue(&uri) {
             return;
         }
@@ -10989,6 +11144,9 @@ impl App {
             Action::TogglePlay | Action::Next | Action::Previous
         ) {
             self.supersede_play_search();
+        }
+        if self.dispatch_hybrid_action(&action) {
+            return;
         }
         match action {
             Action::SaveMixedPlaylist { .. }
@@ -11782,6 +11940,9 @@ impl App {
                 });
             }
             Action::SignOut => {
+                if self.hybrid_owned() {
+                    self.hybrid_pause_for_signout();
+                }
                 self.backend.send(Command::SignOut);
                 self.show_friends_panel = false;
                 self.history = vec![Page::Home];
@@ -12849,7 +13010,9 @@ impl App {
             self.reachable = conditions.online;
             self.backend.network_status(conditions.online);
         }
-        if crate::power::playback_needs_activity(&self.local) {
+        if self.hybrid_needs_activity()
+            || (!self.hybrid_owned() && crate::power::playback_needs_activity(&self.local))
+        {
             self.playback_activity
                 .get_or_insert_with(|| crate::power::Activity::begin("Spotify playback"));
             let power = &self.power;
@@ -12927,6 +13090,14 @@ impl App {
     ///
     /// Paused time and seeking do not count. Each track is recorded once.
     fn note_listening(&mut self) {
+        if self.hybrid_owned() && !self.hybrid_audible() {
+            if let Some(listening) = &mut self.listening
+                && let Some(since) = listening.playing_since.take()
+            {
+                listening.listened += since.elapsed();
+            }
+            return;
+        }
         let Some(now) = self.now_playing_live() else {
             self.listening = None;
             return;
@@ -12964,8 +13135,19 @@ impl App {
             return;
         }
         listening.recorded = true;
-        self.plays
-            .record(crate::history::played_track(&now), jiff::Timestamp::now());
+        let track = if self.hybrid_owned() {
+            self.hybrid_current_item().and_then(|item| match item {
+                PlayableItem::Track(mut track) => {
+                    track.duration_ms = now.duration_ms;
+                    Some(track)
+                }
+                _ => None,
+            })
+        } else {
+            None
+        }
+        .unwrap_or_else(|| crate::history::played_track(&now));
+        self.plays.record(track, jiff::Timestamp::now());
         self.plays.save(&self.files, &self.dirs.history_file());
         self.rebuild_recents();
     }
@@ -13223,6 +13405,8 @@ impl App {
         }
         if !self.offline {
             let session = SessionState {
+                hybrid: self.hybrid_snapshot(),
+                hybrid_start: self.hybrid_start_snapshot(),
                 device_history: self.device_history.clone(),
                 last_page: Some(self.page().encode()),
                 recent_contexts: self.recent_contexts.clone(),
@@ -32183,5 +32367,564 @@ mod tests {
         let server_err =
             widgets::sanitize_error_message("500 Internal Server Error", Locale::English);
         assert_eq!(server_err.as_ref(), "500 Internal Server Error");
+    }
+
+    fn hybrid_fixture() -> App {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.offline = true;
+        let tracks: Vec<_> = ["spotify:track:a", "soundcloud:track:7", "spotify:track:a"]
+            .iter()
+            .map(|uri| Track {
+                uri: (*uri).into(),
+                name: format!("Song {uri}"),
+                duration_ms: 120_000,
+                ..Track::default()
+            })
+            .collect();
+        for track in &tracks {
+            app.track_cache.insert(track.uri.clone(), track.clone());
+        }
+        app
+    }
+
+    fn start_hybrid_fixture(app: &mut App) {
+        app.apply(
+            Action::PlayUris {
+                uris: vec![
+                    "spotify:track:a".into(),
+                    "soundcloud:track:7".into(),
+                    "spotify:track:a".into(),
+                ],
+                index: 0,
+            },
+            &egui::Context::default(),
+        );
+    }
+
+    #[test]
+    fn hybrid_mixed_start_keeps_shuffle_repeat_and_click_occurrence() {
+        let mut app = hybrid_fixture();
+        app.shuffle_wanted = true;
+        app.repeat_wanted = RepeatMode::Context;
+        app.apply(
+            Action::PlayUris {
+                uris: vec![
+                    "spotify:track:a".into(),
+                    "soundcloud:track:7".into(),
+                    "spotify:track:a".into(),
+                ],
+                index: 2,
+            },
+            &egui::Context::default(),
+        );
+        let now = app.now_playing().unwrap();
+        assert!(app.hybrid_owned() && now.shuffle);
+        assert_eq!(now.repeat, RepeatMode::Context);
+        assert_eq!(
+            app.hybrid_tag().unwrap().occurrence,
+            crate::hybrid_queue::EntryId(3)
+        );
+        assert!(app.backend.take_player_commands().is_empty());
+        let commands = app.backend.take_hybrid_commands();
+        assert!(
+            matches!(&commands[1], crate::backend::HybridCommand::Load { track, .. } if track.uri == "spotify:track:a")
+        );
+        assert_eq!(app.queue.get().unwrap().queue.len(), 3);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_next_previous_and_duplicate_completions_cross_sources_once() {
+        use crate::player::HybridEvent;
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        let first = app.hybrid_tag().unwrap();
+        app.handle_hybrid_event(first, HybridEvent::EndOfTrack);
+        let second = app.hybrid_tag().unwrap();
+        assert_eq!(
+            app.current_track_uri().as_deref(),
+            Some("soundcloud:track:7")
+        );
+        app.handle_hybrid_event(first, HybridEvent::EndOfTrack);
+        assert_eq!(app.hybrid_tag(), Some(second));
+        app.handle_hybrid_event(second, HybridEvent::EndOfTrack);
+        let third = app.hybrid_tag().unwrap();
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
+        assert_ne!(first, third);
+        app.handle_hybrid_event(first, HybridEvent::EndOfTrack);
+        app.handle_hybrid_event(second, HybridEvent::EndOfTrack);
+        assert_eq!(app.hybrid_tag(), Some(third));
+        app.apply(Action::Previous, &ctx);
+        assert_eq!(
+            app.current_track_uri().as_deref(),
+            Some("soundcloud:track:7")
+        );
+        app.apply(Action::Previous, &ctx);
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
+        app.apply(Action::Next, &ctx);
+        assert_eq!(
+            app.current_track_uri().as_deref(),
+            Some("soundcloud:track:7")
+        );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_spotify_echoes_never_replace_track_order_or_modes() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(Action::Next, &ctx);
+        app.apply(Action::SetShuffle(true), &ctx);
+        app.apply(Action::SetRepeat(RepeatMode::Track), &ctx);
+        let before = queue_uris(&app);
+        let stale = LocalState {
+            playback: Playback::Playing,
+            shuffle: false,
+            repeat: RepeatMode::Off,
+            track: Some(crate::player::LocalTrack {
+                uri: "spotify:track:old".into(),
+                ..Default::default()
+            }),
+            ..LocalState::default()
+        };
+        app.handle_local(stale);
+        app.handle_api(ApiResponse::Queue {
+            seq: app.queue_seq,
+            result: Ok(Queue::default()),
+        });
+        app.handle_api(ApiResponse::PlaybackState {
+            seq: app.remote_poll_seq,
+            result: Ok(None),
+        });
+        app.handle_api(ApiResponse::Transferred {
+            device_id: "old-phone".into(),
+            result: Ok(()),
+        });
+        assert!(app.selected_device.is_none());
+        let now = app.now_playing().unwrap();
+        assert_eq!(now.uri, "soundcloud:track:7");
+        assert!(now.shuffle);
+        assert_eq!(now.repeat, RepeatMode::Track);
+        assert_eq!(queue_uris(&app), before);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_manual_queue_edits_skip_and_new_context_keep_occurrences() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(
+            Action::QueueMany {
+                songs: vec![
+                    ("soundcloud:track:9".into(), "Nine".into()),
+                    ("spotify:track:z".into(), "Zed".into()),
+                    ("soundcloud:track:9".into(), "Nine".into()),
+                ],
+            },
+            &ctx,
+        );
+        assert_eq!(app.queued_rows_len(), 3);
+        app.apply(Action::MoveInQueue { from: 2, to: 0 }, &ctx);
+        app.apply(
+            Action::RemoveFromQueue {
+                rows: vec![(1, "soundcloud:track:9".into())],
+            },
+            &ctx,
+        );
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["spotify:track:new".into()],
+                index: 0,
+            },
+            &ctx,
+        );
+        assert!(app.hybrid_owned());
+        assert_eq!(app.manual_queue, ["soundcloud:track:9", "spotify:track:z"]);
+        app.apply(
+            Action::PlayFromRow {
+                context: RowContext::Queue,
+                uri: "spotify:track:z".into(),
+                index: 1,
+            },
+            &ctx,
+        );
+        assert!(app.manual_queue.is_empty());
+        assert_eq!(app.now_playing().unwrap().uri, "spotify:track:z");
+        app.apply(Action::Previous, &ctx);
+        assert_eq!(app.now_playing().unwrap().uri, "soundcloud:track:9");
+        app.apply(Action::ClearQueue, &ctx);
+        assert!(app.manual_queue.is_empty());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_remote_transfer_is_refused_before_mutating_selection() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        app.backend.take_transfer_requests();
+        app.apply(
+            Action::Transfer("remote-speaker".into()),
+            &egui::Context::default(),
+        );
+        assert!(app.selected_device.is_none());
+        assert!(app.backend.take_transfer_requests().is_empty());
+        assert!(app.hybrid_owned());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_snapshot_restores_paused_with_order_position_and_manual_duplicates() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(Action::SetShuffle(true), &ctx);
+        app.apply(Action::SetRepeat(RepeatMode::Context), &ctx);
+        app.apply(
+            Action::QueueMany {
+                songs: vec![
+                    ("soundcloud:track:9".into(), "Nine".into()),
+                    ("soundcloud:track:9".into(), "Nine".into()),
+                ],
+            },
+            &ctx,
+        );
+        app.apply(Action::Next, &ctx);
+        app.apply(Action::Seek(12_345), &ctx);
+        let expected_queue = queue_uris(&app);
+        let session = SessionState {
+            hybrid: app.hybrid_snapshot(),
+            ..SessionState::default()
+        };
+        let decoded: SessionState = serde_json::from_str(&session.encode().unwrap()).unwrap();
+        let mut restored = hybrid_fixture();
+        restored.restore_hybrid(decoded.hybrid);
+        let now = restored.now_playing().unwrap();
+        assert_eq!(now.uri, "soundcloud:track:9");
+        assert_eq!(now.position_ms, 12_345);
+        assert!(!now.playing && now.shuffle);
+        assert_eq!(now.repeat, RepeatMode::Context);
+        assert_eq!(queue_uris(&restored), expected_queue);
+        assert!(restored.backend.take_hybrid_commands().is_empty());
+        restored.apply(Action::TogglePlay, &ctx);
+        assert!(
+            matches!(&restored.backend.take_hybrid_commands()[0], crate::backend::HybridCommand::Load { position_ms: 12_345, play: true, track, .. } if track.uri == "soundcloud:track:9")
+        );
+        app.backend.shutdown();
+        restored.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_local_playlist_keeps_identity_even_with_only_spotify_rows() {
+        let mut app = hybrid_fixture();
+        let id = app.mixed_playlists.import(
+            "Local order".into(),
+            String::new(),
+            vec![song("spotify:track:a"), song("spotify:track:b")],
+        );
+        let uri = format!("spotifast:playlist:{id}");
+        app.apply(
+            Action::PlayContext {
+                uri: uri.clone(),
+                offset_uri: None,
+                offset_index: Some(1),
+            },
+            &egui::Context::default(),
+        );
+        assert!(app.hybrid_owned());
+        assert_eq!(app.playing_context_uri(), Some(uri));
+        assert_eq!(app.playing_from().unwrap().name, "Local order");
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:b"));
+        assert!(app.backend.take_player_commands().is_empty());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_overlay_resolve_retains_transport_and_queue_intents() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.playlist_overlay
+            .get_mut("cold")
+            .insert_at_position(1, &song("soundcloud:track:7"));
+        app.apply(
+            Action::PlayContext {
+                uri: "spotify:playlist:cold".into(),
+                offset_uri: Some("spotify:track:a".into()),
+                offset_index: Some(0),
+            },
+            &ctx,
+        );
+        let generation = app
+            .backend
+            .take_hybrid_commands()
+            .into_iter()
+            .find_map(|c| match c {
+                crate::backend::HybridCommand::Resolve { generation, .. } => Some(generation),
+                _ => None,
+            })
+            .unwrap();
+        assert!(app.play_pending("spotify:playlist:cold"));
+        app.apply(
+            Action::QueueMany {
+                songs: vec![("soundcloud:track:9".into(), "Nine".into())],
+            },
+            &ctx,
+        );
+        app.apply(Action::Next, &ctx);
+        app.apply(Action::TogglePlay, &ctx);
+        app.apply(Action::Seek(7_000), &ctx);
+        app.apply(Action::SetRepeat(RepeatMode::Context), &ctx);
+        app.handle_hybrid_context(
+            generation,
+            Ok(crate::hybrid_queue::Context {
+                uri: "spotify:playlist:cold".into(),
+                name: "Cold playlist".into(),
+                tracks: vec![song("spotify:track:a"), song("spotify:track:b")],
+            }),
+        );
+        let now = app.now_playing().unwrap();
+        assert_eq!(now.uri, "soundcloud:track:9");
+        assert!(!now.playing);
+        assert_eq!(now.position_ms, 7_000);
+        assert_eq!(now.repeat, RepeatMode::Context);
+        assert_eq!(
+            queue_uris(&app).1,
+            ["soundcloud:track:7", "spotify:track:b", "spotify:track:a"]
+        );
+        assert_eq!(app.playing_from().unwrap().name, "Cold playlist");
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_stale_seek_and_pause_echoes_hold_the_displayed_intent() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(Action::Next, &ctx);
+        let tag = app.hybrid_tag().unwrap();
+        app.apply(Action::Seek(15_000), &ctx);
+        app.apply(Action::TogglePlay, &ctx);
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Playing,
+                position_ms: 1_000,
+                track: Some(crate::player::LocalTrack {
+                    uri: "soundcloud:track:7".into(),
+                    duration_ms: 120_000,
+                    ..Default::default()
+                }),
+                ..LocalState::default()
+            })),
+        );
+        let now = app.now_playing().unwrap();
+        assert_eq!(now.position_ms, 15_000);
+        assert!(!now.playing);
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Paused,
+                position_ms: 15_000,
+                track: Some(crate::player::LocalTrack {
+                    uri: "soundcloud:track:7".into(),
+                    duration_ms: 120_000,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        );
+        // librespot can restart a still-loading request at the seek target
+        // without emitting Seeked. Its settled position confirms that seek.
+        app.handle_hybrid_event(tag, crate::player::HybridEvent::EndOfTrack);
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
+        assert!(!app.now_playing().unwrap().playing);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_pasted_links_resolve_and_superseded_answers_cannot_start() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.apply(
+            Action::Search("https://soundcloud.com/artist/song".into()),
+            &ctx,
+        );
+        let generation = app
+            .backend
+            .take_hybrid_commands()
+            .into_iter()
+            .find_map(|c| match c {
+                crate::backend::HybridCommand::Resolve { generation, .. } => Some(generation),
+                _ => None,
+            })
+            .unwrap();
+        start_hybrid_fixture(&mut app);
+        let tag = app.hybrid_tag();
+        app.handle_hybrid_context(
+            generation,
+            Ok(crate::hybrid_queue::Context {
+                uri: "soundcloud:track:99".into(),
+                name: "Old link".into(),
+                tracks: vec![song("soundcloud:track:99")],
+            }),
+        );
+        assert_eq!(app.hybrid_tag(), tag);
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_pure_replacement_returns_to_the_local_connect_path() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        app.apply(
+            Action::SetRepeat(RepeatMode::Context),
+            &egui::Context::default(),
+        );
+        let old = app.hybrid_tag().unwrap();
+        app.local_ready = true;
+        app.local.connected = true;
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:a".into(),
+            ..Default::default()
+        });
+        app.backend.take_hybrid_commands();
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["spotify:track:new".into()],
+                index: 0,
+            },
+            &egui::Context::default(),
+        );
+        assert!(!app.hybrid_owned());
+        assert!(matches!(
+            app.backend.take_hybrid_commands().as_slice(),
+            [crate::backend::HybridCommand::Release]
+        ));
+        assert!(matches!(
+            app.backend.take_player_commands().as_slice(),
+            [PlayerCommand::Load(spec)] if spec.repeat == Some(RepeatMode::Context)
+        ));
+        app.handle_hybrid_event(old, crate::player::HybridEvent::EndOfTrack);
+        assert!(!app.hybrid_owned());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_unresolved_context_restores_paused_and_resolves_the_full_order_on_play() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.apply(
+            Action::OpenLink("https://soundcloud.com/u/sets/unloaded".into()),
+            &ctx,
+        );
+        app.apply(
+            Action::QueueMany {
+                songs: vec![("soundcloud:track:9".into(), "Nine".into())],
+            },
+            &ctx,
+        );
+        let saved = SessionState {
+            hybrid: app.hybrid_snapshot(),
+            hybrid_start: app.hybrid_start_snapshot(),
+            ..Default::default()
+        };
+        let saved: SessionState = serde_json::from_str(&saved.encode().unwrap()).unwrap();
+        let mut restored = hybrid_fixture();
+        restored.restore_hybrid(saved.hybrid);
+        restored.restore_hybrid_start(saved.hybrid_start);
+        assert!(restored.hybrid_owned());
+        assert!(restored.backend.take_hybrid_commands().is_empty());
+        assert_eq!(
+            restored.playing_context_uri().as_deref(),
+            Some("https://soundcloud.com/u/sets/unloaded")
+        );
+        restored.apply(Action::TogglePlay, &ctx);
+        let generation = restored
+            .backend
+            .take_hybrid_commands()
+            .into_iter()
+            .find_map(|c| match c {
+                crate::backend::HybridCommand::Resolve { generation, .. } => Some(generation),
+                _ => None,
+            })
+            .unwrap();
+        restored.handle_hybrid_context(
+            generation,
+            Ok(crate::hybrid_queue::Context {
+                uri: "soundcloud:playlist:4".into(),
+                name: "Complete set".into(),
+                tracks: vec![song("soundcloud:track:1"), song("soundcloud:track:2")],
+            }),
+        );
+        assert_eq!(
+            restored.current_track_uri().as_deref(),
+            Some("soundcloud:track:1")
+        );
+        assert_eq!(
+            queue_uris(&restored).1,
+            ["soundcloud:track:9", "soundcloud:track:2"]
+        );
+        app.backend.shutdown();
+        restored.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_filtered_local_rows_keep_metadata_and_queue_gestures_keep_occurrences() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        let mut sc = song("soundcloud:track:55");
+        sc.name = "Local metadata".into();
+        let id = app.mixed_playlists.import(
+            "Sorted list".into(),
+            String::new(),
+            vec![sc.clone(), song("spotify:track:a")],
+        );
+        app.apply(
+            Action::PlayFromRow {
+                context: RowContext::View {
+                    uris: Arc::from(vec![sc.uri.clone()]),
+                    context_uri: format!("spotifast:playlist:{id}"),
+                    editable_playlist: None,
+                },
+                uri: sc.uri.clone(),
+                index: 0,
+            },
+            &ctx,
+        );
+        assert_eq!(app.now_playing().unwrap().title, "Local metadata");
+        app.apply(
+            Action::QueueMany {
+                songs: vec![
+                    (sc.uri.clone(), sc.name.clone()),
+                    (sc.uri.clone(), sc.name.clone()),
+                ],
+            },
+            &ctx,
+        );
+        assert_eq!(app.queued_rows_len(), 2);
+        app.apply(
+            Action::QueueMany {
+                songs: vec![
+                    (sc.uri.clone(), sc.name.clone()),
+                    ("spotify:track:b".into(), "B".into()),
+                ],
+            },
+            &ctx,
+        );
+        assert_eq!(app.queued_rows_len(), 3);
+        app.apply(Action::ClearQueue, &ctx);
+        app.apply(
+            Action::AddToQueue {
+                uri: sc.uri,
+                label: sc.name,
+            },
+            &ctx,
+        );
+        assert_eq!(app.queued_rows_len(), 1);
+        app.backend.shutdown();
     }
 }

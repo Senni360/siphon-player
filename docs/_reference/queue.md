@@ -13,7 +13,16 @@ Above both, **Playing from** names where the playing song came from: the
 playlist, album, artist, or podcast, which opens when clicked, Liked
 Songs, or a radio named after the song, playlist, album, or artist it is
 based on, which opens the radio's page. The line shows only while a song is
-playing from somewhere Spotify reports.
+playing from a known collection, including this fork's local mixed playlists.
+
+In this personal fork the same rules cover mixed Spotify and SoundCloud
+playback. Mixed playlists, Spotify playlists with local insertions, and mixed
+song lists use one queue on this computer. Shuffle and repeat belong to that
+queue across both sources. Remote transfer is refused while it owns playback.
+An existing Spotify queue can accept SoundCloud only when its full context and
+current occurrence are known; otherwise the app asks you to start a mixed
+playlist instead of dropping an unseen tail. Its complete saved queue restores
+paused, and an unresolved context is fetched again on Play.
 
 These are the rules the app follows. The queue tests in `src/app.rs`
 check every one of them.

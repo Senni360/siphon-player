@@ -1835,6 +1835,12 @@ pub struct CachedRootlist {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SessionState {
+    /// Full app-owned order and metadata, restored paused. No stream URLs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hybrid: Option<crate::hybrid_queue::Snapshot>,
+    /// Retains unresolved context intent instead of saving a partial play order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hybrid_start: Option<crate::app::PendingHybridSnapshot>,
     /// Recent explicit output choices, scoped to the verified Spotify account.
     pub device_history: crate::device_history::DeviceHistory,
     pub last_page: Option<String>,

@@ -77,6 +77,64 @@ impl From<reqwest::Error> for Error {
     }
 }
 
+impl super::account::Resolver for Client {
+    async fn resolve_profile(
+        &self,
+        input: &super::account::ProfileInput,
+    ) -> std::result::Result<super::account::Profile, super::account::ResolveError> {
+        // Profile mode is public, even when another session was connected.
+        let anonymous = Self::new(self.shared.http.clone(), self.client_id(), None);
+        let url = match input {
+            super::account::ProfileInput::Permalink(name) => {
+                format!("https://soundcloud.com/{name}")
+            }
+            super::account::ProfileInput::ShortLink(url) => url.clone(),
+        };
+        match anonymous.resolve(&url).await.map_err(account_error)? {
+            Resolved::User(user) => Ok(account_profile(user)),
+            _ => Err(super::account::ResolveError::NotFound),
+        }
+    }
+
+    async fn me(
+        &self,
+        token: &super::account::SessionToken,
+    ) -> std::result::Result<super::account::Profile, super::account::ResolveError> {
+        let authenticated = Self::new(
+            self.shared.http.clone(),
+            self.client_id(),
+            Some(token.expose().to_owned()),
+        );
+        authenticated
+            .me()
+            .await
+            .map(account_profile)
+            .map_err(account_error)
+    }
+}
+
+fn account_profile(user: User) -> super::account::Profile {
+    super::account::Profile {
+        user_id: user.id,
+        username: user.username,
+        permalink: user
+            .permalink_url
+            .as_deref()
+            .and_then(|url| url.trim_end_matches('/').rsplit('/').next())
+            .unwrap_or_default()
+            .to_owned(),
+        avatar: user.avatar_url,
+    }
+}
+
+fn account_error(error: Error) -> super::account::ResolveError {
+    match error {
+        Error::Status(401 | 403) | Error::NotSignedIn => super::account::ResolveError::Unauthorized,
+        Error::Status(404) => super::account::ResolveError::NotFound,
+        _ => super::account::ResolveError::Unavailable,
+    }
+}
+
 struct Shared {
     http: Http,
     client_id: RwLock<Option<String>>,

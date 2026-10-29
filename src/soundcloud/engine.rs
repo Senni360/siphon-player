@@ -90,6 +90,11 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 pub enum Command {
+    /// Runtime adapter: stamps all following events with this load identity.
+    Tagged {
+        tag: crate::player::PlaybackTag,
+        command: Box<Command>,
+    },
     Load {
         stream: Stream,
         start_position_ms: u32,
@@ -115,6 +120,10 @@ pub enum Command {
 
 #[derive(Clone, Debug)]
 pub enum Event {
+    Tagged {
+        tag: crate::player::PlaybackTag,
+        event: Box<Event>,
+    },
     State(Box<LocalState>),
     /// Explicit Stop acknowledgement, after external ownership is released.
     /// Unlike a Stopped state at EOF, this permits returning to Spotify.
@@ -185,8 +194,12 @@ impl Engine {
         // Keep revision changes in channel order even when transport and
         // refresh replies arrive from different threads.
         let commands = self.commands.lock().unwrap_or_else(PoisonError::into_inner);
+        let inner = match &command {
+            Command::Tagged { command, .. } => command.as_ref(),
+            command => command,
+        };
         let interrupts = matches!(
-            command,
+            inner,
             Command::Load { .. }
                 | Command::Pause
                 | Command::Toggle
@@ -273,6 +286,7 @@ impl Drop for Preloaded {
 }
 
 struct Worker {
+    tag: Option<crate::player::PlaybackTag>,
     fetch: Fetch,
     output: Box<dyn Output>,
     notify: Notify,
@@ -301,6 +315,7 @@ impl Worker {
         shared: Arc<Mutex<LocalState>>,
     ) -> Self {
         Self {
+            tag: None,
             fetch,
             output,
             notify,
@@ -323,8 +338,18 @@ impl Worker {
 
     fn report(&mut self) {
         *self.shared.lock().unwrap_or_else(PoisonError::into_inner) = self.state.clone();
-        (self.notify)(Event::State(Box::new(self.state.clone())));
+        self.emit(Event::State(Box::new(self.state.clone())));
         self.last_report = Instant::now();
+    }
+
+    fn emit(&self, event: Event) {
+        (self.notify)(match self.tag {
+            Some(tag) => Event::Tagged {
+                tag,
+                event: Box::new(event),
+            },
+            None => event,
+        });
     }
 
     fn position(&self) -> u32 {
@@ -396,6 +421,10 @@ impl Worker {
 
     fn apply(&mut self, command: Command) -> Result<(), Error> {
         match command {
+            Command::Tagged { tag, command } => {
+                self.tag = Some(tag);
+                self.apply(*command)?;
+            }
             Command::Load {
                 stream,
                 start_position_ms,
@@ -509,7 +538,7 @@ impl Worker {
                 self.state.loading = false;
                 self.state.position_at = None;
                 self.report();
-                (self.notify)(Event::OutputReleased);
+                self.emit(Event::OutputReleased);
             }
             Command::Preload(stream) => {
                 // Remember the intent without doing any work while paused.
@@ -662,7 +691,7 @@ impl Worker {
         self.anchor();
         self.report();
         if let Some(stream) = &self.stream {
-            (self.notify)(Event::EndOfTrack {
+            self.emit(Event::EndOfTrack {
                 uri: stream.uri.clone(),
             });
         }
@@ -701,7 +730,7 @@ impl Worker {
             self.refresh = Some(self.next_refresh);
             self.state.loading = true;
             self.report();
-            (self.notify)(Event::RefreshRequired {
+            self.emit(Event::RefreshRequired {
                 request_id: self.next_refresh,
                 uri,
                 position_ms: self.start_ms,
@@ -712,7 +741,7 @@ impl Worker {
             self.state.playback = Playback::Paused;
             self.state.error = Some(error.to_string());
             self.report();
-            (self.notify)(Event::Error { uri, error });
+            self.emit(Event::Error { uri, error });
         }
     }
 }

@@ -269,6 +269,18 @@ pub enum PlaybackResume {
 }
 
 impl LoadSpec {
+    fn hybrid_track(&self) -> Result<SpotifyUri> {
+        anyhow::ensure!(
+            self.context_uri.is_none()
+                && self.uris.len() == 1
+                && self.shuffle == Some(false)
+                && self.repeat == Some(RepeatMode::Off)
+                && !self.autoplay,
+            "Hybrid Spotify playback requires one explicit track with continuation disabled"
+        );
+        SpotifyUri::from_uri(&self.uris[0]).map_err(Into::into)
+    }
+
     fn context_options(&self, current_repeat: RepeatMode) -> LoadContextOptions {
         if self.autoplay {
             LoadContextOptions::Autoplay
@@ -308,6 +320,10 @@ pub enum PlayerCommand {
 
 #[allow(clippy::large_enum_variant)]
 pub enum EngineEvent {
+    Hybrid {
+        tag: PlaybackTag,
+        event: HybridEvent,
+    },
     State(LocalState),
     SessionEnded,
     /// The output opened on the device an older build saved by `name`;
@@ -316,6 +332,23 @@ pub enum EngineEvent {
         name: String,
         id: String,
     },
+}
+
+/// A queue occurrence can play several times. Both values must match before
+/// a child engine may confirm state or advance the app-owned queue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PlaybackTag {
+    pub generation: u64,
+    pub occurrence: crate::hybrid_queue::EntryId,
+}
+
+pub enum HybridEvent {
+    State(Box<LocalState>),
+    EndOfTrack,
+    Failed(String),
+    /// Another Connect client tried to replace the single child load. The
+    /// app retains its context and explicitly reasserts local ownership.
+    Interrupted,
 }
 
 pub type Notify = Arc<dyn Fn(EngineEvent) + Send + Sync>;
@@ -380,6 +413,8 @@ impl KeptPlayer {
 }
 
 pub struct Engine {
+    hybrid_events: Mutex<Option<tokio::task::AbortHandle>>,
+    hybrid_detached: Arc<std::sync::atomic::AtomicBool>,
     player: Arc<Player>,
     spirc: Arc<Spirc>,
     session: Session,
@@ -488,6 +523,8 @@ impl Engine {
 
         let device_id = config.device_id();
         Ok(Self {
+            hybrid_events: Mutex::new(None),
+            hybrid_detached: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             player,
             spirc: Arc::new(spirc),
             session,
@@ -571,6 +608,7 @@ impl Engine {
     /// this one after its session dropped. Nothing stops it: the song plays
     /// on until the next engine takes it over or [`KeptPlayer::stop`].
     pub fn keep_player(&self) -> KeptPlayer {
+        self.cancel_hybrid_events();
         KeptPlayer {
             player: Arc::clone(&self.player),
             mixer: Arc::clone(&self.mixer),
@@ -676,6 +714,7 @@ impl Engine {
     }
 
     pub fn shutdown(&self) {
+        self.cancel_hybrid_events();
         self.shutting_down
             .store(true, std::sync::atomic::Ordering::SeqCst);
         let _ = self.spirc.shutdown();
@@ -720,6 +759,11 @@ impl Engine {
 
     pub fn command(&self, command: PlayerCommand) -> Result<()> {
         if matches!(command, PlayerCommand::Load(_) | PlayerCommand::Transfer) {
+            self.cancel_hybrid_events();
+            self.hybrid_detached
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        if matches!(command, PlayerCommand::Load(_) | PlayerCommand::Transfer) {
             // Something else chosen replaces the song a dropped session left.
             self.stop_carrying();
         }
@@ -735,6 +779,125 @@ impl Engine {
             self.audio.stopped();
         }
         result
+    }
+
+    fn cancel_hybrid_events(&self) {
+        if let Some(task) = self
+            .hybrid_events
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
+        {
+            task.abort();
+        }
+    }
+
+    /// Disconnect Connect and acknowledge the decoder's stop before an
+    /// external producer may claim its output. Runs only on the runtime.
+    pub async fn stop_for_handoff(&self) -> Result<()> {
+        self.cancel_hybrid_events();
+        if self
+            .hybrid_detached
+            .load(std::sync::atomic::Ordering::SeqCst)
+            && self
+                .state
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .active_client
+                .is_empty()
+        {
+            return self.stop_decoder().await;
+        }
+        let mut events = self.player.get_player_event_channel();
+        self.spirc.activate()?;
+        self.spirc.disconnect(true)?;
+        tokio::time::timeout(Duration::from_secs(15), async {
+            while let Some(event) = events.recv().await {
+                if matches!(event, PlayerEvent::SessionDisconnected { .. }) {
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("Spotify's Connect transport stopped responding")
+        })
+        .await
+        .context("Spotify did not acknowledge disconnecting")??;
+        self.stop_decoder().await?;
+        self.hybrid_detached
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn stop_decoder(&self) -> Result<()> {
+        self.cancel_hybrid_events();
+        self.player.stop();
+        // Player processes commands in order. Subscribing after Stop and
+        // requesting an unchanged volume echo is a barrier even when the
+        // decoder was already stopped, which emits no Stopped event.
+        let mut events = self.player.get_player_event_channel();
+        let volume = self.state.lock().unwrap_or_else(|p| p.into_inner()).volume;
+        self.player.emit_volume_changed_event(volume);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(event) = events.recv().await {
+                if matches!(event, PlayerEvent::VolumeChanged { .. }) {
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("Spotify's decoder stopped responding")
+        })
+        .await
+        .context("Spotify did not acknowledge stopping")?
+    }
+
+    /// Explicit single-item list: Spirc has no context to resolve or autoplay.
+    /// Stop acknowledgement also drains the previous play request before the
+    /// tagged observer subscribes, including an A, B, A sequence.
+    pub async fn hybrid_load(
+        &self,
+        tag: PlaybackTag,
+        spec: LoadSpec,
+        notify: Notify,
+    ) -> Result<()> {
+        let track = spec.hybrid_track()?;
+        self.stop_for_handoff().await?;
+        let events = self.player.get_player_event_channel();
+        let expected = spec.uris.first().cloned().context("Missing hybrid track")?;
+        // Spirc's from_tracks creates a synthetic context and still resolves
+        // autoplay when SessionConfig enables it. Keep Spirc detached and
+        // give the decoder exactly this list's sole track instead.
+        self.player.load(track, spec.play, spec.position_ms);
+        let detached = Arc::clone(&self.hybrid_detached);
+        let tagged_notify: Notify = Arc::new(move |event| {
+            if matches!(
+                event,
+                EngineEvent::Hybrid {
+                    event: HybridEvent::Interrupted,
+                    ..
+                }
+            ) {
+                detached.store(false, std::sync::atomic::Ordering::SeqCst);
+            }
+            notify(event);
+        });
+        let task = tokio::spawn(run_hybrid_events(events, expected, tag, tagged_notify));
+        *self.hybrid_events.lock().unwrap_or_else(|p| p.into_inner()) = Some(task.abort_handle());
+        Ok(())
+    }
+
+    pub fn hybrid_transport(&self, playing: bool) {
+        if playing {
+            self.player.play();
+        } else {
+            self.player.pause();
+        }
+    }
+
+    pub fn hybrid_seek(&self, position_ms: u32) {
+        self.player.seek(position_ms);
+    }
+
+    pub fn preload(&self, uri: &str) -> Result<()> {
+        self.player.preload(SpotifyUri::from_uri(uri)?);
+        Ok(())
     }
 
     fn send_command(&self, command: PlayerCommand) -> Result<()> {
@@ -963,6 +1126,68 @@ async fn run_events(
         };
         if let Some(snapshot) = snapshot {
             notify(EngineEvent::State(snapshot));
+        }
+    }
+}
+
+async fn run_hybrid_events(
+    mut events: tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>,
+    expected: String,
+    tag: PlaybackTag,
+    notify: Notify,
+) {
+    let mut request = None;
+    let mut state = LocalState::default();
+    while let Some(event) = events.recv().await {
+        if let PlayerEvent::PlayRequestIdChanged { play_request_id } = &event {
+            if request.is_some_and(|current| current != *play_request_id) {
+                notify(EngineEvent::Hybrid {
+                    tag,
+                    event: HybridEvent::Interrupted,
+                });
+                break;
+            }
+            request = Some(*play_request_id);
+            continue;
+        }
+        if request.is_none()
+            || event
+                .get_play_request_id()
+                .is_some_and(|id| Some(id) != request)
+        {
+            continue;
+        }
+        if let PlayerEvent::TrackChanged { audio_item } = &event
+            && local_track(audio_item).uri != expected
+        {
+            continue;
+        }
+        if let PlayerEvent::EndOfTrack { track_id, .. }
+        | PlayerEvent::Unavailable { track_id, .. }
+        | PlayerEvent::AudioKeyUnavailable { track_id, .. } = &event
+            && track_id.to_uri() != expected
+        {
+            continue;
+        }
+        let completion = match &event {
+            PlayerEvent::EndOfTrack { .. } => Some(HybridEvent::EndOfTrack),
+            PlayerEvent::Unavailable { .. } => Some(HybridEvent::Failed(
+                "This Spotify track is unavailable".into(),
+            )),
+            PlayerEvent::AudioKeyUnavailable { .. } => {
+                Some(HybridEvent::Failed(AUDIO_KEY_REFUSED.into()))
+            }
+            _ => None,
+        };
+        if let Some(event) = completion {
+            notify(EngineEvent::Hybrid { tag, event });
+            break;
+        }
+        if apply_event(&mut state, event) {
+            notify(EngineEvent::Hybrid {
+                tag,
+                event: HybridEvent::State(Box::new(state.clone())),
+            });
         }
     }
 }
@@ -1573,6 +1798,126 @@ mod tests {
                 disc_number: 1,
             },
         }
+    }
+
+    #[tokio::test]
+    async fn hybrid_observer_tags_completion_and_ignores_old_requests() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::clone(&recorded);
+        let notify: Notify = Arc::new(move |event| events.lock().unwrap().push(event));
+        let tag = PlaybackTag {
+            generation: 3,
+            occurrence: crate::hybrid_queue::EntryId(7),
+        };
+        for event in [
+            PlayerEvent::PlayRequestIdChanged {
+                play_request_id: 42,
+            },
+            PlayerEvent::PlayRequestIdChanged {
+                play_request_id: 42,
+            },
+            PlayerEvent::TrackChanged {
+                audio_item: Box::new(interlude()),
+            },
+            PlayerEvent::EndOfTrack {
+                play_request_id: 41,
+                track_id: uri(),
+            },
+            PlayerEvent::EndOfTrack {
+                play_request_id: 42,
+                track_id: SpotifyUri::from_uri("spotify:track:6rqhFgbbKwnb9MLmUQDhG6").unwrap(),
+            },
+            PlayerEvent::EndOfTrack {
+                play_request_id: 42,
+                track_id: uri(),
+            },
+            PlayerEvent::EndOfTrack {
+                play_request_id: 42,
+                track_id: uri(),
+            },
+        ] {
+            sender.send(event).unwrap();
+        }
+        drop(sender);
+        run_hybrid_events(receiver, uri().to_uri(), tag, notify).await;
+        let events = recorded.lock().unwrap();
+        assert_eq!(events.iter().filter(|e| matches!(e, EngineEvent::Hybrid { tag: actual, event: HybridEvent::EndOfTrack } if *actual == tag)).count(), 1);
+        assert!(!events.iter().any(|e| matches!(
+            e,
+            EngineEvent::Hybrid {
+                event: HybridEvent::Interrupted,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn hybrid_child_load_rejects_contexts_and_every_form_of_continuation() {
+        let spec = LoadSpec {
+            uris: vec![uri().to_uri()],
+            shuffle: Some(false),
+            repeat: Some(RepeatMode::Off),
+            ..Default::default()
+        };
+        assert_eq!(spec.hybrid_track().unwrap(), uri());
+        for invalid in [
+            LoadSpec {
+                context_uri: Some("spotify:playlist:context".into()),
+                ..spec.clone()
+            },
+            LoadSpec {
+                uris: vec![uri().to_uri(), uri().to_uri()],
+                ..spec.clone()
+            },
+            LoadSpec {
+                autoplay: true,
+                ..spec.clone()
+            },
+            LoadSpec {
+                shuffle: Some(true),
+                ..spec.clone()
+            },
+            LoadSpec {
+                repeat: Some(RepeatMode::Track),
+                ..spec.clone()
+            },
+            LoadSpec {
+                repeat: Some(RepeatMode::Context),
+                ..spec.clone()
+            },
+        ] {
+            assert!(invalid.hybrid_track().is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn hybrid_observer_reports_a_connect_replacement_without_adopting_it() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::clone(&recorded);
+        let notify: Notify = Arc::new(move |event| events.lock().unwrap().push(event));
+        let tag = PlaybackTag {
+            generation: 8,
+            occurrence: crate::hybrid_queue::EntryId(2),
+        };
+        sender
+            .send(PlayerEvent::PlayRequestIdChanged { play_request_id: 1 })
+            .unwrap();
+        sender
+            .send(PlayerEvent::PlayRequestIdChanged { play_request_id: 2 })
+            .unwrap();
+        sender
+            .send(PlayerEvent::EndOfTrack {
+                play_request_id: 2,
+                track_id: uri(),
+            })
+            .unwrap();
+        drop(sender);
+        run_hybrid_events(receiver, uri().to_uri(), tag, notify).await;
+        assert!(
+            matches!(recorded.lock().unwrap().as_slice(), [EngineEvent::Hybrid { tag: actual, event: HybridEvent::Interrupted }] if *actual == tag)
+        );
     }
 
     #[test]

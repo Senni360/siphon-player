@@ -1,10 +1,11 @@
-//! Spotify links as they arrive from outside: the desktop's URL handler,
+//! Music links as they arrive from outside: the desktop's URL handler,
 //! the command line, and a second launch handing one to the running
 //! instance.
 //!
 //! Every shape Spotify hands out comes back as the one canonical URI,
 //! `spotify:<kind>:<id>` or `spotify:search:<encoded query>`, or nothing
 //! when it is not something the app can open.
+//! SoundCloud links retain their public URL for asynchronous `/resolve`.
 
 /// Resource pages. Search links carry text instead of a resource id.
 const KINDS: [&str; 7] = [
@@ -42,6 +43,14 @@ pub fn canonical_context_uri(uri: &str) -> String {
 /// without a locale segment (`/intl-de/`), a query string, or the old
 /// `/user/NAME/playlist/ID` shape.
 pub fn parse(text: &str) -> Option<String> {
+    if let Some(url) = soundcloud_url(text) {
+        return Some(url);
+    }
+    if crate::soundcloud::track_id(text.trim()).is_some()
+        || crate::soundcloud::playlist_id(text.trim()).is_some()
+    {
+        return Some(text.trim().to_owned());
+    }
     if let Some(query) = search_query(text) {
         return Some(format!(
             "spotify:search:{}",
@@ -89,6 +98,28 @@ pub fn parse(text: &str) -> Option<String> {
         return None;
     }
     Some(format!("spotify:{kind}:{id}"))
+}
+
+/// Retain a public SoundCloud link for asynchronous /resolve. Credentials and
+/// arbitrary hosts are never accepted by the external-link handler.
+pub fn soundcloud_url(text: &str) -> Option<String> {
+    let mut url = reqwest::Url::parse(text.trim()).ok()?;
+    if !matches!(url.scheme(), "https" | "http")
+        || !matches!(
+            url.host_str(),
+            Some(
+                "soundcloud.com" | "www.soundcloud.com" | "m.soundcloud.com" | "on.soundcloud.com"
+            )
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+        || url.path().trim_matches('/').is_empty()
+    {
+        return None;
+    }
+    url.set_fragment(None);
+    Some(url.to_string())
 }
 
 /// Decodes a search link once. A path's `+` is literal, not a form-encoded
@@ -308,4 +339,27 @@ mod tests {
             assert_eq!(parse(invalid), None, "{invalid}");
         }
     }
+}
+#[test]
+fn soundcloud_links_keep_the_resolve_target_and_reject_foreign_hosts() {
+    for address in [
+        "https://soundcloud.com/u/song",
+        "https://m.soundcloud.com/u/sets/list",
+        "https://on.soundcloud.com/short",
+    ] {
+        assert_eq!(parse(address).as_deref(), Some(address));
+    }
+    for address in [
+        "https://soundcloud.com.evil/u/song",
+        "https://user:password@soundcloud.com/u/song",
+        "https://soundcloud.com:444/u/song",
+        "https://example.com/u/song",
+        "https://soundcloud.com/",
+    ] {
+        assert_eq!(soundcloud_url(address), None);
+    }
+    assert_eq!(
+        parse("soundcloud:track:7").as_deref(),
+        Some("soundcloud:track:7")
+    );
 }
