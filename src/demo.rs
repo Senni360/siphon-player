@@ -1320,6 +1320,14 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 "No confident YouTube match for Northern Lights. Nothing was downloaded.",
             ),
             "soundcloud-profile" => soundcloud_profile(app),
+            "mixed-create" => {
+                app.dialog = Some(Dialog::MixedPlaylist {
+                    id: None,
+                    name: String::new(),
+                    description: String::new(),
+                    tracks: Vec::new(),
+                });
+            }
             "soundcloud" => app.search.source = SearchSource::SoundCloud,
             "soundcloud-preview" => {
                 let mut previews = Vec::new();
@@ -5809,6 +5817,29 @@ mod tests {
                 text.iter().any(|(label, _)| label == "Preview only"),
                 expected
             );
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn unnamed_mixed_playlists_cannot_be_saved() {
+        use egui::accesskit::Role;
+        let (ctx, mut app) = accessible_app("mixed-name-required");
+        for name in ["", "   ", "A named mix"] {
+            app.dialog = Some(Dialog::MixedPlaylist {
+                id: None,
+                name: name.into(),
+                description: String::new(),
+                tracks: Vec::new(),
+            });
+            accessible_frame(&ctx, &mut app, vec![]);
+            let tree = accessible_frame(&ctx, &mut app, vec![]);
+            let save = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.role() == Role::Button && node.label() == Some("Save"))
+                .expect("mixed playlist Save button");
+            assert_eq!(save.1.is_disabled(), name.trim().is_empty());
         }
         app.backend.shutdown();
     }

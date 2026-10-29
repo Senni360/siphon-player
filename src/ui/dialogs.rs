@@ -1009,9 +1009,12 @@ fn mixed_playlist(app: &mut App, ui: &mut egui::Ui) {
     let valid = !name.trim().is_empty();
     ui.add_space(20.0);
     buttons(ui, |ui| {
-        if (theme::pill_button(ui, &palette, &gettext(locale, "Save"), true).clicked() || submit)
-            && valid
-        {
+        let save = ui
+            .add_enabled_ui(valid, |ui| {
+                theme::pill_button(ui, &palette, &gettext(locale, "Save"), true)
+            })
+            .inner;
+        if valid && (save.clicked() || submit) {
             app.actions.push(action);
         }
         if theme::pill_button(ui, &palette, &gettext(locale, "Cancel"), false).clicked() {

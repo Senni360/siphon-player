@@ -96,6 +96,9 @@ SoundCloud rows in a Spotify playlist are local insertions. Spotify and other
 devices do not see them. The existing **SC** badge's tooltip explains this.
 Local mixed playlists also stay on this computer. Both use hybrid playback,
 including shuffle, across the complete combined list.
+Create a local mixed playlist from the library's **+** menu. Enter a name to
+enable **Save**. Open its **More** menu or right-click its sidebar row to edit
+the name and description, duplicate it, or delete it from this computer.
 
 Loaded sets appear immediately. Otherwise the runtime reads the set membership,
 inserts placeholder rows and fills every missing track through batched metadata

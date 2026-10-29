@@ -226,6 +226,8 @@ their order and repeated occurrences, just like local single-song additions.
 Unloaded sets show placeholder rows while their metadata loads. The **SC**
 badge explains that playlist additions stay on this computer. A Spotify
 playlist's More menu can copy its rows into a mixed playlist.
+Give a mixed playlist a name to enable **Save**. Its **More** menu and sidebar
+context menu offer **Edit details**, **Duplicate playlist** and **Delete**.
 
 Local mixed-playlist and Spotify-overlay storage formats are described in
 [Settings and files](docs/_reference/settings-and-files.md#local-mixed-playlist-files).
