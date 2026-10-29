@@ -18,6 +18,7 @@ struct PendingStart {
     repeat: RepeatMode,
     play: bool,
     navigation: Vec<bool>,
+    context_navigation: Vec<bool>,
     resolving: bool,
     manual_started: bool,
 }
@@ -35,6 +36,8 @@ pub struct PendingHybridSnapshot {
     navigation: Vec<bool>,
     #[serde(default)]
     manual_started: bool,
+    #[serde(default)]
+    context_navigation: Vec<bool>,
 }
 
 pub(super) struct HybridPlayback {
@@ -221,7 +224,9 @@ impl App {
                             && entry.track.uri == *uri
                             && let Some(transition) = self.hybrid.queue.skip_to(entry.id)
                         {
-                            self.hybrid.pending.as_mut().unwrap().manual_started = true;
+                            let pending = self.hybrid.pending.as_mut().unwrap();
+                            pending.manual_started = true;
+                            pending.context_navigation.append(&mut pending.navigation);
                             let play = self.hybrid.play_intent;
                             self.hybrid_transition(transition, 0, play);
                             return true;
@@ -549,6 +554,7 @@ impl App {
                 repeat,
                 play: true,
                 navigation: Vec::new(),
+                context_navigation: Vec::new(),
                 resolving: true,
                 manual_started: false,
             });
@@ -671,6 +677,7 @@ impl App {
                         index,
                         pending.shuffle,
                         repeat_to_queue(pending.repeat),
+                        &pending.context_navigation,
                     );
                     None
                 } else {
@@ -1124,6 +1131,7 @@ impl App {
                 return;
             }
             pending.manual_started = true;
+            pending.context_navigation.append(&mut pending.navigation);
         }
         let play = self.hybrid.play_intent;
         let transition = self.hybrid.queue.next();
@@ -1516,6 +1524,7 @@ impl App {
             repeat: repeat_to_queue(pending.repeat),
             navigation: pending.navigation.clone(),
             manual_started: pending.manual_started,
+            context_navigation: pending.context_navigation.clone(),
         })
     }
 
@@ -1550,6 +1559,7 @@ impl App {
             navigation: saved.navigation,
             resolving: false,
             manual_started: saved.manual_started,
+            context_navigation: saved.context_navigation,
         });
         self.project_hybrid();
     }

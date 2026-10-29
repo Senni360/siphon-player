@@ -227,6 +227,7 @@ impl HybridQueue {
         start_at: Option<usize>,
         shuffle: bool,
         repeat: Repeat,
+        navigation: &[bool],
     ) {
         let current = self.state.current.take();
         let history: Vec<_> = self
@@ -236,7 +237,16 @@ impl HybridQueue {
             .filter(|played| played.entry.origin == Origin::Manual)
             .collect();
         let position = self.state.position_ms;
+        let manual = std::mem::take(&mut self.state.manual);
         self.start(context, start_at, shuffle, repeat);
+        for next in navigation {
+            if *next {
+                self.next();
+            } else {
+                self.previous(0);
+            }
+        }
+        self.state.manual = manual;
         if let Some(played) = self.state.current.take() {
             self.state.history.push(played);
         }
@@ -673,6 +683,7 @@ mod tests {
             Some(0),
             false,
             Repeat::Context,
+            &[],
         );
         assert_eq!(queue.current().unwrap().id, manual[1]);
         assert_eq!(queue.position_ms(), 7_000);
