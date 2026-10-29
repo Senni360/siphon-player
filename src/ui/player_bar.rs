@@ -518,7 +518,17 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
             theme::regular(12.0),
             palette.secondary,
         );
-        title.size().x.max(subtitle.size().x).min(text_width)
+        let source_width =
+            if crate::soundcloud::Source::of(&now.uri) == crate::soundcloud::Source::SoundCloud {
+                super::widgets::SOURCE_BADGE_SIZE.x + 6.0
+            } else {
+                0.0
+            };
+        title
+            .size()
+            .x
+            .max(subtitle.size().x + source_width)
+            .min(text_width)
     };
     let info_rect = Rect::from_min_size(pos2(text_left, cy - 18.0), vec2(text_width, 36.0));
 
@@ -542,6 +552,10 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     }
     let mut responses = vec![cover_response, title_response];
     text_ui.horizontal_top(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        if super::widgets::source_badge(ui, &palette, app.locale, &now.uri).is_some() {
+            ui.add_space(6.0);
+        }
         if now.artists.is_empty() {
             let response = theme::link(ui, &now.subtitle, theme::regular(12.0), palette.secondary)
                 .interact(drag_sense);

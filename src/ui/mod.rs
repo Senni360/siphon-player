@@ -340,6 +340,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                 }
                                 Page::Playlist(id) => collection::playlist(app, ui, &id),
                                 Page::MixedPlaylist(id) => collection::mixed_playlist(app, ui, &id),
+                                Page::SoundCloud(uri) => collection::soundcloud(app, ui, &uri),
                                 Page::Album(id) => collection::album(app, ui, &id),
                                 Page::Artist(id) => artist::show(app, ui, &id),
                                 Page::Show(id) => show::show(app, ui, &id),

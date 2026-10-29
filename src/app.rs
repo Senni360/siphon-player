@@ -519,6 +519,7 @@ pub struct App {
     pub recents_generation: u64,
     pub queue_tab: QueueTab,
     pub search: SearchState,
+    pub soundcloud_pages: HashMap<String, SoundCloudPage>,
     pub playlist_pages: HashMap<String, PlaylistPage>,
     /// One checkpoint snapshot at a time, including pages evicted while it writes.
     playlist_cache_write_in_flight: bool,
@@ -1196,6 +1197,7 @@ impl App {
                 .and_then(QueueTab::decode)
                 .unwrap_or_default(),
             search: SearchState::default(),
+            soundcloud_pages: HashMap::new(),
             playlist_pages: HashMap::new(),
             playlist_cache_write_in_flight: false,
             load_generation: 0,
@@ -2718,6 +2720,39 @@ impl App {
                 continue;
             }
             match event {
+                Event::SoundCloudSearch { request, results } => {
+                    self.soundcloud_search_finished(request, *results)
+                }
+                Event::SoundCloudCollection {
+                    uri,
+                    generation,
+                    more,
+                    result,
+                } => {
+                    if let Some(page) = self.soundcloud_pages.get_mut(&uri)
+                        && page.generation == generation
+                    {
+                        page.generation += 1;
+                        page.loading = false;
+                        match result {
+                            Ok(mut value) => {
+                                for track in &value.tracks {
+                                    if let Some(id) = crate::util::uri_id(&track.uri) {
+                                        self.track_cache.insert(id.into(), track.clone());
+                                    }
+                                }
+                                if more && let Some(content) = page.content.get_mut() {
+                                    content.tracks.append(&mut value.tracks);
+                                    content.next = value.next;
+                                } else {
+                                    page.content = Loadable::Loaded(value);
+                                }
+                                page.error = None;
+                            }
+                            Err(error) => page.error = Some(error),
+                        }
+                    }
+                }
                 Event::PlaylistCoverChecked {
                     id,
                     request,
@@ -3168,7 +3203,7 @@ impl App {
                     self.load_new_release_page(true);
                 }
             }
-            Page::MixedPlaylist(_) => {}
+            Page::MixedPlaylist(_) | Page::SoundCloud(_) => {}
             Page::Search => {}
             Page::LikedSongs => {
                 if !self.liked_songs.cache_checked {
@@ -3362,6 +3397,9 @@ impl App {
         self.control_devices_stale = true;
         self.devices_fetched_at = None;
         self.search.results = Loadable::NotLoaded;
+        self.search.soundcloud = Loadable::NotLoaded;
+        self.search.soundcloud_pending = false;
+        self.search.soundcloud_request += 1;
         self.search.committed.clear();
         self.search.committed_run = None;
         self.search.typed_entry = None;
@@ -5425,6 +5463,10 @@ impl App {
     }
 
     pub fn ensure_loaded(&mut self, page: Page) {
+        if let Page::SoundCloud(uri) = &page {
+            self.load_soundcloud_page(uri.clone(), false);
+            return;
+        }
         if matches!(page, Page::MixedPlaylist(_)) {
             return;
         }
@@ -5454,7 +5496,7 @@ impl App {
                     self.load_new_release_page(false);
                 }
             }
-            Page::MixedPlaylist(_) => {}
+            Page::MixedPlaylist(_) | Page::SoundCloud(_) => {}
             Page::Search => {}
             Page::LikedSongs => self.ensure_liked_songs(),
             Page::Albums => {
@@ -6205,6 +6247,25 @@ impl App {
     }
 
     fn reload(&mut self, page: Page) {
+        if let Page::SoundCloud(uri) = &page {
+            if self.soundcloud_pages.get(uri).is_some_and(|state| {
+                state.error.is_some()
+                    && state
+                        .content
+                        .get()
+                        .is_some_and(|content| content.next.is_some())
+            }) {
+                self.load_soundcloud_page(uri.clone(), true);
+                return;
+            }
+            if let Some(state) = self.soundcloud_pages.get_mut(uri) {
+                state.content = Loadable::NotLoaded;
+                state.loading = false;
+            }
+            self.load_soundcloud_page(uri.clone(), false);
+            return;
+        }
+
         if matches!(&page, Page::Artist(id) | Page::Playlist(id) | Page::Album(id) | Page::Show(id) if id.contains(':'))
         {
             return;
@@ -6757,10 +6818,23 @@ impl App {
     }
 
     fn run_search(&mut self, query: String) {
+        if crate::soundcloud::browse::is_url(&query) {
+            if self.search.source == SearchSource::Spotify {
+                self.search.source = SearchSource::SoundCloud;
+            }
+            self.search.filter = SearchFilter::All;
+        }
         if !query.is_empty()
             && query == self.search.committed
             && !self.search.results.needs_load()
             && self.search.error.is_none()
+            && (self.search.source == SearchSource::Spotify
+                || self.search.soundcloud_pending
+                || self
+                    .search
+                    .soundcloud
+                    .get()
+                    .is_none_or(|results| results.errors.is_empty()))
         {
             return;
         }
@@ -6769,7 +6843,8 @@ impl App {
         self.search.committed_run = None;
         self.search.playlists = None;
         self.search.error = None;
-        self.search.catalogue_pending = !query.is_empty();
+        self.search.catalogue_pending =
+            !query.is_empty() && self.search.source != SearchSource::SoundCloud;
         self.search.playlists_pending = false;
         // Results and their query change together. In particular, a failed
         // new query must never inherit the previous query's songs.
@@ -6778,10 +6853,142 @@ impl App {
         } else {
             Loadable::Loading
         };
+        self.search.soundcloud = Loadable::NotLoaded;
+        self.search.soundcloud_request += 1;
+        self.search.soundcloud_pending = false;
+        self.backend.send(Command::SoundCloudSearch(
+            crate::soundcloud::browse::SearchRequest {
+                query: String::new(),
+                serial: self.search.serial,
+                request: self.search.soundcloud_request,
+                more: None,
+            },
+        ));
+        if !query.is_empty() && self.search.source != SearchSource::Spotify {
+            self.actions.push(Action::SearchSoundCloud {
+                query: query.clone(),
+                serial: self.search.serial,
+            });
+        }
         // An empty query also cancels requests waiting on Spotify's quota.
         self.backend.api(ApiRequest::Search {
-            query,
+            query: if self.search.source == SearchSource::SoundCloud {
+                String::new()
+            } else {
+                query
+            },
             serial: self.search.serial,
+        });
+    }
+
+    fn start_soundcloud_search(&mut self, more: Option<SoundCloudSearchKind>) {
+        if self.search.soundcloud_pending
+            || self.search.committed.is_empty()
+            || self.search.source == SearchSource::Spotify
+        {
+            return;
+        }
+        let more = if let Some(kind) = more {
+            let Some(cursor) = self
+                .search
+                .soundcloud
+                .get()
+                .and_then(|value| value.next[kind.index()].clone())
+            else {
+                return;
+            };
+            Some((kind, cursor))
+        } else {
+            if self.search.soundcloud.get().is_none() {
+                self.search.soundcloud = Loadable::Loading;
+            }
+            None
+        };
+        self.search.soundcloud_request += 1;
+        self.search.soundcloud_pending = true;
+        self.backend.send(Command::SoundCloudSearch(
+            crate::soundcloud::browse::SearchRequest {
+                query: self.search.committed.clone(),
+                serial: self.search.serial,
+                request: self.search.soundcloud_request,
+                more,
+            },
+        ));
+    }
+
+    fn soundcloud_search_finished(
+        &mut self,
+        request: crate::soundcloud::browse::SearchRequest,
+        mut results: SoundCloudSearchResults,
+    ) {
+        if request.serial != self.search.serial
+            || request.query != self.search.committed
+            || request.request != self.search.soundcloud_request
+            || self.search.source == SearchSource::Spotify
+        {
+            return;
+        }
+        self.search.soundcloud_pending = false;
+        let found: Vec<Track> = results
+            .tracks
+            .iter()
+            .chain(
+                results
+                    .resolved
+                    .iter()
+                    .flat_map(|value| value.tracks.iter()),
+            )
+            .cloned()
+            .collect();
+        self.cache_soundcloud_tracks(&found);
+        if results.errors.is_empty() || !results.is_empty() {
+            self.remember_search(&request.query);
+        }
+        if let Some((kind, _)) = request.more
+            && let Some(current) = self.search.soundcloud.get_mut()
+        {
+            // A failed page retains its cursor and rows so Show more can retry.
+            if results.errors.is_empty() {
+                match kind {
+                    SoundCloudSearchKind::Tracks => current.tracks.append(&mut results.tracks),
+                    SoundCloudSearchKind::Playlists => {
+                        current.playlists.append(&mut results.playlists)
+                    }
+                    SoundCloudSearchKind::Users => current.users.append(&mut results.users),
+                }
+                current.next[kind.index()] = results.next[kind.index()].take();
+            }
+            current.retry_page = (!results.errors.is_empty()).then_some(kind);
+            current.errors = results.errors;
+        } else {
+            self.search.soundcloud = Loadable::Loaded(results);
+        }
+    }
+
+    fn load_soundcloud_page(&mut self, uri: String, more: bool) {
+        let page = self.soundcloud_pages.entry(uri.clone()).or_default();
+        if page.loading {
+            return;
+        }
+        let cursor = if more {
+            let Some(cursor) = page.content.get().and_then(|value| value.next.clone()) else {
+                return;
+            };
+            Some(cursor)
+        } else {
+            if page.content.get().is_some() {
+                return;
+            }
+            page.content = Loadable::Loading;
+            None
+        };
+        page.generation += 1;
+        page.loading = true;
+        page.error = None;
+        self.backend.send(Command::SoundCloudCollection {
+            uri,
+            generation: page.generation,
+            cursor,
         });
     }
 
@@ -6803,6 +7010,7 @@ impl App {
         if self.search.serial != serial
             || self.search.catalogue_pending
             || self.search.playlists_pending
+            || self.search.soundcloud_pending
         {
             self.search.committed_run = Some((run, false));
         }
@@ -8493,7 +8701,10 @@ impl App {
                 serial,
                 result,
             } => {
-                if serial != self.search.serial || query != self.search.committed {
+                if serial != self.search.serial
+                    || query != self.search.committed
+                    || self.search.source == SearchSource::SoundCloud
+                {
                     return;
                 }
                 self.search.playlists_pending = false;
@@ -8511,7 +8722,10 @@ impl App {
                 serial,
                 result,
             } => {
-                if serial != self.search.serial || query != self.search.committed {
+                if serial != self.search.serial
+                    || query != self.search.committed
+                    || self.search.source == SearchSource::SoundCloud
+                {
                     return;
                 }
                 self.search.catalogue_pending = false;
@@ -12093,6 +12307,72 @@ impl App {
                 self.settings_dirty = true;
             }
             Action::SetSearchFilter(filter) => self.search.filter = filter,
+            Action::SetSearchSource(source) => {
+                if self.search.source == source {
+                    return;
+                }
+                let previous = self.search.source;
+                self.search.source = source;
+                if source == SearchSource::Spotify {
+                    self.search.soundcloud_request += 1;
+                    self.search.soundcloud_pending = false;
+                    if matches!(self.search.soundcloud, Loadable::Loading) {
+                        self.search.soundcloud = Loadable::NotLoaded;
+                    }
+                    self.backend.send(Command::SoundCloudSearch(
+                        crate::soundcloud::browse::SearchRequest {
+                            query: String::new(),
+                            serial: self.search.serial,
+                            request: self.search.soundcloud_request,
+                            more: None,
+                        },
+                    ));
+                }
+                if previous == SearchSource::SoundCloud
+                    && !self.search.committed.is_empty()
+                    && self.search.results.get().is_none()
+                {
+                    self.search.catalogue_pending = true;
+                    self.backend.api(ApiRequest::Search {
+                        query: self.search.committed.clone(),
+                        serial: self.search.serial,
+                    });
+                }
+                if source == SearchSource::SoundCloud {
+                    self.search.catalogue_pending = false;
+                    self.search.playlists_pending = false;
+                    self.backend.api(ApiRequest::Search {
+                        query: String::new(),
+                        serial: self.search.serial,
+                    });
+                }
+                if !source.supports(self.search.filter) {
+                    self.search.filter = SearchFilter::All;
+                }
+                if source != SearchSource::Spotify
+                    && !self.search.committed.is_empty()
+                    && self.search.soundcloud.needs_load()
+                {
+                    self.actions.push(Action::SearchSoundCloud {
+                        query: self.search.committed.clone(),
+                        serial: self.search.serial,
+                    });
+                }
+            }
+            Action::SearchSoundCloud { query, serial } => {
+                if serial == self.search.serial
+                    && query == self.search.committed
+                    && self.search.source != SearchSource::Spotify
+                {
+                    self.start_soundcloud_search(None);
+                }
+            }
+            Action::MoreSoundCloud(kind) => self.start_soundcloud_search(Some(kind)),
+            Action::OpenSoundCloud(uri) => {
+                if let Some(page) = Page::from_uri(&uri) {
+                    self.open(page);
+                }
+            }
             Action::SetTopPeriod(period) => self.set_top_period(period),
             Action::FocusSearch => {
                 self.search.focus_requested = true;
@@ -12100,6 +12380,7 @@ impl App {
                     self.open(Page::Search);
                 }
             }
+            Action::LoadMore(Page::SoundCloud(uri)) => self.load_soundcloud_page(uri, true),
             Action::LoadMore(page) => self.load_more(page),
             Action::LoadWindow { page, position } => self.load_window(page, position),
             Action::RetryWindow(page) => self.retry_window(page),
@@ -20745,6 +21026,7 @@ mod tests {
         for sign_out in [false, true] {
             let mut app = test_app("search-cancel");
             let serial = searching(&mut app, "old");
+            app.search.soundcloud = Loadable::Loaded(SoundCloudSearchResults::default());
             if sign_out {
                 app.reset_data();
             } else {
@@ -20761,6 +21043,7 @@ mod tests {
                 result: Ok(search_page("old")),
             });
             assert!(matches!(app.search.results, Loadable::NotLoaded));
+            assert!(matches!(app.search.soundcloud, Loadable::NotLoaded));
             assert!(app.search.playlists.is_none());
             assert!(!app.search.catalogue_pending && !app.search.playlists_pending);
             app.backend.shutdown();
@@ -20775,8 +21058,308 @@ mod tests {
         });
     }
 
+    #[test]
+    fn changing_search_source_preserves_results_and_resets_only_unsupported_filters() {
+        let mut app = test_app("soundcloud-search-source");
+        app.search.committed = "Bonobo".into();
+        app.search.filter = SearchFilter::Albums;
+        app.search.soundcloud = Loadable::Loaded(SoundCloudSearchResults::default());
+        let ctx = egui::Context::default();
+        app.actions
+            .push(Action::SetSearchSource(SearchSource::SoundCloud));
+        app.apply_actions(&ctx);
+        assert_eq!(app.search.source, SearchSource::SoundCloud);
+        assert_eq!(app.search.filter, SearchFilter::All);
+        assert_eq!(app.search.committed, "Bonobo");
+        assert!(app.search.soundcloud.get().is_some());
+        app.search.filter = SearchFilter::Playlists;
+        app.actions
+            .push(Action::SetSearchSource(SearchSource::Spotify));
+        app.apply_actions(&ctx);
+        assert_eq!(app.search.filter, SearchFilter::Playlists);
+        assert!(app.search.soundcloud.get().is_some());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn a_new_search_drops_previous_soundcloud_results_and_emits_a_serialled_hook() {
+        let mut app = test_app("soundcloud-search-hook");
+        app.backend.set_offline(true);
+        app.search.soundcloud = Loadable::Loaded(SoundCloudSearchResults::default());
+        app.run_search("Bonobo".into());
+        assert!(matches!(app.search.soundcloud, Loadable::NotLoaded));
+        assert!(
+            matches!(app.actions.as_slice(), [Action::SearchSoundCloud { query, serial }]
+            if query == "Bonobo" && *serial == app.search.serial)
+        );
+        app.actions.clear();
+        app.search.source = SearchSource::Spotify;
+        app.run_search("another query".into());
+        assert!(app.actions.is_empty());
+        app.apply(
+            Action::SetSearchSource(SearchSource::All),
+            &egui::Context::default(),
+        );
+        assert!(
+            matches!(app.actions.as_slice(), [Action::SearchSoundCloud { query, serial }]
+            if query == "another query" && *serial == app.search.serial)
+        );
+        app.apply_actions(&egui::Context::default());
+        assert!(app.actions.is_empty());
+        assert!(matches!(app.search.soundcloud, Loadable::Loading));
+        app.backend.shutdown();
+    }
+
+    fn sc_request(app: &App) -> crate::soundcloud::browse::SearchRequest {
+        crate::soundcloud::browse::SearchRequest {
+            query: app.search.committed.clone(),
+            serial: app.search.serial,
+            request: app.search.soundcloud_request,
+            more: None,
+        }
+    }
+
+    #[test]
+    fn soundcloud_search_discards_old_queries_sources_and_requests() {
+        let mut app = test_app("sc-stale-search");
+        app.backend.set_offline(true);
+        app.run_search("first".into());
+        app.apply_actions(&egui::Context::default());
+        let first = sc_request(&app);
+        app.run_search("second".into());
+        app.apply_actions(&egui::Context::default());
+        let current = sc_request(&app);
+        let answer = SoundCloudSearchResults {
+            tracks: vec![Track {
+                uri: "soundcloud:track:1".into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        app.soundcloud_search_finished(first, answer.clone());
+        assert!(app.search.soundcloud_pending);
+        assert!(app.search.soundcloud.get().is_none());
+        let mut wrong_query = current.clone();
+        wrong_query.query = "other".into();
+        app.soundcloud_search_finished(wrong_query, answer.clone());
+        assert!(app.search.soundcloud_pending);
+        app.apply(
+            Action::SetSearchSource(SearchSource::Spotify),
+            &egui::Context::default(),
+        );
+        app.apply(
+            Action::SetSearchSource(SearchSource::All),
+            &egui::Context::default(),
+        );
+        app.apply_actions(&egui::Context::default());
+        app.soundcloud_search_finished(current, answer.clone());
+        assert!(app.search.soundcloud.get().is_none());
+        app.soundcloud_search_finished(sc_request(&app), answer);
+        assert_eq!(app.search.soundcloud.get().unwrap().tracks.len(), 1);
+        assert!(!app.search.soundcloud_pending);
+        assert!(app.track_cache.contains_key("soundcloud:track:1"));
+        assert_eq!(app.settings.search_history, ["second"]);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_pages_append_only_the_requested_kind_and_failed_pages_can_retry() {
+        let mut app = test_app("sc-search-paging");
+        app.backend.set_offline(true);
+        app.search.committed = "ambient".into();
+        let first = Track {
+            uri: "soundcloud:track:1".into(),
+            ..Default::default()
+        };
+        app.search.soundcloud = Loadable::Loaded(SoundCloudSearchResults {
+            tracks: vec![first.clone()],
+            users: vec![SoundCloudUserSummary {
+                id: 9,
+                ..Default::default()
+            }],
+            next: [
+                Some("search/tracks?cursor=one".into()),
+                None,
+                Some("search/users?cursor=two".into()),
+            ],
+            ..Default::default()
+        });
+        app.start_soundcloud_search(Some(SoundCloudSearchKind::Tracks));
+        let mut request = sc_request(&app);
+        request.more = Some((
+            SoundCloudSearchKind::Tracks,
+            "search/tracks?cursor=one".into(),
+        ));
+        app.soundcloud_search_finished(
+            request.clone(),
+            SoundCloudSearchResults {
+                errors: vec!["Temporary failure".into()],
+                ..Default::default()
+            },
+        );
+        let state = app.search.soundcloud.get().unwrap();
+        assert_eq!(state.tracks.as_slice(), std::slice::from_ref(&first));
+        assert_eq!(state.next[0].as_deref(), Some("search/tracks?cursor=one"));
+        assert_eq!(state.retry_page, Some(SoundCloudSearchKind::Tracks));
+        app.start_soundcloud_search(Some(SoundCloudSearchKind::Tracks));
+        request.request = app.search.soundcloud_request;
+        let second = Track {
+            uri: "soundcloud:track:2".into(),
+            ..Default::default()
+        };
+        app.soundcloud_search_finished(
+            request,
+            SoundCloudSearchResults {
+                tracks: vec![second.clone()],
+                ..Default::default()
+            },
+        );
+        let state = app.search.soundcloud.get().unwrap();
+        assert_eq!(state.tracks, [first, second]);
+        assert_eq!(state.users[0].id, 9);
+        assert_eq!(state.next[0], None);
+        assert_eq!(state.next[2].as_deref(), Some("search/users?cursor=two"));
+        assert!(state.errors.is_empty());
+        assert_eq!(state.retry_page, None);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_only_search_cancels_spotify_and_keeps_typing_history() {
+        let mut app = test_app("sc-only-search");
+        app.backend.set_offline(true);
+        app.search.source = SearchSource::SoundCloud;
+        app.run_typed_search("ambient".into());
+        app.apply_actions(&egui::Context::default());
+        assert!(!app.search.catalogue_pending && !app.search.playlists_pending);
+        let serial = app.search.serial;
+        app.handle_api(ApiResponse::Search {
+            query: "ambient".into(),
+            serial,
+            result: Ok(catalogue_answer()),
+        });
+        assert!(app.search.results.get().is_none());
+        app.soundcloud_search_finished(sc_request(&app), SoundCloudSearchResults::default());
+        assert_eq!(app.settings.search_history, ["ambient"]);
+        app.apply(
+            Action::SetSearchSource(SearchSource::All),
+            &egui::Context::default(),
+        );
+        assert!(app.search.catalogue_pending);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_collection_pages_ignore_old_generations_and_append_uploads() {
+        let mut app = test_app("sc-collection-paging");
+        app.backend.set_offline(true);
+        let uri = crate::soundcloud::user_uri(9);
+        app.open(Page::SoundCloud(uri.clone()));
+        let generation = app.soundcloud_pages[&uri].generation;
+        let content = SoundCloudCollection {
+            title: "Uploader".into(),
+            tracks: vec![Track {
+                uri: "soundcloud:track:1".into(),
+                ..Default::default()
+            }],
+            next: Some("users/9/tracks?cursor=one".into()),
+        };
+        app.handle_backend_events(vec![Event::SoundCloudCollection {
+            uri: uri.clone(),
+            generation: generation + 1,
+            more: false,
+            result: Ok(content.clone()),
+        }]);
+        assert!(app.soundcloud_pages[&uri].loading);
+        app.handle_backend_events(vec![Event::SoundCloudCollection {
+            uri: uri.clone(),
+            generation,
+            more: false,
+            result: Ok(content),
+        }]);
+        let before = app.soundcloud_pages[&uri].generation;
+        app.load_soundcloud_page(uri.clone(), true);
+        let generation = app.soundcloud_pages[&uri].generation;
+        app.handle_backend_events(vec![Event::SoundCloudCollection {
+            uri: uri.clone(),
+            generation,
+            more: true,
+            result: Err("Temporary failure".into()),
+        }]);
+        app.apply(
+            Action::Reload(Page::SoundCloud(uri.clone())),
+            &egui::Context::default(),
+        );
+        assert_eq!(
+            app.soundcloud_pages[&uri]
+                .content
+                .get()
+                .unwrap()
+                .tracks
+                .len(),
+            1
+        );
+        let generation = app.soundcloud_pages[&uri].generation;
+        app.handle_backend_events(vec![Event::SoundCloudCollection {
+            uri: uri.clone(),
+            generation,
+            more: true,
+            result: Ok(SoundCloudCollection {
+                tracks: vec![Track {
+                    uri: "soundcloud:track:2".into(),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+        }]);
+        let page = &app.soundcloud_pages[&uri];
+        assert!(!page.loading);
+        assert!(page.generation > before);
+        let content = page.content.get().unwrap();
+        assert_eq!(content.title, "Uploader");
+        assert_eq!(content.tracks.len(), 2);
+        assert!(content.next.is_none());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn pasting_a_soundcloud_link_reveals_its_source_and_entity_kind() {
+        let mut app = test_app("sc-paste-link");
+        app.backend.set_offline(true);
+        app.search.source = SearchSource::Spotify;
+        app.search.filter = SearchFilter::Albums;
+        app.run_search("https://soundcloud.com/uploader/track".into());
+        app.apply_actions(&egui::Context::default());
+        assert_eq!(app.search.source, SearchSource::SoundCloud);
+        assert_eq!(app.search.filter, SearchFilter::All);
+        assert!(app.search.soundcloud_pending);
+        assert!(!app.search.catalogue_pending);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn resubmitting_a_query_can_refresh_an_expired_soundcloud_cursor() {
+        let mut app = test_app("sc-refresh-cursor");
+        app.backend.set_offline(true);
+        app.search.committed = "ambient".into();
+        app.search.results = Loadable::Loaded(Default::default());
+        app.search.soundcloud = Loadable::Loaded(SoundCloudSearchResults {
+            errors: vec!["Expired cursor".into()],
+            retry_page: Some(SoundCloudSearchKind::Tracks),
+            ..Default::default()
+        });
+        let serial = app.search.serial;
+        app.run_search("ambient".into());
+        app.apply_actions(&egui::Context::default());
+        assert!(app.search.serial > serial);
+        assert!(app.search.soundcloud_pending);
+        assert!(matches!(app.search.soundcloud, Loadable::Loading));
+        app.backend.shutdown();
+    }
+
     /// A query the debounce committed after a pause, answered with results.
     fn typed_search(app: &mut App, query: &str) {
+        app.backend.set_offline(true);
         app.search.query = query.into();
         app.run_typed_search(query.into());
         let serial = app.search.serial;
@@ -20791,6 +21374,7 @@ mod tests {
 
     /// Enter in the search field.
     fn submit_search(app: &mut App, query: &str) {
+        app.backend.set_offline(true);
         app.search.query = query.into();
         app.actions.push(Action::Search(query.into()));
         app.apply_actions(&egui::Context::default());

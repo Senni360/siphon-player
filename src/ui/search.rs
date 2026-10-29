@@ -7,30 +7,119 @@ use egui::{Align, CornerRadius, Layout, Rect, Sense, Vec2, pos2, vec2};
 use crate::api::models::{Artist, ArtistRef, PlayableItem, SearchResults, pick_image};
 use crate::app::App;
 use crate::i18n::gettext;
-use crate::model::{Action, Loadable, Page, RowContext, SearchFilter};
+use crate::model::{
+    Action, Loadable, Page, RowContext, SearchFilter, SearchSource, SoundCloudSearchKind,
+    SoundCloudSearchResults,
+};
 use crate::theme::{self, Icon};
 
 use super::widgets::{self, TrackRow};
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
-    if app.search.committed.is_empty() && app.search.typed_at.is_none() {
+    let recent_searches = app.search.committed.is_empty() && app.search.typed_at.is_none();
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 8.0;
+        for source in SearchSource::ALL {
+            let label = source.label(app.locale);
+            let response =
+                theme::soft_button(ui, &palette, None, &label, source == app.search.source);
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(
+                    egui::WidgetType::Button,
+                    ui.is_enabled(),
+                    source == app.search.source,
+                    // Translators: {source} is All, Spotify or SoundCloud.
+                    gettext(app.locale, "Search source: {source}").replace("{source}", &label),
+                )
+            });
+            if response.clicked() {
+                app.actions.push(Action::SetSearchSource(source));
+            }
+        }
+        if !recent_searches {
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            for filter in SearchFilter::ALL {
+                if !app.search.source.supports(filter) {
+                    continue;
+                }
+                let label = filter.label(app.locale);
+                if theme::soft_button(ui, &palette, None, &label, filter == app.search.filter)
+                    .clicked()
+                {
+                    app.actions.push(Action::SetSearchFilter(filter));
+                }
+            }
+        }
+    });
+    if recent_searches {
         recent(app, ui);
         return;
     }
-    ui.add_space(4.0);
-    let labels: Vec<_> = SearchFilter::ALL
-        .iter()
-        .map(|f| (*f, f.label(app.locale)))
-        .collect();
-    let options: Vec<(SearchFilter, &str)> = labels
-        .iter()
-        .map(|(filter, label)| (*filter, label.as_ref()))
-        .collect();
-    if let Some(filter) = widgets::chips(ui, &palette, &options, app.search.filter) {
-        app.actions.push(Action::SetSearchFilter(filter));
-    }
     ui.add_space(12.0);
+    // A pasted link is a direct result, ahead of either service's shelves.
+    let resolved = (app.search.source != SearchSource::Spotify)
+        .then(|| {
+            app.search
+                .soundcloud
+                .get()
+                .and_then(|value| value.resolved.clone())
+        })
+        .flatten();
+    if let Some(resolved) = resolved
+        && !resolved.is_empty()
+    {
+        theme::section_title(ui, &palette, &gettext(app.locale, "From your link"));
+        soundcloud_results(app, ui, &resolved, true);
+        if app.search.source == SearchSource::All {
+            ui.add_space(16.0);
+            theme::section_title(ui, &palette, &gettext(app.locale, "Spotify"));
+            spotify(app, ui);
+        }
+        return;
+    }
+    // Keep both services in view on a wide search page. Narrow windows
+    // retain the usual full-width shelves and rows.
+    if app.search.source == SearchSource::All
+        && SearchSource::SoundCloud.supports(app.search.filter)
+        && ui.available_width() >= 800.0
+    {
+        ui.columns(2, |columns| {
+            theme::section_title(&mut columns[0], &palette, &gettext(app.locale, "Spotify"));
+            columns[0].add_space(8.0);
+            spotify(app, &mut columns[0]);
+            theme::section_title(
+                &mut columns[1],
+                &palette,
+                &gettext(app.locale, "SoundCloud"),
+            );
+            columns[1].add_space(8.0);
+            soundcloud(app, &mut columns[1]);
+        });
+        return;
+    }
+    if app.search.source != SearchSource::SoundCloud {
+        if app.search.source == SearchSource::All {
+            theme::section_title(ui, &palette, &gettext(app.locale, "Spotify"));
+            ui.add_space(8.0);
+        }
+        spotify(app, ui);
+    }
+    if app.search.source != SearchSource::Spotify
+        && SearchSource::SoundCloud.supports(app.search.filter)
+    {
+        ui.add_space(16.0);
+        theme::section_title(ui, &palette, &gettext(app.locale, "SoundCloud"));
+        ui.add_space(8.0);
+        soundcloud(app, ui);
+    }
+}
+
+fn spotify(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
     let pending = app.search.catalogue_pending || app.search.playlists_pending;
     if pending {
         widgets::loading_row(ui, &palette, app.locale);
@@ -58,6 +147,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         return;
     }
     if results.is_empty() {
+        if app.search.source == SearchSource::All {
+            theme::text(
+                ui,
+                gettext(app.locale, "No Spotify results."),
+                theme::regular(13.0),
+                palette.secondary,
+            );
+            return;
+        }
         widgets::empty_state(
             ui,
             &palette,
@@ -78,6 +176,261 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         SearchFilter::Podcasts => shows_grid(app, ui, &results),
         SearchFilter::Episodes => episodes(app, ui, &results, usize::MAX),
     }
+}
+
+fn soundcloud(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let results = match &app.search.soundcloud {
+        Loadable::Loaded(results) => results.clone(),
+        Loadable::Loading => {
+            widgets::loading_row(ui, &palette, app.locale);
+            return;
+        }
+        Loadable::NotLoaded => {
+            theme::text(
+                ui,
+                gettext(app.locale, "SoundCloud search is unavailable."),
+                theme::regular(13.0),
+                palette.secondary,
+            );
+            return;
+        }
+        Loadable::Failed(error) => {
+            let error = error.clone();
+            widgets::error_row(ui, app, &error, None);
+            return;
+        }
+    };
+    for error in &results.errors {
+        widgets::error_row(ui, app, error, None);
+    }
+    if !results.errors.is_empty()
+        && !app.search.soundcloud_pending
+        && theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::Refresh),
+            &gettext(app.locale, "Retry"),
+            false,
+        )
+        .clicked()
+    {
+        app.actions.push(match results.retry_page {
+            Some(kind) => Action::MoreSoundCloud(kind),
+            None => Action::SearchSoundCloud {
+                query: app.search.committed.clone(),
+                serial: app.search.serial,
+            },
+        });
+    }
+    soundcloud_results(app, ui, &results, false);
+    if app.search.soundcloud_pending {
+        widgets::loading_row(ui, &palette, app.locale);
+    }
+}
+
+fn soundcloud_results(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    results: &SoundCloudSearchResults,
+    resolved: bool,
+) {
+    let palette = app.palette;
+    let filter = if resolved {
+        SearchFilter::All
+    } else {
+        app.search.filter
+    };
+    let empty = match filter {
+        SearchFilter::Songs => results.tracks.is_empty(),
+        SearchFilter::Artists => results.users.is_empty(),
+        SearchFilter::Playlists => results.playlists.is_empty(),
+        _ => results.is_empty(),
+    };
+    if empty {
+        if results.resolved.is_some() || !results.errors.is_empty() {
+            return;
+        }
+        theme::text(
+            ui,
+            gettext(app.locale, "No SoundCloud results."),
+            theme::regular(13.0),
+            palette.secondary,
+        );
+        return;
+    }
+    if matches!(filter, SearchFilter::All | SearchFilter::Songs) {
+        // SoundCloud uses ordinary rows and the full loaded search context.
+        let tracks = SearchResults {
+            tracks: Some(crate::api::models::Page {
+                items: results.tracks.clone(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        songs(
+            app,
+            ui,
+            &tracks,
+            if filter == SearchFilter::All {
+                4
+            } else {
+                usize::MAX
+            },
+        );
+        soundcloud_more(app, ui, results, SoundCloudSearchKind::Tracks);
+    }
+    if matches!(filter, SearchFilter::All | SearchFilter::Playlists)
+        && !results.playlists.is_empty()
+    {
+        soundcloud_cards(app, ui, results, false);
+        soundcloud_more(app, ui, results, SoundCloudSearchKind::Playlists);
+    }
+    if matches!(filter, SearchFilter::All | SearchFilter::Artists) && !results.users.is_empty() {
+        soundcloud_cards(app, ui, results, true);
+        soundcloud_more(app, ui, results, SoundCloudSearchKind::Users);
+    }
+}
+
+fn soundcloud_more(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    results: &SoundCloudSearchResults,
+    kind: SoundCloudSearchKind,
+) {
+    let loaded = match kind {
+        SoundCloudSearchKind::Tracks => results.tracks.len(),
+        SoundCloudSearchKind::Playlists => results.playlists.len(),
+        SoundCloudSearchKind::Users => results.users.len(),
+    };
+    if app.search.filter == SearchFilter::All && kind == SoundCloudSearchKind::Tracks && loaded > 4
+    {
+        if theme::soft_button(
+            ui,
+            &app.palette,
+            None,
+            &gettext(app.locale, "Show all"),
+            false,
+        )
+        .clicked()
+        {
+            app.actions
+                .push(Action::SetSearchFilter(SearchFilter::Songs));
+        }
+    } else if results.next[kind.index()].is_some() {
+        ui.add_enabled_ui(!app.search.soundcloud_pending, |ui| {
+            if theme::soft_button(
+                ui,
+                &app.palette,
+                None,
+                &gettext(app.locale, "Show more"),
+                false,
+            )
+            .clicked()
+            {
+                app.actions.push(Action::MoreSoundCloud(kind));
+            }
+        });
+    }
+}
+
+fn soundcloud_cards(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    results: &SoundCloudSearchResults,
+    artists: bool,
+) {
+    let palette = app.palette;
+    let title = if artists {
+        gettext(app.locale, "Artists")
+    } else {
+        gettext(app.locale, "Playlists")
+    };
+    let all = app.search.filter == SearchFilter::All;
+    let mut cards = |ui: &mut egui::Ui| {
+        if artists {
+            for user in &results.users {
+                let card = widgets::card(
+                    ui,
+                    app,
+                    user.image.as_deref(),
+                    &user.name,
+                    &gettext(app.locale, "Artist"),
+                    widgets::CardCover {
+                        circular: true,
+                        playable: false,
+                        playing: false,
+                    },
+                );
+                card_source_badge(
+                    ui,
+                    app,
+                    &card.response.rect,
+                    &crate::soundcloud::user_uri(user.id),
+                );
+                if card.response.clicked() {
+                    app.actions
+                        .push(Action::OpenSoundCloud(crate::soundcloud::user_uri(user.id)));
+                }
+            }
+        } else {
+            for playlist in &results.playlists {
+                let card = widgets::card(
+                    ui,
+                    app,
+                    playlist.image.as_deref(),
+                    &playlist.name,
+                    &playlist.creator,
+                    widgets::CardCover {
+                        circular: false,
+                        playable: false,
+                        playing: false,
+                    },
+                );
+                card_source_badge(
+                    ui,
+                    app,
+                    &card.response.rect,
+                    &crate::soundcloud::playlist_uri(playlist.id),
+                );
+                if card.response.clicked() {
+                    app.actions
+                        .push(Action::OpenSoundCloud(crate::soundcloud::playlist_uri(
+                            playlist.id,
+                        )));
+                }
+            }
+        }
+    };
+    if all {
+        widgets::shelf(
+            ui,
+            &palette,
+            if artists {
+                "soundcloud-search-artists"
+            } else {
+                "soundcloud-search-playlists"
+            },
+            &title,
+            &mut cards,
+        );
+    } else {
+        theme::section_title(ui, &palette, &title);
+        widgets::grid(ui, &mut cards);
+    }
+}
+
+fn card_source_badge(ui: &mut egui::Ui, app: &App, rect: &Rect, uri: &str) {
+    let badge = Rect::from_min_size(
+        rect.right_top() + vec2(-widgets::SOURCE_BADGE_SIZE.x - 16.0, 16.0),
+        widgets::SOURCE_BADGE_SIZE,
+    );
+    let mut child = ui.new_child(
+        egui::UiBuilder::new()
+            .id_salt(("search-source", uri))
+            .max_rect(badge),
+    );
+    widgets::source_badge(&mut child, &app.palette, app.locale, uri);
 }
 
 fn recent(app: &mut App, ui: &mut egui::Ui) {
@@ -101,11 +454,19 @@ fn recent(app: &mut App, ui: &mut egui::Ui) {
             ui,
             &palette,
             Icon::Search,
-            &gettext(app.locale, "Search Spotify"),
-            &gettext(
-                app.locale,
-                "Find songs, artists, albums, playlists, and podcasts.",
-            ),
+            &match app.search.source {
+                SearchSource::All => gettext(app.locale, "Search music"),
+                SearchSource::Spotify => gettext(app.locale, "Search Spotify"),
+                SearchSource::SoundCloud => gettext(app.locale, "Search SoundCloud"),
+            },
+            &if app.search.source == SearchSource::SoundCloud {
+                gettext(app.locale, "Find songs, artists, and playlists.")
+            } else {
+                gettext(
+                    app.locale,
+                    "Find songs, artists, albums, playlists, and podcasts.",
+                )
+            },
         );
         return;
     }
@@ -448,11 +809,24 @@ fn songs(app: &mut App, ui: &mut egui::Ui, results: &SearchResults, limit: usize
         .cloned()
         .map(PlayableItem::Track)
         .collect();
+    let soundcloud_context = items
+        .first()
+        .filter(|item| crate::soundcloud::is_track_uri(item.uri()))
+        .map(|_| {
+            RowContext::Uris(
+                items
+                    .iter()
+                    .filter(|item| app.row_playable(item))
+                    .map(|item| item.uri().to_string())
+                    .collect(),
+            )
+        });
     for (index, item) in items.iter().take(limit).enumerate() {
-        // A search result plays on its own, and Spotify continues with what
-        // follows it (autoplay), as the Spotify apps do; the other results are
-        // not a queue. A one-song list loads as that song's own context.
-        let context = RowContext::Uris(Arc::from([item.uri().to_string()]));
+        // Spotify keeps its existing one-song autoplay context. SoundCloud
+        // plays the loaded results in order through the ordinary play action.
+        let context = soundcloud_context
+            .clone()
+            .unwrap_or_else(|| RowContext::Uris(Arc::from([item.uri().to_string()])));
         widgets::track_row(
             ui,
             app,

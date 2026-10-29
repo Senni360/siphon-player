@@ -120,6 +120,7 @@ pub enum Page {
     Episodes,
     Playlist(String),
     MixedPlaylist(String),
+    SoundCloud(String),
     Album(String),
     Artist(String),
     Show(String),
@@ -144,6 +145,7 @@ impl Page {
             Page::Episodes => "episodes".into(),
             Page::Playlist(id) => format!("playlist:{id}"),
             Page::MixedPlaylist(id) => format!("mixed-playlist:{id}"),
+            Page::SoundCloud(uri) => uri.clone(),
             Page::Album(id) => format!("album:{id}"),
             Page::Artist(id) => format!("artist:{id}"),
             Page::Show(id) => format!("show:{id}"),
@@ -154,6 +156,11 @@ impl Page {
     }
 
     pub fn decode(text: &str) -> Option<Self> {
+        if crate::soundcloud::playlist_id(text).is_some()
+            || crate::soundcloud::user_id(text).is_some()
+        {
+            return Some(Page::SoundCloud(text.into()));
+        }
         Some(match text {
             "home" => Page::Home,
             "top-songs" => Page::TopSongs,
@@ -183,14 +190,11 @@ impl Page {
 
     /// Keep foreign schemes in page keys, never reinterpret their numeric IDs.
     pub fn from_uri(uri: &str) -> Option<Self> {
+        if crate::soundcloud::is_uri(uri) {
+            return Self::decode(uri);
+        }
         if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             return Some(Page::MixedPlaylist(id.into()));
-        }
-        if crate::soundcloud::user_id(uri).is_some() {
-            return Some(Page::Artist(uri.into()));
-        }
-        if crate::soundcloud::playlist_id(uri).is_some() {
-            return Some(Page::Playlist(uri.into()));
         }
         let mut parts = uri.split(':');
         if parts.next()? != "spotify" {
@@ -835,6 +839,115 @@ impl SearchFilter {
     }
 }
 
+/// A search's service scope, independent of its content filter.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SearchSource {
+    #[default]
+    All,
+    Spotify,
+    SoundCloud,
+}
+
+impl SearchSource {
+    pub const ALL: [Self; 3] = [Self::All, Self::Spotify, Self::SoundCloud];
+
+    pub fn label(self, locale: crate::i18n::Locale) -> std::borrow::Cow<'static, str> {
+        use crate::i18n::{gettext, pgettext};
+        match self {
+            Self::All => pgettext(locale, "filter", "All"),
+            Self::Spotify => gettext(locale, "Spotify"),
+            Self::SoundCloud => gettext(locale, "SoundCloud"),
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Self::All => Self::Spotify,
+            Self::Spotify => Self::SoundCloud,
+            Self::SoundCloud => Self::All,
+        }
+    }
+
+    pub fn supports(self, filter: SearchFilter) -> bool {
+        self != Self::SoundCloud
+            || matches!(
+                filter,
+                SearchFilter::All
+                    | SearchFilter::Songs
+                    | SearchFilter::Artists
+                    | SearchFilter::Playlists
+            )
+    }
+}
+
+/// UI summaries deliberately independent of the SoundCloud client's wire models.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SoundCloudPlaylistSummary {
+    pub id: u64,
+    pub name: String,
+    pub creator: String,
+    pub image: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SoundCloudUserSummary {
+    pub id: u64,
+    pub name: String,
+    pub image: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SoundCloudSearchResults {
+    pub tracks: Vec<Track>,
+    pub playlists: Vec<SoundCloudPlaylistSummary>,
+    pub users: Vec<SoundCloudUserSummary>,
+    pub next: [Option<String>; 3],
+    pub errors: Vec<String>,
+    pub retry_page: Option<SoundCloudSearchKind>,
+    pub resolved: Option<Box<SoundCloudSearchResults>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SoundCloudSearchKind {
+    Tracks,
+    Playlists,
+    Users,
+}
+
+impl SoundCloudSearchKind {
+    pub fn index(self) -> usize {
+        match self {
+            Self::Tracks => 0,
+            Self::Playlists => 1,
+            Self::Users => 2,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SoundCloudCollection {
+    pub title: String,
+    pub tracks: Vec<Track>,
+    pub next: Option<String>,
+}
+
+#[derive(Default)]
+pub struct SoundCloudPage {
+    pub content: Loadable<SoundCloudCollection>,
+    pub generation: u64,
+    pub loading: bool,
+    pub error: Option<String>,
+}
+
+impl SoundCloudSearchResults {
+    pub fn is_empty(&self) -> bool {
+        self.tracks.is_empty()
+            && self.playlists.is_empty()
+            && self.users.is_empty()
+            && self.resolved.as_ref().is_none_or(|value| value.is_empty())
+    }
+}
+
 #[derive(Default)]
 pub struct SearchState {
     pub query: String,
@@ -847,6 +960,11 @@ pub struct SearchState {
     pub playlists_pending: bool,
     pub error: Option<String>,
     pub filter: SearchFilter,
+    pub source: SearchSource,
+    /// Replace only when the request's serial equals `serial`, just like Spotify.
+    pub soundcloud: Loadable<SoundCloudSearchResults>,
+    pub soundcloud_request: u64,
+    pub soundcloud_pending: bool,
     pub typed_at: Option<Instant>,
     /// Counts runs of typing in the search field. A run ends when the field
     /// is emptied, its selected text is typed over, or the query is
@@ -1341,6 +1459,15 @@ pub enum Action {
     EndSearchRun,
     ForgetSearch(String),
     SetSearchFilter(SearchFilter),
+    SetSearchSource(SearchSource),
+    /// Start an independent runtime search under the current query serial.
+    SearchSoundCloud {
+        query: String,
+        serial: u64,
+    },
+    /// Open a native SoundCloud playlist or uploader page.
+    OpenSoundCloud(String),
+    MoreSoundCloud(SoundCloudSearchKind),
     SetTopPeriod(TopPeriod),
     FocusSearch,
     LoadMore(Page),
@@ -1497,6 +1624,21 @@ pub enum Action {
 mod finite_scroll_tests {
     use super::*;
 
+    #[test]
+    fn soundcloud_collection_pages_preserve_source_and_round_trip() {
+        for uri in ["soundcloud:playlist:12", "soundcloud:user:34"] {
+            let page = Page::SoundCloud(uri.into());
+            assert_eq!(Page::decode(&page.encode()), Some(page.clone()));
+            assert_eq!(Page::from_uri(uri), Some(page));
+        }
+        assert_eq!(Page::from_uri("soundcloud:track:12"), None);
+        assert_eq!(Page::from_uri("soundcloud:playlist:invalid"), None);
+        assert_eq!(
+            Page::from_uri("spotify:playlist:12"),
+            Some(Page::Playlist("12".into()))
+        );
+    }
+
     fn page(offset: u32, count: u32, total: u32) -> Page_<u32> {
         Page_ {
             items: (offset..offset + count).collect(),
@@ -1628,11 +1770,11 @@ mod source_guard_tests {
         for (uri, expected) in [
             (
                 "soundcloud:user:123",
-                Page::Artist("soundcloud:user:123".into()),
+                Page::SoundCloud("soundcloud:user:123".into()),
             ),
             (
                 "soundcloud:playlist:123",
-                Page::Playlist("soundcloud:playlist:123".into()),
+                Page::SoundCloud("soundcloud:playlist:123".into()),
             ),
             ("spotify:artist:123", Page::Artist("123".into())),
             ("spotifast:playlist:123", Page::MixedPlaylist("123".into())),
@@ -1649,7 +1791,7 @@ mod source_guard_tests {
         };
         assert_eq!(
             Page::for_artist(&artist),
-            Some(Page::Artist("soundcloud:user:123".into()))
+            Some(Page::SoundCloud("soundcloud:user:123".into()))
         );
     }
 }

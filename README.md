@@ -28,12 +28,14 @@ framework behind a family of native desktop apps. It plays music through
 The interface includes complete
 [translations for all supported languages](docs/_reference/translating.md#languages-and-coverage).
 
-This personal fork supports a separate SoundCloud source with anonymous
-listening and optional profile or session connections. The
-[SoundCloud reference](docs/_reference/soundcloud.md) describes the account
-contract and playback limits. The connection interface is not wired yet.
-SoundCloud items use their real SoundCloud links. Spotify saves, radio, album
-navigation, lyrics and remote Spotify outputs are unavailable for these items.
+This personal fork plays SoundCloud beside Spotify. One search field holds
+both, with source chips, native SoundCloud playlist and artist pages, and
+public URL lookup; SoundCloud search needs no account connection. Anonymous
+listening and the optional profile or session connections are described in
+the [SoundCloud reference](docs/_reference/soundcloud.md), with playback
+limits. SoundCloud items use their real SoundCloud links; Spotify saves,
+radio, album navigation, lyrics and remote Spotify outputs are unavailable
+for them. The connection interface is not wired yet.
 
 **Playback needs Spotify Premium.** Free accounts can browse and search, but
 cannot play music through Spotifast.

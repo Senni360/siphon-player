@@ -815,6 +815,12 @@ pub enum Command {
         refresh: Option<u64>,
         result: Result<crate::soundcloud::engine::Stream, String>,
     },
+    SoundCloudSearch(crate::soundcloud::browse::SearchRequest),
+    SoundCloudCollection {
+        uri: String,
+        generation: u64,
+        cursor: Option<String>,
+    },
     OpenThemesFolder,
     /// Read or change the login registration, off the UI thread: it reads
     /// and writes a file, the registry or D-Bus, and the Flatpak portal may
@@ -1088,6 +1094,16 @@ pub enum Event {
         result: Result<crate::hybrid_queue::Context, String>,
     },
     SoundCloudAccount(crate::soundcloud::account::Account),
+    SoundCloudSearch {
+        request: crate::soundcloud::browse::SearchRequest,
+        results: Box<crate::model::SoundCloudSearchResults>,
+    },
+    SoundCloudCollection {
+        uri: String,
+        generation: u64,
+        more: bool,
+        result: Result<crate::model::SoundCloudCollection, String>,
+    },
     /// The folder picked in the local files dialog; `None` when cancelled.
     LocalFilesFolderChosen(Option<std::path::PathBuf>),
     /// The songs in `folder`, by the `spotify:local:` URIs they play for.
@@ -2005,6 +2021,8 @@ struct Worker {
     /// second attempt does not pile up.
     engine_busy: bool,
     search_tasks: Vec<tokio::task::AbortHandle>,
+    soundcloud: crate::soundcloud::api::Client,
+    soundcloud_search_task: Option<tokio::task::AbortHandle>,
     /// A user changed engine-affecting settings while the current connection
     /// attempt was in flight. Its result is stale and must not be installed.
     engine_restart_pending: bool,
@@ -2099,7 +2117,7 @@ impl Worker {
             connect: Arc::default(),
             receiver_discovery: None,
             background_session: Arc::new(tokio::sync::Semaphore::new(4)),
-            http,
+            http: http.clone(),
             friend_names: Arc::default(),
             art,
             events,
@@ -2115,6 +2133,8 @@ impl Worker {
             prerelease_waiting: None,
             engine_busy: false,
             search_tasks: Vec::new(),
+            soundcloud: crate::soundcloud::api::Client::new(http.clone(), None, None),
+            soundcloud_search_task: None,
             engine_restart_pending: false,
             signed_in: false,
             premium: None,
@@ -2559,6 +2579,50 @@ impl Worker {
                             ))
                         }
                     }
+                }
+                Command::SoundCloudSearch(request) => {
+                    if let Some(task) = self.soundcloud_search_task.take() {
+                        task.abort();
+                    }
+                    if request.query.is_empty() {
+                        continue;
+                    }
+                    let client = self.soundcloud.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    self.soundcloud_search_task = Some(
+                        tokio::spawn(async move {
+                            let results =
+                                crate::soundcloud::browse::search(&client, &request).await;
+                            let _ = events.send(Event::SoundCloudSearch {
+                                request,
+                                results: Box::new(results),
+                            });
+                            waker.wake();
+                        })
+                        .abort_handle(),
+                    );
+                }
+                Command::SoundCloudCollection {
+                    uri,
+                    generation,
+                    cursor,
+                } => {
+                    let client = self.soundcloud.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result =
+                            crate::soundcloud::browse::collection(&client, &uri, cursor.as_deref())
+                                .await;
+                        let _ = events.send(Event::SoundCloudCollection {
+                            uri,
+                            generation,
+                            more: cursor.is_some(),
+                            result,
+                        });
+                        waker.wake();
+                    });
                 }
                 Command::Api(ApiRequest::Search { query, serial }) => self.search(query, serial),
                 Command::Api(request) => {

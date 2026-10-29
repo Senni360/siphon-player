@@ -814,3 +814,88 @@ async fn live_search_lofi_and_resolve_a_stream() {
     assert!(stream.url.starts_with("https://"));
     assert!(client.client_id().is_some());
 }
+
+#[tokio::test]
+async fn browse_search_runs_all_sections_and_pages_the_selected_cursor() {
+    use crate::model::SoundCloudSearchKind;
+    use crate::soundcloud::browse::{self, SearchRequest};
+    let body = json!({"collection":[{"id":7,"title":"A track or set","username":"Uploader"}],"next_href":"search/tracks?cursor=one"}).to_string();
+    let (client, task) = server(vec![ok(body.clone()), ok(body.clone()), ok(body)]).await;
+    let mut request = SearchRequest {
+        query: "ambient".into(),
+        serial: 3,
+        request: 4,
+        more: None,
+    };
+    let results = browse::search(&client, &request).await;
+    assert_eq!(
+        (
+            results.tracks.len(),
+            results.playlists.len(),
+            results.users.len()
+        ),
+        (1, 1, 1)
+    );
+    assert!(results.errors.is_empty());
+    let requests = task.await.unwrap();
+    for kind in ["tracks", "playlists", "users"] {
+        assert!(requests.iter().any(|line| {
+            line.starts_with(&format!("GET /search/{kind}?q=ambient&limit=20&offset=0&"))
+        }));
+    }
+    let (client, task) = server(vec![ok(
+        json!({"collection":[{"id":8,"title":"Next"}],"next_href":null}).to_string(),
+    )])
+    .await;
+    request.more = Some((
+        SoundCloudSearchKind::Tracks,
+        results.next[0].clone().unwrap(),
+    ));
+    let page = browse::search(&client, &request).await;
+    assert_eq!(page.tracks[0].uri, "soundcloud:track:8");
+    assert!(page.playlists.is_empty() && page.users.is_empty());
+    assert!(task.await.unwrap()[0].starts_with("GET /search/tracks?cursor=one&"));
+}
+
+#[tokio::test]
+async fn browse_url_search_resolves_instead_of_searching_the_url() {
+    use crate::soundcloud::browse::{self, SearchRequest};
+    let body = json!({"kind":"user","id":9,"username":"Linked uploader"}).to_string();
+    let (client, task) = server(vec![ok(body)]).await;
+    let request = SearchRequest {
+        query: "https://soundcloud.com/uploader".into(),
+        serial: 1,
+        request: 1,
+        more: None,
+    };
+    let results = browse::search(&client, &request).await;
+    assert_eq!(results.resolved.unwrap().users[0].id, 9);
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("GET /resolve?"));
+}
+
+#[tokio::test]
+async fn browse_search_keeps_successful_sections_when_one_fails() {
+    use crate::soundcloud::browse::{self, SearchRequest};
+    let body =
+        json!({"collection":[{"id":7,"title":"Result","username":"Uploader"}],"next_href":null})
+            .to_string();
+    let (client, task) = server(vec![(500, "{}".into(), ""), ok(body.clone()), ok(body)]).await;
+    let results = browse::search(
+        &client,
+        &SearchRequest {
+            query: "ambient".into(),
+            serial: 1,
+            request: 1,
+            more: None,
+        },
+    )
+    .await;
+    assert_eq!(results.errors.len(), 1);
+    assert_eq!(
+        results.tracks.len() + results.playlists.len() + results.users.len(),
+        2
+    );
+    assert_eq!(task.await.unwrap().len(), 3);
+}

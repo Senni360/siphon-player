@@ -20,6 +20,43 @@ but cannot change them. The advanced option uses a masked field and warns:
 is saved in your computer's protected credential store." Verify `/me` before
 showing **Connected as [display name]**. Clear the pasted draft after use.
 
+## Search and browsing
+
+Use the same search field for both services. **All**, **Spotify** and
+**SoundCloud** chips beside the content filters select a source without changing
+the query. Ctrl+Shift+S (Cmd+Shift+S on macOS) cycles the source while Search is
+open. Songs, Artists and Playlists apply to SoundCloud; selecting SoundCloud
+from an unsupported filter returns to All. Wide windows put the two services
+beside each other, and narrow windows stack them.
+
+SoundCloud songs use the ordinary track rows, menus and drag operations. A
+small **SC** badge identifies them in search, the queue and the player bar.
+It follows the light or dark palette and has a SoundCloud screen-reader label.
+Spotify songs do not have a source badge. Playing a SoundCloud search result
+uses the loaded SoundCloud songs as its context. Spotify search keeps its
+existing single-song context.
+
+Public search runs anonymously on the backend runtime through the configured
+shared HTTP transport. Typing uses the existing search debounce. Changing the
+query or leaving the source cancels pending SoundCloud work, and stale query
+or request generations cannot replace the current results. Spotify and
+SoundCloud have independent loading and error states. A failed section leaves
+the successful sections visible. **Show more** follows each section's opaque
+cursor, retaining existing rows and allowing failed pages to be retried.
+Retry repeats the failed page. Submit the query again to start a fresh search
+if a cursor expires.
+
+Paste a desktop, mobile or short SoundCloud URL to resolve it. The linked
+song, playlist or profile appears first. A pasted link reveals SoundCloud
+results and resets the entity filter to All. Playlist and artist cards open native
+collection pages with ordinary track tables; artist uploads have their own
+**Show more** pagination. No embedded browser is used.
+
+Demo mode includes invented, deterministic SoundCloud results. Use
+`--demo-page search --demo-show soundcloud,dark` for SoundCloud alone or
+`--demo-show soundcloud-all,light` for both services. Save review captures
+outside the repository.
+
 ## How requests reach SoundCloud
 
 The client uses SoundCloud's web API at `api-v2.soundcloud.com`. It discovers

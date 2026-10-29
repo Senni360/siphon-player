@@ -108,6 +108,66 @@ fn demo_added_at(index: usize, now: Timestamp) -> String {
     (now - age).to_string()
 }
 
+/// Invented uploads, represented by the same Track type as Spotify songs.
+fn soundcloud_search_results() -> SoundCloudSearchResults {
+    let tracks = [
+        "Bonobo - Studio Sketch",
+        "Bonobo - Night Bus Dub",
+        "Bonobo - Tape Loop",
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, name)| {
+        let mut upload = track(index);
+        upload.id = Some((10_001 + index).to_string());
+        upload.uri = crate::soundcloud::track_uri(10_001 + index as u64);
+        upload.name = name.into();
+        upload.artists = vec![ArtistRef {
+            name: "Bonobo Studio".into(),
+            ..Default::default()
+        }];
+        upload.album = Some(Album {
+            name: "Studio sketches".into(),
+            images: image(70 + index as u32),
+            ..Default::default()
+        });
+        upload.is_playable = Some(true);
+        upload
+    })
+    .collect();
+    SoundCloudSearchResults {
+        tracks,
+        playlists: [
+            "Bonobo - Work in progress",
+            "Bonobo - Late sessions",
+            "Bonobo - Radio sketches",
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| SoundCloudPlaylistSummary {
+            id: 20_001 + index as u64,
+            name: name.into(),
+            creator: "Bonobo Studio".into(),
+            image: image(80 + index as u32)
+                .first()
+                .map(|image| image.url.clone()),
+        })
+        .collect(),
+        users: ["Bonobo Studio", "Bonobo Radio"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, name)| SoundCloudUserSummary {
+                id: 30_001 + index as u64,
+                name: name.into(),
+                image: image(90 + index as u32)
+                    .first()
+                    .map(|image| image.url.clone()),
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
 const PLAYLISTS: &[&str] = &[
     "Discover Weekly",
     "Late night focus",
@@ -720,6 +780,41 @@ pub fn populate(app: &mut App) {
     app.home.new_releases = Loadable::Loaded(releases);
 
     // Search.
+    let sc = soundcloud_search_results();
+    for track in &sc.tracks {
+        if let Some(id) = &track.id {
+            app.track_cache.insert(id.clone(), track.clone());
+        }
+    }
+    for (uri, title) in sc
+        .playlists
+        .iter()
+        .map(|value| {
+            (
+                crate::soundcloud::playlist_uri(value.id),
+                value.name.clone(),
+            )
+        })
+        .chain(
+            sc.users
+                .iter()
+                .map(|value| (crate::soundcloud::user_uri(value.id), value.name.clone())),
+        )
+    {
+        app.soundcloud_pages.insert(
+            uri,
+            SoundCloudPage {
+                content: Loadable::Loaded(SoundCloudCollection {
+                    title,
+                    tracks: sc.tracks.clone(),
+                    next: None,
+                }),
+                generation: 1,
+                ..Default::default()
+            },
+        );
+    }
+    app.search.soundcloud = Loadable::Loaded(sc);
     app.search.query = "Bonobo".into();
     app.search.committed = "Bonobo".into();
     app.search.results = Loadable::Loaded(SearchResults {
@@ -1124,6 +1219,21 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            "soundcloud" => app.search.source = SearchSource::SoundCloud,
+            "soundcloud-all" => {
+                app.search.source = SearchSource::All;
+                // Compact fixture with both services visible in one capture.
+                if let Some(results) = app.search.results.get_mut() {
+                    results.artists = None;
+                    results.albums = None;
+                    results.playlists = None;
+                    results.shows = None;
+                    results.episodes = None;
+                    if let Some(tracks) = &mut results.tracks {
+                        tracks.items.truncate(2);
+                    }
+                }
+            }
             "presaved" => {
                 for page in app.album_pages.values_mut() {
                     if let Some(data) = &mut page.prerelease {
@@ -5239,6 +5349,324 @@ mod tests {
         events: Vec<egui::Event>,
     ) -> Vec<(String, egui::Rect)> {
         view_frame(ctx, app, events, crate::ui::search::show)
+    }
+
+    #[test]
+    fn soundcloud_search_scopes_keep_one_query_and_use_the_same_song_rows() {
+        let (ctx, mut app) = accessible_app("soundcloud-search-scopes");
+        app.search.filter = SearchFilter::Songs;
+        for source in SearchSource::ALL {
+            app.search.source = source;
+            search_frame(&ctx, &mut app, vec![]);
+            let text = search_frame(&ctx, &mut app, vec![]);
+            let contains = |name: &str| text.iter().any(|(label, _)| label == name);
+            assert_eq!(contains("Rosewood"), source != SearchSource::SoundCloud);
+            assert_eq!(
+                contains("Bonobo - Studio Sketch"),
+                source != SearchSource::Spotify
+            );
+            assert_eq!(contains("SC"), source != SearchSource::Spotify);
+            assert_eq!(app.search.committed, "Bonobo");
+            if source == SearchSource::SoundCloud {
+                assert!(!contains("Albums"));
+                assert!(!contains("Podcasts"));
+                assert!(!contains("Episodes"));
+            }
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_search_sections_adapt_to_width_in_both_themes() {
+        for light in [false, true] {
+            for width in [520.0, 1280.0] {
+                let (ctx, mut app) = accessible_app("soundcloud-search-layout");
+                app.palette = if light {
+                    crate::theme::Palette::light()
+                } else {
+                    crate::theme::Palette::dark()
+                };
+                crate::theme::apply(&ctx, &app.palette);
+                app.search.filter = SearchFilter::Songs;
+                let draw = |app: &mut App| {
+                    view_frame_sized(
+                        &ctx,
+                        app,
+                        vec![],
+                        crate::ui::search::show,
+                        egui::vec2(width, 1100.0),
+                    )
+                };
+                draw(&mut app);
+                let text = draw(&mut app);
+                let heading =
+                    |label: &str| text.iter().rev().find(|(text, _)| text == label).unwrap().1;
+                let spotify = heading("Spotify");
+                let soundcloud = heading("SoundCloud");
+                if width >= 800.0 {
+                    assert_eq!(spotify.top(), soundcloud.top());
+                    assert!(soundcloud.left() > spotify.right());
+                } else {
+                    assert!(soundcloud.top() > spotify.bottom());
+                }
+                assert!(text.iter().any(|(label, _)| label == "SC"));
+                app.backend.shutdown();
+            }
+        }
+    }
+
+    #[test]
+    fn soundcloud_badges_follow_tracks_into_the_queue_and_player_bar() {
+        let (ctx, mut app) = accessible_app("soundcloud-queue-player-badges");
+        let upload = soundcloud_search_results().tracks.remove(0);
+        app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload.clone()));
+        app.queue = Loadable::Loaded(Queue {
+            currently_playing: Some(PlayableItem::Track(upload.clone())),
+            queue: vec![PlayableItem::Track(upload)],
+        });
+        for view in [
+            crate::ui::queue::page as fn(&mut App, &mut egui::Ui),
+            crate::ui::player_bar::show,
+        ] {
+            view_frame(&ctx, &mut app, vec![], view);
+            let text = view_frame(&ctx, &mut app, vec![], view);
+            assert!(text.iter().any(|(label, _)| label == "SC"));
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_search_survives_spotify_loading_and_failure() {
+        let (ctx, mut app) = accessible_app("soundcloud-search-independent-status");
+        app.search.filter = SearchFilter::Songs;
+        for state in [
+            Loadable::Loading,
+            Loadable::Failed("Spotify is unavailable".into()),
+        ] {
+            app.search.results = state;
+            search_frame(&ctx, &mut app, vec![]);
+            let text = search_frame(&ctx, &mut app, vec![]);
+            assert!(
+                text.iter()
+                    .any(|(label, _)| label == "Bonobo - Studio Sketch")
+            );
+            assert!(
+                !text
+                    .iter()
+                    .any(|(label, _)| label == "No SoundCloud results.")
+            );
+        }
+        app.search.results = Loadable::Loaded(SearchResults {
+            tracks: Some(page(vec![track(0)])),
+            ..Default::default()
+        });
+        app.search.soundcloud = Loadable::Failed("SoundCloud is unavailable".into());
+        let text = search_frame(&ctx, &mut app, vec![]);
+        assert!(text.iter().any(|(label, _)| label == "Rosewood"));
+        assert!(
+            text.iter()
+                .any(|(label, _)| label.contains("SoundCloud is unavailable"))
+        );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn retrying_a_failed_soundcloud_page_keeps_rows_and_retries_that_cursor() {
+        let (ctx, mut app) = accessible_app("soundcloud-page-retry");
+        app.search.source = SearchSource::SoundCloud;
+        app.search.filter = SearchFilter::Songs;
+        let results = app.search.soundcloud.get_mut().unwrap();
+        results.next[0] = Some("search/tracks?cursor=one".into());
+        results.errors.push("Temporary failure".into());
+        results.retry_page = Some(SoundCloudSearchKind::Tracks);
+        search_frame(&ctx, &mut app, vec![]);
+        let text = search_frame(&ctx, &mut app, vec![]);
+        assert!(
+            text.iter()
+                .any(|(label, _)| label == "Bonobo - Studio Sketch")
+        );
+        let retry = text
+            .iter()
+            .find(|(label, _)| label == "Retry")
+            .unwrap()
+            .1
+            .center();
+        app.actions.clear();
+        search_frame(
+            &ctx,
+            &mut app,
+            pointer_click(retry, egui::PointerButton::Primary),
+        );
+        assert!(matches!(
+            app.actions.as_slice(),
+            [Action::MoreSoundCloud(SoundCloudSearchKind::Tracks)]
+        ));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn a_resolved_soundcloud_link_precedes_spotify_even_in_narrow_windows() {
+        let (ctx, mut app) = accessible_app("soundcloud-link-first");
+        app.search.source = SearchSource::All;
+        app.search.soundcloud = Loadable::Loaded(SoundCloudSearchResults {
+            resolved: Some(Box::new(SoundCloudSearchResults {
+                tracks: vec![soundcloud_search_results().tracks.remove(0)],
+                ..Default::default()
+            })),
+            ..Default::default()
+        });
+        let draw = |app: &mut App| {
+            view_frame_sized(
+                &ctx,
+                app,
+                vec![],
+                crate::ui::search::show,
+                egui::vec2(640.0, 1100.0),
+            )
+        };
+        draw(&mut app);
+        let text = draw(&mut app);
+        let top = |label: &str| text.iter().find(|(text, _)| text == label).unwrap().1.top();
+        assert!(top("From your link") < top("Bonobo - Studio Sketch"));
+        assert!(top("Bonobo - Studio Sketch") < top("Rosewood"));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_source_chips_emit_actions_without_mutating_the_view() {
+        let (ctx, mut app) = accessible_app("soundcloud-source-chip");
+        search_frame(&ctx, &mut app, vec![]);
+        let text = search_frame(&ctx, &mut app, vec![]);
+        let chip = text
+            .iter()
+            .find(|(label, _)| label == "SoundCloud")
+            .unwrap()
+            .1
+            .center();
+        app.actions.clear();
+        search_frame(
+            &ctx,
+            &mut app,
+            pointer_click(chip, egui::PointerButton::Primary),
+        );
+        assert_eq!(app.search.source, SearchSource::All);
+        assert!(matches!(
+            app.actions.as_slice(),
+            [Action::SetSearchSource(SearchSource::SoundCloud)]
+        ));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_search_source_shortcut_cycles_only_on_search() {
+        let (ctx, mut app) = accessible_app("soundcloud-search-shortcut");
+        let modifiers = if cfg!(target_os = "macos") {
+            egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT
+        } else {
+            egui::Modifiers::CTRL | egui::Modifiers::COMMAND | egui::Modifiers::SHIFT
+        };
+        app.open(Page::Search);
+        for expected in [
+            SearchSource::Spotify,
+            SearchSource::SoundCloud,
+            SearchSource::All,
+        ] {
+            accessible_frame(&ctx, &mut app, vec![keyboard(egui::Key::S, modifiers)]);
+            assert_eq!(app.search.source, expected);
+        }
+        app.open(Page::Home);
+        accessible_frame(&ctx, &mut app, vec![keyboard(egui::Key::S, modifiers)]);
+        assert_eq!(app.search.source, SearchSource::All);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_cards_open_populated_native_collection_pages() {
+        let (ctx, mut app) = accessible_app("soundcloud-search-card");
+        app.search.source = SearchSource::SoundCloud;
+        for (filter, title, uri) in [
+            (
+                SearchFilter::Playlists,
+                "Bonobo - Work in progress",
+                "soundcloud:playlist:20001",
+            ),
+            (
+                SearchFilter::Artists,
+                "Bonobo Studio",
+                "soundcloud:user:30001",
+            ),
+        ] {
+            app.search.filter = filter;
+            search_frame(&ctx, &mut app, vec![]);
+            let text = search_frame(&ctx, &mut app, vec![]);
+            let card = text
+                .iter()
+                .find(|(label, _)| label == title)
+                .unwrap()
+                .1
+                .center();
+            app.actions.clear();
+            search_frame(
+                &ctx,
+                &mut app,
+                pointer_click(card, egui::PointerButton::Primary),
+            );
+            assert!(
+                matches!(app.actions.as_slice(), [Action::OpenSoundCloud(target)] if target == uri)
+            );
+            for action in std::mem::take(&mut app.actions) {
+                app.apply(action, &ctx);
+            }
+            assert_eq!(app.page(), &Page::SoundCloud(uri.into()));
+            assert!(
+                !app.soundcloud_pages[uri]
+                    .content
+                    .get()
+                    .unwrap()
+                    .tracks
+                    .is_empty()
+            );
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_search_song_plays_with_the_loaded_results_as_context() {
+        use egui::accesskit::{Action as AccessibleAction, Role};
+        let (ctx, mut app) = accessible_app("soundcloud-search-play");
+        app.search.source = SearchSource::SoundCloud;
+        app.search.filter = SearchFilter::Songs;
+        let render = |app: &mut App, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| crate::ui::search::show(app, ui),
+            );
+            output.textures_delta.clear();
+            output.platform_output.accesskit_update.unwrap()
+        };
+        render(&mut app, vec![]);
+        let tree = render(&mut app, vec![]);
+        let row = accessible_node(
+            &tree,
+            "Play Bonobo - Studio Sketch, Bonobo Studio",
+            Role::Button,
+        );
+        app.actions.clear();
+        render(
+            &mut app,
+            vec![accessible_action(row, AccessibleAction::Click, None)],
+        );
+        assert!(app.actions.iter().any(|action| matches!(action,
+            Action::PlayFromRow { context: RowContext::Uris(uris), uri, .. }
+            if uris.as_ref() == soundcloud_search_results().tracks.iter().map(|track| track.uri.clone()).collect::<Vec<_>>() && uri == "soundcloud:track:10001")));
+        app.backend.shutdown();
     }
 
     /// Beside an artist line shorter than the title, the player bar's empty

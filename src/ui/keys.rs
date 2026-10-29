@@ -53,6 +53,13 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             );
         }
         key(Modifiers::COMMAND, Key::F, Action::FocusSearch);
+        if matches!(app.page(), Page::Search) && app.dialog.is_none() {
+            key(
+                Modifiers::COMMAND | Modifiers::SHIFT,
+                Key::S,
+                Action::SetSearchSource(app.search.source.next()),
+            );
+        }
         key(Modifiers::COMMAND, Key::B, Action::ToggleSidebar);
         key(Modifiers::COMMAND, Key::Comma, Action::Open(Page::Settings));
         key(Modifiers::COMMAND, Key::Q, Action::Quit);
@@ -310,6 +317,10 @@ pub fn shortcuts(locale: Locale) -> Vec<(Cow<'static, str>, Cow<'static, str>)> 
             gettext(locale, "Show or hide the sidebar"),
         ),
         (keys("Alt+←  /  Alt+→"), gettext(locale, "Back or forward")),
+        (
+            keys(platform_shortcut("Ctrl+Shift+S", "Cmd+Shift+S")),
+            gettext(locale, "Search: cycle sources"),
+        ),
         (
             keys("Page Up  /  Page Down"),
             gettext(locale, "Scroll the page"),
@@ -697,7 +708,7 @@ mod tests {
             (
                 Key::A,
                 command | Modifiers::SHIFT,
-                Some(Page::Artist("soundcloud:user:123".into())),
+                Some(Page::SoundCloud("soundcloud:user:123".into())),
             ),
         ] {
             app.actions.clear();

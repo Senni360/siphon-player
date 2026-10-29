@@ -2692,8 +2692,70 @@ fn palette_of(app: &App) -> Palette {
     app.palette
 }
 
-/// Local playlists share the collection shell and table, including selection,
-/// filtering, sorting, keyboard edits and positional drag/drop.
+/// Public SoundCloud collections reuse selection, sorting, menus and dragging.
+pub fn soundcloud(app: &mut App, ui: &mut egui::Ui, uri: &str) {
+    let Some(state) = app.soundcloud_pages.get(uri) else {
+        return;
+    };
+    let content = state.content.get().cloned().unwrap_or_default();
+    let loading = state.loading;
+    let error = state.error.clone();
+    let revision = state.generation;
+    let page = Page::SoundCloud(uri.into());
+    let fallback_title = gettext(app.locale, "SoundCloud");
+    theme::section_title(
+        ui,
+        &app.palette,
+        if content.title.is_empty() {
+            &fallback_title
+        } else {
+            &content.title
+        },
+    );
+    widgets::source_badge(ui, &app.palette, app.locale, uri);
+    let items: Vec<TableItem> = content
+        .tracks
+        .into_iter()
+        .map(|track| (PlayableItem::Track(track), None, None))
+        .collect();
+    table(
+        app,
+        ui,
+        Table {
+            items: &items,
+            row_offset: 0,
+            pagination: None,
+            context: RowContext::Uris(items.iter().map(|row| row.0.uri().to_string()).collect()),
+            show_album: false,
+            show_cover: true,
+            show_added: false,
+            show_added_by: false,
+            show_plays: false,
+            page: page.clone(),
+            loading,
+            error: error.as_deref(),
+            can_load_more: false,
+            filter: "",
+            items_revision: revision,
+            plays_shown_rows: true,
+        },
+    );
+    if content.next.is_some()
+        && !loading
+        && theme::soft_button(
+            ui,
+            &app.palette,
+            None,
+            &gettext(app.locale, "Show more"),
+            false,
+        )
+        .clicked()
+    {
+        app.actions.push(Action::LoadMore(page));
+    }
+}
+
+/// Local playlists share the collection shell and table, including editing.
 pub fn mixed_playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
     let Some(playlist) = app.mixed_playlists.get(id).cloned() else {
         widgets::empty_state(

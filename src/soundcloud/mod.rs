@@ -24,6 +24,7 @@
 
 pub mod account;
 pub mod api;
+pub mod browse;
 pub mod engine;
 pub mod models;
 
