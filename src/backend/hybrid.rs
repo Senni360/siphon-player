@@ -114,6 +114,10 @@ impl Worker {
     pub(super) async fn hybrid_command(&mut self, command: HybridCommand) {
         match command {
             HybridCommand::Claim => {
+                log::info!(
+                    "Playback ownership: hybrid; local_engine_ready={}",
+                    self.engine.is_some()
+                );
                 self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;
                 self.hybrid.tag = None;
@@ -145,6 +149,16 @@ impl Worker {
                 self.hybrid.playing = play;
                 self.resume = None;
                 self.resume_verify = None;
+                log::info!(
+                    "Hybrid playback: load source={} generation={} play={play} position_ms={position_ms} local_engine_ready={}",
+                    if crate::soundcloud::is_track_uri(&track.uri) {
+                        "soundcloud"
+                    } else {
+                        "spotify"
+                    },
+                    tag.generation,
+                    self.engine.is_some(),
+                );
                 // Only the newest intent survives a handoff in flight.
                 if self.hybrid.releasing {
                     self.hybrid.pending = Some(HybridCommand::Load {
@@ -152,6 +166,15 @@ impl Worker {
                         track,
                         position_ms,
                         play,
+                    });
+                    return;
+                }
+                if self.engine.is_none() {
+                    self.emit(Event::Hybrid {
+                        tag,
+                        event: HybridEvent::Failed(
+                            crate::player::LOCAL_PLAYBACK_UNAVAILABLE.into(),
+                        ),
                     });
                     return;
                 }
@@ -189,7 +212,7 @@ impl Worker {
                         self.emit(Event::Hybrid {
                             tag,
                             event: HybridEvent::Failed(
-                                "Enable playback on this computer to play Spotify tracks".into(),
+                                crate::player::LOCAL_PLAYBACK_UNAVAILABLE.into(),
                             ),
                         });
                     }
@@ -200,7 +223,7 @@ impl Worker {
                 }
             }
             HybridCommand::Preload { tag, track } => {
-                if self.hybrid.tag != Some(tag) {
+                if self.hybrid.tag != Some(tag) || self.engine.is_none() {
                     return;
                 }
                 self.hybrid.preload_uri = Some(track.uri.clone());
@@ -279,6 +302,14 @@ impl Worker {
             command @ (HybridCommand::Stop | HybridCommand::Release) => {
                 self.hybrid.new_owner_intent();
                 let release = matches!(command, HybridCommand::Release);
+                log::info!(
+                    "Playback ownership: {}",
+                    if release {
+                        "Spotify Connect"
+                    } else {
+                        "hybrid stopped"
+                    }
+                );
                 self.hybrid.tag = None;
                 self.hybrid.pending = None;
                 self.hybrid.playing = false;
@@ -309,7 +340,7 @@ impl Worker {
             let spotify = self
                 .engine
                 .as_ref()
-                .ok_or_else(|| "Enable local playback before playing SoundCloud".to_owned())?;
+                .ok_or_else(|| crate::player::LOCAL_PLAYBACK_UNAVAILABLE.to_owned())?;
             if !self.hybrid.claimed {
                 spotify
                     .stop_for_handoff()
@@ -335,6 +366,11 @@ impl Worker {
                 );
             }
             self.hybrid.claimed = true;
+            log::info!(
+                "SoundCloud playback: loading shared output generation={} protocol={:?}",
+                tag.generation,
+                stream.protocol
+            );
             self.hybrid
                 .engine
                 .as_ref()
@@ -383,6 +419,11 @@ impl Worker {
         let commands = self.commands.clone();
         let path = self.dirs.state.join("soundcloud-client.json");
         tokio::spawn(async move {
+            log::debug!(
+                "SoundCloud playback: resolving stream generation={} preload={preload} refresh={}",
+                tag.generation,
+                refresh.is_some()
+            );
             let result = async {
                 let id = crate::soundcloud::track_id(&uri)
                     .ok_or_else(|| "Invalid SoundCloud track".to_owned())?;
@@ -391,6 +432,7 @@ impl Worker {
                     .resolve_stream(&track)
                     .await
                     .map_err(|e| e.to_string())?;
+                log::info!("SoundCloud playback: resolved track_id={id} protocol={:?} codec={} duration_ms={} preview={}", info.protocol, info.codec, info.duration_ms, info.is_preview);
                 Ok(sc::Stream {
                     uri: uri.clone(),
                     url: info.url,
@@ -657,6 +699,37 @@ pub(super) async fn persist_client_id(client: &Client, path: std::path::PathBuf)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hybrid_without_local_engine_reports_setup_before_resolving_either_source() {
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("hybrid-playback-setup");
+        runtime.block_on(async {
+            // Deliberately no SoundCloud client: this must fail before any
+            // resolver access, for Spotify and SoundCloud alike.
+            for uri in ["spotify:track:a", "soundcloud:track:7"] {
+                let tag = PlaybackTag {
+                    generation: 1,
+                    occurrence: crate::hybrid_queue::EntryId(1),
+                };
+                worker
+                    .hybrid_command(HybridCommand::Load {
+                        tag,
+                        track: Box::new(Track {
+                            uri: uri.into(),
+                            ..Default::default()
+                        }),
+                        position_ms: 0,
+                        play: true,
+                    })
+                    .await;
+                assert!(events.try_iter().any(|event| matches!(event,
+                    Event::Hybrid { tag: actual, event: HybridEvent::Failed(message) }
+                    if actual == tag && message == crate::player::LOCAL_PLAYBACK_UNAVAILABLE
+                )));
+            }
+        });
+    }
 
     #[test]
     fn review_hybrid_new_claim_discards_older_deferred_spotify_load() {

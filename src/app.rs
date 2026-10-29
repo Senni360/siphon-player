@@ -9718,6 +9718,14 @@ impl App {
         if self.try_hybrid_start(request.clone(), shuffle_first, None) {
             return;
         }
+        log::info!(
+            "Spotify playback: start target={:?} local_ready={} connected={} context={} track_count={}",
+            self.target(),
+            self.local_ready,
+            self.local.connected,
+            request.context_uri.is_some(),
+            request.uris.len()
+        );
         // Shuffle applies across contexts until disabled. A selected row still
         // starts first; otherwise choose a random starting track.
         let mut request = request;
@@ -9846,10 +9854,7 @@ impl App {
                     self.queue_start_pending = None;
                     self.clear_play_pending();
                     self.queued_play = None;
-                    self.toast(gettext(
-                        self.locale,
-                        "Choose a device, or enable playback on this computer",
-                    ));
+                    self.toast(crate::player::LOCAL_PLAYBACK_UNAVAILABLE);
                     self.show_devices = true;
                     self.refresh_devices();
                 }
@@ -33923,6 +33928,88 @@ mod tests {
             },
             &egui::Context::default(),
         );
+    }
+
+    #[test]
+    fn playback_setup_prompt_keeps_hybrid_selection_for_retry() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        let tag = app.hybrid_tag().unwrap();
+        let selected = app.current_track_uri();
+        app.backend.take_hybrid_commands();
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::Failed(crate::player::LOCAL_PLAYBACK_UNAVAILABLE.into()),
+        );
+        assert!(app.show_devices);
+        assert_eq!(app.current_track_uri(), selected);
+        assert!(!app.now_playing().unwrap().loading);
+        assert!(!app.now_playing().unwrap().playing);
+        assert!(
+            app.toasts
+                .last()
+                .unwrap()
+                .message
+                .contains("Set up playback here")
+        );
+        assert!(app.backend.take_hybrid_commands().is_empty());
+        app.apply(Action::TogglePlay, &egui::Context::default());
+        assert!(matches!(app.backend.take_hybrid_commands().first(),
+            Some(crate::backend::HybridCommand::Load { tag: retry, .. })
+            if retry.occurrence == tag.occurrence && retry.generation > tag.generation
+        ));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn playback_setup_prompt_for_spotify_without_an_output_names_the_setup_action() {
+        let mut app = hybrid_fixture();
+        app.local_ready = false;
+        app.local_playback = LocalPlayback::Unavailable;
+        app.settings.playback_authorized = false;
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["spotify:track:a".into()],
+                index: 0,
+            },
+            &egui::Context::default(),
+        );
+        assert!(!app.hybrid_owned());
+        assert!(app.show_devices);
+        assert!(
+            app.toasts
+                .last()
+                .unwrap()
+                .message
+                .contains("Set up playback here")
+        );
+        assert!(app.backend.take_player_commands().is_empty());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn playback_spotify_playlist_row_uses_connect_without_claiming_hybrid() {
+        let mut app = hybrid_fixture();
+        app.local_ready = true;
+        app.local.connected = true;
+        let context = RowContext::Context {
+            uri: "spotify:playlist:plain".into(),
+            editable_playlist: None,
+        };
+        app.apply(
+            Action::PlayFromRow {
+                context,
+                uri: "spotify:track:a".into(),
+                index: 2,
+            },
+            &egui::Context::default(),
+        );
+        assert!(!app.hybrid_owned());
+        assert!(app.backend.take_hybrid_commands().is_empty());
+        assert!(matches!(app.backend.take_player_commands().as_slice(),
+            [PlayerCommand::Load(spec)] if spec.context_uri.as_deref() == Some("spotify:playlist:plain")
+        ));
+        app.backend.shutdown();
     }
 
     #[test]

@@ -2619,7 +2619,7 @@ impl Worker {
                                 self.stop_kept_player();
                             }
                             self.emit(Event::Error(
-                                "Local playback isn't set up on this computer yet".into(),
+                                crate::player::LOCAL_PLAYBACK_UNAVAILABLE.into(),
                             ))
                         }
                     }

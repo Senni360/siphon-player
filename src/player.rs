@@ -168,6 +168,8 @@ impl LocalTrack {
 /// text itself.
 pub const AUDIO_KEY_REFUSED: &str = "Spotify refused the audio key. Try again later";
 
+pub const LOCAL_PLAYBACK_UNAVAILABLE: &str = "Playback on this computer is not ready. Open the device menu and choose \"Set up playback here\" or \"Try again\".";
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct LocalState {
     pub playback: Playback,
@@ -533,6 +535,7 @@ impl Engine {
         });
 
         let device_id = config.device_id();
+        log::info!("Spotify playback: local engine connected and ready");
         Ok(Self {
             hybrid_events: Mutex::new(None),
             player,
@@ -1163,6 +1166,21 @@ async fn run_events(
             && current != incoming
         {
             continue;
+        }
+        match &event {
+            PlayerEvent::Playing {
+                play_request_id, ..
+            } => log::info!("Spotify decoder: playing request={play_request_id}"),
+            PlayerEvent::Loading {
+                play_request_id, ..
+            } => log::debug!("Spotify decoder: loading request={play_request_id}"),
+            PlayerEvent::Paused {
+                play_request_id, ..
+            } => log::debug!("Spotify decoder: paused request={play_request_id}"),
+            PlayerEvent::Stopped {
+                play_request_id, ..
+            } => log::debug!("Spotify decoder: stopped request={play_request_id}"),
+            _ => {}
         }
         audio.handle_player_event(&event);
         let snapshot = {

@@ -1230,8 +1230,24 @@ impl App {
             }
             HybridEvent::Failed(error) => {
                 let play = self.hybrid.play_intent;
+                let needs_setup = error == crate::player::LOCAL_PLAYBACK_UNAVAILABLE;
                 self.toast_error(error);
                 self.hybrid.tag = None;
+                if needs_setup {
+                    // Missing shared output affects every row. Keep the chosen
+                    // occurrence for Play after setup instead of skipping the
+                    // whole collection and showing the same error per track.
+                    self.hybrid.play_intent = false;
+                    self.hybrid.audible = false;
+                    self.hybrid.loaded = false;
+                    self.hybrid.state.loading = false;
+                    self.hybrid.state.playback = Playback::Paused;
+                    self.hybrid.state.position_at = None;
+                    self.show_devices = true;
+                    self.refresh_devices();
+                    self.project_hybrid();
+                    return;
+                }
                 self.hybrid.failed_occurrences.insert(tag.occurrence);
                 if self.hybrid.pending.is_some() {
                     self.hybrid_next();

@@ -94,6 +94,11 @@ both using your computer's protected storage. See
 [Getting started](https://spotifast.rocks/getting-started/) for the full walkthrough
 and [How it connects](https://spotifast.rocks/how-it-connects/) for the details.
 
+This fork's SoundCloud and mixed queues use the same local audio output, so
+complete **Set up playback here** before trying either source. If playback
+is unavailable, the app opens the device menu and explains how to set it up
+or retry. After setup, press Play again to retry the selected mixed-queue row.
+
 ## The Winamp mini player
 
 A classic look for your music, with Winamp 2 `.wsz` skins, an equalizer,

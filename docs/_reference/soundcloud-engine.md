@@ -32,8 +32,13 @@ cannot overwrite it. Source switches acknowledge the old decoder stop or
 SoundCloud's `OutputReleased` before loading the replacement.
 
 The pinned Spirc fork resolves autoplay even for an explicit track list when
-the Spotify session enables it. For hybrid loads the adapter first detaches
-Connect and waits for its acknowledgement, which clears Spirc's contexts.
+the Spotify session enables it. For hybrid loads the adapter inhibits Spotify
+output first and detaches Connect only when its cluster marks this computer
+active. It never activates an idle device just to disconnect it. Disconnect
+clears Spirc's contexts; its network-dependent acknowledgement is best effort,
+bounded to 500 ms. A missing acknowledgement does not abort playback while
+output is inhibited. The decoder's separate ordered Stop barrier is required
+before loading either source.
 It validates the one-item list and loads its sole item directly on the
 librespot decoder. Hybrid pause, play and seek also address that decoder.
 The pinned Spirc also consumes EOF while inactive and sends a decoder Stop
@@ -45,6 +50,17 @@ Explicit handoffs cancel the observer before sending their own Stop.
 Returning to Spotify-only playback uses the existing Spirc load path again.
 Deferred Spotify-only commands carry an ownership generation: a newer Claim,
 Load, Stop or Release discards the older handoff's commands.
+
+Both sources need the local engine's shared audio output. If it is unavailable,
+the app opens the device menu and points to **Set up playback here** or
+**Try again**. A mixed queue keeps the chosen row paused rather than skipping
+every row; press Play after setup to retry it. Normal Spotify playlists and
+tracks continue through Connect, and an explicit Spotify load removes output
+inhibition after a SoundCloud stop or a failed hybrid start.
+
+Playback logs report routing, local engine readiness, handoffs, load generations
+and resolved stream protocol/codec. They omit client IDs, account tokens,
+track authorization values and signed stream URLs.
 
 Mixed playback stays on this computer, including Spotify rows. A remote
 transfer or receiver activation is refused in both the application and backend.
