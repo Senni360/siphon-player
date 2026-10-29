@@ -126,6 +126,8 @@ If you configured a local files folder, librespot scans it before its decoder
 is ready. Playback waits for that scan and the app explains the delay. Use a
 dedicated music folder rather than a large Downloads folder, or choose
 **Remove** beside the local files folder in Settings if you only stream music.
+The app's background index skips `__MACOSX` folders and AppleDouble `._*`
+files. This filtering does not yet change librespot's separate startup scan.
 
 ## The Winamp mini player
 

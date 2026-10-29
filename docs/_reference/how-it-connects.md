@@ -620,6 +620,12 @@ request and pause intent. This disk initialization is separate from Spotify's
 75-second network connection deadline. Use a dedicated music folder, or
 **Remove** the local files folder in Settings if you only stream music.
 
+The app separately indexes playable local rows, covers and lyrics on a blocking
+worker. That index skips `__MACOSX` directories and AppleDouble `._*` files
+before probing them, and logs malformed audio files only at debug level.
+The pinned player's startup scan is independent of that index; fixing its
+decoder delay requires a librespot change.
+
 Playback runs on a separate runtime. Librespot maintains the Spotify Connect
 session, exposes this computer as a device, receives transfers, and reports
 playback state. If the session drops, it reconnects with the stored credential.

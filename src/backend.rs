@@ -52,10 +52,7 @@ const RADIO_TIMEOUT: Duration = Duration::from_secs(20);
 fn local_file_uris(
     folder: &std::path::Path,
 ) -> std::collections::HashMap<String, std::path::PathBuf> {
-    librespot_playback::local_file::create_local_file_lookup(&[folder.to_path_buf()])
-        .iter()
-        .map(|(uri, path)| (uri.to_uri(), path.to_path_buf()))
-        .collect()
+    crate::local_files::scan(folder)
 }
 /// Newest episodes read from each saved podcast for Home's podcast shelf.
 const HOME_EPISODES_PER_SHOW: u32 = 5;
