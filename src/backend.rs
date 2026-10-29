@@ -2543,11 +2543,13 @@ impl Worker {
                     {
                         continue;
                     }
-                    if matches!(command, PlayerCommand::Load(_)) && self.hybrid.owned {
+                    if matches!(command, PlayerCommand::Load(_))
+                        && (self.hybrid.owned || self.hybrid.releasing)
+                    {
                         self.hybrid_command(HybridCommand::Release).await;
                     }
                     if self.hybrid.releasing {
-                        self.hybrid.player_waiting.push(command);
+                        self.hybrid.defer_player(command);
                         continue;
                     }
                     if matches!(&command, PlayerCommand::Load(_)) {

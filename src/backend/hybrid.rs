@@ -48,6 +48,8 @@ pub(super) struct HybridRuntime {
     pub(super) releasing: bool,
     pending: Option<HybridCommand>,
     pub(super) player_waiting: Vec<PlayerCommand>,
+    owner_generation: u64,
+    player_waiting_generation: u64,
     streams: HashMap<String, sc::Stream>,
     preload_uri: Option<String>,
     pub(super) restart_pending: bool,
@@ -106,6 +108,7 @@ impl Worker {
     pub(super) async fn hybrid_command(&mut self, command: HybridCommand) {
         match command {
             HybridCommand::Claim => {
+                self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;
                 self.hybrid.tag = None;
                 self.hybrid.pending = None;
@@ -128,6 +131,7 @@ impl Worker {
                 position_ms,
                 play,
             } => {
+                self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;
                 self.hybrid.tag = Some(tag);
                 self.hybrid.track = Some(*track.clone());
@@ -267,6 +271,7 @@ impl Worker {
                 }
             }
             command @ (HybridCommand::Stop | HybridCommand::Release) => {
+                self.hybrid.new_owner_intent();
                 let release = matches!(command, HybridCommand::Release);
                 self.hybrid.tag = None;
                 self.hybrid.pending = None;
@@ -471,7 +476,7 @@ impl Worker {
             if let Some(command) = self.hybrid.pending.take() {
                 self.hybrid_command(command).await;
             } else if let Some(engine) = &self.engine {
-                for command in std::mem::take(&mut self.hybrid.player_waiting) {
+                for command in self.hybrid.take_player_waiting() {
                     let _ = engine.command(command);
                 }
             }
@@ -601,6 +606,23 @@ impl Worker {
 }
 
 impl HybridRuntime {
+    fn new_owner_intent(&mut self) {
+        self.owner_generation = self.owner_generation.wrapping_add(1);
+        self.player_waiting.clear();
+    }
+
+    pub(super) fn defer_player(&mut self, command: PlayerCommand) {
+        self.player_waiting_generation = self.owner_generation;
+        self.player_waiting.push(command);
+    }
+
+    fn take_player_waiting(&mut self) -> Vec<PlayerCommand> {
+        if self.owned || self.player_waiting_generation != self.owner_generation {
+            self.player_waiting.clear();
+        }
+        std::mem::take(&mut self.player_waiting)
+    }
+
     pub(super) fn holds_output(&self) -> bool {
         self.claimed || self.releasing
     }
