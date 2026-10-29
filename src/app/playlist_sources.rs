@@ -179,7 +179,10 @@ impl App {
                         .map(|entry| entry.id.clone())
                         .collect();
                     let items: Vec<_> = tracks.iter().cloned().map(PlayableItem::Track).collect();
-                    self.add_playlist_sources(&pending.target, &pending.name, &items, None);
+                    // Register the provisional identities before any snapshot
+                    // reaches the writer. An interrupted process cannot resume
+                    // these metadata requests on its next start.
+                    self.insert_playlist_sources(&pending.target, &pending.name, &items, None);
                     pending.entries = self
                         .soundcloud_add_entries(&pending.target)
                         .iter()
@@ -194,7 +197,6 @@ impl App {
                             entry.permalink.clone_from(&track.external_urls.spotify);
                         }
                     }
-                    self.save_playlist_sources();
                 }
                 if complete {
                     self.toast(format!(
@@ -205,6 +207,7 @@ impl App {
                 } else {
                     self.pending_soundcloud_adds.insert(request, pending);
                 }
+                self.save_playlist_sources();
             }
             Err(error) => {
                 if let Some(id) = pending
@@ -246,8 +249,29 @@ impl App {
         if self.offline {
             return;
         }
-        if self.mixed_playlists_writable {
-            match self.mixed_playlists.encode() {
+        let provisional: HashSet<_> = self
+            .pending_soundcloud_adds
+            .values()
+            .flat_map(|pending| pending.entries.iter())
+            .collect();
+        let mut mixed = std::borrow::Cow::Borrowed(&self.mixed_playlists);
+        let mut overlays = std::borrow::Cow::Borrowed(&self.playlist_overlay);
+        if !provisional.is_empty() {
+            for playlist in &mut mixed.to_mut().playlists {
+                playlist
+                    .entries
+                    .retain(|entry| !provisional.contains(&entry.id));
+            }
+            for overlay in overlays.to_mut().playlists.values_mut() {
+                overlay
+                    .entries
+                    .retain(|row| !provisional.contains(&row.entry.id));
+            }
+        }
+        let mixed = self.mixed_playlists_writable.then(|| mixed.encode());
+        let overlays = self.playlist_overlay_writable.then(|| overlays.encode());
+        if let Some(result) = mixed {
+            match result {
                 Ok(bytes) => self.files.write(
                     &self.dirs.mixed_playlists_file(),
                     bytes,
@@ -256,8 +280,8 @@ impl App {
                 Err(error) => self.toast_error(format!("Could not save mixed playlists: {error}")),
             }
         }
-        if self.playlist_overlay_writable {
-            match self.playlist_overlay.encode() {
+        if let Some(result) = overlays {
+            match result {
                 Ok(bytes) => self.files.write(
                     &self.dirs.playlist_overlay_file(),
                     bytes,
@@ -300,6 +324,21 @@ impl App {
         items: &[PlayableItem],
         position: Option<u32>,
     ) -> bool {
+        let handled = self.insert_playlist_sources(target, name, items, position);
+        if handled {
+            self.save_playlist_sources();
+        }
+        handled
+    }
+
+    // The caller commits persistence after recording any pending row IDs.
+    fn insert_playlist_sources(
+        &mut self,
+        target: &str,
+        name: &str,
+        items: &[PlayableItem],
+        position: Option<u32>,
+    ) -> bool {
         if let Some(id) = target.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             if !self.mixed_playlists_writable {
                 self.toast_error(
@@ -316,7 +355,6 @@ impl App {
                 .collect();
             if let Some(playlist) = self.mixed_playlists.get_mut(id) {
                 playlist.add_tracks(&tracks, position.map(|at| at as usize));
-                self.save_playlist_sources();
             }
             return true;
         }
@@ -436,7 +474,6 @@ impl App {
                 }
             }
         }
-        self.save_playlist_sources();
         true
     }
 
@@ -977,6 +1014,105 @@ mod tests {
         }
         assert_eq!(app.soundcloud_add_entries("p").len(), 2);
         cleanup(app);
+    }
+
+    #[test]
+    fn soundcloud_set_persists_only_completed_copies_during_overlapping_loads() {
+        for mixed in [false, true] {
+            let mut app = app("set-pending-persistence");
+            app.backend.set_offline(true);
+            app.playlist_pages.insert("p".into(), spotify(&["a"]));
+            let id = app.mixed_playlists.create("Mix".into(), String::new());
+            let target = if mixed {
+                format!("spotifast:playlist:{id}")
+            } else {
+                "p".into()
+            };
+            let existing = track("soundcloud:track:9");
+            app.add_playlist_sources(
+                &target,
+                "Target",
+                &[PlayableItem::Track(existing.clone())],
+                None,
+            );
+            let mut requests = Vec::new();
+            let filled = vec![track("soundcloud:track:1"), track("soundcloud:track:1")];
+            let provisional: Vec<_> = filled
+                .iter()
+                .map(|track| Track {
+                    uri: track.uri.clone(),
+                    name: "Loading SoundCloud track…".into(),
+                    is_playable: Some(false),
+                    ..Default::default()
+                })
+                .collect();
+            for _ in 0..2 {
+                app.add_soundcloud_playlist(
+                    "soundcloud:playlist:7",
+                    target.clone(),
+                    "Target".into(),
+                );
+                let request = app.load_generation;
+                requests.push(request);
+                app.soundcloud_playlist_add_finished(request, false, Ok(provisional.clone()));
+            }
+            // Navigation and page eviction do not own a copy's lifetime.
+            app.open(Page::Search);
+            app.soundcloud_pages.clear();
+            app.playlist_pages.clear();
+            assert_eq!(app.soundcloud_add_entries(&target).len(), 5);
+            // An unrelated edit must not accidentally persist either request.
+            app.add_playlist_sources(
+                &target,
+                "Target",
+                &[PlayableItem::Track(existing.clone())],
+                None,
+            );
+            let saved_tracks = |app: &App| {
+                assert!(app.files.flush(Duration::from_secs(10)));
+                if mixed {
+                    crate::mixed_playlists::Store::load(&app.dirs.mixed_playlists_file())
+                        .unwrap()
+                        .get(&id)
+                        .unwrap()
+                        .to_tracks()
+                } else {
+                    crate::playlist_overlay::Store::load(&app.dirs.playlist_overlay_file())
+                        .unwrap()
+                        .get("p")
+                        .unwrap()
+                        .entries
+                        .iter()
+                        .map(|row| row.entry.to_track())
+                        .collect()
+                }
+            };
+            assert_eq!(saved_tracks(&app), [existing.clone(), existing.clone()]);
+            // Complete the second request first. It becomes durable without
+            // including the first request's still-visible provisional rows.
+            let second_ids = app.pending_soundcloud_adds[&requests[1]].entries.clone();
+            app.soundcloud_playlist_add_finished(requests[1], true, Ok(filled.clone()));
+            assert_eq!(
+                saved_tracks(&app),
+                [
+                    existing.clone(),
+                    filled[0].clone(),
+                    filled[1].clone(),
+                    existing.clone()
+                ]
+            );
+            app.soundcloud_playlist_add_finished(requests[0], true, Err("Missing track".into()));
+            // Neither failure cleanup nor an obsolete reply can remove or
+            // duplicate the other copy, even though every URI is the same.
+            app.soundcloud_playlist_add_finished(requests[0], true, Ok(filled));
+            let entries = app.soundcloud_add_entries(&target);
+            assert_eq!(entries.len(), 4);
+            assert_eq!(entries[1].id, second_ids[0]);
+            assert_eq!(entries[2].id, second_ids[1]);
+            let tracks: Vec<_> = entries.iter().map(|entry| entry.to_track()).collect();
+            assert_eq!(saved_tracks(&app), tracks);
+            cleanup(app);
+        }
     }
 
     #[test]

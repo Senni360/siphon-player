@@ -70,9 +70,11 @@ Loaded sets appear immediately. Otherwise the runtime reads the set membership,
 inserts placeholder rows and fills every missing track through batched metadata
 requests. A failed metadata load removes only that addition's provisional rows
 and reports the error. Removing or moving rows while loading is preserved.
-Changing connections or quitting cancels pending copies. Local files keep their existing
-version and atomic background-write path. Playlist dragging in the sidebar
-reorders library entries; it does not copy playlist contents.
+Changing connections or quitting cancels pending copies. Only completed copies
+are saved, so an interrupted app cannot restore rows stuck waiting for metadata.
+Local files keep their existing version and atomic background-write path.
+Playlist dragging in the sidebar reorders library entries; it does not copy
+playlist contents.
 
 Demo mode includes invented, deterministic SoundCloud results. Use
 `--demo-page search --demo-show soundcloud,dark` for SoundCloud alone or
