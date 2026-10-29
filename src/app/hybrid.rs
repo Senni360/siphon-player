@@ -43,8 +43,12 @@ pub(super) struct HybridPlayback {
     state: LocalState,
     loaded: bool,
     seek_pending: Option<(u32, u64)>,
-    playing_pending: Option<bool>,
-    consecutive_failures: usize,
+    // Child snapshots report observations, never the user's transport intent.
+    play_intent: bool,
+    transport_sequence: u64,
+    playing_pending: Option<u64>,
+    audible: bool,
+    failed_occurrences: HashSet<crate::hybrid_queue::EntryId>,
     last_added: HashMap<String, Instant>,
 }
 
@@ -60,7 +64,10 @@ impl Default for HybridPlayback {
             loaded: false,
             seek_pending: None,
             playing_pending: None,
-            consecutive_failures: 0,
+            play_intent: false,
+            transport_sequence: 0,
+            audible: false,
+            failed_occurrences: HashSet::new(),
             last_added: HashMap::new(),
         }
     }
@@ -103,9 +110,7 @@ impl App {
     }
 
     pub(super) fn hybrid_audible(&self) -> bool {
-        self.hybrid.loaded
-            && !self.hybrid.state.loading
-            && self.hybrid.state.playback == Playback::Playing
+        self.hybrid.audible && self.hybrid.play_intent
     }
 
     pub(super) fn hybrid_row_is_played_copy(&self, context: &RowContext, index: usize) -> bool {
@@ -300,7 +305,7 @@ impl App {
                     pending.navigation.push(true);
                     pending.request.position_ms = 0;
                 } else {
-                    let play = self.hybrid.state.playback != Playback::Paused;
+                    let play = self.hybrid.play_intent;
                     let t = self.hybrid.queue.next();
                     self.hybrid_transition(t, 0, play);
                 }
@@ -313,7 +318,7 @@ impl App {
                     }
                     pending.request.position_ms = 0;
                 } else {
-                    let play = self.hybrid.state.playback != Playback::Paused;
+                    let play = self.hybrid.play_intent;
                     let t = self.hybrid.queue.previous(position);
                     self.hybrid_transition(t, 0, play);
                 }
@@ -392,6 +397,8 @@ impl App {
         self.hybrid.state.loading = false;
         self.hybrid.tag = None;
         self.hybrid.loaded = false;
+        self.hybrid.play_intent = false;
+        self.hybrid.audible = false;
         self.hybrid.pending = None;
         self.project_hybrid();
     }
@@ -464,7 +471,9 @@ impl App {
         self.enter_hybrid();
         self.hybrid.plan_generation = self.hybrid.plan_generation.wrapping_add(1);
         self.hybrid.pending = None;
-        self.hybrid.consecutive_failures = 0;
+        self.hybrid.failed_occurrences.clear();
+        self.hybrid.play_intent = true;
+        self.hybrid.audible = false;
         self.shuffle_wanted = shuffle;
         self.repeat_wanted = repeat;
         let loaded_context = self.loaded_hybrid_context(&context_uri);
@@ -1000,6 +1009,8 @@ impl App {
         self.hybrid.seek_pending = None;
         self.hybrid.playing_pending = None;
         self.hybrid.loaded = false;
+        self.hybrid.play_intent = play;
+        self.hybrid.audible = false;
         self.hybrid.pending = None;
         self.listening = None;
         self.played_row = None;
@@ -1008,7 +1019,6 @@ impl App {
         }
         match transition {
             Transition::Play(id) | Transition::Restart(id) => {
-                self.hybrid.playing_pending = Some(play);
                 let tag = PlaybackTag {
                     generation: self.hybrid.generation,
                     occurrence: id,
@@ -1034,6 +1044,7 @@ impl App {
                 }));
             }
             Transition::Stopped => {
+                self.hybrid.play_intent = false;
                 self.hybrid.tag = None;
                 self.hybrid.state = LocalState::default();
                 self.backend.send(Command::Hybrid(HybridCommand::Stop));
@@ -1075,7 +1086,7 @@ impl App {
                     self.hybrid_transition(
                         Transition::Play(entry.id),
                         self.hybrid_position(),
-                        self.hybrid.state.playback == Playback::Playing,
+                        self.hybrid.play_intent,
                     );
                 }
             }
@@ -1098,22 +1109,23 @@ impl App {
                         self.hybrid.seek_pending = None;
                     }
                 }
-                if let Some(playing) = self.hybrid.playing_pending {
-                    if (state.playback == Playback::Playing) == playing && !state.loading {
-                        self.hybrid.playing_pending = None;
-                    } else {
-                        state.playback = if playing {
-                            Playback::Playing
-                        } else {
-                            Playback::Paused
-                        };
-                        state.position_ms = self.hybrid_position();
-                        state.position_at = None;
-                    }
+                self.hybrid.audible = state.playback == Playback::Playing
+                    && !state.loading
+                    && state.error.is_none();
+                if self.hybrid.audible {
+                    self.hybrid.failed_occurrences.clear();
                 }
-                if state.playback == Playback::Playing && !state.loading {
-                    self.hybrid.consecutive_failures = 0;
+                // A matching boolean can be a pre-command periodic snapshot.
+                // Only a numbered acknowledgement clears a pending command.
+                if (state.playback == Playback::Playing) != self.hybrid.play_intent {
+                    state.position_ms = self.hybrid_position();
+                    state.position_at = None;
                 }
+                state.playback = if self.hybrid.play_intent {
+                    Playback::Playing
+                } else {
+                    Playback::Paused
+                };
                 self.hybrid.loaded = true;
                 self.hybrid.queue.set_position_ms(state.position_now());
                 if state.seek_sequence != self.hybrid.state.seek_sequence
@@ -1125,7 +1137,7 @@ impl App {
                 self.project_hybrid();
             }
             HybridEvent::EndOfTrack => {
-                let play = self.hybrid.state.playback != Playback::Paused;
+                let play = self.hybrid.play_intent;
                 if let Some((position, _)) = self.hybrid.seek_pending {
                     self.hybrid_transition(Transition::Restart(tag.occurrence), position, play);
                     return;
@@ -1135,13 +1147,17 @@ impl App {
                 self.hybrid_transition(t, 0, play);
             }
             HybridEvent::Failed(error) => {
-                let play = self.hybrid.state.playback != Playback::Paused;
+                let play = self.hybrid.play_intent;
                 self.toast_error(error);
                 self.hybrid.tag = None;
-                self.hybrid.consecutive_failures += 1;
-                let count = self.hybrid.queue.context().map_or(0, |c| c.entries.len())
-                    + self.hybrid.queue.playing_next(usize::MAX).len();
-                if self.hybrid.consecutive_failures >= count.max(1) {
+                self.hybrid.failed_occurrences.insert(tag.occurrence);
+                // Occurrence IDs form a stable retry budget even as manual
+                // rows leave the queue. Never wrap into an already failed row.
+                if self.hybrid.queue.next_entry().is_none_or(|entry| {
+                    self.hybrid.failed_occurrences.contains(&entry.id)
+                }) {
+                    self.hybrid.play_intent = false;
+                    self.hybrid.audible = false;
                     self.hybrid.state.loading = false;
                     self.hybrid.state.playback = Playback::Paused;
                     self.hybrid.state.position_at = None;
@@ -1150,6 +1166,11 @@ impl App {
                 } else {
                     let t = self.hybrid.queue.next();
                     self.hybrid_transition(t, 0, play);
+                }
+            }
+            HybridEvent::PlayingAcknowledged { sequence } => {
+                if self.hybrid.playing_pending == Some(sequence) {
+                    self.hybrid.playing_pending = None;
                 }
             }
         }
@@ -1192,8 +1213,11 @@ impl App {
             }
             return;
         }
-        let playing = self.hybrid.state.playback != Playback::Playing;
-        self.hybrid.playing_pending = Some(playing);
+        let playing = !self.hybrid.play_intent;
+        self.hybrid.play_intent = playing;
+        self.hybrid.transport_sequence = self.hybrid.transport_sequence.wrapping_add(1);
+        let sequence = self.hybrid.transport_sequence;
+        self.hybrid.playing_pending = Some(sequence);
         self.hybrid.state.position_ms = self.hybrid_position();
         self.hybrid.state.playback = if playing {
             Playback::Playing
@@ -1203,7 +1227,7 @@ impl App {
         self.hybrid.state.position_at = playing.then(Instant::now);
         if let Some(tag) = self.hybrid.tag {
             self.backend
-                .send(Command::Hybrid(HybridCommand::Playing { tag, playing }));
+                .send(Command::Hybrid(HybridCommand::Playing { tag, playing, sequence }));
         }
         self.project_hybrid();
         self.preload_hybrid();
@@ -1443,7 +1467,6 @@ fn as_track(item: &PlayableItem) -> Track {
             name: e.name.clone(),
             duration_ms: e.duration_ms,
             explicit: e.explicit,
-            is_playable: e.is_playable,
             album: Some(Album {
                 images: e.images.clone(),
                 ..Album::default()

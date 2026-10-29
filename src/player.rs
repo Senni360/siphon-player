@@ -344,6 +344,8 @@ pub struct PlaybackTag {
 
 pub enum HybridEvent {
     State(Box<LocalState>),
+    /// The runtime accepted this numbered app transport command.
+    PlayingAcknowledged { sequence: u64 },
     EndOfTrack,
     Failed(String),
     /// Another Connect client tried to replace the single child load. The

@@ -20,6 +20,7 @@ pub enum HybridCommand {
     Playing {
         tag: PlaybackTag,
         playing: bool,
+        sequence: u64,
     },
     Seek {
         tag: PlaybackTag,
@@ -205,7 +206,7 @@ impl Worker {
                     let _ = engine.preload(&track.uri);
                 }
             }
-            HybridCommand::Playing { tag, playing } => {
+            HybridCommand::Playing { tag, playing, sequence } => {
                 if self.hybrid.tag != Some(tag) {
                     return;
                 }
@@ -230,6 +231,10 @@ impl Worker {
                 {
                     engine.hybrid_transport(playing);
                 }
+                self.emit(Event::Hybrid {
+                    tag,
+                    event: HybridEvent::PlayingAcknowledged { sequence },
+                });
             }
             HybridCommand::Seek { tag, position_ms } => {
                 if self.hybrid.tag != Some(tag) {
@@ -685,11 +690,11 @@ mod tests {
             worker.hybrid.claimed = true;
             let tag = PlaybackTag { generation: 4, occurrence: crate::hybrid_queue::EntryId(6) };
             worker.hybrid_command(HybridCommand::Load { tag, track: Box::new(Track { uri: "spotify:track:next".into(), ..Default::default() }), position_ms: 0, play: true }).await;
-            worker.hybrid_command(HybridCommand::Playing { tag, playing: false }).await;
+            worker.hybrid_command(HybridCommand::Playing { tag, playing: false, sequence: 1 }).await;
             worker.hybrid_command(HybridCommand::Seek { tag, position_ms: 12_000 }).await;
             assert!(matches!(worker.hybrid.pending, Some(HybridCommand::Load { tag: actual, position_ms: 12_000, play: false, .. }) if actual == tag));
             let stale = PlaybackTag { generation: 3, ..tag };
-            worker.hybrid_command(HybridCommand::Playing { tag: stale, playing: true }).await;
+            worker.hybrid_command(HybridCommand::Playing { tag: stale, playing: true, sequence: 2 }).await;
             assert!(!worker.hybrid.playing);
         });
     }
