@@ -801,6 +801,10 @@ pub enum Command {
     Hybrid(HybridCommand),
     SoundCloudLibrary(soundcloud_library::Request),
     SoundCloudAccount(crate::soundcloud::account::Account),
+    AcceptSoundCloudAccount {
+        account: crate::soundcloud::account::Account,
+        request: u64,
+    },
     RestoreSoundCloud,
     SoundCloudSaveFailed,
     SoundCloudSessionExpired(u64),
@@ -2368,6 +2372,11 @@ impl Worker {
                     self.credentials.invalidate(CredentialSlot::SoundCloud);
                     self.set_soundcloud_account(account, 0);
                 }
+                Command::AcceptSoundCloudAccount { account, request } => {
+                    if request == self.hybrid.account_request {
+                        self.install_soundcloud_account(account);
+                    }
+                }
                 Command::RestoreSoundCloud => self.restore_soundcloud_account(),
                 Command::SoundCloudSaveFailed => self.emit(Event::SoundCloudSaveFailed),
                 Command::SoundCloudSessionExpired(generation) => {
@@ -2385,7 +2394,10 @@ impl Worker {
                     result,
                     request,
                 } if connection.current() => match result {
-                    Ok(account) => self.set_soundcloud_account(account, request),
+                    // Verification may finish before the UI processes a newer
+                    // connect/cancel action. Keep serving the displayed account
+                    // until the UI accepts this exact connection reply.
+                    Ok(account) => self.emit(Event::SoundCloudAccount { account, request }),
                     Err(error) => self.emit(Event::SoundCloudConnectFailed { error, request }),
                 },
                 Command::SoundCloudAccountRestored { .. } => {}

@@ -40,7 +40,7 @@ pub(super) struct HybridRuntime {
     pub(super) account: crate::soundcloud::account::Account,
     client: Option<Client>,
     pub(super) account_generation: u64,
-    account_request: u64,
+    pub(super) account_request: u64,
     account_lease: Option<crate::credentials::Lease>,
     pub(super) engine: Option<sc::Engine>,
     tag: Option<PlaybackTag>,
@@ -214,7 +214,7 @@ impl Worker {
         });
     }
 
-    fn install_soundcloud_account(&mut self, account: crate::soundcloud::account::Account) {
+    pub(super) fn install_soundcloud_account(&mut self, account: crate::soundcloud::account::Account) {
         self.hybrid.account_lease = Some(self.credentials.lease(CredentialSlot::SoundCloud));
         let id = self.hybrid.client.as_ref().and_then(Client::client_id);
         if let Some(previous) = &self.hybrid.client {
@@ -1098,6 +1098,64 @@ mod tests {
             worker.hybrid_command(HybridCommand::Stop).await;
             assert!(worker.hybrid.take_player_waiting().is_empty());
         });
+    }
+
+    #[test]
+    fn verified_soundcloud_accounts_wait_for_the_ui_to_accept_them() {
+        use crate::soundcloud::account::{Account, Connection, Profile};
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("soundcloud-account-acceptance");
+        let previous = Account::Profile(Profile {
+            user_id: 1,
+            username: "Previous account".into(),
+            permalink: "previous".into(),
+            avatar: None,
+        });
+        let verified = Account::Profile(Profile {
+            user_id: 2,
+            username: "Verified account".into(),
+            permalink: "verified".into(),
+            avatar: None,
+        });
+        worker.hybrid.account = previous.clone();
+        worker.hybrid.account_request = 1;
+        let connection = Connection::begin(&worker.credentials);
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands.send(Command::SoundCloudAccountRestored {
+            connection,
+            result: Ok(verified.clone()),
+            request: 1,
+        }).unwrap();
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(worker.hybrid.account == previous);
+        assert!(events.try_iter().any(|event| matches!(event,
+            Event::SoundCloudAccount { account, request: 1 } if account == verified
+        )));
+    }
+
+    #[test]
+    fn soundcloud_account_acceptance_rejects_superseded_requests() {
+        use crate::soundcloud::account::{Account, Profile};
+        for request in [1, 2] {
+            let (runtime, mut worker, _) = super::super::authorization_tests::worker(
+                &format!("soundcloud-account-acceptance-{request}"),
+            );
+            worker.hybrid.account_request = 2;
+            let account = Account::Profile(Profile {
+                user_id: 42,
+                username: "Accepted account".into(),
+                permalink: "accepted".into(),
+                avatar: None,
+            });
+            let (commands, receiver) = mpsc::unbounded_channel();
+            commands.send(Command::AcceptSoundCloudAccount {
+                account: account.clone(), request,
+            }).unwrap();
+            commands.send(Command::Shutdown).unwrap();
+            runtime.block_on(worker.run(receiver));
+            assert_eq!(worker.hybrid.account == account, request == 2);
+        }
     }
 
     #[test]

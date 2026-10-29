@@ -71,6 +71,10 @@ impl App {
         if request != self.soundcloud_request {
             return;
         }
+        self.backend.send(Command::AcceptSoundCloudAccount {
+            account: account.clone(),
+            request,
+        });
         if let Some(user) = account.user()
             && matches!(&self.dialog, Some(Dialog::SoundCloudConnect(draft)) if draft.busy)
         {
