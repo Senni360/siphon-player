@@ -225,6 +225,7 @@ pub async fn command(
     to: &str,
     body: &Value,
 ) -> Result<(), crate::api::client::ApiError> {
+    crate::api::client::reject_foreign_resources("/connect-state", &[], Some(body))?;
     let path = format!(
         "/connect-state/v1/player/command/from/{}/to/{to}",
         session.device_id()

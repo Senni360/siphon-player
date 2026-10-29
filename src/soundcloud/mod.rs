@@ -59,6 +59,18 @@ pub fn is_uri(uri: &str) -> bool {
     uri.starts_with("soundcloud:")
 }
 
+/// Only returned public SoundCloud permalinks may be opened or copied.
+pub fn permalink(url: Option<&str>) -> Option<&str> {
+    let url = url?;
+    let parsed = reqwest::Url::parse(url).ok()?;
+    (parsed.scheme() == "https"
+        && matches!(
+            parsed.host_str(),
+            Some("soundcloud.com" | "www.soundcloud.com")
+        ))
+    .then_some(url)
+}
+
 /// The numeric id in a SoundCloud track URI.
 pub fn track_id(uri: &str) -> Option<u64> {
     uri.strip_prefix(TRACK_PREFIX)?.parse().ok()

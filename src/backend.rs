@@ -394,6 +394,93 @@ pub enum ApiRequest {
 }
 
 impl ApiRequest {
+    /// Resource identities only. Search text, names and descriptions are prose.
+    fn spotify_resources(&self) -> Vec<&str> {
+        match self {
+            Self::Playlist { id, .. }
+            | Self::PlaylistItems { id, .. }
+            | Self::PlaylistSample { id, .. }
+            | Self::UploadPlaylistCover { id, .. }
+            | Self::UpdatePlaylist { id, .. }
+            | Self::FollowPlaylist { id, .. }
+            | Self::Artist { id }
+            | Self::ArtistTopTracks { id }
+            | Self::ArtistAlbums { id, .. }
+            | Self::RelatedArtists { id }
+            | Self::Album { id }
+            | Self::AlbumTracks { id, .. }
+            | Self::AlbumQueueTracks { id, .. }
+            | Self::Show { id }
+            | Self::ShowEpisodes { id, .. }
+            | Self::Track { id }
+            | Self::Episode { id } => vec![id],
+            Self::ReorderPlaylist { playlist_id, .. } => vec![playlist_id],
+            Self::AddToPlaylist {
+                playlist_id, uris, ..
+            }
+            | Self::RemoveFromPlaylist {
+                playlist_id, uris, ..
+            } => std::iter::once(playlist_id.as_str())
+                .chain(uris.iter().map(String::as_str))
+                .collect(),
+            Self::CheckPlaylistDuplicates {
+                playlist_id, items, ..
+            } => std::iter::once(playlist_id.as_str())
+                .chain(items.iter().map(PlayableItem::uri))
+                .collect(),
+            Self::Contains { uris }
+            | Self::SetSaved { uris, .. }
+            | Self::AddManyToQueue { uris, .. } => uris.iter().map(String::as_str).collect(),
+            Self::AddToQueue { uri, .. } => vec![uri],
+            Self::SetHiddenInPlaylist {
+                playlist_uri,
+                track_uri,
+                ..
+            } => vec![playlist_uri, track_uri],
+            Self::Recommendations {
+                seed_tracks,
+                seed_artists,
+                ..
+            } => seed_tracks
+                .iter()
+                .chain(seed_artists)
+                .map(String::as_str)
+                .collect(),
+            Self::NewReleaseTracks { albums, .. } => albums
+                .iter()
+                .flat_map(|album| [album.id.as_str(), album.uri.as_str()])
+                .collect(),
+            Self::HomeEpisodes { shows, .. } => shows
+                .iter()
+                .flat_map(|show| [show.id.as_str(), show.uri.as_str()])
+                .collect(),
+            Self::Remote { play, .. } => play.as_ref().map(play_resources).unwrap_or_default(),
+            Self::ShufflePlay { play, .. } => play_resources(play),
+            Self::FollowedArtists { after } => after.as_deref().into_iter().collect(),
+            Self::Me
+            | Self::Devices
+            | Self::PlaybackState { .. }
+            | Self::Queue { .. }
+            | Self::RecentlyPlayed { .. }
+            | Self::TopTracks { .. }
+            | Self::TopArtists { .. }
+            | Self::MadeForYou { .. }
+            | Self::NewReleases { .. }
+            | Self::HiddenSongs { .. }
+            | Self::MyPlaylists { .. }
+            | Self::CreatePlaylist { .. }
+            | Self::SavedTracks { .. }
+            | Self::SavedAlbums { .. }
+            | Self::SavedShows { .. }
+            | Self::SavedEpisodes { .. }
+            | Self::Search { .. }
+            | Self::SearchCatalogue { .. }
+            | Self::SearchPlaylists { .. }
+            | Self::PlaySearch { .. }
+            | Self::Transfer { .. } => Vec::new(),
+        }
+    }
+
     /// Identifies reads that share the background request concurrency limit.
     fn background(&self) -> bool {
         matches!(
@@ -412,6 +499,15 @@ impl ApiRequest {
                 | Self::Contains { .. }
         )
     }
+}
+
+fn play_resources(play: &PlayRequest) -> Vec<&str> {
+    play.context_uri
+        .as_deref()
+        .into_iter()
+        .chain(play.uris.iter().map(String::as_str))
+        .chain(play.offset_uri.as_deref())
+        .collect()
 }
 
 #[derive(Debug)]
@@ -4686,6 +4782,14 @@ impl Worker {
     }
 
     fn fetch_lyrics(&self, request: LyricsRequest) {
+        if !crate::lyrics::supports_uri(&request.uri) {
+            let _ = self.events.send(Event::Lyrics {
+                uri: request.uri,
+                result: Ok(None),
+            });
+            self.waker.wake();
+            return;
+        }
         let http = self.http.client();
         let events = self.events.clone();
         let waker = self.waker.clone();
@@ -5386,6 +5490,7 @@ async fn handle(
     background_session: &tokio::sync::Semaphore,
     request: ApiRequest,
 ) -> (ApiResponse, Vec<ApiSource>) {
+    let resource_check = api.validate_resources(request.spotify_resources());
     if let ApiRequest::MadeForYou { generation, force } = request {
         let shelves = match engine
             .filter(|engine| same_account(&engine.session().username(), api.account().as_ref()))
@@ -5444,14 +5549,18 @@ async fn handle(
     }
     if let ApiRequest::NewReleaseTracks { albums, generation } = request {
         let mut expired = Vec::new();
-        let result =
-            match read_new_release_tracks(api, session_engine, background_session, &albums).await {
-                Err(ApiError::SignInExpired { api_source }) => {
-                    expired.push(api_source);
-                    Err(ApiError::SignInExpired { api_source })
-                }
-                result => result,
-            };
+        let result = match match resource_check {
+            Ok(()) => {
+                read_new_release_tracks(api, session_engine, background_session, &albums).await
+            }
+            Err(error) => Err(error),
+        } {
+            Err(ApiError::SignInExpired { api_source }) => {
+                expired.push(api_source);
+                Err(ApiError::SignInExpired { api_source })
+            }
+            result => result,
+        };
         return (
             ApiResponse::NewReleaseTracks { generation, result },
             expired,
@@ -5475,7 +5584,7 @@ async fn handle(
         hidden,
     } = request
     {
-        let result = match playback_session(api, engine) {
+        let result = match resource_check.and_then(|()| playback_session(api, engine)) {
             Ok(session) => session_reads::set_hidden(
                 session,
                 &playlist_uri,
@@ -5501,7 +5610,8 @@ async fn handle(
     // A session whose long-lived connection has dropped still answers over
     // its HTTP client, so the engine's presence is the only liveness test;
     // a read the session truly cannot make falls back to the Web API below.
-    if (api.session_serves(operation) || library_over_session(api, operation).await)
+    if resource_check.is_ok()
+        && (api.session_serves(operation) || library_over_session(api, operation).await)
         && let Some(engine) = engine
             .filter(|engine| same_account(&engine.session().username(), api.account().as_ref()))
     {
@@ -5522,12 +5632,16 @@ async fn handle(
     }
     if let Some(engine) =
         engine.filter(|engine| same_account(&engine.session().username(), api.account().as_ref()))
+        && resource_check.is_ok()
         && let Some(response) = over_connect(engine, connect, &request).await
     {
         log::debug!("Spotify route operation={operation:?} source=connect");
         return (response, Vec::new());
     }
-    let selected = api.client_for(operation).await;
+    let selected = match resource_check {
+        Ok(()) => api.client_for(operation).await,
+        Err(error) => Err(error),
+    };
     let _background_permit = if request.background() {
         match &selected {
             Ok(client) => client.background_permit().await,
@@ -9404,6 +9518,73 @@ fn playback_account_matches(credentials: &Credentials, account: Option<AccountId
 mod session_tests {
     use super::*;
     use crate::session_reads::Failure;
+
+    #[tokio::test]
+    async fn soundcloud_resources_fail_before_gateway_authentication_or_session_routing() {
+        let api = ApiGateway::new(reqwest::Client::new(), Arc::new(NetActivity::default()));
+        api.set_state(ApiSource::Shared, SessionState::Authorizing);
+        let requests = [
+            ApiRequest::ArtistTopTracks {
+                id: "soundcloud:user:123".into(),
+            },
+            ApiRequest::Playlist {
+                id: "soundcloud:playlist:123".into(),
+                generation: 1,
+            },
+            ApiRequest::Contains {
+                uris: vec!["soundcloud:track:123".into()],
+            },
+            ApiRequest::ShufflePlay {
+                device_id: None,
+                play: PlayRequest::tracks(vec![
+                    "spotify:track:a".into(),
+                    "soundcloud:track:123".into(),
+                ]),
+            },
+            ApiRequest::AddManyToQueue {
+                request: 1,
+                device_id: None,
+                uris: vec!["spotify:track:a".into(), "soundcloud:track:123".into()],
+            },
+            ApiRequest::SetHiddenInPlaylist {
+                playlist_uri: "spotify:playlist:a".into(),
+                track_uri: "soundcloud:track:123".into(),
+                hidden: true,
+            },
+        ];
+        for request in requests {
+            let (response, expired) = tokio::time::timeout(
+                Duration::from_secs(1),
+                handle(
+                    &api,
+                    &crate::made_for_you::MadeForYou::new(crate::http::Http::default()),
+                    &crate::new_releases::NewReleases::new(crate::http::Http::default()),
+                    &crate::sonos::Controller::default(),
+                    None,
+                    &tokio::sync::Semaphore::new(0),
+                    request,
+                ),
+            )
+            .await
+            .expect(
+                "foreign resources must fail before waiting for authorization or a session slot",
+            );
+            let error = match response {
+                ApiResponse::ArtistTopTracks { result, .. } => result.unwrap_err(),
+                ApiResponse::Playlist { result, .. } => result.unwrap_err(),
+                ApiResponse::Contains { result, .. } => result.unwrap_err(),
+                ApiResponse::Remote { result, .. } => result.unwrap_err(),
+                ApiResponse::QueueBatchAdded { added, result, .. } => {
+                    assert_eq!(added, 0);
+                    result.unwrap_err()
+                }
+                ApiResponse::HiddenInPlaylistSet { result, .. } => result.unwrap_err(),
+                other => panic!("unexpected response: {other:?}"),
+            };
+            assert_eq!(error.status(), Some(400));
+            assert!(expired.is_empty());
+        }
+    }
 
     /// Queued Shared and session work must not delay a Personal background read.
     #[tokio::test]

@@ -2754,3 +2754,20 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod source_guard_tests {
+    use super::*;
+
+    #[test]
+    fn soundcloud_artwork_uses_the_shared_url_loader() {
+        let url = "https://i1.sndcdn.com/artworks-example-large.jpg";
+        assert!(is_art(url));
+        let scaled = scaled_uri(url, 128);
+        assert_eq!(parse_scaled(&scaled), Some((url, 128)));
+        assert_ne!(
+            scaled_uri(url, 128),
+            scaled_uri("https://i.scdn.co/image/artworks-example-large.jpg", 128)
+        );
+    }
+}

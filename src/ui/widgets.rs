@@ -734,7 +734,12 @@ pub fn picked_menu(
         });
     }
     // Set one explicit saved state for the full selection.
-    let all_saved = uris.iter().all(|uri| app.is_saved(uri).unwrap_or(false));
+    let savable: Vec<_> = uris
+        .iter()
+        .filter(|uri| matches!(util::uri_kind(uri), Some("track" | "episode")))
+        .cloned()
+        .collect();
+    let all_saved = savable.iter().all(|uri| app.is_saved(uri).unwrap_or(false));
     let (icon, text) = if all_saved {
         (
             Icon::HeartFilled,
@@ -743,9 +748,22 @@ pub fn picked_menu(
     } else {
         (Icon::Heart, gettext(locale, "Save to Liked Songs"))
     };
-    if menu_item(ui, &palette, Some(icon), &text) {
+    let text = if savable.len() < uris.len() {
+        let count = savable.len();
+        let eligible = ngettext(
+            locale,
+            "{count} Spotify song",
+            "{count} Spotify songs",
+            count as u32,
+        )
+        .replace("{count}", &count.to_string());
+        format!("{text} ({eligible})")
+    } else {
+        text.into_owned()
+    };
+    if !savable.is_empty() && menu_item(ui, &palette, Some(icon), &text) {
         app.actions.push(Action::SetSavedMany {
-            uris: uris.clone(),
+            uris: savable,
             saved: !all_saved,
         });
     }
@@ -1035,7 +1053,7 @@ fn item_menu_at(
         } else {
             (Icon::Heart, gettext(locale, "Save to Liked Songs"))
         };
-        if menu_item(ui, &palette, Some(icon), &text) {
+        if util::uri_kind(&uri) == Some("track") && menu_item(ui, &palette, Some(icon), &text) {
             app.actions.push(Action::ToggleSaved(uri.clone()));
         }
         add_to_playlist_menu(ui, app, std::slice::from_ref(item));
@@ -1110,7 +1128,7 @@ fn item_menu_at(
         Some(RowContext::View { context_uri, .. }) => Some(context_uri),
         _ => None,
     }
-    .filter(|playlist| item.is_track() && app.can_hide_in(playlist))
+    .filter(|playlist| util::uri_kind(&uri) == Some("track") && app.can_hide_in(playlist))
     .cloned();
     if let Some(playlist_uri) = hide_in {
         let hidden = app.hidden_in(&playlist_uri, &uri);
@@ -1130,12 +1148,14 @@ fn item_menu_at(
     menu_separator(ui, &palette);
     match item {
         PlayableItem::Track(track) => {
-            if menu_item(
-                ui,
-                &palette,
-                Some(Icon::Radio),
-                &gettext(locale, "Go to song radio"),
-            ) {
+            if util::uri_kind(&uri) == Some("track")
+                && menu_item(
+                    ui,
+                    &palette,
+                    Some(Icon::Radio),
+                    &gettext(locale, "Go to song radio"),
+                )
+            {
                 app.actions.push(Action::OpenSongRadio {
                     uri: uri.clone(),
                     track: Box::new(track.clone()),
@@ -1144,7 +1164,7 @@ fn item_menu_at(
             let artists: Vec<&ArtistRef> = track
                 .artists
                 .iter()
-                .filter(|artist| artist.id.is_some())
+                .filter(|artist| Page::for_artist(artist).is_some())
                 .collect();
             if artists.len() == 1 {
                 if menu_item(
@@ -1152,25 +1172,25 @@ fn item_menu_at(
                     &palette,
                     Some(Icon::User),
                     &gettext(locale, "Go to artist"),
-                ) {
-                    app.actions.push(Action::Open(Page::Artist(
-                        artists[0].id.clone().unwrap_or_default(),
-                    )));
+                ) && let Some(page) = Page::for_artist(artists[0])
+                {
+                    app.actions.push(Action::Open(page));
                 }
             } else if artists.len() > 1 {
                 let label = gettext(locale, "Go to artist");
                 menu_submenu(ui, &palette, Some(Icon::User), &label, |ui| {
                     ui.set_min_width(200.0);
                     for artist in &artists {
-                        if menu_item(ui, &palette, Some(Icon::User), &artist.name) {
-                            app.actions.push(Action::Open(Page::Artist(
-                                artist.id.clone().unwrap_or_default(),
-                            )));
+                        if menu_item(ui, &palette, Some(Icon::User), &artist.name)
+                            && let Some(page) = Page::for_artist(artist)
+                        {
+                            app.actions.push(Action::Open(page));
                         }
                     }
                 });
             }
-            if let Some(album) = &track.album
+            if util::uri_kind(&track.uri) == Some("track")
+                && let Some(album) = &track.album
                 && !album.id.is_empty()
                 && menu_item(
                     ui,
@@ -1197,6 +1217,10 @@ fn item_menu_at(
         }
     }
     menu_separator(ui, &palette);
+    if crate::soundcloud::is_uri(&uri) {
+        soundcloud_link_menu(ui, app, util::item_link(item).as_deref());
+        return;
+    }
     if menu_item(
         ui,
         &palette,
@@ -1212,6 +1236,40 @@ fn item_menu_at(
         &gettext(locale, "Open in Spotify"),
     ) {
         app.actions.push(Action::OpenInSpotify(uri));
+    }
+}
+
+/// SoundCloud shares only the permalink returned by its catalogue.
+fn soundcloud_link_menu(ui: &mut Ui, app: &mut App, url: Option<&str>) {
+    let palette = app.palette;
+    for (icon, label, open) in [
+        (
+            Icon::Copy,
+            gettext(app.locale, "Copy SoundCloud link"),
+            false,
+        ),
+        (
+            Icon::ExternalLink,
+            gettext(app.locale, "Open on SoundCloud"),
+            true,
+        ),
+    ] {
+        let response = ui.add_enabled_ui(url.is_some(), |ui| {
+            menu_item(ui, &palette, Some(icon), &label)
+        });
+        response.response.on_disabled_hover_text(gettext(
+            app.locale,
+            "SoundCloud did not provide a public link",
+        ));
+        if response.inner
+            && let Some(url) = url
+        {
+            app.actions.push(if open {
+                Action::OpenUrl(url.into())
+            } else {
+                Action::CopyLink(url.into())
+            });
+        }
     }
 }
 
@@ -1231,7 +1289,11 @@ pub fn context_menu_items(
     let locale = app.locale;
     ui.set_min_width(200.0);
     ui.set_max_width(300.0);
-    let kind = util::uri_kind(uri).unwrap_or("");
+    let kind = if crate::soundcloud::user_id(uri).is_some() {
+        "artist"
+    } else {
+        util::uri_kind(uri).unwrap_or("")
+    };
     if menu_item(ui, &palette, Some(Icon::Play), &gettext(locale, "Play")) {
         app.actions.push(Action::PlayContext {
             uri: uri.to_string(),
@@ -1248,6 +1310,11 @@ pub fn context_menu_items(
         )
     {
         app.actions.push(Action::ShufflePlay(uri.to_string()));
+    }
+    if crate::soundcloud::is_uri(uri) {
+        let url = app.soundcloud_link(uri);
+        soundcloud_link_menu(ui, app, url.as_deref());
+        return;
     }
     if kind == "album"
         && menu_item(
@@ -1375,7 +1442,7 @@ pub struct TrackRow<'a> {
     pub position: Option<u32>,
 }
 
-/// Draw each credited artist separately so its Spotify id remains clickable.
+/// Draw each credited artist with its service-aware page link.
 pub(crate) fn artist_links(
     ui: &mut Ui,
     app: &mut App,
@@ -1396,9 +1463,9 @@ pub(crate) fn artist_links(
         if index + 1 == artists.len() {
             ui.spacing_mut().item_spacing = spacing;
         }
-        if let Some(id) = &artist.id {
+        if let Some(page) = Page::for_artist(artist) {
             if theme::link(ui, &artist.name, font.clone(), color).clicked() {
-                app.actions.push(Action::Open(Page::Artist(id.clone())));
+                app.actions.push(Action::Open(page));
                 clicked = true;
             }
         } else {
@@ -1927,13 +1994,20 @@ fn track_row_contents(
                     .layout(Layout::left_to_right(Align::Center)),
             );
             child.set_clip_rect(album_rect.intersect(ui.clip_rect()));
-            let response = theme::link(
-                &mut child,
-                album.name.clone(),
-                theme::regular(13.0),
-                subtitle_color,
-            );
-            if response.clicked() && !album.id.is_empty() {
+            let supported = !crate::soundcloud::is_uri(&track.uri);
+            let response = child
+                .add_enabled_ui(supported, |ui| {
+                    theme::link(ui, album.name.clone(), theme::regular(13.0), subtitle_color)
+                })
+                .inner
+                .on_disabled_hover_text(gettext(
+                    app.locale,
+                    "Spotify album pages are unavailable for SoundCloud tracks",
+                ));
+            if response.clicked()
+                && !album.id.is_empty()
+                && util::uri_kind(&track.uri) == Some("track")
+            {
                 app.actions
                     .push(Action::Open(Page::Album(album.id.clone())));
             }
@@ -2006,7 +2080,7 @@ fn track_row_contents(
     if cols.heart > 0.0 {
         let saved = app.is_saved(row.item.uri());
         let heart_rect = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.heart, row_height));
-        if row.item.is_track() {
+        if row.item.is_track() && util::uri_kind(row.item.uri()) == Some("track") {
             let mut child = ui.new_child(
                 UiBuilder::new()
                     .max_rect(heart_rect)
@@ -3945,6 +4019,93 @@ mod tests {
             (field - clear).abs() < 0.6,
             "the clear button must sit on the search pill's midline: got {clear}, expected {field}"
         );
+    }
+
+    #[test]
+    fn soundcloud_row_menu_omits_spotify_actions_and_names_its_service() {
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        theme::install(&ctx);
+        let mut app = test_app();
+        let mut track = Track {
+            uri: "soundcloud:track:123".into(),
+            name: "SoundCloud song".into(),
+            artists: vec![ArtistRef {
+                id: Some("123".into()),
+                name: "Uploader".into(),
+                uri: Some("soundcloud:user:123".into()),
+            }],
+            album: Some(Album {
+                id: "123".into(),
+                uri: "soundcloud:playlist:123".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        track.external_urls.spotify = Some("https://soundcloud.com/u/song".into());
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            item_menu(
+                ui,
+                &mut app,
+                &PlayableItem::Track(track.clone()),
+                None,
+                None,
+            );
+        });
+        output.textures_delta.clear();
+        let tree = output.platform_output.accesskit_update.unwrap();
+        let labels: Vec<_> = tree
+            .nodes
+            .iter()
+            .filter_map(|(_, node)| node.label())
+            .collect();
+        for expected in ["Copy SoundCloud link", "Open on SoundCloud", "Go to artist"] {
+            assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
+        }
+        for absent in [
+            "Save to Liked Songs",
+            "Remove from Liked Songs",
+            "Go to album",
+            "Go to song radio",
+            "Copy link",
+            "Open in Spotify",
+        ] {
+            assert!(!labels.contains(&absent), "unexpected {absent}");
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_context_menus_never_offer_spotify_library_or_radio() {
+        let mut app = test_app();
+        for uri in ["soundcloud:user:123", "soundcloud:playlist:123"] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            theme::install(&ctx);
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                context_menu_items(ui, &mut app, uri, "SoundCloud", None);
+            });
+            output.textures_delta.clear();
+            let tree = output.platform_output.accesskit_update.unwrap();
+            let labels: Vec<_> = tree
+                .nodes
+                .iter()
+                .filter_map(|(_, node)| node.label())
+                .collect();
+            assert!(labels.contains(&"Open on SoundCloud"));
+            for absent in [
+                "Follow",
+                "Add to Your Library",
+                "Edit details",
+                "Go to artist radio",
+                "Go to playlist radio",
+                "Copy link",
+                "Open in Spotify",
+            ] {
+                assert!(!labels.contains(&absent), "unexpected {absent} for {uri}");
+            }
+        }
+        app.backend.shutdown();
     }
 
     fn test_app() -> App {

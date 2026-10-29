@@ -318,25 +318,6 @@ impl App {
             return None;
         }
         match action {
-            Action::CopySongs(items)
-                if items
-                    .iter()
-                    .any(|item| item.uri().starts_with("soundcloud:track:")) =>
-            {
-                let links: Vec<_> = items
-                    .iter()
-                    .filter_map(|item| {
-                        if item.uri().starts_with("soundcloud:track:") {
-                            Some(item.uri().to_string())
-                        } else {
-                            util::open_spotify_url(item.uri())
-                        }
-                    })
-                    .collect();
-                ctx.copy_text(links.join(if cfg!(windows) { "\r\n" } else { "\n" }));
-                self.copied_songs = items;
-                self.toast(gettext(self.locale, "Link copied"));
-            }
             Action::SaveMixedPlaylist {
                 id,
                 name,
@@ -928,18 +909,42 @@ mod tests {
     fn pasted_mixed_selection_keeps_sources_order_and_duplicate_identity() {
         let mut app = app("paste");
         let ctx = egui::Context::default();
+        let mut soundcloud = track("soundcloud:track:1");
+        soundcloud.external_urls.spotify = Some("https://soundcloud.com/u/song".into());
         let songs = vec![
-            PlayableItem::Track(track("soundcloud:track:1")),
+            PlayableItem::Track(soundcloud.clone()),
             PlayableItem::Track(track("spotify:track:a")),
-            PlayableItem::Track(track("soundcloud:track:1")),
+            PlayableItem::Track(soundcloud),
         ];
-        app.apply(Action::CopySongs(songs.clone()), &ctx);
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.apply(Action::CopySongs(songs.clone()), ui.ctx());
+        });
+        output.textures_delta.clear();
+        let text = output
+            .platform_output
+            .commands
+            .iter()
+            .find_map(|command| {
+                if let egui::OutputCommand::CopyText(text) = command {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("copied public links");
+        assert_eq!(
+            text.lines().collect::<Vec<_>>(),
+            [
+                "https://soundcloud.com/u/song",
+                "https://open.spotify.com/track/a",
+                "https://soundcloud.com/u/song"
+            ]
+        );
         let id = app.mixed_playlists.create("Paste".into(), String::new());
         app.apply(
             Action::PasteSongs {
                 playlist_id: format!("spotifast:playlist:{id}"),
-                text: "soundcloud:track:1\nhttps://open.spotify.com/track/a\nsoundcloud:track:1"
-                    .into(),
+                text,
             },
             &ctx,
         );
@@ -953,6 +958,15 @@ mod tests {
             songs.iter().map(PlayableItem::uri).collect::<Vec<_>>()
         );
         assert_ne!(playlist.entries[0].id, playlist.entries[2].id);
+        app.apply(
+            Action::PasteSongs {
+                playlist_id: format!("spotifast:playlist:{id}"),
+                text: "soundcloud:track:1\nhttps://open.spotify.com/track/a\nsoundcloud:track:1"
+                    .into(),
+            },
+            &ctx,
+        );
+        assert_eq!(app.mixed_playlists.get(&id).unwrap().entries.len(), 6);
         cleanup(app);
     }
 

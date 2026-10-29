@@ -426,3 +426,27 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 }
+
+#[cfg(test)]
+mod source_guard_tests {
+    use super::*;
+
+    #[test]
+    fn matching_numeric_ids_from_different_sources_are_distinct_plays() {
+        let play = |uri: &str| PlayHistory {
+            track: Track {
+                uri: uri.into(),
+                id: Some("123".into()),
+                ..Default::default()
+            },
+            played_at: Some("2026-10-28T12:00:00Z".into()),
+            ..Default::default()
+        };
+        let result = merged(
+            &[play("soundcloud:track:123")],
+            &[play("spotify:track:123")],
+        );
+        assert_eq!(result.len(), 2);
+        assert_ne!(result[0].track.uri, result[1].track.uri);
+    }
+}

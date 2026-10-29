@@ -9,6 +9,17 @@ use crate::theme::{self, Icon};
 
 use super::widgets;
 
+fn unavailable_reason(app: &App) -> std::borrow::Cow<'static, str> {
+    if app
+        .now_playing()
+        .is_some_and(|now| crate::soundcloud::is_uri(&now.uri))
+    {
+        gettext(app.locale, "Lyrics are unavailable for SoundCloud tracks")
+    } else {
+        gettext(app.locale, "No lyrics found for this track.")
+    }
+}
+
 const LINE_SIZE: f32 = 19.0;
 const LINE_GAP: f32 = 10.0;
 /// Where the line being sung sits, as a fraction of the visible lyrics from
@@ -186,7 +197,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                 &palette,
                 Icon::Mic,
                 &gettext(app.locale, "No lyrics"),
-                &gettext(app.locale, "No lyrics found for this track."),
+                &unavailable_reason(app),
             );
             return;
         }
@@ -444,10 +455,7 @@ fn with_cover(app: &mut App, ui: &mut egui::Ui, rect: Rect, top: f32) {
                 gettext(app.locale, "Instrumental"),
                 gettext(app.locale, "No timed lyrics for this track."),
             ),
-            Loadable::Loaded(None) => (
-                gettext(app.locale, "No lyrics"),
-                gettext(app.locale, "No lyrics found for this track."),
-            ),
+            Loadable::Loaded(None) => (gettext(app.locale, "No lyrics"), unavailable_reason(app)),
             Loadable::Failed(error) => (
                 gettext(
                     app.locale,
@@ -706,7 +714,7 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 &palette,
                 Icon::Mic,
                 &gettext(app.locale, "No lyrics"),
-                &gettext(app.locale, "No lyrics found for this track."),
+                &unavailable_reason(app),
             );
             return;
         }

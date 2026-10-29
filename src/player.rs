@@ -680,8 +680,7 @@ impl Engine {
     /// read; `Ok(None)` when Spotify has none, an error when asking failed.
     pub async fn lyrics_json(&self, track_uri: &str) -> Result<Option<serde_json::Value>> {
         let Some(id) = track_uri
-            .rsplit(':')
-            .next()
+            .strip_prefix("spotify:track:")
             .and_then(|id| SpotifyId::from_base62(id).ok())
         else {
             return Ok(None);

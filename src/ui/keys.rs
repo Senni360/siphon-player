@@ -136,7 +136,9 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     if !editing_text
         && app.dialog.is_none()
         && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::B))
-        && let Some(now) = app.now_playing().filter(|now| !now.is_episode)
+        && let Some(now) = app
+            .now_playing()
+            .filter(|now| !now.is_episode && crate::util::uri_kind(&now.uri) == Some("track"))
     {
         actions.push(Action::ToggleSaved(now.uri));
     }
@@ -144,16 +146,18 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     for action in actions {
         match action {
             Action::OpenUri(kind) if kind == "artist" => {
-                if let Some(id) = app
+                if let Some(page) = app
                     .now_playing()
-                    .and_then(|now| now.artists.first().and_then(|artist| artist.id.clone()))
+                    .and_then(|now| now.artists.first().and_then(Page::for_artist))
                 {
-                    app.actions.push(Action::Open(Page::Artist(id)));
+                    app.actions.push(Action::Open(page));
                 }
             }
             Action::OpenUri(kind) if kind == "album" => {
                 if let Some(now) = app.now_playing() {
-                    if let Some(id) = now.album_id {
+                    if let Some(id) = now.album_id
+                        && crate::util::uri_kind(&now.uri) == Some("track")
+                    {
                         app.actions.push(Action::Open(Page::Album(id)));
                     } else if let Some(id) = now.show_id {
                         app.actions.push(Action::Open(Page::Show(id)));
@@ -670,6 +674,59 @@ mod tests {
             app.actions.as_slice(),
             [Action::ToggleSaved(uri)] if uri == "spotify:track:trk0"
         ));
+        let Some(crate::api::models::PlayableItem::Track(track)) =
+            &mut app.remote.as_mut().unwrap().state.item
+        else {
+            panic!("demo track");
+        };
+        track.uri = "soundcloud:track:123".into();
+        track.id = Some("123".into());
+        track.artists = vec![crate::api::models::ArtistRef {
+            id: Some("123".into()),
+            uri: Some("soundcloud:user:123".into()),
+            ..Default::default()
+        }];
+        let command = if cfg!(target_os = "macos") {
+            Modifiers::MAC_CMD | Modifiers::COMMAND
+        } else {
+            Modifiers::CTRL | Modifiers::COMMAND
+        };
+        for (key, modifiers, expected) in [
+            (Key::B, Modifiers::NONE, None),
+            (Key::B, command | Modifiers::SHIFT, None),
+            (
+                Key::A,
+                command | Modifiers::SHIFT,
+                Some(Page::Artist("soundcloud:user:123".into())),
+            ),
+        ] {
+            app.actions.clear();
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    ..Default::default()
+                },
+                |ui| handle(&mut app, ui.ctx()),
+            );
+            output.textures_delta.clear();
+            match expected {
+                Some(page) => assert!(
+                    matches!(app.actions.as_slice(), [Action::Open(actual)] if actual == &page)
+                ),
+                None => assert!(
+                    app.actions.is_empty(),
+                    "unexpected SoundCloud shortcut: {:?}",
+                    app.actions
+                ),
+            }
+        }
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
     }

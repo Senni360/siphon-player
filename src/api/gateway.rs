@@ -196,6 +196,17 @@ pub struct ApiGateway {
 }
 
 impl ApiGateway {
+    /// Check identifiers before choosing a Web API or playback-session route.
+    pub(crate) fn validate_resources<'a>(
+        &self,
+        resources: impl IntoIterator<Item = &'a str>,
+    ) -> Result<(), ApiError> {
+        for resource in resources {
+            super::client::reject_foreign_resources(resource, &[], None)?;
+        }
+        Ok(())
+    }
+
     pub fn new(http: impl Into<crate::http::Http>, activity: Arc<NetActivity>) -> Self {
         let http = http.into();
         Self {
@@ -422,6 +433,9 @@ impl ApiGateway {
     }
 
     pub fn observe_playlist(&self, playlist: &Playlist) {
+        if crate::soundcloud::is_uri(&playlist.uri) || playlist.uri.starts_with("spotifast:") {
+            return;
+        }
         let Some(account) = self.account() else {
             return;
         };
@@ -781,6 +795,30 @@ mod tests {
             classify_playlist(&account, &playlist),
             PlaylistAccess::Owned
         );
+    }
+
+    #[test]
+    fn soundcloud_playlist_ids_cannot_replace_spotify_access() {
+        let gateway = ApiGateway::new(reqwest::Client::new(), Arc::new(NetActivity::default()));
+        gateway.set_state(
+            ApiSource::Shared,
+            SessionState::Ready {
+                account: AccountId::new("me"),
+            },
+        );
+        let mut playlist = Playlist {
+            id: "123".into(),
+            uri: "spotify:playlist:123".into(),
+            ..Default::default()
+        };
+        playlist.owner.id = Some("me".into());
+        gateway.observe_playlist(&playlist);
+        assert_eq!(gateway.playlist_access("123"), PlaylistAccess::Owned);
+        playlist.uri = "soundcloud:playlist:123".into();
+        playlist.owner.id = Some("uploader".into());
+        gateway.observe_playlist(&playlist);
+        assert_eq!(gateway.playlist_access("123"), PlaylistAccess::Owned);
+        assert!(gateway.validate_resources([playlist.uri.as_str()]).is_err());
     }
 
     #[test]

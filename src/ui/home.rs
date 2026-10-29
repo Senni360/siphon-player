@@ -100,7 +100,7 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
     let playlist_tile = |playlist: &Playlist| Tile {
         image: pick_image(&playlist.images, tile_art).map(str::to_string),
         name: playlist.name.clone(),
-        page: Page::Playlist(playlist.id.clone()),
+        page: Page::from_uri(&playlist.uri).unwrap_or(Page::Search),
         uri: Some(playlist.uri.clone()),
         liked: false,
         owned_playlist: app
@@ -138,7 +138,7 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
                 app.known_artist(id).map(|artist| Tile {
                     image: pick_image(&artist.images, tile_art).map(str::to_string),
                     name: artist.name.clone(),
-                    page: Page::Artist(artist.id.clone()),
+                    page: Page::from_uri(&artist.uri).unwrap_or(Page::Search),
                     uri: Some(uri.to_string()),
                     liked: false,
                     owned_playlist: None,
@@ -164,7 +164,7 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
                 .map(|album| Tile {
                     image: track.image(tile_art).map(str::to_string),
                     name: track.name.clone(),
-                    page: Page::Album(album.id.clone()),
+                    page: Page::from_uri(&album.uri).unwrap_or(Page::Search),
                     uri: Some(track.uri.clone()),
                     liked: false,
                     owned_playlist: None,
@@ -486,8 +486,9 @@ fn playlist_cards(app: &mut App, ui: &mut egui::Ui, menu: &str, playlists: &[Pla
             }
         }
         if card.clicked {
-            app.actions
-                .push(Action::Open(Page::Playlist(playlist.id.clone())));
+            app.actions.push(Action::Open(
+                Page::from_uri(&playlist.uri).unwrap_or(Page::Search),
+            ));
         }
         egui::Popup::context_menu(&card.response)
             .id(ui.make_persistent_id((menu, &playlist.uri)))
@@ -803,8 +804,9 @@ fn top_artists(app: &mut App, ui: &mut egui::Ui) {
                     }
                 }
                 if card.clicked {
-                    app.actions
-                        .push(Action::Open(Page::Artist(artist.id.clone())));
+                    app.actions.push(Action::Open(
+                        Page::from_uri(&artist.uri).unwrap_or(Page::Search),
+                    ));
                 }
                 egui::Popup::context_menu(&card.response)
                     .id(ui.make_persistent_id(("home-top_artists-menu", &artist.uri)))

@@ -179,12 +179,17 @@ pub fn format_relative_date(locale: Locale, iso: &str, now: jiff::Timestamp) -> 
 
 /// Tears the id out of `spotify:track:abc` and friends.
 pub fn uri_id(uri: &str) -> Option<&str> {
-    uri.rsplit(':').next().filter(|id| !id.is_empty())
+    uri.strip_prefix("spotify:")?
+        .rsplit(':')
+        .next()
+        .filter(|id| !id.is_empty())
 }
 
 pub fn uri_kind(uri: &str) -> Option<&str> {
     let mut parts = uri.split(':');
-    parts.next()?;
+    if parts.next()? != "spotify" {
+        return None;
+    }
     parts.next()
 }
 
@@ -207,6 +212,18 @@ pub fn open_spotify_url(uri: &str) -> Option<String> {
     let kind = uri_kind(uri)?;
     let id = uri_id(uri)?;
     Some(format!("https://open.spotify.com/{kind}/{id}"))
+}
+
+/// A service's real share link. SoundCloud permalinks cannot be derived from IDs.
+pub fn item_link(item: &crate::api::models::PlayableItem) -> Option<String> {
+    if crate::soundcloud::is_uri(item.uri()) {
+        let crate::api::models::PlayableItem::Track(track) = item else {
+            return None;
+        };
+        crate::soundcloud::permalink(track.external_urls.spotify.as_deref()).map(str::to_owned)
+    } else {
+        open_spotify_url(item.uri())
+    }
 }
 
 /// The menu-bar shape for macOS: the circle with the play triangle punched
@@ -369,6 +386,35 @@ pub(crate) fn temporary_files(dir: &std::path::Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn foreign_uris_never_become_spotify_ids_or_links() {
+        for uri in [
+            "soundcloud:track:123",
+            "soundcloud:user:123",
+            "soundcloud:playlist:123",
+            "spotifast:playlist:123",
+        ] {
+            assert_eq!(uri_id(uri), None);
+            assert_eq!(uri_kind(uri), None);
+            assert_eq!(open_spotify_url(uri), None);
+            assert_eq!(station_uri(uri), None);
+        }
+        let mut track = crate::api::models::Track {
+            uri: "soundcloud:track:123".into(),
+            ..Default::default()
+        };
+        track.external_urls.spotify = Some("https://soundcloud.com/u/song".into());
+        assert_eq!(
+            item_link(&crate::api::models::PlayableItem::Track(track.clone())).as_deref(),
+            Some("https://soundcloud.com/u/song")
+        );
+        track.external_urls.spotify = None;
+        assert_eq!(
+            item_link(&crate::api::models::PlayableItem::Track(track)),
+            None
+        );
+    }
 
     fn pixel(rgba: &[u8], size: usize, x: usize, y: usize) -> [u8; 4] {
         let index = (y * size + x) * 4;

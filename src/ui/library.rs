@@ -101,7 +101,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, page: Page) {
             let artist_label = gettext(locale, "Artist");
             widgets::virtual_wrapped_cards(ui, count, card_height, |ui, index| {
                 let artist = app.library.artists.items[index].clone();
-                let id = artist.id.clone();
+                let page = Page::from_uri(&artist.uri).unwrap_or(Page::Search);
                 let uri = artist.uri.clone();
                 let context_here = app.playing_context_uri().as_deref() == Some(uri.as_str());
                 let playing_here = context_here && app.believed_playing();
@@ -126,7 +126,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, page: Page) {
                     }
                 }
                 if card.clicked {
-                    app.actions.push(Action::Open(Page::Artist(id)));
+                    app.actions.push(Action::Open(page));
                 }
                 egui::Popup::context_menu(&card.response)
                     .id(ui.make_persistent_id(("library-artist-menu", &artist.uri)))

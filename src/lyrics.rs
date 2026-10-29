@@ -29,6 +29,11 @@ const RATE_LIMIT_RETRIES: u32 = 3;
 /// and a click on it asks again.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 
+/// Lyrics providers only support Spotify catalogue tracks and matched local files.
+pub fn supports_uri(uri: &str) -> bool {
+    uri.starts_with("spotify:track:") || uri.starts_with("spotify:local:")
+}
+
 /// Track metadata used for lyrics lookup.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query {
@@ -843,5 +848,18 @@ mod tests {
         assert_eq!(plain.lines.len(), 1);
         let nothing = Record::default();
         assert!(nothing.lyrics().is_none());
+    }
+}
+
+#[cfg(test)]
+mod source_guard_tests {
+    use super::*;
+
+    #[test]
+    fn soundcloud_never_uses_spotify_or_inferred_lyrics() {
+        assert!(!supports_uri("soundcloud:track:123"));
+        assert!(!supports_uri("spotifast:playlist:123"));
+        assert!(supports_uri("spotify:track:123"));
+        assert!(supports_uri("spotify:local:a:b:c:1"));
     }
 }

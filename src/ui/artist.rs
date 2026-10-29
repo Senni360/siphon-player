@@ -246,8 +246,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
                             }
                         }
                         if card.clicked {
-                            app.actions
-                                .push(Action::Open(Page::Artist(artist.id.clone())));
+                            app.actions.push(Action::Open(
+                                Page::from_uri(&artist.uri).unwrap_or(Page::Search),
+                            ));
                         }
                         egui::Popup::context_menu(&card.response)
                             .id(ui.make_persistent_id(("related-artist-menu", &artist.uri)))
@@ -402,17 +403,18 @@ fn artist_actions(app: &mut App, ui: &mut egui::Ui, artist: &Artist) {
                 offset_index: None,
             });
         }
-        if theme::pill_button(
-            ui,
-            &palette,
-            &if following {
-                pgettext(locale, "artist", "Following")
-            } else {
-                pgettext(locale, "artist", "Follow")
-            },
-            false,
-        )
-        .clicked()
+        if util::uri_kind(&artist.uri) == Some("artist")
+            && theme::pill_button(
+                ui,
+                &palette,
+                &if following {
+                    pgettext(locale, "artist", "Following")
+                } else {
+                    pgettext(locale, "artist", "Follow")
+                },
+                false,
+            )
+            .clicked()
         {
             app.actions.push(Action::ToggleSaved(artist.uri.clone()));
         }

@@ -27,7 +27,7 @@ struct Row {
     queued: Option<usize>,
     /// The pages the MISC menu can open for it.
     album_id: Option<String>,
-    artist_id: Option<String>,
+    artist_id: Option<Page>,
 }
 
 /// The whole panel, `height` skin pixels tall, drawn into a view whose
@@ -275,8 +275,12 @@ fn rows(app: &App, now: Option<&NowPlaying>) -> (Vec<Row>, Vec<String>) {
     let queue = app.queue.get();
     let ids = |item: &PlayableItem| match item {
         PlayableItem::Track(track) => (
-            track.album.as_ref().map(|album| album.id.clone()),
-            track.artists.first().and_then(|artist| artist.id.clone()),
+            track
+                .album
+                .as_ref()
+                .filter(|_| util::uri_kind(&track.uri) == Some("track"))
+                .map(|album| album.id.clone()),
+            track.artists.first().and_then(Page::for_artist),
         ),
         _ => (None, None),
     };
@@ -305,8 +309,11 @@ fn rows(app: &App, now: Option<&NowPlaying>) -> (Vec<Row>, Vec<String>) {
             duration_ms: now.duration_ms,
             current: true,
             queued: None,
-            album_id: now.album_id.clone(),
-            artist_id: now.artists.first().and_then(|artist| artist.id.clone()),
+            album_id: now
+                .album_id
+                .clone()
+                .filter(|_| util::uri_kind(&now.uri) == Some("track")),
+            artist_id: now.artists.first().and_then(Page::for_artist),
         });
     }
     let queued: &[PlayableItem] = queue.map(|queue| queue.queue.as_slice()).unwrap_or(&[]);
@@ -745,9 +752,10 @@ fn misc_menu(app: &mut App, ui: &mut egui::Ui, rows: &[Row]) {
     if let Some(artist) = &row.artist_id
         && ui.button(gettext(locale, "Artist").as_ref()).clicked()
     {
-        app.actions.push(Action::Open(Page::Artist(artist.clone())));
+        app.actions.push(Action::Open(artist.clone()));
         app.actions.push(Action::ToggleWinampWindow);
     }
+    super::soundcloud_links(app, ui, &row.uri);
 }
 
 /// Your playlists to play, and the queue kept as a new one.

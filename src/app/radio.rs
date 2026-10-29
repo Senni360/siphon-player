@@ -81,6 +81,9 @@ impl App {
     /// is kept, but takes the row's album when it has no artwork of its own:
     /// an album's song list comes without the album.
     pub(crate) fn open_song_radio(&mut self, uri: &str, track: &Track) {
+        if util::station_uri(uri).is_none() {
+            return;
+        }
         if let Some(id) = util::uri_id(uri) {
             let cached = self
                 .track_cache
@@ -97,6 +100,9 @@ impl App {
 
     /// Asks for the seed's songs unless the page already has or awaits them.
     pub(super) fn load_radio(&mut self, seed: &str) {
+        if util::station_uri(seed).is_none() {
+            return;
+        }
         let name = self.radio_name(seed);
         let images = self.radio_images(seed);
         let page = self.radio_pages.entry(seed.to_string()).or_default();

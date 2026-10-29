@@ -32,6 +32,8 @@ This personal fork supports a separate SoundCloud source with anonymous
 listening and optional profile or session connections. The
 [SoundCloud reference](docs/_reference/soundcloud.md) describes the account
 contract and playback limits. The connection interface is not wired yet.
+SoundCloud items use their real SoundCloud links. Spotify saves, radio, album
+navigation, lyrics and remote Spotify outputs are unavailable for these items.
 
 **Playback needs Spotify Premium.** Free accounts can browse and search, but
 cannot play music through Spotifast.

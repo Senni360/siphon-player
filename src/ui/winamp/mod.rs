@@ -706,6 +706,9 @@ fn options_menu(app: &mut App, ui: &mut Ui, unit: f32) {
     let locale = app.locale;
     let font = menu_font(unit);
     ui.set_min_width(font * 11.0);
+    if let Some(now) = app.now_playing() {
+        soundcloud_links(app, ui, &now.uri);
+    }
     let scale = WinampState::scale(&app.settings, ui.ctx().pixels_per_point());
     ui.horizontal(|ui| {
         ui.label(gettext(locale, "Size").as_ref());
@@ -757,6 +760,35 @@ fn options_menu(app: &mut App, ui: &mut Ui, unit: f32) {
     }
     if ui.button(gettext(locale, "Quit").as_ref()).clicked() {
         app.actions.push(Action::Quit);
+    }
+}
+
+/// Keep public links available in the mini player's native, skin-sized menus.
+fn soundcloud_links(app: &mut App, ui: &mut Ui, uri: &str) {
+    if !crate::soundcloud::is_uri(uri) {
+        return;
+    }
+    let url = app.soundcloud_link(uri);
+    for (label, open) in [
+        (gettext(app.locale, "Open on SoundCloud"), true),
+        (gettext(app.locale, "Copy SoundCloud link"), false),
+    ] {
+        if ui
+            .add_enabled(url.is_some(), egui::Button::new(label))
+            .on_disabled_hover_text(gettext(
+                app.locale,
+                "SoundCloud did not provide a public link",
+            ))
+            .clicked()
+            && let Some(url) = &url
+        {
+            app.actions.push(if open {
+                Action::OpenUrl(url.clone())
+            } else {
+                Action::CopyLink(url.clone())
+            });
+            ui.close();
+        }
     }
 }
 
@@ -878,18 +910,32 @@ fn clutter_bar(app: &mut App, view: &mut View, now: Option<&NowPlaying>) {
     {
         app.actions.push(Action::ToggleWinampOnTop);
     }
-    if view
-        .lamp_button(
+    let info = if now.is_some_and(|now| crate::soundcloud::is_uri(&now.uri)) {
+        let rect = view.rect(layout::CLUTTER_I);
+        view.ui
+            .add_enabled_ui(false, |ui| {
+                ui.interact(rect, Id::new(("winamp", "clutter-i")), Sense::click())
+            })
+            .inner
+            .on_disabled_hover_text(gettext(
+                app.locale,
+                "Spotify song info is unavailable for SoundCloud tracks",
+            ))
+    } else {
+        view.lamp_button(
             layout::CLUTTER_I,
             sprites::CLUTTER_I_LIT,
             false,
             "clutter-i",
         )
-        .on_hover_text(gettext(app.locale, "Song info").as_ref())
-        .clicked()
+        .on_hover_text(gettext(app.locale, "Song info"))
+    };
+    if info.clicked()
         && let Some(now) = now
     {
-        if let Some(id) = &now.album_id {
+        if let Some(id) = &now.album_id
+            && crate::util::uri_kind(&now.uri) == Some("track")
+        {
             app.actions.push(Action::Open(Page::Album(id.clone())));
         } else if let Some(id) = &now.show_id {
             app.actions.push(Action::Open(Page::Show(id.clone())));

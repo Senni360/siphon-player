@@ -159,7 +159,7 @@ fn all(app: &mut App, ui: &mut egui::Ui, results: &SearchResults) {
                     TopResultSubtitle::Text(&gettext(locale, "Artist")),
                     true,
                     Some(artist.uri.clone()),
-                    Page::Artist(artist.id.clone()),
+                    Page::from_uri(&artist.uri).unwrap_or(Page::Search),
                     |ui, app| {
                         widgets::context_menu_items(ui, app, &artist.uri, &artist.name, None);
                     },
@@ -169,7 +169,7 @@ fn all(app: &mut App, ui: &mut egui::Ui, results: &SearchResults) {
                 let page = track
                     .album
                     .as_ref()
-                    .map(|album| Page::Album(album.id.clone()))
+                    .and_then(|album| Page::from_uri(&album.uri))
                     .unwrap_or(Page::Search);
                 top_result(
                     app,
@@ -230,7 +230,7 @@ fn all(app: &mut App, ui: &mut egui::Ui, results: &SearchResults) {
                     ),
                     false,
                     Some(playlist.uri.clone()),
-                    Page::Playlist(playlist.id.clone()),
+                    Page::from_uri(&playlist.uri).unwrap_or(Page::Search),
                     |ui, app| {
                         let owned = app.user_id().is_some_and(|id| playlist.owned_by(id));
                         widgets::context_menu_items(
@@ -503,8 +503,9 @@ fn artist_card(app: &mut App, ui: &mut egui::Ui, artist: &Artist) {
         }
     }
     if card.clicked {
-        app.actions
-            .push(Action::Open(Page::Artist(artist.id.clone())));
+        app.actions.push(Action::Open(
+            Page::from_uri(&artist.uri).unwrap_or(Page::Search),
+        ));
     }
     egui::Popup::context_menu(&card.response)
         .id(ui.make_persistent_id(("search-artist-menu", &artist.uri)))
@@ -635,8 +636,9 @@ fn playlist_card(app: &mut App, ui: &mut egui::Ui, playlist: &crate::api::models
         }
     }
     if card.clicked {
-        app.actions
-            .push(Action::Open(Page::Playlist(playlist.id.clone())));
+        app.actions.push(Action::Open(
+            Page::from_uri(&playlist.uri).unwrap_or(Page::Search),
+        ));
     }
     egui::Popup::context_menu(&card.response)
         .id(ui.make_persistent_id(("search-playlist-menu", &playlist.uri)))

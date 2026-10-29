@@ -709,7 +709,9 @@ fn paint_expanded_art(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
         }
     }
     if art.clicked() && !over_chevron {
-        if let Some(id) = album_id {
+        if let Some(id) = album_id
+            && crate::util::uri_kind(&now.uri) == Some("track")
+        {
             app.actions.push(Action::Open(Page::Album(id)));
         } else if let Some(id) = show_id {
             app.actions.push(Action::Open(Page::Show(id)));
@@ -944,7 +946,7 @@ fn playlist_entry(
         // Translators: {owner} is the name of the playlist's owner.
         subtitle: gettext(locale, "Playlist • {owner}").replace("{owner}", playlist.owner_name()),
         grid_subtitle: playlist.owner_name().to_string(),
-        page: Page::Playlist(playlist.id.clone()),
+        page: Page::from_uri(&playlist.uri).unwrap_or(Page::Search),
         uri: playlist.uri.clone(),
         round: false,
         liked: false,
@@ -1297,7 +1299,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                     name: artist.name.clone(),
                     subtitle: gettext(locale, "Artist").into_owned(),
                     grid_subtitle: String::new(),
-                    page: Page::Artist(artist.id.clone()),
+                    page: Page::from_uri(&artist.uri).unwrap_or(Page::Search),
                     uri: artist.uri.clone(),
                     round: true,
                     liked: false,

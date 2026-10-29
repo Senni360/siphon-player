@@ -224,7 +224,10 @@ fn receiver_row(app: &mut App, ui: &mut egui::Ui, receiver: &crate::zeroconf::Re
         );
         theme::spinner(&mut spin, 16.0, palette.accent);
     }
-    if response.clicked() && !activating {
+    if !app.can_use_spotify_outputs() {
+        response.clone().on_disabled_hover_text(gettext(app.locale, "SoundCloud plays on this computer. Spotify Connect, Sonos and Cast support Spotify only."));
+    }
+    if response.clicked() && !activating && app.can_use_spotify_outputs() {
         app.actions
             .push(Action::ActivateReceiver(Box::new(receiver.clone())));
     }
@@ -517,11 +520,15 @@ pub fn popup(app: &mut App, ctx: &egui::Context) {
                             ui.push_id(row.widget_key(), |ui| {
                                 let OutputRow::Device(device) = row else {
                                     if let OutputRow::Receiver(receiver) = row {
-                                        receiver_row(app, ui, receiver);
+                                        let enabled = app.can_use_spotify_outputs();
+                                        ui.add_enabled_ui(enabled, |ui| receiver_row(app, ui, receiver));
                                     }
                                     return;
                                 };
                                 let is_local = device.id.is_some() && device.id == local_id;
+                                if !app.can_use_spotify_outputs() {
+                                    ui.disable();
+                                }
                                 let active = device.id.is_some() && device.id == active_id;
                                 let name = if is_local {
                                     // Translators: {name} is the name this computer uses in Spotify Connect.
@@ -583,7 +590,11 @@ pub fn popup(app: &mut App, ctx: &egui::Context) {
                                     let dot = pos2(rect.right() - 16.0, rect.center().y);
                                     ui.painter().circle_filled(dot, 4.0, palette.accent);
                                 }
+                                if !app.can_use_spotify_outputs() {
+                                    response.clone().on_disabled_hover_text(gettext(locale, "SoundCloud plays on this computer. Spotify Connect, Sonos and Cast support Spotify only."));
+                                }
                                 if response.clicked()
+                                    && app.can_use_spotify_outputs()
                                     && !active
                                     && let Some(id) = &device.id
                                 {

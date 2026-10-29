@@ -1624,7 +1624,177 @@ impl App {
             .clone()
     }
 
+    /// Foreign metadata stays keyed by its full URI, including when bare IDs collide.
+    fn soundcloud_track(&self, uri: &str) -> Option<&Track> {
+        // The shared Spotify cache may contain older restored entries, so always
+        // compare the complete URI before using their metadata.
+        self.track_cache
+            .values()
+            .find(|track| track.uri == uri)
+            .or_else(|| {
+                self.search
+                    .results
+                    .get()?
+                    .tracks
+                    .as_ref()?
+                    .items
+                    .iter()
+                    .find(|track| track.uri == uri)
+            })
+            .or_else(|| {
+                self.mixed_playlists
+                    .playlists
+                    .iter()
+                    .flat_map(|playlist| &playlist.entries)
+                    .map(|entry| &entry.track)
+                    .chain(
+                        self.playlist_overlay
+                            .playlists
+                            .values()
+                            .flat_map(|overlay| &overlay.entries)
+                            .map(|entry| &entry.entry.track),
+                    )
+                    .find(|track| track.uri == uri)
+            })
+            .or_else(|| {
+                self.plays
+                    .plays()
+                    .iter()
+                    .map(|play| &play.track)
+                    .find(|track| track.uri == uri)
+            })
+            .or_else(|| {
+                self.playlist_pages
+                    .values()
+                    .flat_map(|page| &page.items.items)
+                    .filter_map(PlaylistItem::playable)
+                    .find_map(|item| match item {
+                        PlayableItem::Track(track) if track.uri == uri => Some(track),
+                        _ => None,
+                    })
+            })
+            .or_else(|| {
+                self.album_pages
+                    .values()
+                    .flat_map(|page| &page.tracks.items)
+                    .chain(self.library.liked.items.iter().map(|saved| &saved.track))
+                    .find(|track| track.uri == uri)
+            })
+            .or_else(|| {
+                self.copied_songs.iter().find_map(|item| match item {
+                    PlayableItem::Track(track) if track.uri == uri => Some(track),
+                    _ => None,
+                })
+            })
+            .or_else(|| {
+                self.queue
+                    .get()?
+                    .queue
+                    .iter()
+                    .chain(self.queue.get()?.currently_playing.iter())
+                    .find_map(|item| match item {
+                        PlayableItem::Track(track) if track.uri == uri => Some(track),
+                        _ => None,
+                    })
+            })
+    }
+
+    pub fn soundcloud_link(&self, uri: &str) -> Option<String> {
+        if !crate::soundcloud::is_uri(uri) {
+            return None;
+        }
+        let url = self
+            .soundcloud_track(uri)
+            .and_then(|track| track.external_urls.spotify.as_deref())
+            .or_else(|| {
+                self.mixed_playlists
+                    .playlists
+                    .iter()
+                    .flat_map(|playlist| &playlist.entries)
+                    .chain(
+                        self.playlist_overlay
+                            .playlists
+                            .values()
+                            .flat_map(|overlay| &overlay.entries)
+                            .map(|entry| &entry.entry),
+                    )
+                    .find(|entry| entry.track.uri == uri)?
+                    .permalink
+                    .as_deref()
+            })
+            .or_else(|| {
+                self.artist_pages
+                    .values()
+                    .filter_map(|page| page.artist.get())
+                    .find(|artist| artist.uri == uri)?
+                    .external_urls
+                    .spotify
+                    .as_deref()
+            })
+            .or_else(|| {
+                self.playlist_pages
+                    .values()
+                    .filter_map(|page| page.playlist.get())
+                    .find(|playlist| playlist.uri == uri)?
+                    .external_urls
+                    .spotify
+                    .as_deref()
+            })
+            .or_else(|| {
+                self.search
+                    .results
+                    .get()?
+                    .artists
+                    .as_ref()?
+                    .items
+                    .iter()
+                    .find(|artist| artist.uri == uri)?
+                    .external_urls
+                    .spotify
+                    .as_deref()
+            })
+            .or_else(|| {
+                self.search
+                    .results
+                    .get()?
+                    .playlists
+                    .as_ref()?
+                    .items
+                    .iter()
+                    .find(|playlist| playlist.uri == uri)?
+                    .external_urls
+                    .spotify
+                    .as_deref()
+            });
+        crate::soundcloud::permalink(url).map(str::to_owned)
+    }
+
+    /// Spotify Connect, Cast and Sonos cannot receive SoundCloud audio.
+    pub fn can_use_spotify_outputs(&self) -> bool {
+        !self
+            .now_playing()
+            .is_some_and(|now| crate::soundcloud::is_uri(&now.uri))
+            && !self
+                .manual_queue
+                .iter()
+                .any(|uri| crate::soundcloud::is_uri(uri))
+            && !self.queue.get().is_some_and(|queue| {
+                queue
+                    .queue
+                    .iter()
+                    .any(|item| crate::soundcloud::is_uri(item.uri()))
+            })
+            && !self.playing_context_uri().is_some_and(|uri| {
+                crate::soundcloud::is_uri(&uri)
+                    || uri.starts_with("spotifast:")
+                    || uri
+                        .strip_prefix("spotify:playlist:")
+                        .is_some_and(|id| self.playlist_overlay.has_overlay(id))
+            })
+    }
+
     pub fn is_saved(&self, uri: &str) -> Option<bool> {
+        util::uri_kind(uri)?;
         let exact = self.saved.get(uri).copied();
         if exact == Some(true)
             || self
@@ -1655,6 +1825,9 @@ impl App {
     }
 
     fn remember_track_recording(&mut self, track: &Track) {
+        if util::uri_kind(&track.uri) != Some("track") {
+            return;
+        }
         let Some(key) = track.recording_key() else {
             return;
         };
@@ -1960,7 +2133,14 @@ impl App {
         if now.is_episode {
             return None;
         }
-        if let Some(track) = now.id.as_deref().and_then(|id| self.track_cache.get(id)) {
+        if crate::soundcloud::is_uri(&now.uri)
+            && let Some(track) = self.soundcloud_track(&now.uri)
+        {
+            return Some(PlayableItem::Track(track.clone()));
+        }
+        if let Some(track) = util::uri_id(&now.uri).and_then(|id| self.track_cache.get(id))
+            && util::uri_kind(&track.uri) == Some("track")
+        {
             return Some(PlayableItem::Track(track.clone()));
         }
         Some(PlayableItem::Track(Track {
@@ -2027,11 +2207,9 @@ impl App {
         if self.local.is_active() && self.local_transfer_sequence != Some(self.local.track_sequence)
         {
             let track = self.local.track.as_ref()?;
-            let cached = track
-                .uri
-                .rsplit(':')
-                .next()
-                .and_then(|id| self.track_cache.get(id));
+            let cached = util::uri_id(&track.uri)
+                .and_then(|id| self.track_cache.get(id))
+                .filter(|cached| util::uri_kind(&cached.uri) == Some("track"));
             // Playback already carries artist IDs. Keep those links available
             // while the Web API is loading (or its cached credits have no IDs).
             let artists = if track.artists.iter().any(|artist| artist.id.is_some()) {
@@ -3647,7 +3825,7 @@ impl App {
     /// track supplies an ISRC, refresh only plausible aliases so Spotify can
     /// confirm which market-specific URI is the same recording.
     fn request_recording_candidates(&mut self, track: &Track) {
-        if track.recording_key().is_none() {
+        if util::uri_kind(&track.uri) != Some("track") || track.recording_key().is_none() {
             return;
         }
         let mut candidates = HashSet::new();
@@ -3656,7 +3834,8 @@ impl App {
                 let Some(PlayableItem::Track(candidate)) = item.playable() else {
                     continue;
                 };
-                if same_recording_hint(track, candidate)
+                if util::uri_kind(&candidate.uri) == Some("track")
+                    && same_recording_hint(track, candidate)
                     && let Some(id) = candidate.id.as_ref()
                     && self
                         .track_cache
@@ -3748,6 +3927,7 @@ impl App {
         self.resume_track = Some(now.uri.clone());
         self.resume_position_ms = 0;
         if now.local
+            && util::uri_kind(&now.uri) == Some("track")
             && !now.is_episode
             && let Some(id) = &now.id
             && !self.track_cache.contains_key(id)
@@ -3822,7 +4002,7 @@ impl App {
         self.lyrics_uri = Some(now.uri.clone());
         self.lyrics_following = true;
         self.lyrics_line_shown = None;
-        if now.is_episode || self.offline || crate::soundcloud::is_track_uri(&now.uri) {
+        if now.is_episode || crate::soundcloud::is_uri(&now.uri) || self.offline {
             self.lyrics = Loadable::Loaded(None);
             return;
         }
@@ -5248,6 +5428,11 @@ impl App {
         if matches!(page, Page::MixedPlaylist(_)) {
             return;
         }
+        if matches!(&page, Page::Artist(id) | Page::Playlist(id) | Page::Album(id) | Page::Show(id) if id.contains(':'))
+        {
+            return;
+        }
+
         if !self.is_connected() {
             return;
         }
@@ -5571,6 +5756,11 @@ impl App {
 
     /// Greys the row out at once and lets the session tell Spotify.
     fn set_hidden_in_playlist(&mut self, playlist_uri: String, track_uri: String, hidden: bool) {
+        if util::uri_kind(&track_uri) != Some("track")
+            || util::uri_kind(&playlist_uri) != Some("playlist")
+        {
+            return;
+        }
         self.mark_hidden(&playlist_uri, &track_uri, hidden);
         self.backend.api(ApiRequest::SetHiddenInPlaylist {
             playlist_uri,
@@ -5771,6 +5961,11 @@ impl App {
     }
 
     pub fn load_more(&mut self, page: Page) {
+        if matches!(&page, Page::Artist(id) | Page::Playlist(id) | Page::Album(id) | Page::Show(id) if id.contains(':'))
+        {
+            return;
+        }
+
         if !self.network_reachable {
             if matches!(page, Page::LikedSongs) && !self.liked_songs.cache_checked {
                 self.ensure_liked_songs();
@@ -5903,6 +6098,11 @@ impl App {
     }
 
     fn load_window(&mut self, page: Page, position: u32) {
+        if matches!(&page, Page::Artist(id) | Page::Playlist(id) | Page::Album(id) | Page::Show(id) if id.contains(':'))
+        {
+            return;
+        }
+
         match page {
             Page::Playlist(id) => {
                 let Some(page) = self.playlist_pages.get_mut(&id) else {
@@ -6005,6 +6205,11 @@ impl App {
     }
 
     fn reload(&mut self, page: Page) {
+        if matches!(&page, Page::Artist(id) | Page::Playlist(id) | Page::Album(id) | Page::Show(id) if id.contains(':'))
+        {
+            return;
+        }
+
         match &page {
             Page::Home => self.load_home(true),
             Page::TopSongs => self.load_top_songs(true),
@@ -6679,6 +6884,9 @@ impl App {
     /// the playback session can read them. A read that failed is asked
     /// again on a visit a minute later.
     pub fn request_play_counts(&mut self, uri: &str) {
+        if util::uri_kind(uri).is_none() {
+            return;
+        }
         if !self.local_ready || !self.network_reachable {
             return;
         }
@@ -6730,7 +6938,7 @@ impl App {
     pub fn request_contains(&mut self, uris: Vec<String>) {
         let mut batch = Vec::new();
         for uri in uris {
-            if uri.is_empty()
+            if util::uri_kind(&uri).is_none()
                 || self.saved.contains_key(&uri)
                 || self.saved_pending.contains(&uri)
                 || uri.starts_with("spotify:local")
@@ -8870,7 +9078,11 @@ impl App {
     }
 
     fn read_cached_track(&mut self, id: &str) -> Option<Track> {
-        let track = self.track_cache.get(id).cloned()?;
+        let track = self
+            .track_cache
+            .get(id)
+            .filter(|track| util::uri_kind(&track.uri) == Some("track"))
+            .cloned()?;
         self.track_used.insert(id.to_owned(), Instant::now());
         Some(track)
     }
@@ -10960,16 +11172,25 @@ impl App {
             .filter_map(|text| {
                 if crate::soundcloud::track_id(text).is_some() {
                     Some(text.to_string())
+                } else if let Some(item) = self
+                    .copied_songs
+                    .iter()
+                    .find(|item| util::item_link(item).as_deref() == Some(text))
+                {
+                    Some(item.uri().to_string())
                 } else {
                     crate::link::parse(text)
                 }
             })
-            .filter(|uri| matches!(util::uri_kind(uri), Some("track" | "episode")))
+            .filter(|uri| {
+                crate::soundcloud::is_track_uri(uri)
+                    || matches!(util::uri_kind(uri), Some("track" | "episode"))
+            })
             .collect();
         if uris.is_empty() {
             self.toast(gettext(
                 self.locale,
-                "The clipboard has no Spotify song links",
+                "The clipboard has no known song links",
             ));
             return;
         }
@@ -11003,6 +11224,9 @@ impl App {
     fn known_song(&mut self, uri: &str) -> Option<PlayableItem> {
         if let Some(item) = self.copied_songs.iter().find(|item| item.uri() == uri) {
             return Some(item.clone());
+        }
+        if crate::soundcloud::is_track_uri(uri) {
+            return self.soundcloud_track(uri).cloned().map(PlayableItem::Track);
         }
         let id = uri.strip_prefix("spotify:track:")?;
         self.read_cached_track(id).map(PlayableItem::Track)
@@ -11064,6 +11288,9 @@ impl App {
     }
 
     fn set_saved(&mut self, uri: String, saved: bool) {
+        if util::uri_kind(&uri).is_none() || uri.starts_with("spotify:local:") {
+            return;
+        }
         if uri.starts_with("spotify:playlist:") {
             self.saved.insert(uri.clone(), saved);
             let id = util::uri_id(&uri).unwrap_or_default().to_string();
@@ -11497,6 +11724,10 @@ impl App {
                 }
             }
             Action::SetSavedMany { uris, saved } => {
+                let uris: Vec<_> = uris
+                    .into_iter()
+                    .filter(|uri| matches!(util::uri_kind(uri), Some("track" | "episode")))
+                    .collect();
                 let mut changed_tracks = false;
                 for uri in &uris {
                     self.set_saved_state(uri.clone(), saved);
@@ -11770,12 +12001,18 @@ impl App {
                     .api(ApiRequest::FollowPlaylist { id, follow: false });
             }
             Action::Transfer(device_id) => {
+                if !self.can_use_spotify_outputs() {
+                    return;
+                }
                 // The listener chose where to play instead.
                 self.audio_key_banner = false;
                 self.remember_device_choice(&device_id);
                 self.transfer(device_id);
             }
             Action::ActivateReceiver(receiver) => {
+                if !self.can_use_spotify_outputs() {
+                    return;
+                }
                 self.audio_key_banner = false;
                 if self.activating_receiver.is_none() {
                     if let Some(key) = receiver.preference_key() {
@@ -11801,16 +12038,17 @@ impl App {
             } => self.set_hidden_in_playlist(playlist_uri, track_uri, hidden),
             Action::RefreshQueue => self.refresh_queue(true),
             Action::CopyLink(uri) => {
-                if let Some(url) = util::open_spotify_url(&uri) {
+                if let Some(url) = crate::soundcloud::permalink(Some(&uri))
+                    .map(str::to_owned)
+                    .or_else(|| self.soundcloud_link(&uri))
+                    .or_else(|| util::open_spotify_url(&uri))
+                {
                     ctx.copy_text(url);
                     self.toast(gettext(self.locale, "Link copied"));
                 }
             }
             Action::CopySongs(items) => {
-                let links: Vec<String> = items
-                    .iter()
-                    .filter_map(|item| util::open_spotify_url(item.uri()))
-                    .collect();
+                let links: Vec<String> = items.iter().filter_map(util::item_link).collect();
                 if !links.is_empty() {
                     // One link a line, in the platform's own line breaks.
                     let newline = if cfg!(windows) { "\r\n" } else { "\n" };
@@ -11826,8 +12064,8 @@ impl App {
                         )
                         .replace("{count}", &count.to_string()),
                     });
-                    self.copied_songs = items;
                 }
+                self.copied_songs = items;
             }
             Action::PasteSongs { playlist_id, text } => self.paste_songs(playlist_id, &text),
             Action::OpenInSpotify(uri) => {
@@ -13146,6 +13384,11 @@ impl App {
         } else {
             None
         }
+        .or_else(|| {
+            crate::soundcloud::is_uri(&now.uri)
+                .then(|| self.soundcloud_track(&now.uri).cloned())
+                .flatten()
+        })
         .unwrap_or_else(|| crate::history::played_track(&now));
         self.plays.record(track, jiff::Timestamp::now());
         self.plays.save(&self.files, &self.dirs.history_file());
@@ -21108,6 +21351,115 @@ mod tests {
         app.backend.shutdown();
     }
 
+    #[test]
+    fn soundcloud_save_commands_and_contains_do_not_touch_spotify_state() {
+        let ctx = egui::Context::default();
+        let mut app = test_app("soundcloud-source-guards");
+        let uri = "soundcloud:track:123";
+        app.saved.insert(uri.into(), true);
+        assert_eq!(app.is_saved(uri), None);
+        app.saved.clear();
+        app.request_contains(vec![uri.into()]);
+        assert!(app.saved_pending.is_empty());
+        app.apply(Action::ToggleSaved(uri.into()), &ctx);
+        app.apply(
+            Action::SetSavedMany {
+                uris: vec![uri.into()],
+                saved: true,
+            },
+            &ctx,
+        );
+        assert!(app.saved.is_empty());
+        assert!(app.saved_writes.is_empty());
+        assert!(app.library.liked.items.is_empty());
+        app.open_song_radio(
+            uri,
+            &Track {
+                uri: uri.into(),
+                ..Default::default()
+            },
+        );
+        assert_ne!(app.page(), &Page::Radio(uri.into()));
+        app.apply(
+            Action::SetSavedMany {
+                uris: vec![uri.into(), "spotify:track:123".into(), uri.into()],
+                saved: true,
+            },
+            &ctx,
+        );
+        assert_eq!(app.saved_writes.len(), 1);
+        assert_eq!(app.saved_writes.get("spotify:track:123"), Some(&true));
+        app.track_cache.insert(
+            "123".into(),
+            Track {
+                uri: "spotify:track:123".into(),
+                ..Default::default()
+            },
+        );
+        let mut now = app.cached_track_preview("spotify:track:123", 0).unwrap();
+        now.uri = uri.into();
+        now.id = Some("123".into());
+        app.frame_now = Some(now);
+        assert_eq!(app.now_playing_item().unwrap().uri(), uri);
+        assert!(!app.can_use_spotify_outputs());
+        app.apply(Action::Transfer("spotify-speaker".into()), &ctx);
+        assert!(app.backend.take_transfer_requests().is_empty());
+        assert!(app.selected_device.is_none());
+        let mut spotify_now = app.frame_now.clone().unwrap();
+        spotify_now.uri = "spotify:track:123".into();
+        app.frame_now = Some(spotify_now);
+        app.manual_queue.push(uri.into());
+        assert!(!app.can_use_spotify_outputs());
+        app.manual_queue.clear();
+        app.queue = Loadable::Loaded(Queue {
+            queue: vec![PlayableItem::Track(Track {
+                uri: uri.into(),
+                ..Default::default()
+            })],
+            ..Default::default()
+        });
+        assert!(!app.can_use_spotify_outputs());
+        let mut track = Track {
+            uri: uri.into(),
+            ..Default::default()
+        };
+        track.external_urls.spotify = Some("https://soundcloud.com/u/song".into());
+        let playlist = app.mixed_playlists.create("Mixed".into(), String::new());
+        app.mixed_playlists
+            .get_mut(&playlist)
+            .unwrap()
+            .entries
+            .push(crate::mixed_playlists::Entry::new(&track));
+        assert_eq!(
+            app.soundcloud_link(uri).as_deref(),
+            Some("https://soundcloud.com/u/song")
+        );
+        for action in [
+            Action::CopyLink(uri.into()),
+            Action::CopySongs(vec![PlayableItem::Track(track)]),
+        ] {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                app.apply(action.clone(), ui.ctx())
+            });
+            output.textures_delta.clear();
+            assert!(
+                output
+                    .platform_output
+                    .commands
+                    .contains(&egui::OutputCommand::CopyText(
+                        "https://soundcloud.com/u/song".into()
+                    ))
+            );
+        }
+        app.apply(
+            Action::Open(Page::Artist("soundcloud:user:123".into())),
+            &ctx,
+        );
+        assert_eq!(app.page(), &Page::Artist("soundcloud:user:123".into()));
+        assert!(!app.artist_pages.contains_key("123"));
+        app.backend.shutdown();
+    }
+
     fn test_app(name: &str) -> App {
         let root =
             std::env::temp_dir().join(format!("spotifast-{name}-test-{}", std::process::id()));
@@ -26566,7 +26918,7 @@ mod tests {
         assert!(
             app.toasts
                 .iter()
-                .any(|toast| toast.message == "The clipboard has no Spotify song links")
+                .any(|toast| toast.message == "The clipboard has no known song links")
         );
 
         // #when the playlist cannot be edited

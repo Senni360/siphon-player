@@ -25,6 +25,42 @@ const MAX_BACKGROUND_IN_FLIGHT: usize = 4;
 const RATE_LIMIT_RETRIES: u32 = 3;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
 
+/// Reject foreign resource identifiers before authentication or network work.
+pub(crate) fn reject_foreign_resources(
+    path: &str,
+    query: &[(&str, String)],
+    body: Option<&Value>,
+) -> Result<()> {
+    fn foreign(text: &str) -> bool {
+        let lower = text.to_ascii_lowercase();
+        ["soundcloud:", "soundcloud%3a", "spotifast:", "spotifast%3a"]
+            .iter()
+            .any(|scheme| lower.contains(scheme))
+    }
+    fn foreign_json(value: &Value) -> bool {
+        match value {
+            Value::String(text) => foreign(text),
+            Value::Array(values) => values.iter().any(foreign_json),
+            Value::Object(values) => values.iter().any(|(key, value)| {
+                !matches!(key.as_str(), "name" | "description") && foreign_json(value)
+            }),
+            _ => false,
+        }
+    }
+    if foreign(path)
+        || query
+            .iter()
+            .any(|(key, value)| *key != "q" && foreign(value))
+        || body.is_some_and(foreign_json)
+    {
+        return Err(ApiError::Status {
+            status: 400,
+            message: "SoundCloud and local mixed playlists cannot be sent to Spotify".into(),
+        });
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Error)]
 pub enum ApiError {
     #[error("not signed in")]
@@ -466,6 +502,7 @@ impl ApiClient {
         client_token: &str,
         query: &serde_json::Value,
     ) -> Result<serde_json::Value> {
+        reject_foreign_resources("/partner", &[], Some(query))?;
         if *self.partner_cooldown_until.lock().await > Instant::now() {
             return Err(ApiError::RateLimited);
         }
@@ -546,6 +583,9 @@ impl ApiClient {
         body: Option<&Value>,
         jpeg: Option<&str>,
     ) -> Result<String> {
+        // Defense in depth for every Web API builder, including nested play
+        // offsets and playlist mutations. Never strip a foreign scheme to an ID.
+        reject_foreign_resources(path, query, body)?;
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
@@ -868,6 +908,9 @@ impl ApiClient {
         uris: &[String],
         device_id: Option<&str>,
     ) -> (usize, Result<()>) {
+        if let Err(error) = reject_foreign_resources("/me/player/queue", &[], Some(&json!(uris))) {
+            return (0, Err(error));
+        }
         let _write = self.queue_writes.lock().await;
         for (added, uri) in uris.iter().enumerate() {
             if let Err(error) = self.append_to_queue(uri, device_id).await {
@@ -914,6 +957,7 @@ impl ApiClient {
     /// Spotify has no membership endpoint for playlists, so walk its pages
     /// until every requested URI has been found or the playlist ends.
     pub async fn playlist_duplicates(&self, id: &str, uris: &[String]) -> Result<Vec<String>> {
+        reject_foreign_resources(id, &[], Some(&json!(uris)))?;
         let wanted: HashSet<&str> = uris.iter().map(String::as_str).collect();
         if wanted.is_empty() {
             return Ok(Vec::new());
@@ -1303,6 +1347,67 @@ impl ApiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn foreign_resources_are_rejected_before_authentication_or_network() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = client_with_token(
+            Some(format!("http://{}", listener.local_addr().unwrap())),
+            "test-only",
+        );
+        tokio::time::timeout(Duration::from_secs(2), async {
+            let uri = "soundcloud:track:123";
+            let requests = [
+                client.track(uri).await.map(|_| ()),
+                client.artist("soundcloud:user:123").await.map(|_| ()),
+                client.playlist("soundcloud:playlist:123").await.map(|_| ()),
+                client.contains(&[uri.into()]).await.map(|_| ()),
+                client.save(&[uri.into()]).await,
+                client.add_to_queue(uri, None).await,
+                client
+                    .play(None, Some(&PlayRequest::tracks(vec![uri.into()])))
+                    .await,
+                client
+                    .play(
+                        None,
+                        Some(&PlayRequest::context("spotify:album:123").starting_at_uri(uri)),
+                    )
+                    .await,
+                client
+                    .add_playlist_items("spotify-list", &[uri.into()], None)
+                    .await
+                    .map(|_| ()),
+            ];
+            let (added, result) = client
+                .add_many_to_queue(&["spotify:track:a".into(), uri.into()], None)
+                .await;
+            assert_eq!(added, 0);
+            assert_eq!(result.unwrap_err().status(), Some(400));
+            assert_eq!(
+                client
+                    .playlist_duplicates("spotify-list", &[uri.into()])
+                    .await
+                    .unwrap_err()
+                    .status(),
+                Some(400)
+            );
+            for result in requests {
+                assert_eq!(result.unwrap_err().status(), Some(400));
+            }
+        })
+        .await
+        .expect("foreign requests must fail without waiting for a network response");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), listener.accept())
+                .await
+                .is_err()
+        );
+        assert!(reject_foreign_resources("/tracks/soundcloud%3Atrack%3A123", &[], None).is_err());
+        assert!(
+            reject_foreign_resources("/search", &[("q", "soundcloud: a song title".into())], None)
+                .is_ok()
+        );
+    }
 
     /// An unrelated Pathfinder request can finish while another reply is slow.
     #[tokio::test]

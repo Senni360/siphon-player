@@ -354,7 +354,9 @@ pub fn actions_row(
                 app.actions.push(Action::SetShuffle(!shuffle));
             }
         }
-        if let Some((uri, saved)) = &actions.saved {
+        if let Some((uri, saved)) = &actions.saved
+            && util::uri_kind(uri).is_some()
+        {
             // A saved button stays green under the pointer, like shuffle.
             let (icon, tooltip, color, hover) = if *saved {
                 (
@@ -2341,7 +2343,7 @@ fn album_hero(
     let mut byline: Vec<(String, Option<Page>)> = album
         .artists
         .iter()
-        .map(|artist| (artist.name.clone(), artist.id.clone().map(Page::Artist)))
+        .map(|artist| (artist.name.clone(), Page::for_artist(artist)))
         .collect();
     if let Some(year) = album.year() {
         byline.push((year.to_string(), None));

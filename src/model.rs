@@ -181,15 +181,26 @@ impl Page {
         })
     }
 
-    /// Opens whatever a Spotify URI points at.
+    /// Keep foreign schemes in page keys, never reinterpret their numeric IDs.
     pub fn from_uri(uri: &str) -> Option<Self> {
         if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             return Some(Page::MixedPlaylist(id.into()));
         }
+        if crate::soundcloud::user_id(uri).is_some() {
+            return Some(Page::Artist(uri.into()));
+        }
+        if crate::soundcloud::playlist_id(uri).is_some() {
+            return Some(Page::Playlist(uri.into()));
+        }
         let mut parts = uri.split(':');
-        let _ = parts.next()?;
+        if parts.next()? != "spotify" {
+            return None;
+        }
         let kind = parts.next()?;
         let id = parts.next()?.to_string();
+        if id.is_empty() || parts.next().is_some() {
+            return None;
+        }
         Some(match kind {
             "playlist" => Page::Playlist(id),
             "album" => Page::Album(id),
@@ -197,6 +208,13 @@ impl Page {
             "show" => Page::Show(id),
             _ => return None,
         })
+    }
+
+    pub fn for_artist(artist: &ArtistRef) -> Option<Self> {
+        if let Some(uri) = &artist.uri {
+            return Self::from_uri(uri);
+        }
+        artist.id.as_ref().map(|id| Page::Artist(id.clone()))
     }
 }
 
@@ -1598,5 +1616,40 @@ mod finite_scroll_tests {
         assert_eq!(list.window_at(150, 50), None);
         list.fail("offline".into());
         assert_eq!(list.window_at(150, 50), None);
+    }
+}
+
+#[cfg(test)]
+mod source_guard_tests {
+    use super::*;
+
+    #[test]
+    fn soundcloud_pages_preserve_scheme_and_history_keys() {
+        for (uri, expected) in [
+            (
+                "soundcloud:user:123",
+                Page::Artist("soundcloud:user:123".into()),
+            ),
+            (
+                "soundcloud:playlist:123",
+                Page::Playlist("soundcloud:playlist:123".into()),
+            ),
+            ("spotify:artist:123", Page::Artist("123".into())),
+            ("spotifast:playlist:123", Page::MixedPlaylist("123".into())),
+        ] {
+            assert_eq!(Page::from_uri(uri), Some(expected.clone()));
+            assert_eq!(Page::decode(&expected.encode()), Some(expected));
+        }
+        assert_eq!(Page::from_uri("soundcloud:album:123"), None);
+        assert_eq!(Page::from_uri("spotify:artist:123:456"), None);
+        let artist = ArtistRef {
+            id: Some("123".into()),
+            uri: Some("soundcloud:user:123".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Page::for_artist(&artist),
+            Some(Page::Artist("soundcloud:user:123".into()))
+        );
     }
 }

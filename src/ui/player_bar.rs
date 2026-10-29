@@ -477,7 +477,9 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     let offer_expand = art_available && !app.settings.art_expanded && app.settings.sidebar_visible;
     let over_expand = offer_expand && ui.rect_contains_pointer(expand_rect);
     if cover_response.clicked() && !over_expand {
-        if let Some(id) = &now.album_id {
+        if let Some(id) = &now.album_id
+            && crate::util::uri_kind(&now.uri) == Some("track")
+        {
             app.actions.push(Action::Open(Page::Album(id.clone())));
         } else if let Some(id) = &now.show_id {
             app.actions.push(Action::Open(Page::Show(id.clone())));
@@ -500,7 +502,11 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
             app.actions.push(Action::SettingsChanged);
         }
     }
-    let heart_width = if now.is_episode { 0.0 } else { 42.0 };
+    let heart_width = if now.is_episode || crate::soundcloud::is_uri(&now.uri) {
+        0.0
+    } else {
+        42.0
+    };
     let text_left = cover_rect.right() + 12.0;
     let text_width = (region.right() - text_left - heart_width).max(40.0);
     let displayed_text_width: f32 = {
@@ -526,7 +532,9 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     let title_response = theme::link(&mut text_ui, &now.title, theme::medium(14.0), palette.text)
         .interact(drag_sense);
     if title_response.clicked() {
-        if let Some(id) = &now.album_id {
+        if let Some(id) = &now.album_id
+            && crate::util::uri_kind(&now.uri) == Some("track")
+        {
             app.actions.push(Action::Open(Page::Album(id.clone())));
         } else if let Some(id) = &now.show_id {
             app.actions.push(Action::Open(Page::Show(id.clone())));
@@ -556,9 +564,9 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
                 }
                 .interact(drag_sense);
                 if response.clicked()
-                    && let Some(id) = &artist.id
+                    && let Some(page) = Page::for_artist(artist)
                 {
-                    app.actions.push(Action::Open(Page::Artist(id.clone())));
+                    app.actions.push(Action::Open(page));
                 }
                 responses.push(response);
             }
@@ -592,7 +600,7 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         }
     }
 
-    if !now.is_episode {
+    if !now.is_episode && crate::util::uri_kind(&now.uri) == Some("track") {
         let saved = app.is_saved(&now.uri).unwrap_or(false);
         // A liked heart stays green under the pointer, like shuffle.
         let (icon, color, hover, tooltip) = if saved {
@@ -1033,20 +1041,30 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
                 .collect(),
         });
     }
-    if theme::icon_button(
-        ui,
-        Icon::Mic,
-        18.0,
-        if app.show_lyrics_panel {
-            palette.accent
-        } else {
-            palette.secondary
-        },
-        palette.text,
-        &gettext(app.locale, "Lyrics"),
-    )
-    .clicked()
-    {
+    let lyrics_supported = app
+        .now_playing()
+        .is_none_or(|now| !crate::soundcloud::is_uri(&now.uri));
+    let lyrics_button = ui
+        .add_enabled_ui(lyrics_supported || app.show_lyrics_panel, |ui| {
+            theme::icon_button(
+                ui,
+                Icon::Mic,
+                18.0,
+                if app.show_lyrics_panel {
+                    palette.accent
+                } else {
+                    palette.secondary
+                },
+                palette.text,
+                &gettext(app.locale, "Lyrics"),
+            )
+        })
+        .inner
+        .on_disabled_hover_text(gettext(
+            app.locale,
+            "Lyrics are unavailable for SoundCloud tracks",
+        ));
+    if lyrics_button.clicked() {
         app.actions.push(Action::ToggleLyricsPanel);
     }
     // The Listening activity button is the first to go in a narrow window,

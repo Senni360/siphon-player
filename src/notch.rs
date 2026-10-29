@@ -161,8 +161,8 @@ pub fn detect_incremental_changes(
 }
 
 /// Pure helper to determine whether toggling saved status is allowed for a media item.
-pub fn can_toggle_saved(is_episode: bool) -> bool {
-    !is_episode
+pub fn can_toggle_saved(is_episode: bool, uri: &str) -> bool {
+    !is_episode && crate::util::uri_kind(uri) == Some("track")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -349,10 +349,10 @@ mod tests {
     #[test]
     fn episode_save_restrictions() {
         // Episodes do not allow saving
-        assert!(!can_toggle_saved(true));
+        assert!(!can_toggle_saved(true, "spotify:episode:abc"));
 
         // Regular tracks allow saving
-        assert!(can_toggle_saved(false));
+        assert!(can_toggle_saved(false, "spotify:track:abc"));
     }
 
     #[test]
@@ -588,5 +588,17 @@ mod tests {
         t2 = t1.clone();
         t2.repeat = crate::player::RepeatMode::Context;
         assert!(detect_incremental_changes(&t1, &t2).repeat_changed);
+    }
+}
+
+#[cfg(test)]
+mod source_guard_tests {
+    use super::*;
+
+    #[test]
+    fn soundcloud_cannot_toggle_spotify_saved_status() {
+        assert!(!can_toggle_saved(false, "soundcloud:track:123"));
+        assert!(!can_toggle_saved(false, "spotify:local:a:b:c:1"));
+        assert!(can_toggle_saved(false, "spotify:track:123"));
     }
 }

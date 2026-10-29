@@ -135,3 +135,32 @@ not promise full Go+ playback. Blocked tracks stay unavailable and encrypted
 streams are not played. There is no paywall or DRM bypass. SoundCloud's
 [streaming guide](https://developers.soundcloud.com/docs/api/guide#streaming-tracks)
 describes playable, preview and blocked access.
+
+## Source-specific actions
+
+SoundCloud rows offer **Open on SoundCloud** and **Copy SoundCloud link** when
+SoundCloud returned a public permalink. Artist links retain the full
+`soundcloud:user:<id>` URI. A missing permalink is shown as unavailable;
+Spotifast never builds a Spotify link from a SoundCloud ID.
+
+SoundCloud menus omit Spotify Liked Songs, radio, album navigation and credits.
+Lyrics lookup is also unavailable for SoundCloud tracks. Disabled controls
+explain why, and keyboard save commands cannot change Spotify's library for
+those tracks. In a mixed selection, saving affects only eligible Spotify rows
+in their original order. The gateway and Web API boundary reject foreign
+URIs before authentication or network work, including queue and playlist
+writes. Local mixed playlists and Spotify overlays retain their own
+add-to-playlist routing.
+
+SoundCloud playback stays on this computer. Spotify Connect, Sonos and Cast
+selections are disabled with an explanation while a SoundCloud track is
+playing or queued, or a local mixed context is active (including a Spotify
+playlist with local additions).
+The computer's own audio-output picker remains usable.
+Artwork uses the existing URL-based image cache, including sndcdn.com URLs.
+
+For page integration, `Page::from_uri` currently carries a SoundCloud user as
+`Page::Artist(full_uri)` and a SoundCloud set as `Page::Playlist(full_uri)`.
+These keys round-trip through navigation history and are guarded from Spotify
+page loaders. The SoundCloud page implementation can replace this handoff with
+its dedicated page variants without stripping the scheme.

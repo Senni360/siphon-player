@@ -449,7 +449,7 @@ define_class!(
             if let Ok(mut lock) = CONTROLLER.lock()
                 && let Some(ctrl) = lock.as_mut()
                 && let Some(track) = ctrl.track.as_mut()
-                && can_toggle_saved(track.is_episode)
+                && can_toggle_saved(track.is_episode, &track.uri)
             {
                 track.saved = !track.saved;
                 let is_saved = track.saved;
@@ -1598,7 +1598,8 @@ pub fn sync_state(enabled: bool, is_background: bool, track: Option<&NotchTrackI
             update_shuffle_button_ui(&ctrl.shuffle_button, &ctrl.icons, t.shuffle);
             update_repeat_button_ui(&ctrl.repeat_button, &ctrl.icons, t.repeat);
             update_device_button_ui(&ctrl.device_button, &ctrl.icons, t.is_remote);
-            ctrl.like_button.setHidden(!can_toggle_saved(t.is_episode));
+            ctrl.like_button
+                .setHidden(!can_toggle_saved(t.is_episode, &t.uri));
 
             update_artwork_path(ctrl, t.art_path.clone());
         } else {
@@ -1643,7 +1644,7 @@ pub fn sync_state(enabled: bool, is_background: bool, track: Option<&NotchTrackI
 
         if changes.episode_changed {
             ctrl.like_button
-                .setHidden(!can_toggle_saved(latest.is_episode));
+                .setHidden(!can_toggle_saved(latest.is_episode, &latest.uri));
         }
 
         if changes.art_changed {
