@@ -2574,7 +2574,13 @@ impl Worker {
                     {
                         self.hybrid_command(HybridCommand::Release).await;
                     }
-                    if self.hybrid.releasing {
+                    // Volume belongs to the shared mixer, not an owner generation.
+                    if self.hybrid.releasing
+                        && !matches!(
+                            command,
+                            PlayerCommand::Volume(_) | PlayerCommand::VolumePreview(_)
+                        )
+                    {
                         self.hybrid.defer_player(command);
                         continue;
                     }

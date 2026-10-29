@@ -805,6 +805,36 @@ mod tests {
     }
 
     #[test]
+    fn shared_volume_does_not_wait_in_a_superseded_owner_generation() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("hybrid-volume-handoff");
+        worker.hybrid.releasing = true;
+        worker.hybrid.claimed = true;
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands
+            .send(Command::Player(PlayerCommand::Volume(123)))
+            .unwrap();
+        commands
+            .send(Command::Player(PlayerCommand::VolumePreview(456)))
+            .unwrap();
+        commands
+            .send(Command::SoundCloudEngine(sc::Event::Tagged {
+                tag: PlaybackTag {
+                    generation: 1,
+                    occurrence: crate::hybrid_queue::EntryId(1),
+                },
+                event: Box::new(sc::Event::OutputReleased),
+            }))
+            .unwrap();
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(
+            worker.hybrid.player_waiting.is_empty(),
+            "shared volume must be dispatched immediately, not invalidated by the next Claim"
+        );
+    }
+
+    #[test]
     fn empty_spotify_load_does_not_release_hybrid_ownership() {
         let (runtime, mut worker, events) =
             super::super::authorization_tests::worker("hybrid-invalid-replacement");
