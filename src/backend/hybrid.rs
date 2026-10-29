@@ -617,6 +617,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn review_hybrid_account_change_rejects_old_private_stream_resolution() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("hybrid-old-account-stream");
+        runtime.block_on(async {
+            let tag = PlaybackTag {
+                generation: 4,
+                occurrence: crate::hybrid_queue::EntryId(6),
+            };
+            worker.hybrid.tag = Some(tag);
+            worker.hybrid.preload_uri = Some("soundcloud:track:7".into());
+            // The old account's resolution was already in flight when the
+            // account was disconnected. Its result must not refill the cache.
+            worker.set_soundcloud_account(crate::soundcloud::account::Account::Disconnected);
+            worker.soundcloud_stream(tag, true, None, Ok(sc::Stream {
+                uri: "soundcloud:track:7".into(),
+                url: "https://audio.example/private-old-account".into(),
+                protocol: sc::Protocol::Progressive,
+                mime: "audio/mpeg".into(),
+                duration_ms: 120_000,
+                is_preview: false,
+            })).await;
+            assert!(worker.hybrid.streams.is_empty(),
+                "a result authorized by the old account cannot be reused after disconnect");
+        });
+    }
+
+    #[test]
     fn hybrid_handoff_keeps_controls_used_before_output_release() {
         let (runtime, mut worker, _) = super::super::authorization_tests::worker("hybrid-handoff");
         runtime.block_on(async {

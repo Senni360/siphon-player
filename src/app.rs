@@ -33504,6 +33504,66 @@ mod tests {
         assert!(shown_playing, "the intermediate Pause must not undo the later Play");
     }
 
+    #[test]
+    fn review_hybrid_row_marker_survives_changing_the_display_order() {
+        let mut app = hybrid_fixture();
+        let tracks = vec![song("spotify:track:a"), song("soundcloud:track:7")];
+        let id = app.mixed_playlists.import("List".into(), String::new(), tracks);
+        let uri = format!("spotifast:playlist:{id}");
+        let original = RowContext::View {
+            uris: Arc::from(vec!["spotify:track:a".into(), "soundcloud:track:7".into()]),
+            context_uri: uri.clone(),
+            editable_playlist: None,
+        };
+        app.apply(Action::PlayFromRow {
+            context: original,
+            uri: "soundcloud:track:7".into(),
+            index: 1,
+        }, &egui::Context::default());
+        // Re-sort while playback continues. The only SoundCloud row is now 0.
+        let sorted = RowContext::View {
+            uris: Arc::from(vec!["soundcloud:track:7".into(), "spotify:track:a".into()]),
+            context_uri: uri,
+            editable_playlist: None,
+        };
+        let marked = app.row_is_played_copy(&sorted, 0, "soundcloud:track:7");
+        app.backend.shutdown();
+        assert!(marked, "the only row of the playing track must retain its marker");
+    }
+
+    #[test]
+    fn review_hybrid_history_waits_for_audible_state_and_resets_same_uri_occurrences() {
+        use crate::player::HybridEvent;
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.apply(Action::PlayUris {
+            uris: vec!["soundcloud:track:7".into(), "soundcloud:track:7".into()],
+            index: 0,
+        }, &ctx);
+        app.note_listening();
+        assert!(app.listening.is_none(), "loading must not count as listening");
+        for expected in 1..=2 {
+            let tag = app.hybrid_tag().unwrap();
+            app.handle_hybrid_event(tag, HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Playing,
+                track: Some(crate::player::LocalTrack {
+                    uri: "soundcloud:track:7".into(),
+                    duration_ms: 120_000,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })));
+            app.note_listening();
+            app.listening.as_mut().unwrap().playing_since =
+                Some(Instant::now() - Duration::from_secs(31));
+            app.note_listening();
+            assert_eq!(app.plays.plays().len(), expected);
+            app.handle_hybrid_event(tag, HybridEvent::EndOfTrack);
+            assert!(app.listening.is_none());
+        }
+        app.backend.shutdown();
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
