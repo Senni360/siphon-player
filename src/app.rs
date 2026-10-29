@@ -34054,6 +34054,40 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_audio_key_refusal_pauses_without_consuming_mixed_successors() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(
+            Action::AddToQueue {
+                uri: "soundcloud:track:9".into(),
+                label: "Manual".into(),
+            },
+            &ctx,
+        );
+        let tag = app.hybrid_tag().unwrap();
+        let queue = queue_uris(&app);
+        app.backend.take_hybrid_commands();
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::Failed(crate::player::AUDIO_KEY_REFUSED.into()),
+        );
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
+        assert_eq!(queue_uris(&app), queue);
+        assert!(app.hybrid_tag().is_none());
+        assert!(!app.now_playing().unwrap().playing);
+        assert!(!app.now_playing().unwrap().loading);
+        assert!(app.show_devices);
+        assert!(app.backend.take_hybrid_commands().is_empty());
+        app.apply(Action::TogglePlay, &ctx);
+        assert!(matches!(app.backend.take_hybrid_commands().first(),
+            Some(crate::backend::HybridCommand::Load { tag: retry, play: true, .. })
+                if retry.occurrence == tag.occurrence && retry.generation > tag.generation
+        ));
+        app.backend.shutdown();
+    }
+
+    #[test]
     fn playback_setup_prompt_keeps_hybrid_selection_for_retry() {
         let mut app = hybrid_fixture();
         start_hybrid_fixture(&mut app);

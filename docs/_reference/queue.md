@@ -33,7 +33,8 @@ Album additions keep loading across local
 playback changes. Failed mixed rows are skipped once per occurrence until a
 song actually plays; Repeat All cannot loop through a fully failing context.
 Pause and Play retain the latest user intent through child-engine errors and
-late transport snapshots.
+late transport snapshots. A Spotify audio-key refusal pauses the current
+occurrence for an explicit retry and keeps every mixed successor queued.
 
 These are the rules the app follows. The queue tests in `src/app.rs`
 check every one of them.

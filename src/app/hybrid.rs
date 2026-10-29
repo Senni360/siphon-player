@@ -1323,13 +1323,14 @@ impl App {
             }
             HybridEvent::Failed(error) => {
                 let play = self.hybrid.play_intent;
-                let needs_setup = error == crate::player::LOCAL_PLAYBACK_UNAVAILABLE;
+                let playback_blocked = error == crate::player::LOCAL_PLAYBACK_UNAVAILABLE
+                    || error == crate::player::AUDIO_KEY_REFUSED;
                 self.toast_error(error);
                 self.hybrid.tag = None;
-                if needs_setup {
-                    // Missing shared output affects every row. Keep the chosen
-                    // occurrence for Play after setup instead of skipping the
-                    // whole collection and showing the same error per track.
+                if playback_blocked {
+                    // Missing output and refused audio keys are playback-wide
+                    // failures. Keep the occurrence for an explicit retry,
+                    // without consuming manual rows or the context behind it.
                     self.hybrid.play_intent = false;
                     if let Some(pending) = &mut self.hybrid.pending {
                         pending.play = false;
