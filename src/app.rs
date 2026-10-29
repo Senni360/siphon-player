@@ -33661,6 +33661,38 @@ mod tests {
         );
     }
 
+    #[test]
+    fn review_hybrid_activity_follows_soundcloud_pause_despite_spotify_echoes() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(Action::Next, &ctx);
+        let tag = app.hybrid_tag().unwrap();
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Playing,
+                track: Some(crate::player::LocalTrack {
+                    uri: "soundcloud:track:7".into(),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })),
+        );
+        assert!(app.hybrid_needs_activity());
+        app.apply(Action::TogglePlay, &ctx);
+        app.handle_local(LocalState {
+            playback: Playback::Playing,
+            track: Some(crate::player::LocalTrack {
+                uri: "spotify:track:stale".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(!app.hybrid_needs_activity());
+        app.backend.shutdown();
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
