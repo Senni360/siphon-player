@@ -33716,6 +33716,35 @@ mod tests {
         );
     }
 
+    #[test]
+    fn review_hybrid_start_preserves_an_album_already_being_queued() {
+        let mut app = hybrid_fixture();
+        app.local.connected = true;
+        app.add_to_queue("spotify:album:loading".into(), "Loading album".into());
+        let request = app.album_queue_serial;
+        assert!(app.pending_album_queues.contains_key(&request));
+        start_hybrid_fixture(&mut app);
+        app.receive_album_queue(
+            request,
+            0,
+            Ok(crate::api::models::Page {
+                items: vec![song("spotify:track:one"), song("spotify:track:two")],
+                total: 2,
+                limit: 50,
+                offset: 0,
+                next: None,
+                ..Default::default()
+            }),
+        );
+        let manual = app.manual_queue.clone();
+        app.backend.shutdown();
+        assert_eq!(
+            manual,
+            ["spotify:track:one", "spotify:track:two"],
+            "starting another local context must keep the album addition"
+        );
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
