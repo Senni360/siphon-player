@@ -15,6 +15,7 @@ pub mod credentials;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod device_history;
+pub mod downloads;
 pub mod emoji;
 pub mod eq;
 pub mod extension_bridge;

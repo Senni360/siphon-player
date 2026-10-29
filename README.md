@@ -92,6 +92,22 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 | **Winamp mini player** | Use classic skins with an equalizer, playlist, and animated sound displays. |
 | **MilkDrop** | Watch music-reactive visuals in a separate window or full screen. See platform availability below. |
 
+## Save audio with the Siphon helper
+
+On Windows, install the Siphon browser extension's native helper, then choose
+**Download** from a track, a multi-selection, or the now-playing context menu.
+Spotify album/playlist and SoundCloud set menus offer **Download all**.
+A small progress card offers cancellation; completion and errors appear as toasts.
+
+SoundCloud uses its public permalink. Spotify tracks find a matching YouTube
+recording by artist, title, version and duration; uncertain matches are skipped.
+Spotify audio is never ripped or decrypted, and playback remains unchanged.
+The existing helper saves tagged MP3s to its default Music/Siphon folder, trims
+leading silence and analyzes BPM/key with the extension's factory defaults.
+Customized extension preferences and Spotify tag overrides are unavailable in
+the current protocol. See [Downloads](docs/_reference/downloads.md) for setup,
+matching, files, network access and platform limits.
+
 ## Install
 
 Build this checkout to run Siphon:

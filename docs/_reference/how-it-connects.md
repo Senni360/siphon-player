@@ -17,6 +17,12 @@ independent of Spotify's grants.
 
 ## Independent grants, once each
 
+This personal fork can also delegate an explicit **Download** action to the
+installed Siphon extension helper on Windows. SoundCloud supplies its public
+permalink; Spotify supplies metadata for a conservative YouTube match. No
+Spotify audio or account grant goes to the helper, and playback is unchanged.
+See [Downloads](/downloads/) for requests, defaults and network access.
+
 Siphon uses separate credentials for Web API access and local playback:
 
 1. **Your own Spotify app**, the personal app, carries the Web API: account,

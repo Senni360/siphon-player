@@ -1,6 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
 mod extension_bridge;
+mod download_actions;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
@@ -626,6 +627,7 @@ pub struct App {
     pub lyrics_line_shown: Option<Option<usize>>,
     pub show_devices: bool,
     pub toasts: Vec<Toast>,
+    pub downloads: crate::downloads::State,
     pub actions: Vec<Action>,
     volume_before_mute: Option<u8>,
     /// Context and track URIs whose pending play buttons show a spinner.
@@ -1268,6 +1270,7 @@ impl App {
             lyrics_line_shown: None,
             show_devices: false,
             toasts: Vec::new(),
+            downloads: crate::downloads::State::default(),
             actions: Vec::new(),
             volume_before_mute: None,
             pending_play_keys: Vec::new(),
@@ -2742,6 +2745,7 @@ impl App {
                 Event::PlaylistLinkResolved { request, result } => {
                     self.playlist_link_resolved(request, result);
                 }
+                Event::Download(event) => self.handle_download_event(event),
                 Event::SoundCloudPlaylistAdd {
                     request,
                     complete,
@@ -5139,6 +5143,7 @@ impl App {
         if let Some(focused) = focused {
             if focused && !self.window_focused {
                 self.rootlist_wanted = true;
+                self.backend.send(Command::DiscoverDownloadHelper);
             }
             self.window_focused = focused;
         }
@@ -11659,6 +11664,14 @@ impl App {
                 unreachable!("local playlist actions are applied by the source adapter")
             }
             Action::Open(page) => self.open(page),
+            Action::Download(items) => self.download_items(items),
+            Action::DownloadAll { uri, name } => self.download_all(uri, name),
+            Action::CancelDownload(id) => {
+                if let Some(progress) = self.downloads.active.get_mut(&id) {
+                    progress.cancelling = true;
+                    self.backend.send(Command::CancelDownload(id));
+                }
+            }
             Action::OpenSongRadio { uri, track } => self.open_song_radio(&uri, &track),
             Action::PrepareTint(url) => {
                 if self.settings.accent_from_art {
@@ -25726,6 +25739,61 @@ mod tests {
             app.backend.shutdown();
             std::fs::remove_dir_all(app.dirs.config.parent().unwrap()).ok();
         }
+    }
+
+    #[test]
+    fn downloads_are_optimistic_cancellable_and_ignore_late_completion() {
+        use crate::downloads::{Event as DownloadEvent, Progress, Summary};
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.downloads.available = true;
+        app.apply(
+            Action::Download(vec![PlayableItem::Track(song("spotify:track:download"))]),
+            &egui::Context::default(),
+        );
+        let id = *app
+            .downloads
+            .active
+            .keys()
+            .next()
+            .expect("visible immediately");
+        assert_eq!(app.downloads.active[&id].stage, "queued");
+        app.apply(Action::CancelDownload(id), &egui::Context::default());
+        assert!(app.downloads.active[&id].cancelling);
+        app.handle_download_event(DownloadEvent::Progress {
+            id,
+            progress: Progress::queued("Song".into()),
+        });
+        assert!(app.downloads.active[&id].cancelling);
+        app.handle_download_event(DownloadEvent::Finished {
+            id,
+            result: Ok(Summary {
+                cancelled: true,
+                ..Default::default()
+            }),
+        });
+        assert!(app.downloads.active.is_empty());
+        let toasts = app.toasts.len();
+        app.handle_download_event(DownloadEvent::Finished {
+            id,
+            result: Err("late error".into()),
+        });
+        assert_eq!(app.toasts.len(), toasts);
+        let batch = app
+            .downloads
+            .enqueue("Album".into(), crate::downloads::Target::Items(vec![]))
+            .unwrap();
+        app.downloads
+            .progress(batch.id, Progress::queued("Last song".into()));
+        app.handle_download_event(DownloadEvent::Finished {
+            id: batch.id,
+            result: Ok(Summary {
+                downloaded: 3,
+                ..Default::default()
+            }),
+        });
+        assert_eq!(app.toasts.last().unwrap().message, "Downloaded 3 files");
+        app.backend.shutdown();
     }
 
     /// Settings takes Siphon out of the Dock only while its menu-bar

@@ -1294,6 +1294,31 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            "downloads-ready" => app.downloads.available = true,
+            "downloads" => {
+                app.downloads.available = true;
+                let request = app
+                    .downloads
+                    .enqueue(
+                        "Northern Lights (Original Mix)".into(),
+                        crate::downloads::Target::Items(vec![]),
+                    )
+                    .unwrap();
+                app.downloads.progress(
+                    request.id,
+                    crate::downloads::Progress {
+                        title: request.title,
+                        stage: "downloading".into(),
+                        item: 2,
+                        total: 8,
+                        fraction: Some(0.42),
+                        cancelling: false,
+                    },
+                );
+            }
+            "download-error" => app.toast_error(
+                "No confident YouTube match for Northern Lights. Nothing was downloaded.",
+            ),
             "soundcloud-profile" => soundcloud_profile(app),
             "soundcloud" => app.search.source = SearchSource::SoundCloud,
             "soundcloud-all" => {

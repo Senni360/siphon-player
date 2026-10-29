@@ -793,6 +793,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
     fastframe_autostart::Autostart::new(crate::brand::SLUG, crate::brand::NAME)
 }
 
+mod download_jobs;
 mod hybrid;
 pub(crate) mod soundcloud_library;
 pub use hybrid::HybridCommand;
@@ -801,6 +802,13 @@ pub enum Command {
     ResolvePlaylistLink {
         url: String,
         request: u64,
+    },
+    DiscoverDownloadHelper,
+    Download(crate::downloads::Request),
+    CancelDownload(u64),
+    DownloadFinished {
+        id: u64,
+        result: Result<crate::downloads::Summary, String>,
     },
     Hybrid(HybridCommand),
     SoundCloudLibrary(soundcloud_library::Request),
@@ -1118,6 +1126,7 @@ pub enum Event {
         request: u64,
         result: Result<crate::extension_bridge::ResolvedItem, String>,
     },
+    Download(crate::downloads::Event),
     Hybrid {
         tag: crate::player::PlaybackTag,
         event: crate::player::HybridEvent,
@@ -2022,6 +2031,7 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    download_jobs: download_jobs::Jobs,
     hybrid: hybrid::HybridRuntime,
     dirs: AppDirs,
     credentials: CredentialStore,
@@ -2150,6 +2160,7 @@ impl Worker {
     ) -> Self {
         Self {
             hybrid: hybrid::HybridRuntime::default(),
+            download_jobs: download_jobs::Jobs::default(),
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2352,6 +2363,7 @@ impl Worker {
 
     async fn run(&mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
         self.init_soundcloud();
+        self.discover_download_helper();
         let (cache_writes, cache_write_receiver) = mpsc::channel(1);
         let cache_writer = tokio::spawn(store_playlist_caches(
             cache_write_receiver,
@@ -2374,6 +2386,16 @@ impl Worker {
                 continue;
             }
             match command {
+                Command::DiscoverDownloadHelper => self.discover_download_helper(),
+                Command::Download(request) => self.start_download(request),
+                Command::CancelDownload(id) => self.download_jobs.cancel(id),
+                Command::DownloadFinished { id, result } => {
+                    self.download_jobs.finish(id);
+                    self.emit(Event::Download(crate::downloads::Event::Finished {
+                        id,
+                        result,
+                    }));
+                }
                 Command::Hybrid(command) => self.hybrid_command(command).await,
                 Command::SoundCloudLibrary(request) => self.soundcloud_library(request),
                 Command::SoundCloudAccount(account) => {
@@ -2568,6 +2590,7 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    self.download_jobs.cancel_all();
                     if self.hybrid.holds_output() {
                         self.hybrid.shutdown_pending = true;
                         self.hybrid_command(HybridCommand::Release).await;

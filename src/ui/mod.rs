@@ -6,6 +6,7 @@ pub mod artist;
 pub mod collection;
 pub(crate) mod devices;
 mod dialogs;
+mod downloads;
 pub(crate) mod friends;
 pub mod home;
 mod keys;
@@ -662,16 +663,17 @@ pub fn blend(base: Color32, tint: Color32, amount: f32) -> Color32 {
 }
 
 fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
-    if app.toasts.is_empty() {
+    if app.toasts.is_empty() && app.downloads.active.is_empty() {
         return;
     }
     let palette = app.palette;
     egui::Area::new(egui::Id::new("toasts"))
         .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset))
         .order(egui::Order::Tooltip)
-        .interactable(false)
+        .interactable(!app.downloads.active.is_empty())
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
+            downloads::show(app, ui);
             for toast in &app.toasts {
                 let age = toast.created.elapsed().as_secs_f32();
                 let alpha = if age < 0.15 {

@@ -1270,6 +1270,12 @@ pub struct Toast {
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
+    Download(Vec<PlayableItem>),
+    DownloadAll {
+        uri: String,
+        name: String,
+    },
+    CancelDownload(u64),
     ConnectSoundCloud,
     ToggleSoundCloudLike(String),
     DisconnectSoundCloud,

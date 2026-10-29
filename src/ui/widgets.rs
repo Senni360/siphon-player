@@ -817,6 +817,35 @@ pub fn picked_menu(
         });
     }
     add_to_playlist_menu(ui, app, songs);
+    if songs.iter().any(|item| app.download_source(item).is_some())
+        && download_menu_item(ui, app, "Download")
+    {
+        app.actions.push(Action::Download(songs.to_vec()));
+    }
+}
+
+/// Common availability and install guidance for rows and collection headers.
+fn download_menu_item(ui: &mut Ui, app: &App, label: &str) -> bool {
+    let enabled =
+        app.downloads.available && app.downloads.active.len() < crate::downloads::MAX_BATCHES;
+    let (response, clicked) = menu_item_response(
+        ui,
+        &app.palette,
+        Some(Icon::Download),
+        label,
+        enabled,
+        false,
+    );
+    if !enabled {
+        response.on_hover_text(if app.downloads.available {
+            "Wait for a download to finish before starting another."
+        } else {
+            crate::downloads::INSTALL_HELP
+        });
+    } else {
+        response.on_hover_text("Save audio with the Siphon extension helper. Spotify tracks use a matched YouTube recording.");
+    }
+    clicked
 }
 
 fn add_to_playlist_menu(ui: &mut Ui, app: &mut App, items: &[PlayableItem]) {
@@ -1077,6 +1106,9 @@ fn item_menu_at(
     ui.set_max_width(300.0);
     let uri = item.uri().to_string();
     let label = item.name().to_string();
+    if app.download_source(item).is_some() && download_menu_item(ui, app, "Download") {
+        app.actions.push(Action::Download(vec![item.clone()]));
+    }
     // A local file queues only on this computer's player (#1002).
     let queueable = app.can_queue(&uri);
     if menu_item_enabled(
@@ -1385,6 +1417,15 @@ pub fn context_menu_items(
     } else {
         util::uri_kind(uri).unwrap_or("")
     };
+    if (crate::soundcloud::playlist_id(uri).is_some()
+        || (uri.starts_with("spotify:") && matches!(kind, "album" | "playlist")))
+        && download_menu_item(ui, app, "Download all")
+    {
+        app.actions.push(Action::DownloadAll {
+            uri: uri.into(),
+            name: name.into(),
+        });
+    }
     if menu_item(ui, &palette, Some(Icon::Play), &gettext(locale, "Play")) {
         app.actions.push(Action::PlayContext {
             uri: uri.to_string(),
@@ -4241,6 +4282,91 @@ mod tests {
             );
             app.backend.shutdown();
         }
+    }
+
+    #[test]
+    fn download_menu_is_disabled_without_a_helper_and_emits_track_and_selection_actions() {
+        let mut app = test_app();
+        app.backend.set_offline(true);
+        let songs = [song("spotify:track:first"), song("spotify:track:second")];
+        for (available, selection) in [(false, false), (true, false), (true, true)] {
+            app.downloads.available = available;
+            app.actions.clear();
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            theme::install(&ctx);
+            let mut frame = |events| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        if selection {
+                            picked_menu(ui, &mut app, &songs, &[], None);
+                        } else {
+                            item_menu(ui, &mut app, &songs[0], None, None);
+                        }
+                    },
+                );
+                output.textures_delta.clear();
+                output
+            };
+            let tree = frame(vec![]).platform_output.accesskit_update.unwrap();
+            let (target, node) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some("Download"))
+                .unwrap();
+            assert_eq!(node.is_disabled(), !available);
+            frame(vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: *target,
+                    action: egui::accesskit::Action::Click,
+                    data: None,
+                },
+            )]);
+            if available {
+                assert!(matches!(app.actions.as_slice(), [Action::Download(items)]
+                    if items.len() == if selection {2} else {1}));
+            } else {
+                assert!(app.actions.is_empty());
+            }
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn only_album_playlist_and_soundcloud_set_menus_offer_download_all() {
+        let mut app = test_app();
+        app.backend.set_offline(true);
+        app.downloads.available = true;
+        for (uri, offered) in [
+            ("spotify:album:album", true),
+            ("spotify:playlist:list", true),
+            ("soundcloud:playlist:12", true),
+            ("soundcloud:user:12", false),
+            ("spotify:artist:artist", false),
+            ("spotify:show:show", false),
+        ] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            theme::install(&ctx);
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                context_menu_items(ui, &mut app, uri, "Collection", None);
+            });
+            output.textures_delta.clear();
+            let tree = output.platform_output.accesskit_update.unwrap();
+            assert_eq!(
+                tree.nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("Download all")),
+                offered,
+                "{uri}"
+            );
+        }
+        app.backend.shutdown();
     }
 
     #[test]

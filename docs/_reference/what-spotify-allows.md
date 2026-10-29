@@ -236,7 +236,10 @@ The Web API and librespot do not provide these features:
   audiobooks among saved shows; since 0.10.0, Siphon asks the
   librespot session which ones and leaves them out of the Podcasts shelf.
 - **Offline listening and downloads.** Spotify's DRM and the project's scope
-  rule these out.
+  rule out exporting Spotify audio. This personal fork's Windows
+  [Download action](/downloads/) delegates SoundCloud permalinks or independently
+  matched YouTube recordings to the installed extension helper. It never exports
+  Spotify audio or changes the Spotify playback source.
 - **Playback speed and crossfade.** librespot supports neither. Siphon
   would have to add them to its own audio path.
 - **Free-account playback.** Replacing Spotify audio with another source is
