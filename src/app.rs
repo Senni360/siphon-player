@@ -25654,8 +25654,14 @@ mod tests {
     }
 
     fn headless_app() -> App {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-volume-test-{}", std::process::id()));
+        // Each fixture loads session.json on construction. Sharing a root
+        // lets a parallel test's save become this app's resume song, queue
+        // or shuffle state, including in tests that never save themselves.
+        let root = std::env::temp_dir().join(format!(
+            "spotifast-headless-test-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
         let dirs = AppDirs {
             config: root.join("config"),
             state: root.join("state"),
@@ -25674,6 +25680,27 @@ mod tests {
         );
         app.local_ready = true;
         app
+    }
+
+    #[test]
+    fn headless_apps_do_not_restore_another_fixtures_session() {
+        let mut first = headless_app();
+        first.resume_track = Some("spotify:track:another-tests-song".into());
+        first.resume_context = Some("spotify:album:another-tests-album".into());
+        first.shuffle_wanted = true;
+        first.save_session();
+        assert!(first.flush_files());
+
+        let mut second = headless_app();
+        assert_ne!(first.dirs.state, second.dirs.state);
+        assert_eq!(second.resume_track, None);
+        assert_eq!(second.resume_context, None);
+        assert!(!second.shuffle_wanted);
+
+        for app in [&mut first, &mut second] {
+            app.backend.shutdown();
+            std::fs::remove_dir_all(app.dirs.config.parent().unwrap()).ok();
+        }
     }
 
     /// Settings takes Siphon out of the Dock only while its menu-bar
