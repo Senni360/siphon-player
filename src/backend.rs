@@ -2553,7 +2553,8 @@ impl Worker {
                 }
                 Command::ApplyProxy { request, config } => self.change_proxy(request, config, None),
                 Command::Player(command) => {
-                    if let PlayerCommand::Load(spec) = &command
+                    if (self.hybrid.owned || self.hybrid.releasing)
+                        && let PlayerCommand::Load(spec) = &command
                         && let Err(error) = spec.validate()
                     {
                         self.emit(Event::Error(format!("Playback error: {error}")));

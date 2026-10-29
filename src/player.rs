@@ -770,7 +770,9 @@ impl Engine {
     }
 
     pub fn command(&self, command: PlayerCommand) -> Result<()> {
-        if let PlayerCommand::Load(spec) = &command {
+        if self.audio.spotify_inhibited()
+            && let PlayerCommand::Load(spec) = &command
+        {
             spec.validate()?;
         }
 
