@@ -448,9 +448,17 @@ pub(crate) fn run() -> eframe::Result<()> {
     let folders = match demo_dirs {
         Some(dirs) => paths::Found::given(dirs),
         None => paths::AppDirs::discover().map_err(|error| {
-            eframe::Error::AppCreation(Box::new(std::io::Error::other(format!(
+            let message = format!(
                 "Could not migrate the Spotifast profile. No profile was opened; fix the folder permissions or free disk space and try again: {error}"
-            ))))
+            );
+            // Release builds on Windows have no stderr console. Make a safe
+            // retry actionable even when no application window was opened.
+            rfd::MessageDialog::new()
+                .set_title("Siphon")
+                .set_description(&message)
+                .set_level(rfd::MessageLevel::Error)
+                .show();
+            eframe::Error::AppCreation(Box::new(std::io::Error::other(message)))
         })?,
     };
     let dirs = folders.dirs.clone();

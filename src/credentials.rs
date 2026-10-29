@@ -2042,6 +2042,22 @@ mod tests {
             );
             native.delete(&key).unwrap();
             assert_eq!(native.read(&key).unwrap(), None);
+            let mut legacy = NativeStore {
+                store: None,
+                service: LEGACY_SERVICE,
+            };
+            assert_eq!(legacy.read(&key).unwrap(), None);
+            legacy.write(&key, b"dummy-legacy-probe").unwrap();
+            let mut migrating = MigratingStore {
+                current: native,
+                legacy,
+            };
+            assert_eq!(
+                migrating.read(&key).unwrap().as_deref(),
+                Some(b"dummy-legacy-probe".as_slice())
+            );
+            assert_eq!(migrating.legacy.read(&key).unwrap(), None);
+            migrating.delete(&key).unwrap();
         })
         .await
         .unwrap();

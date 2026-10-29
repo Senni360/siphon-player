@@ -110,6 +110,16 @@ impl Found {
     }
 }
 
+fn discover_with(
+    work: impl FnOnce() -> std::io::Result<Found> + Send + 'static,
+) -> std::io::Result<Found> {
+    std::thread::Builder::new()
+        .name("profile-migration".into())
+        .spawn(work)?
+        .join()
+        .map_err(|_| std::io::Error::other("profile migration worker panicked"))?
+}
+
 impl AppDirs {
     /// The folders this copy uses: a portable copy's own, made the first
     /// time from the per-user ones, or the per-user ones. Call it once this
@@ -117,11 +127,7 @@ impl AppDirs {
     pub fn discover() -> std::io::Result<Found> {
         // Startup waits before opening any window, but disk copies and durable
         // writes still belong to a worker, never the future drawing thread.
-        std::thread::Builder::new()
-            .name("profile-migration".into())
-            .spawn(Self::discover_on_worker)?
-            .join()
-            .map_err(|_| std::io::Error::other("profile migration worker panicked"))?
+        discover_with(Self::discover_on_worker)
     }
 
     fn discover_on_worker() -> std::io::Result<Found> {
@@ -403,6 +409,36 @@ fn describe(dirs: &AppDirs, mode: &fastframe_dirs::Mode) -> Option<(log::Level, 
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn discovery_copies_and_syncs_off_the_drawing_thread_and_propagates_failures() {
+        let root = std::env::temp_dir().join(format!(
+            "siphon-startup-worker-{:016x}",
+            rand::random::<u64>()
+        ));
+        let old: AppDirs = fastframe_dirs::Dirs::inside(&root.join("old")).into();
+        let new: AppDirs = fastframe_dirs::Dirs::inside(&root.join("new")).into();
+        old.ensure().unwrap();
+        std::fs::write(old.history_file(), "history").unwrap();
+        fastframe_file::mark_ui_thread();
+        let found = discover_with(move || {
+            crate::migration::profile(&old, &new)?;
+            Ok(Found::given(new))
+        })
+        .unwrap();
+        assert_eq!(
+            std::fs::read(found.dirs.history_file()).unwrap(),
+            b"history"
+        );
+        assert_eq!(
+            discover_with(|| Err(std::io::ErrorKind::PermissionDenied.into()))
+                .err()
+                .unwrap()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn flatpak_adopts_the_original_sandbox_instead_of_the_new_xdg_roots() {
