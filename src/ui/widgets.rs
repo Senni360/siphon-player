@@ -3155,6 +3155,41 @@ pub fn loading_row(ui: &mut Ui, palette: &Palette, locale: Locale) {
 }
 
 pub fn sanitize_error_message<'a>(message: &'a str, locale: Locale) -> std::borrow::Cow<'a, str> {
+    // SoundCloud's three search sections may fail together. Keep the
+    // recovery message readable and never expose transport diagnostics.
+    if message.starts_with("Your SoundCloud session expired.") {
+        return gettext(
+            locale,
+            "Your SoundCloud session expired. Reconnect SoundCloud.",
+        );
+    }
+    if message.contains("SoundCloud request failed (HTTP 404)")
+        || message.contains("SoundCloud request failed (HTTP 410)")
+        || message.starts_with("SoundCloud did not return track ")
+    {
+        return gettext(locale, "This SoundCloud item is unavailable.");
+    }
+    if message.contains("SoundCloud is rate limiting requests")
+        || message.contains("SoundCloud request failed (HTTP 429)")
+    {
+        return gettext(locale, "SoundCloud is busy. Try again later.");
+    }
+    if message.contains("SoundCloud network error:")
+        || message.contains("Unable to discover SoundCloud's public client ID")
+    {
+        return gettext(locale, "SoundCloud could not be reached. Try again.");
+    }
+    if message.contains("SoundCloud request failed (HTTP ")
+        || message.contains("SoundCloud returned an unexpected response")
+    {
+        return gettext(
+            locale,
+            "SoundCloud could not complete this request. Try again.",
+        );
+    }
+    if message.contains("SoundCloud has no supported, unencrypted stream") {
+        return gettext(locale, "SoundCloud cannot play this track.");
+    }
     if message.contains("http://")
         || message.contains("https://")
         || message.contains("error sending request for url")
@@ -3897,6 +3932,38 @@ mod tests {
                     "{tree:?}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn soundcloud_errors_offer_recovery_without_transport_details() {
+        for (raw, expected) in [
+            (
+                "SoundCloud request failed (HTTP 503)",
+                "SoundCloud could not complete this request. Try again.",
+            ),
+            (
+                "SoundCloud request failed (HTTP 401)",
+                "SoundCloud could not complete this request. Try again.",
+            ),
+            (
+                "Could not add SoundCloud playlist: SoundCloud request failed (HTTP 404)",
+                "This SoundCloud item is unavailable.",
+            ),
+            (
+                "SoundCloud is rate limiting requests; try again after 3600s",
+                "SoundCloud is busy. Try again later.",
+            ),
+            (
+                "SoundCloud network error: dns error with private diagnostics",
+                "SoundCloud could not be reached. Try again.",
+            ),
+            (
+                "Your SoundCloud session expired. Reconnect SoundCloud with a current oauth_token cookie.",
+                "Your SoundCloud session expired. Reconnect SoundCloud.",
+            ),
+        ] {
+            assert_eq!(sanitize_error_message(raw, Locale::English), expected);
         }
     }
 

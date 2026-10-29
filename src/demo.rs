@@ -1321,6 +1321,22 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             ),
             "soundcloud-profile" => soundcloud_profile(app),
             "soundcloud" => app.search.source = SearchSource::SoundCloud,
+            "soundcloud-error" => {
+                app.search.source = SearchSource::SoundCloud;
+                app.search.soundcloud =
+                    Loadable::Failed("SoundCloud request failed (HTTP 503)".into());
+            }
+            "soundcloud-loading" => {
+                app.search.source = SearchSource::SoundCloud;
+                app.search.soundcloud = Loadable::Loaded(Default::default());
+                app.search.soundcloud_pending = true;
+            }
+            "soundcloud-partial-error" => {
+                app.search.source = SearchSource::SoundCloud;
+                if let Some(results) = app.search.soundcloud.get_mut() {
+                    results.errors = vec!["SoundCloud request failed (HTTP 503)".into(); 3];
+                }
+            }
             "soundcloud-all" => {
                 app.search.source = SearchSource::All;
                 // Compact fixture with both services visible in one capture.
@@ -5846,6 +5862,71 @@ mod tests {
         assert!(
             text.iter()
                 .any(|(label, _)| label.contains("SoundCloud is unavailable"))
+        );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn failed_soundcloud_search_offers_a_source_local_retry() {
+        let (ctx, mut app) = accessible_app("soundcloud-initial-retry");
+        app.search.source = SearchSource::SoundCloud;
+        app.search.soundcloud = Loadable::Failed("SoundCloud request failed (HTTP 503)".into());
+        search_frame(&ctx, &mut app, vec![]);
+        let text = search_frame(&ctx, &mut app, vec![]);
+        assert!(text.iter().all(|(label, _)| !label.contains("HTTP")));
+        let retry = text
+            .iter()
+            .find(|(label, _)| label == "Retry")
+            .unwrap()
+            .1
+            .center();
+        app.actions.clear();
+        search_frame(
+            &ctx,
+            &mut app,
+            pointer_click(retry, egui::PointerButton::Primary),
+        );
+        assert!(
+            matches!(app.actions.as_slice(), [Action::SearchSoundCloud { query, serial }]
+            if query == &app.search.committed && *serial == app.search.serial)
+        );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_search_deduplicates_errors_and_waits_before_showing_empty() {
+        let (ctx, mut app) = accessible_app("soundcloud-search-status");
+        app.search.source = SearchSource::SoundCloud;
+        let results = app.search.soundcloud.get_mut().unwrap();
+        results.errors = vec!["SoundCloud request failed (HTTP 503)".into(); 3];
+        search_frame(&ctx, &mut app, vec![]);
+        let text = search_frame(&ctx, &mut app, vec![]);
+        assert!(
+            text.iter()
+                .any(|(label, _)| label == "Bonobo - Studio Sketch")
+        );
+        assert_eq!(
+            text.iter()
+                .filter(
+                    |(label, _)| label == "SoundCloud could not complete this request. Try again."
+                )
+                .count(),
+            1
+        );
+        app.search.soundcloud = Loadable::Loaded(Default::default());
+        app.search.soundcloud_pending = true;
+        let text = search_frame(&ctx, &mut app, vec![]);
+        assert!(
+            !text
+                .iter()
+                .any(|(label, _)| label == "No SoundCloud results.")
+        );
+        assert!(text.iter().any(|(label, _)| label == "Loading…"));
+        app.search.soundcloud_pending = false;
+        let text = search_frame(&ctx, &mut app, vec![]);
+        assert!(
+            text.iter()
+                .any(|(label, _)| label == "No SoundCloud results.")
         );
         app.backend.shutdown();
     }

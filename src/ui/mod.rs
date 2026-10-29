@@ -707,7 +707,13 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                             // label left to wrap at the area's width broke
                             // long messages on every word.
                             let galley = ui.painter().layout(
-                                toast.message.clone(),
+                                match toast.kind {
+                                    ToastKind::Error => {
+                                        widgets::sanitize_error_message(&toast.message, app.locale)
+                                            .into_owned()
+                                    }
+                                    ToastKind::Info => toast.message.clone(),
+                                },
                                 theme::medium(13.5),
                                 palette.text,
                                 280.0,

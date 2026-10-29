@@ -198,34 +198,44 @@ fn soundcloud(app: &mut App, ui: &mut egui::Ui) {
         Loadable::Failed(error) => {
             let error = error.clone();
             widgets::error_row(ui, app, &error, None);
+            soundcloud_retry(app, ui, None);
             return;
         }
     };
+    let mut shown_errors = std::collections::HashSet::new();
     for error in &results.errors {
-        widgets::error_row(ui, app, error, None);
+        let message = widgets::sanitize_error_message(error, app.locale).into_owned();
+        if shown_errors.insert(message.clone()) {
+            widgets::error_row(ui, app, &message, None);
+        }
     }
-    if !results.errors.is_empty()
-        && !app.search.soundcloud_pending
-        && theme::soft_button(
+    if !results.errors.is_empty() {
+        soundcloud_retry(app, ui, results.retry_page);
+    }
+    soundcloud_results(app, ui, &results, false);
+    if app.search.soundcloud_pending {
+        widgets::loading_row(ui, &palette, app.locale);
+    }
+}
+
+fn soundcloud_retry(app: &mut App, ui: &mut egui::Ui, page: Option<SoundCloudSearchKind>) {
+    let retry = ui.add_enabled_ui(!app.search.soundcloud_pending, |ui| {
+        theme::soft_button(
             ui,
-            &palette,
+            &app.palette,
             Some(Icon::Refresh),
             &gettext(app.locale, "Retry"),
             false,
         )
-        .clicked()
-    {
-        app.actions.push(match results.retry_page {
+    });
+    if retry.inner.clicked() {
+        app.actions.push(match page {
             Some(kind) => Action::MoreSoundCloud(kind),
             None => Action::SearchSoundCloud {
                 query: app.search.committed.clone(),
                 serial: app.search.serial,
             },
         });
-    }
-    soundcloud_results(app, ui, &results, false);
-    if app.search.soundcloud_pending {
-        widgets::loading_row(ui, &palette, app.locale);
     }
 }
 
@@ -248,7 +258,8 @@ fn soundcloud_results(
         _ => results.is_empty(),
     };
     if empty {
-        if results.resolved.is_some() || !results.errors.is_empty() {
+        if results.resolved.is_some() || !results.errors.is_empty() || app.search.soundcloud_pending
+        {
             return;
         }
         theme::text(

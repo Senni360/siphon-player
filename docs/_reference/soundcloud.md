@@ -68,6 +68,10 @@ the successful sections visible. **Show more** follows each section's opaque
 cursor, retaining existing rows and allowing failed pages to be retried.
 Retry repeats the failed page. Submit the query again to start a fresh search
 if a cursor expires.
+Initial failures also offer **Retry** without restarting Spotify search.
+Repeated failures from SoundCloud's sections share one short message, and an
+empty result appears only after the request finishes. Error messages explain
+how to recover instead of exposing HTTP statuses or network details.
 
 Paste a desktop, mobile or short SoundCloud URL to resolve it. The linked
 song, playlist or profile appears first. A pasted link reveals SoundCloud

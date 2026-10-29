@@ -3822,3 +3822,28 @@ msgstr ""
 
 #~ msgid "Reduce lyrics motion"
 #~ msgstr "Reducir movimiento de la letra"
+
+
+#: src/app/soundcloud_library.rs:25 src/ui/widgets.rs:3120
+msgid "Your SoundCloud session expired. Reconnect SoundCloud."
+msgstr "Tu sesión de SoundCloud expiró. Vuelva a conectar SoundCloud."
+
+#: src/soundcloud/connect.rs:30 src/ui/widgets.rs:3136
+msgid "SoundCloud could not be reached. Try again."
+msgstr "No se pudo contactar con SoundCloud. Intentar otra vez."
+
+#: src/ui/widgets.rs:3126
+msgid "This SoundCloud item is unavailable."
+msgstr "Este elemento de SoundCloud no está disponible."
+
+#: src/ui/widgets.rs:3131
+msgid "SoundCloud is busy. Try again later."
+msgstr "SoundCloud está ocupado. Vuelve a intentarlo más tarde."
+
+#: src/ui/widgets.rs:3141
+msgid "SoundCloud could not complete this request. Try again."
+msgstr "SoundCloud no pudo completar esta solicitud. Intentar otra vez."
+
+#: src/ui/widgets.rs:3144
+msgid "SoundCloud cannot play this track."
+msgstr "SoundCloud no puede reproducir esta pista."

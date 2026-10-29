@@ -22,7 +22,13 @@ impl App {
         }
         self.save_soundcloud_account();
         self.soundcloud_reconnect = true;
-        self.toast_error(gettext(self.locale, "Your SoundCloud session expired. Reconnect SoundCloud with a current oauth_token cookie.").into_owned());
+        self.toast_error(
+            gettext(
+                self.locale,
+                "Your SoundCloud session expired. Reconnect SoundCloud.",
+            )
+            .into_owned(),
+        );
     }
 
     pub(super) fn own_soundcloud_likes_context(&self, uri: &str) -> bool {
