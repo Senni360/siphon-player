@@ -36,7 +36,15 @@ the Spotify session enables it. For hybrid loads the adapter first detaches
 Connect and waits for its acknowledgement, which clears Spirc's contexts.
 It validates the one-item list and loads its sole item directly on the
 librespot decoder. Hybrid pause, play and seek also address that decoder.
+The pinned Spirc also consumes EOF while inactive and sends a decoder Stop
+when its cleared queue has no successor. The tagged observer holds a natural
+completion until the matching track and play-request ID report Stopped. This
+acknowledges Spirc's Stop before the application can load the next row. Old
+requests, other tracks and duplicate EOF events cannot advance the queue.
+Explicit handoffs cancel the observer before sending their own Stop.
 Returning to Spotify-only playback uses the existing Spirc load path again.
+Deferred Spotify-only commands carry an ownership generation: a newer Claim,
+Load, Stop or Release discards the older handoff's commands.
 
 Mixed playback stays on this computer, including Spotify rows. A remote
 transfer or receiver activation is refused in both the application and backend.
@@ -53,7 +61,10 @@ Play resolves its full order instead of resuming a truncated preview.
 SoundCloud account restoration is independent of Spotify and waits for the
 configured proxy. `App::soundcloud_account` holds the restored account;
 after a verified account change, send `Command::SoundCloudAccount` to update
-the backend client and persist only the non-secret account state.
+the backend client and persist only the non-secret account state. Stream and
+context resolutions capture a backend account generation. Changing accounts
+rejects their old replies, clears the stream cache and cancels both active and
+paused lookahead without interrupting the current decoder.
 
 ## Output ownership
 
@@ -70,10 +81,17 @@ release, writes and event handling are serialized, so an in-flight Spotify
 write cannot mix with external PCM. This protects audio exclusivity; the
 integrator must still suppress conflicting Connect and queue state updates.
 
-Pause and end-of-track retain ownership. To return to Spotify, send `Stop`
+A separate Spotify inhibition gate survives external release, including the
+final SoundCloud row's Stop. Connect replacements are stopped and their packets
+remain silent until an explicit validated Spotify load takes ownership. Gate
+changes and rejected decoder commands are serialized, so an older rejection
+cannot enqueue Stop after the replacement load.
+
+Pause and end-of-track retain external ownership. To return to Spotify, send `Stop`
 and wait for `Event::OutputReleased` before loading or resuming Spotify.
 An end-of-track `Stopped` state alone does not release
-ownership. Dropping the engine requests asynchronous shutdown; use the
+external ownership. OutputReleased alone does not remove Spotify inhibition.
+Dropping the engine requests asynchronous shutdown; use the
 explicit Stop acknowledgement for a coordinated handoff.
 Keep the Tokio runtime alive until that acknowledgement as well.
 

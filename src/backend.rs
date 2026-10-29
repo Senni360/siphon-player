@@ -2340,7 +2340,11 @@ impl Worker {
                 }
                 Command::SoundCloudAccountRestored { .. } => {}
                 Command::SoundCloudEngine(event) => self.soundcloud_event(event).await,
-                Command::HybridContextResolved { account_generation, generation, result } => {
+                Command::HybridContextResolved {
+                    account_generation,
+                    generation,
+                    result,
+                } => {
                     if account_generation == self.hybrid.account_generation {
                         self.emit(Event::HybridContext { generation, result });
                     }

@@ -175,7 +175,10 @@ across local context changes. Next consumes known queued rows even while a
 playlist loads, and unavailable tracks cannot make Repeat All retry forever.
 SoundCloud set and uploader links open their SoundCloud pages; SoundCloud
 hearts never write to the Spotify library.
-Local Spotify playback must be enabled first. Its
+Local Spotify playback must be enabled first. Spotify Connect replacements
+stay silent during SoundCloud playback and after its queue stops, until you
+explicitly start Spotify playback. Changing the SoundCloud account discards
+pending stream and playlist replies from the previous account. Its
 [engine contract](docs/_reference/soundcloud-engine.md) describes stream inputs,
 URL refresh and exclusive use of the output. No account connection is needed
 for public streams; the optional connection interface is not wired yet.

@@ -134,11 +134,23 @@ impl AudioControl {
     /// explicit validated Spotify load may remove this independent gate.
     pub(crate) fn inhibit_spotify(&self, inhibited: bool) {
         let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
-        self.spotify_inhibited.store(inhibited, Ordering::SeqCst);
+        let previous = self.spotify_inhibited.swap(inhibited, Ordering::SeqCst);
+        if inhibited && !previous && !self.external_active.load(Ordering::SeqCst) {
+            self.interrupt_output();
+        }
     }
 
     pub(crate) fn spotify_inhibited(&self) -> bool {
         self.spotify_inhibited.load(Ordering::SeqCst)
+    }
+
+    /// Serialize rejected decoder commands with the next owner's gate change.
+    /// The callback only enqueues a player command; it must never wait.
+    pub(crate) fn while_spotify_inhibited(&self, reject: impl FnOnce()) {
+        let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
+        if self.spotify_inhibited() {
+            reject();
+        }
     }
 
     fn spotify_blocked(&self) -> bool {
@@ -366,12 +378,7 @@ impl Sink for SharedSink {
             .producer
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if self
-            .external
-            .0
-            .control
-            .spotify_blocked()
-        {
+        if self.external.0.control.spotify_blocked() {
             return Ok(());
         }
         self.spotify.start()
@@ -384,12 +391,7 @@ impl Sink for SharedSink {
             .producer
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if self
-            .external
-            .0
-            .control
-            .spotify_blocked()
-        {
+        if self.external.0.control.spotify_blocked() {
             return Ok(());
         }
         self.spotify.stop()
@@ -403,12 +405,7 @@ impl Sink for SharedSink {
                 .producer
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            if !self
-                .external
-                .0
-                .control
-                .spotify_blocked()
-            {
+            if !self.external.0.control.spotify_blocked() {
                 return self.spotify.write(packet, converter);
             }
         }
@@ -1578,10 +1575,13 @@ mod tests {
         external.release().unwrap();
         shared.start().unwrap();
         shared.stop().unwrap();
-        shared.write(AudioPacket::Samples(vec![0.0; 88]), &mut converter).unwrap();
+        shared
+            .write(AudioPacket::Samples(vec![0.0; 88]), &mut converter)
+            .unwrap();
         control.handle_player_event(&PlayerEvent::Stopped {
             play_request_id: 9,
-            track_id: librespot_core::SpotifyUri::from_uri("spotify:track:14XWXWv5FoCbFzLksawpEe").unwrap(),
+            track_id: librespot_core::SpotifyUri::from_uri("spotify:track:14XWXWv5FoCbFzLksawpEe")
+                .unwrap(),
         });
         assert!(control.spotify_inhibited());
         assert_eq!(calls.load(Ordering::SeqCst), 0);

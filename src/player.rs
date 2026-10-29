@@ -270,7 +270,10 @@ pub enum PlaybackResume {
 
 impl LoadSpec {
     pub(crate) fn validate(&self) -> Result<()> {
-        anyhow::ensure!(self.context_uri.is_some() || !self.uris.is_empty(), "nothing to play");
+        anyhow::ensure!(
+            self.context_uri.is_some() || !self.uris.is_empty(),
+            "nothing to play"
+        );
         Ok(())
     }
 
@@ -788,9 +791,13 @@ impl Engine {
             self.audio.interrupt();
         }
         let spotify_load = matches!(command, PlayerCommand::Load(_));
-        let result = self.send_command(command);
-        if spotify_load && result.is_ok() {
+        let was_inhibited = self.audio.spotify_inhibited();
+        if spotify_load {
             self.audio.inhibit_spotify(false);
+        }
+        let result = self.send_command(command);
+        if spotify_load && result.is_err() && was_inhibited {
+            self.audio.inhibit_spotify(true);
         }
         if interrupts_audio && result.is_err() {
             self.audio.stopped();
@@ -1130,10 +1137,8 @@ async fn run_events(
             play_request_id = Some(*next);
             // Connect can still replace a detached player. Stop that decoder
             // while the independent output gate keeps every packet silent.
-            if audio.spotify_inhibited()
-                && let Some(player) = player.upgrade()
-            {
-                player.stop();
+            if let Some(player) = player.upgrade() {
+                audio.while_spotify_inhibited(|| player.stop());
             }
             continue;
         }
@@ -1206,8 +1211,12 @@ async fn run_hybrid_events(
             continue;
         }
         if ended {
-            if matches!(&event, PlayerEvent::Stopped { track_id, .. } if track_id.to_uri() == expected) {
-                notify(EngineEvent::Hybrid { tag, event: HybridEvent::EndOfTrack });
+            if matches!(&event, PlayerEvent::Stopped { track_id, .. } if track_id.to_uri() == expected)
+            {
+                notify(EngineEvent::Hybrid {
+                    tag,
+                    event: HybridEvent::EndOfTrack,
+                });
                 break;
             }
             continue;
@@ -1904,23 +1913,53 @@ mod tests {
         let loaded = Arc::new(Mutex::new(Vec::new()));
         let commands = Arc::clone(&loaded);
         let notify: Notify = Arc::new(move |event| {
-            if matches!(event, EngineEvent::Hybrid { event: HybridEvent::EndOfTrack, .. }) {
+            if matches!(
+                event,
+                EngineEvent::Hybrid {
+                    event: HybridEvent::EndOfTrack,
+                    ..
+                }
+            ) {
                 commands.lock().unwrap().push("Load B");
             }
         });
-        let tag = PlaybackTag { generation: 1, occurrence: crate::hybrid_queue::EntryId(1) };
+        let tag = PlaybackTag {
+            generation: 1,
+            occurrence: crate::hybrid_queue::EntryId(1),
+        };
         let mut observer = Box::pin(run_hybrid_events(receiver, uri().to_uri(), tag, notify));
         for event in [
-            PlayerEvent::PlayRequestIdChanged { play_request_id: 42 },
-            PlayerEvent::EndOfTrack { play_request_id: 42, track_id: uri() },
+            PlayerEvent::PlayRequestIdChanged {
+                play_request_id: 42,
+            },
+            PlayerEvent::EndOfTrack {
+                play_request_id: 42,
+                track_id: uri(),
+            },
             // Neither an old Stop nor a different track acknowledges A's EOF.
-            PlayerEvent::Stopped { play_request_id: 41, track_id: uri() },
-            PlayerEvent::Stopped { play_request_id: 42, track_id: SpotifyUri::from_uri("spotify:track:6rqhFgbbKwnb9MLmUQDhG6").unwrap() },
-        ] { sender.send(event).unwrap(); }
+            PlayerEvent::Stopped {
+                play_request_id: 41,
+                track_id: uri(),
+            },
+            PlayerEvent::Stopped {
+                play_request_id: 42,
+                track_id: SpotifyUri::from_uri("spotify:track:6rqhFgbbKwnb9MLmUQDhG6").unwrap(),
+            },
+        ] {
+            sender.send(event).unwrap();
+        }
         assert!(futures_util::poll!(observer.as_mut()).is_pending());
-        assert!(loaded.lock().unwrap().is_empty(), "the observer ran before Spirc consumed EOF");
+        assert!(
+            loaded.lock().unwrap().is_empty(),
+            "the observer ran before Spirc consumed EOF"
+        );
         loaded.lock().unwrap().push("Spirc Stop A");
-        sender.send(PlayerEvent::Stopped { play_request_id: 42, track_id: uri() }).unwrap();
+        sender
+            .send(PlayerEvent::Stopped {
+                play_request_id: 42,
+                track_id: uri(),
+            })
+            .unwrap();
         observer.await;
         assert_eq!(*loaded.lock().unwrap(), ["Spirc Stop A", "Load B"]);
     }

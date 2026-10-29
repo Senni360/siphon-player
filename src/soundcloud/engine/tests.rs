@@ -616,6 +616,36 @@ async fn stop_cancels_a_preload_that_already_started_on_a_blocking_thread() {
 }
 
 #[tokio::test]
+async fn account_change_discards_inflight_and_paused_lookahead_without_stopping_audio() {
+    let server = Server::new().await;
+    let (mut worker, recorded, _) = worker();
+    worker
+        .apply(Command::Preload(server.stream(
+            "/slow.mp3",
+            Protocol::Progressive,
+            1200,
+        )))
+        .unwrap();
+    server.wait_for("/slow.mp3").await;
+    worker.apply(Command::ClearPreload).unwrap();
+    server.wait_for("/cancelled").await;
+    assert!(worker.preload.is_none());
+    worker.state.playback = Playback::Paused;
+    worker
+        .apply(Command::Preload(server.stream(
+            "/next.mp3",
+            Protocol::Progressive,
+            1200,
+        )))
+        .unwrap();
+    assert!(worker.deferred_preload.is_some());
+    worker.apply(Command::ClearPreload).unwrap();
+    assert!(worker.deferred_preload.is_none());
+    assert_eq!(worker.state.playback, Playback::Paused);
+    assert_eq!(recorded.lock().unwrap().pauses, 0);
+}
+
+#[tokio::test]
 async fn a_preloaded_successor_keeps_the_output_tail_and_uses_the_new_command_revision() {
     let server = Server::new().await;
     let first = server.stream("/tone.mp3", Protocol::Progressive, 1200);

@@ -607,7 +607,11 @@ impl Worker {
             }
             .await;
             persist_client_id(&client, path).await;
-            let _ = commands.send(Command::HybridContextResolved { account_generation, generation, result });
+            let _ = commands.send(Command::HybridContextResolved {
+                account_generation,
+                generation,
+                result,
+            });
         });
     }
 }
@@ -713,6 +717,108 @@ mod tests {
                 "a result authorized by the old account cannot be reused after disconnect"
             );
         });
+    }
+
+    #[test]
+    fn newer_ownership_intents_replace_deferred_legacy_commands() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("hybrid-intent-generations");
+        runtime.block_on(async {
+            worker.hybrid.releasing = true;
+            worker.hybrid_command(HybridCommand::Release).await;
+            worker.hybrid.defer_player(PlayerCommand::Load(LoadSpec {
+                uris: vec!["spotify:track:old".into()],
+                ..Default::default()
+            }));
+            let old_generation = worker.hybrid.owner_generation;
+            worker.hybrid_command(HybridCommand::Release).await;
+            assert_ne!(worker.hybrid.owner_generation, old_generation);
+            let latest = PlayerCommand::Load(LoadSpec {
+                uris: vec!["spotify:track:new".into()],
+                ..Default::default()
+            });
+            worker.hybrid.defer_player(latest.clone());
+            assert_eq!(worker.hybrid.take_player_waiting(), vec![latest]);
+            worker.hybrid.defer_player(PlayerCommand::Toggle);
+            worker.hybrid_command(HybridCommand::Claim).await;
+            worker.hybrid_command(HybridCommand::Stop).await;
+            assert!(worker.hybrid.take_player_waiting().is_empty());
+        });
+    }
+
+    #[test]
+    fn account_generation_filters_stream_and_context_replies_in_command_loop() {
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("hybrid-account-replies");
+        let tag = PlaybackTag {
+            generation: 4,
+            occurrence: crate::hybrid_queue::EntryId(6),
+        };
+        worker.hybrid.tag = Some(tag);
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands
+            .send(Command::SoundCloudAccount(
+                crate::soundcloud::account::Account::Disconnected,
+            ))
+            .unwrap();
+        for account_generation in [0, 1] {
+            commands
+                .send(Command::SoundCloudStream {
+                    account_generation,
+                    tag,
+                    preload: false,
+                    refresh: None,
+                    result: Ok(sc::Stream {
+                        uri: format!("soundcloud:track:{}", account_generation + 10),
+                        url: "https://audio.example/stream".into(),
+                        protocol: sc::Protocol::Progressive,
+                        mime: "audio/mpeg".into(),
+                        duration_ms: 100,
+                        is_preview: false,
+                    }),
+                })
+                .unwrap();
+            commands
+                .send(Command::HybridContextResolved {
+                    account_generation,
+                    generation: account_generation + 10,
+                    result: Ok(crate::hybrid_queue::Context {
+                        uri: "soundcloud:playlist:7".into(),
+                        name: "Set".into(),
+                        tracks: vec![],
+                    }),
+                })
+                .unwrap();
+        }
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert_eq!(worker.hybrid.streams.len(), 1);
+        assert!(worker.hybrid.streams.contains_key("soundcloud:track:11"));
+        let contexts: Vec<_> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                Event::HybridContext { generation, .. } => Some(generation),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(contexts, [11]);
+    }
+
+    #[test]
+    fn empty_spotify_load_does_not_release_hybrid_ownership() {
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("hybrid-invalid-replacement");
+        worker.hybrid.owned = true;
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands
+            .send(Command::Player(PlayerCommand::Load(LoadSpec::default())))
+            .unwrap();
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(worker.hybrid.owned);
+        assert!(events.try_iter().any(
+            |event| matches!(event, Event::Error(message) if message.contains("nothing to play"))
+        ));
     }
 
     #[test]
