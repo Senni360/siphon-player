@@ -41,6 +41,7 @@ pub(super) struct HybridRuntime {
     client: Option<Client>,
     pub(super) account_generation: u64,
     pub(super) account_request: u64,
+    active_account_request: u64,
     account_lease: Option<crate::credentials::Lease>,
     pub(super) engine: Option<sc::Engine>,
     tag: Option<PlaybackTag>,
@@ -180,7 +181,7 @@ impl Worker {
         request: u64,
     ) {
         self.hybrid.account_request = request;
-        self.install_soundcloud_account(account.clone());
+        self.install_soundcloud_account(account.clone(), request);
         self.emit(Event::SoundCloudAccount { account, request });
     }
 
@@ -195,7 +196,10 @@ impl Worker {
         self.credentials
             .invalidate(crate::credentials::Slot::SoundCloud);
         let lease = self.credentials.lease(crate::credentials::Slot::SoundCloud);
-        self.install_soundcloud_account(account.clone());
+        if self.hybrid.account != account {
+            self.install_soundcloud_account(account.clone(), self.hybrid.active_account_request);
+        }
+        self.hybrid.account_lease = Some(lease.clone());
         let events = self.events.clone();
         let waker = self.waker.clone();
         tokio::spawn(async move {
@@ -214,7 +218,12 @@ impl Worker {
         });
     }
 
-    pub(super) fn install_soundcloud_account(&mut self, account: crate::soundcloud::account::Account) {
+    pub(super) fn install_soundcloud_account(
+        &mut self,
+        account: crate::soundcloud::account::Account,
+        request: u64,
+    ) {
+        self.hybrid.active_account_request = request;
         self.hybrid.account_lease = Some(self.credentials.lease(CredentialSlot::SoundCloud));
         let id = self.hybrid.client.as_ref().and_then(Client::client_id);
         if let Some(previous) = &self.hybrid.client {
@@ -239,6 +248,20 @@ impl Worker {
             engine.command(sc::Command::ClearPreload);
         }
         self.hybrid.account = account;
+        if let Some(tag) = self.hybrid.tag
+            && self
+                .hybrid
+                .track
+                .as_ref()
+                .is_some_and(|track| crate::soundcloud::is_track_uri(&track.uri))
+        {
+            // Account changes discard in-flight stream resolutions too. Retry
+            // the current load or URL refresh at the UI's current position.
+            self.emit(Event::Hybrid {
+                tag,
+                event: HybridEvent::Interrupted,
+            });
+        }
     }
 
     pub(super) fn expire_soundcloud_session(&mut self, generation: u64) {
@@ -249,12 +272,7 @@ impl Worker {
         let Account::Session { user, .. } = &self.hybrid.account else {
             return;
         };
-        self.hybrid.account = Account::Profile(user.clone());
-        self.hybrid.streams.clear();
-        self.hybrid.preload_uri = None;
-        if let Some(engine) = &self.hybrid.engine {
-            engine.command(sc::Command::ClearPreload);
-        }
+        let public_account = Account::Profile(user.clone());
         if let Some(lease) = self
             .hybrid
             .account_lease
@@ -272,9 +290,11 @@ impl Worker {
                 }
             });
         }
-        // Keep the generation: a pending public load still needs its result.
+        // Expiry is an account boundary too. A successful private response
+        // already in flight must not repopulate the queue or stream cache.
+        self.install_soundcloud_account(public_account, self.hybrid.active_account_request);
         self.emit(Event::SoundCloudSessionExpired {
-            request: self.hybrid.account_request,
+            request: self.hybrid.active_account_request,
         });
     }
 
@@ -1121,11 +1141,13 @@ mod tests {
         worker.hybrid.account_request = 1;
         let connection = Connection::begin(&worker.credentials);
         let (commands, receiver) = mpsc::unbounded_channel();
-        commands.send(Command::SoundCloudAccountRestored {
-            connection,
-            result: Ok(verified.clone()),
-            request: 1,
-        }).unwrap();
+        commands
+            .send(Command::SoundCloudAccountRestored {
+                connection,
+                result: Ok(verified.clone()),
+                request: 1,
+            })
+            .unwrap();
         commands.send(Command::Shutdown).unwrap();
         runtime.block_on(worker.run(receiver));
         assert!(worker.hybrid.account == previous);
@@ -1138,9 +1160,9 @@ mod tests {
     fn soundcloud_account_acceptance_rejects_superseded_requests() {
         use crate::soundcloud::account::{Account, Profile};
         for request in [1, 2] {
-            let (runtime, mut worker, _) = super::super::authorization_tests::worker(
-                &format!("soundcloud-account-acceptance-{request}"),
-            );
+            let (runtime, mut worker, _) = super::super::authorization_tests::worker(&format!(
+                "soundcloud-account-acceptance-{request}"
+            ));
             worker.hybrid.account_request = 2;
             let account = Account::Profile(Profile {
                 user_id: 42,
@@ -1149,13 +1171,135 @@ mod tests {
                 avatar: None,
             });
             let (commands, receiver) = mpsc::unbounded_channel();
-            commands.send(Command::AcceptSoundCloudAccount {
-                account: account.clone(), request,
-            }).unwrap();
+            commands
+                .send(Command::AcceptSoundCloudAccount {
+                    account: account.clone(),
+                    request,
+                })
+                .unwrap();
             commands.send(Command::Shutdown).unwrap();
             runtime.block_on(worker.run(receiver));
             assert_eq!(worker.hybrid.account == account, request == 2);
         }
+    }
+
+    #[test]
+    fn canceling_a_connection_keeps_the_displayed_accounts_in_flight_context() {
+        use crate::soundcloud::account::{Account, Profile};
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("soundcloud-cancel-context");
+        let account = Account::Profile(Profile {
+            user_id: 42,
+            username: "Current listener".into(),
+            permalink: "current-listener".into(),
+            avatar: None,
+        });
+        worker.hybrid.account = account.clone();
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands
+            .send(Command::CancelSoundCloudConnect {
+                account,
+                request: 1,
+            })
+            .unwrap();
+        commands
+            .send(Command::HybridContextResolved {
+                account_generation: 0,
+                generation: 7,
+                result: Ok(crate::hybrid_queue::Context {
+                    uri: "soundcloud:playlist:7".into(),
+                    name: "Current context".into(),
+                    tracks: vec![],
+                }),
+            })
+            .unwrap();
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(events.try_iter().any(|event| matches!(
+            event,
+            Event::HybridContext {
+                generation: 7,
+                result: Ok(_)
+            }
+        )));
+    }
+
+    #[test]
+    fn session_expiry_rejects_in_flight_private_streams_and_contexts() {
+        use crate::soundcloud::account::{Account, Profile, SessionToken};
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("soundcloud-expired-private-replies");
+        worker.hybrid.account = Account::Session {
+            user: Profile {
+                user_id: 42,
+                username: "Expired listener".into(),
+                permalink: "expired-listener".into(),
+                avatar: None,
+            },
+            token: SessionToken::parse("2-000000-dummy_session_token").unwrap(),
+        };
+        worker.hybrid.account_request = 9; // A reconnect is being verified.
+        let tag = PlaybackTag {
+            generation: 4,
+            occurrence: crate::hybrid_queue::EntryId(6),
+        };
+        worker.hybrid.tag = Some(tag);
+        worker.hybrid.track = Some(Track {
+            uri: "soundcloud:track:7".into(),
+            ..Default::default()
+        });
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands.send(Command::SoundCloudSessionExpired(0)).unwrap();
+        commands
+            .send(Command::SoundCloudStream {
+                account_generation: 0,
+                tag,
+                preload: false,
+                refresh: None,
+                result: Ok(sc::Stream {
+                    uri: "soundcloud:track:7".into(),
+                    url: "https://audio.example/private".into(),
+                    protocol: sc::Protocol::Progressive,
+                    mime: "audio/mpeg".into(),
+                    duration_ms: 100,
+                    is_preview: false,
+                }),
+            })
+            .unwrap();
+        for account_generation in [0, 1] {
+            commands
+                .send(Command::HybridContextResolved {
+                    account_generation,
+                    generation: account_generation + 10,
+                    result: Ok(crate::hybrid_queue::Context {
+                        uri: "soundcloud:playlist:7".into(),
+                        name: "Set".into(),
+                        tracks: vec![],
+                    }),
+                })
+                .unwrap();
+        }
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(matches!(worker.hybrid.account, Account::Profile(_)));
+        assert!(worker.hybrid.streams.is_empty());
+        let events: Vec<_> = events.try_iter().collect();
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::SoundCloudSessionExpired { request: 0 }))
+        );
+        assert!(events.iter().any(|event| matches!(event,
+            Event::Hybrid { tag: actual, event: HybridEvent::Interrupted } if *actual == tag
+        )));
+        let contexts: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                Event::HybridContext { generation, .. } => Some(*generation),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(contexts, [11]);
     }
 
     #[test]
@@ -1167,6 +1311,10 @@ mod tests {
             occurrence: crate::hybrid_queue::EntryId(6),
         };
         worker.hybrid.tag = Some(tag);
+        worker.hybrid.track = Some(Track {
+            uri: "soundcloud:track:7".into(),
+            ..Default::default()
+        });
         let (commands, receiver) = mpsc::unbounded_channel();
         commands
             .send(Command::SoundCloudAccount(
@@ -1206,8 +1354,12 @@ mod tests {
         runtime.block_on(worker.run(receiver));
         assert_eq!(worker.hybrid.streams.len(), 1);
         assert!(worker.hybrid.streams.contains_key("soundcloud:track:11"));
+        let events: Vec<_> = events.try_iter().collect();
+        assert!(events.iter().any(|event| matches!(event,
+            Event::Hybrid { tag: actual, event: HybridEvent::Interrupted } if *actual == tag
+        )));
         let contexts: Vec<_> = events
-            .try_iter()
+            .into_iter()
             .filter_map(|event| match event {
                 Event::HybridContext { generation, .. } => Some(generation),
                 _ => None,

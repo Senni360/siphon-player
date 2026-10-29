@@ -318,6 +318,7 @@ pub struct App {
     pub soundcloud_reconnect: bool,
     pub soundcloud_library: crate::soundcloud::library::Library,
     soundcloud_request: u64,
+    soundcloud_account_request: u64,
     pub dirs: AppDirs,
     pub settings: Settings,
     /// Proxy policy actually handed to network workers. Manual form edits are
@@ -1084,6 +1085,7 @@ impl App {
             soundcloud_reconnect: false,
             soundcloud_library: Default::default(),
             soundcloud_request: 0,
+            soundcloud_account_request: 0,
             custom_themes: theme::Catalog::default(),
             dirs,
             settings,
@@ -12235,12 +12237,12 @@ impl App {
                 self.cancel_soundcloud_playlist_adds();
                 self.soundcloud_reconnect = false;
                 self.soundcloud_account = crate::soundcloud::account::Account::Disconnected;
-                self.reset_soundcloud_collections();
-                self.soundcloud_library.reset();
-                self.save_soundcloud_account();
                 self.soundcloud_request = self.soundcloud_request.wrapping_add(1);
                 self.backend
                     .send(Command::DisconnectSoundCloud(self.soundcloud_request));
+                self.reset_soundcloud_collections();
+                self.soundcloud_library.reset();
+                self.save_soundcloud_account();
                 self.dialog = None;
             }
             Action::ShowDialog(mut dialog) => {

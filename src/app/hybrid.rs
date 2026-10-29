@@ -632,6 +632,28 @@ impl App {
         self.hybrid_transition(t, request.position_ms, true);
     }
 
+    pub(super) fn reload_soundcloud_hybrid_context(&mut self) {
+        let Some(pending) = &mut self.hybrid.pending else {
+            return;
+        };
+        if !pending.resolving {
+            return;
+        }
+        let Some(uri) =
+            pending.request.context_uri.as_ref().filter(|uri| {
+                uri.starts_with("soundcloud:") || crate::soundcloud::browse::is_url(uri)
+            })
+        else {
+            return;
+        };
+        self.hybrid.plan_generation = self.hybrid.plan_generation.wrapping_add(1);
+        pending.generation = self.hybrid.plan_generation;
+        self.backend.send(Command::Hybrid(HybridCommand::Resolve {
+            generation: pending.generation,
+            uri: uri.clone(),
+        }));
+    }
+
     pub(super) fn handle_hybrid_context(
         &mut self,
         generation: u64,

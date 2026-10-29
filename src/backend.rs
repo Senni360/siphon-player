@@ -2374,7 +2374,7 @@ impl Worker {
                 }
                 Command::AcceptSoundCloudAccount { account, request } => {
                     if request == self.hybrid.account_request {
-                        self.install_soundcloud_account(account);
+                        self.install_soundcloud_account(account, request);
                     }
                 }
                 Command::RestoreSoundCloud => self.restore_soundcloud_account(),

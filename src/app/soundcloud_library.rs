@@ -4,7 +4,7 @@ use crate::soundcloud::library::{PendingLike, cache_key};
 
 impl App {
     pub(super) fn expire_soundcloud_session(&mut self, request: u64) {
-        if request != self.soundcloud_request {
+        if request != self.soundcloud_account_request {
             return;
         }
         let crate::soundcloud::account::Account::Session { user, .. } = &self.soundcloud_account
@@ -75,6 +75,7 @@ impl App {
             account: account.clone(),
             request,
         });
+        self.soundcloud_account_request = request;
         if let Some(user) = account.user()
             && matches!(&self.dialog, Some(Dialog::SoundCloudConnect(draft)) if draft.busy)
         {
@@ -99,6 +100,7 @@ impl App {
     // Keep generations monotonic so queued answers from the previous session
     // cannot repopulate a private playlist after disconnecting or switching.
     pub(super) fn reset_soundcloud_collections(&mut self) {
+        self.reload_soundcloud_hybrid_context();
         for page in self.soundcloud_pages.values_mut() {
             page.generation = page.generation.wrapping_add(1);
             page.content = Loadable::NotLoaded;
@@ -468,7 +470,7 @@ mod tests {
             name: "New like".into(),
             ..Default::default()
         };
-        app.cache_soundcloud_tracks(&[added.clone()]);
+        app.cache_soundcloud_tracks(std::slice::from_ref(&added));
         app.soundcloud_library.snapshot = Default::default();
         app.soundcloud_library.rebuild_membership();
         // An unlike completed before this refresh started loading its cache.
@@ -488,7 +490,12 @@ mod tests {
             snapshot: Some(snapshot.clone()),
         });
         let expected: Vec<_> = std::iter::once(added.clone())
-            .chain(snapshot.likes.into_iter().filter(|track| track.uri != removed.uri))
+            .chain(
+                snapshot
+                    .likes
+                    .into_iter()
+                    .filter(|track| track.uri != removed.uri),
+            )
             .collect();
         assert_eq!(app.soundcloud_library.snapshot.likes, expected);
         assert_eq!(app.is_saved(&added.uri), Some(true));
@@ -547,6 +554,30 @@ mod tests {
     }
 
     #[test]
+    fn expiry_belongs_to_the_active_session_even_during_a_reconnect() {
+        let mut app = app("expiry-during-reconnect");
+        session(&mut app);
+        app.soundcloud_request = 1;
+        // The current session can expire while a new token is being verified.
+        app.expire_soundcloud_session(0);
+        assert!(!app.can_like_soundcloud());
+        assert!(app.soundcloud_reconnect);
+        let account = Account::Session {
+            user: app.soundcloud_account.user().unwrap().clone(),
+            token: SessionToken::parse("2-000000-another_session_token").unwrap(),
+        };
+        app.accept_soundcloud_account(account, 1);
+        // An already queued expiry notice from the old connection cannot
+        // disconnect the newly accepted token, even for the same user.
+        app.expire_soundcloud_session(0);
+        assert!(app.can_like_soundcloud());
+        assert!(!app.soundcloud_reconnect);
+        app.expire_soundcloud_session(1);
+        assert!(!app.can_like_soundcloud());
+        finish(app);
+    }
+
+    #[test]
     fn expired_soundcloud_session_clears_private_views_and_ignores_stale_expiry() {
         let mut app = app("session-expiry");
         session(&mut app);
@@ -588,6 +619,67 @@ mod tests {
         app.apply(Action::DisconnectSoundCloud, &egui::Context::default());
         assert!(!app.soundcloud_reconnect);
         finish(app);
+    }
+
+    #[test]
+    fn account_changes_retry_pending_contexts_and_reject_already_queued_private_replies() {
+        for change in 0..3 {
+            let mut app = app(&format!("pending-context-account-{change}"));
+            session(&mut app);
+            let uri = crate::soundcloud::playlist_uri(999999);
+            app.apply(
+                Action::PlayContext {
+                    uri: uri.clone(),
+                    offset_uri: None,
+                    offset_index: None,
+                },
+                &egui::Context::default(),
+            );
+            let resolved_generation = |commands: Vec<crate::backend::HybridCommand>| {
+                commands
+                    .into_iter()
+                    .find_map(|command| match command {
+                        crate::backend::HybridCommand::Resolve { generation, .. } => {
+                            Some(generation)
+                        }
+                        _ => None,
+                    })
+                    .expect("context resolution")
+            };
+            let old = resolved_generation(app.backend.take_hybrid_commands());
+            match change {
+                0 => app.accept_soundcloud_account(
+                    Account::Profile(app.soundcloud_account.user().unwrap().clone()),
+                    app.soundcloud_request,
+                ),
+                1 => app.apply(Action::DisconnectSoundCloud, &egui::Context::default()),
+                _ => app.expire_soundcloud_session(app.soundcloud_request),
+            }
+            let fresh = resolved_generation(app.backend.take_hybrid_commands());
+            assert_ne!(old, fresh);
+            for (generation, id) in [(old, 123), (fresh, 456)] {
+                app.handle_hybrid_context(
+                    generation,
+                    Ok(crate::hybrid_queue::Context {
+                        uri: uri.clone(),
+                        name: "Set".into(),
+                        tracks: vec![Track {
+                            uri: crate::soundcloud::track_uri(id),
+                            ..Default::default()
+                        }],
+                    }),
+                );
+                if generation == old {
+                    assert!(app.now_playing().is_none());
+                } else {
+                    assert_eq!(
+                        app.now_playing().unwrap().uri,
+                        crate::soundcloud::track_uri(456)
+                    );
+                }
+            }
+            finish(app);
+        }
     }
 
     #[test]

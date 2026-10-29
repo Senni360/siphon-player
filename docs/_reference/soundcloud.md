@@ -168,6 +168,8 @@ library views and continues reading public content anonymously. Choose that
 prompt and paste a current cookie value. A forbidden track alone does not
 disconnect a valid session: the client checks `/me` first. No fixed session
 lifetime or access to every private item is promised.
+Pending playback reads restart without account access, so a late private
+response cannot restore expired access to the queue or stream cache.
 
 Session library reads combine authorized `/users/<id>/playlists`,
 `/users/<id>/playlists/liked_and_owned` and `/users/<id>/playlist_likes`,
