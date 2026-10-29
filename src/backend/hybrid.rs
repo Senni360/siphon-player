@@ -617,6 +617,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn review_hybrid_new_claim_discards_older_deferred_spotify_load() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("hybrid-superseded-handoff");
+        runtime.block_on(async {
+            // SoundCloud A -> pure Spotify X is waiting for OutputReleased.
+            // A newer mixed start B arrives before that acknowledgement.
+            worker.hybrid.releasing = true;
+            worker.hybrid.claimed = true;
+            worker
+                .hybrid
+                .player_waiting
+                .push(PlayerCommand::Load(LoadSpec {
+                    uris: vec!["spotify:track:old-intent".into()],
+                    play: true,
+                    ..Default::default()
+                }));
+            worker.hybrid_command(HybridCommand::Claim).await;
+            assert!(
+                worker.hybrid.player_waiting.is_empty(),
+                "the old pure Spotify load must not run when the new mixed queue stops"
+            );
+        });
+    }
+
+    #[test]
     fn review_hybrid_account_change_rejects_old_private_stream_resolution() {
         let (runtime, mut worker, _) =
             super::super::authorization_tests::worker("hybrid-old-account-stream");
