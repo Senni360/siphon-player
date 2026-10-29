@@ -24,6 +24,14 @@ current occurrence are known; otherwise the app asks you to start a mixed
 playlist instead of dropping an unseen tail. Its complete saved queue restores
 paused, and an unresolved context is fetched again on Play.
 
+While a mixed context loads, Next immediately consumes any known manual song.
+The full context is attached behind it when it arrives, without restarting that
+song or bringing consumed rows back. Album additions keep loading across local
+playback changes. Failed mixed rows are skipped once per occurrence until a
+song actually plays; Repeat All cannot loop through a fully failing context.
+Pause and Play retain the latest user intent through child-engine errors and
+late transport snapshots.
+
 These are the rules the app follows. The queue tests in `src/app.rs`
 check every one of them.
 

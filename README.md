@@ -169,6 +169,12 @@ the complete mixed queue and restores it paused. Paste a SoundCloud song or
 playlist link into search and press Enter to resolve and play it.
 
 SoundCloud uses the existing local audio output, EQ, visualizers and volume.
+
+Mixed playback keeps manual additions, including albums and Spotify episodes,
+across local context changes. Next consumes known queued rows even while a
+playlist loads, and unavailable tracks cannot make Repeat All retry forever.
+SoundCloud set and uploader links open their SoundCloud pages; SoundCloud
+hearts never write to the Spotify library.
 Local Spotify playback must be enabled first. Its
 [engine contract](docs/_reference/soundcloud-engine.md) describes stream inputs,
 URL refresh and exclusive use of the output. No account connection is needed

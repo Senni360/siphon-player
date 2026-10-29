@@ -660,6 +660,38 @@ impl Snapshot {
 mod tests {
     use super::*;
 
+    #[test]
+    fn resolving_context_retains_manual_identity_history_and_position() {
+        let mut queue = HybridQueue::new(7);
+        queue.start(context(&["a"]), Some(0), false, Repeat::Off);
+        let manual = queue.add_to_queue(tracks(&["soundcloud:track:7", "soundcloud:track:7", "z"]));
+        assert_eq!(queue.next(), Transition::Play(manual[0]));
+        assert_eq!(queue.next(), Transition::Play(manual[1]));
+        queue.set_position_ms(7_000);
+        queue.resolve_context_behind_manual(
+            context(&["a", "b", "c"]),
+            Some(0),
+            false,
+            Repeat::Context,
+        );
+        assert_eq!(queue.current().unwrap().id, manual[1]);
+        assert_eq!(queue.position_ms(), 7_000);
+        assert_eq!(queue.playing_next(9)[0].id, manual[2]);
+        assert_eq!(
+            queue
+                .next_up(9)
+                .iter()
+                .map(|entry| entry.track.name.as_str())
+                .collect::<Vec<_>>(),
+            ["b", "c", "a"]
+        );
+        // Rebased context anchors must also produce a valid saved queue.
+        let mut restored = HybridQueue::restore(queue.snapshot()).unwrap();
+        assert_eq!(restored.previous(0), Transition::Play(manual[0]));
+        restored.previous(0);
+        assert_eq!(restored.current().unwrap().track.name, "a");
+    }
+
     fn track(name: &str) -> Track {
         Track {
             uri: if name.starts_with("soundcloud:") {

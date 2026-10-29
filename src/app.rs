@@ -33752,6 +33752,104 @@ mod tests {
         );
     }
 
+    #[test]
+    fn hybrid_resolving_context_does_not_reload_consumed_manual_occurrence() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.playlist_overlay
+            .get_mut("cold")
+            .insert_at_position(1, &song("soundcloud:track:7"));
+        app.apply(
+            Action::PlayContext {
+                uri: "spotify:playlist:cold".into(),
+                offset_uri: Some("spotify:track:a".into()),
+                offset_index: Some(0),
+            },
+            &ctx,
+        );
+        let generation = app
+            .backend
+            .take_hybrid_commands()
+            .into_iter()
+            .find_map(|command| match command {
+                crate::backend::HybridCommand::Resolve { generation, .. } => Some(generation),
+                _ => None,
+            })
+            .unwrap();
+        app.apply(
+            Action::QueueMany {
+                songs: vec![
+                    ("soundcloud:track:9".into(), "Nine".into()),
+                    ("soundcloud:track:9".into(), "Nine".into()),
+                ],
+            },
+            &ctx,
+        );
+        app.apply(Action::Next, &ctx);
+        let tag = app.hybrid_tag();
+        app.backend.take_hybrid_commands();
+        app.handle_hybrid_context(
+            generation,
+            Ok(crate::hybrid_queue::Context {
+                uri: "spotify:playlist:cold".into(),
+                name: "Resolved".into(),
+                tracks: vec![song("spotify:track:a"), song("spotify:track:b")],
+            }),
+        );
+        assert_eq!(app.hybrid_tag(), tag);
+        assert_eq!(app.manual_queue, ["soundcloud:track:9"]);
+        assert!(
+            !app.backend
+                .take_hybrid_commands()
+                .iter()
+                .any(|command| matches!(command, crate::backend::HybridCommand::Load { .. }))
+        );
+        app.apply(Action::Next, &ctx);
+        assert_ne!(app.hybrid_tag(), tag);
+        assert!(app.manual_queue.is_empty());
+        app.apply(Action::Next, &ctx);
+        assert_eq!(
+            app.current_track_uri().as_deref(),
+            Some("soundcloud:track:7")
+        );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_soundcloud_navigation_uses_full_provider_uris() {
+        let mut app = hybrid_fixture();
+        let track = Track {
+            album: Some(Album {
+                uri: "soundcloud:playlist:9".into(),
+                ..Default::default()
+            }),
+            artists: vec![crate::api::models::ArtistRef {
+                id: Some("42".into()),
+                uri: Some("soundcloud:user:42".into()),
+                name: "Uploader".into(),
+            }],
+            ..song("soundcloud:track:7")
+        };
+        app.cache_soundcloud_tracks(&[track]);
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["soundcloud:track:7".into()],
+                index: 0,
+            },
+            &egui::Context::default(),
+        );
+        let now = app.now_playing().unwrap();
+        assert_eq!(
+            app.now_playing_collection_page(&now),
+            Some(Page::SoundCloud("soundcloud:playlist:9".into()))
+        );
+        assert_eq!(
+            Page::for_artist(&now.artists[0]),
+            Some(Page::SoundCloud("soundcloud:user:42".into()))
+        );
+        app.backend.shutdown();
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
