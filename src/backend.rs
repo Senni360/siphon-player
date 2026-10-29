@@ -809,7 +809,13 @@ pub enum Command {
             Result<crate::soundcloud::account::Account, crate::soundcloud::account::ConnectError>,
     },
     SoundCloudEngine(crate::soundcloud::engine::Event),
+    HybridContextResolved {
+        account_generation: u64,
+        generation: u64,
+        result: Result<crate::hybrid_queue::Context, String>,
+    },
     SoundCloudStream {
+        account_generation: u64,
         tag: crate::player::PlaybackTag,
         preload: bool,
         refresh: Option<u64>,
@@ -2334,12 +2340,22 @@ impl Worker {
                 }
                 Command::SoundCloudAccountRestored { .. } => {}
                 Command::SoundCloudEngine(event) => self.soundcloud_event(event).await,
+                Command::HybridContextResolved { account_generation, generation, result } => {
+                    if account_generation == self.hybrid.account_generation {
+                        self.emit(Event::HybridContext { generation, result });
+                    }
+                }
                 Command::SoundCloudStream {
+                    account_generation,
                     tag,
                     preload,
                     refresh,
                     result,
-                } => self.soundcloud_stream(tag, preload, refresh, result).await,
+                } => {
+                    if account_generation == self.hybrid.account_generation {
+                        self.soundcloud_stream(tag, preload, refresh, result).await;
+                    }
+                }
                 Command::ListOutputDevices => {
                     let events = self.events.clone();
                     let waker = self.waker.clone();

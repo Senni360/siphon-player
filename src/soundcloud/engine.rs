@@ -109,6 +109,8 @@ pub enum Command {
     /// the identical stream at zero consumes it, never auto-advances a queue.
     /// While paused, preparation is deferred until Play.
     Preload(Stream),
+    /// Discard lookahead authorized by a previous account without stopping audio.
+    ClearPreload,
     /// Answer RefreshRequired. Old requests and another track's URLs are
     /// ignored. The engine remembers position and play/pause intent.
     Refresh {
@@ -547,6 +549,10 @@ impl Worker {
                 } else {
                     self.prepare(stream);
                 }
+            }
+            Command::ClearPreload => {
+                self.preload = None;
+                self.deferred_preload = None;
             }
             Command::Refresh { request_id, stream } => {
                 if self.refresh == Some(request_id)

@@ -38,6 +38,7 @@ pub enum HybridCommand {
 #[derive(Default)]
 pub(super) struct HybridRuntime {
     client: Option<Client>,
+    pub(super) account_generation: u64,
     pub(super) engine: Option<sc::Engine>,
     tag: Option<PlaybackTag>,
     track: Option<Track>,
@@ -101,7 +102,12 @@ impl Worker {
             id,
             account.token().map(|s| s.expose().to_owned()),
         ));
+        self.hybrid.account_generation = self.hybrid.account_generation.wrapping_add(1);
         self.hybrid.streams.clear();
+        self.hybrid.preload_uri = None;
+        if let Some(engine) = &self.hybrid.engine {
+            engine.command(sc::Command::ClearPreload);
+        }
         self.emit(Event::SoundCloudAccount(account));
     }
 
@@ -372,6 +378,7 @@ impl Worker {
         preload: bool,
         refresh: Option<u64>,
     ) {
+        let account_generation = self.hybrid.account_generation;
         let client = self.hybrid.client.as_ref().unwrap().clone();
         let commands = self.commands.clone();
         let path = self.dirs.state.join("soundcloud-client.json");
@@ -399,6 +406,7 @@ impl Worker {
             .await;
             persist_client_id(&client, path).await;
             let _ = commands.send(Command::SoundCloudStream {
+                account_generation,
                 tag,
                 preload,
                 refresh,
@@ -501,11 +509,11 @@ impl Worker {
     }
 
     fn resolve_hybrid_context(&self, generation: u64, uri: String) {
+        let account_generation = self.hybrid.account_generation;
         let client = self.hybrid.client.as_ref().unwrap().clone();
         let api = Arc::clone(&self.api);
         let engine = self.engine.clone();
-        let events = self.events.clone();
-        let waker = self.waker.clone();
+        let commands = self.commands.clone();
         let path = self.dirs.state.join("soundcloud-client.json");
         tokio::spawn(async move {
             let result = async {
@@ -599,8 +607,7 @@ impl Worker {
             }
             .await;
             persist_client_id(&client, path).await;
-            let _ = events.send(Event::HybridContext { generation, result });
-            waker.wake();
+            let _ = commands.send(Command::HybridContextResolved { account_generation, generation, result });
         });
     }
 }
