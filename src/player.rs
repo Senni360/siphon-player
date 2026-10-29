@@ -1165,6 +1165,7 @@ async fn run_hybrid_events(
 ) {
     let mut request = None;
     let mut state = LocalState::default();
+    let mut ended = false;
     while let Some(event) = events.recv().await {
         if let PlayerEvent::PlayRequestIdChanged { play_request_id } = &event {
             if request.is_some_and(|current| current != *play_request_id) {
@@ -1196,8 +1197,22 @@ async fn run_hybrid_events(
         {
             continue;
         }
+        // The pinned Spirc still handles EOF while inactive. Its empty queue
+        // sends Stop to this decoder. Do not expose completion (and allow B's
+        // Load) until that Stop has actually been processed for A. Explicit
+        // handoffs cancel this observer before sending their own Stop.
+        if matches!(event, PlayerEvent::EndOfTrack { .. }) {
+            ended = true;
+            continue;
+        }
+        if ended {
+            if matches!(&event, PlayerEvent::Stopped { track_id, .. } if track_id.to_uri() == expected) {
+                notify(EngineEvent::Hybrid { tag, event: HybridEvent::EndOfTrack });
+                break;
+            }
+            continue;
+        }
         let completion = match &event {
-            PlayerEvent::EndOfTrack { .. } => Some(HybridEvent::EndOfTrack),
             PlayerEvent::Unavailable { .. } => Some(HybridEvent::Failed(
                 "This Spotify track is unavailable".into(),
             )),
@@ -1863,6 +1878,10 @@ mod tests {
                 play_request_id: 42,
                 track_id: uri(),
             },
+            PlayerEvent::Stopped {
+                play_request_id: 42,
+                track_id: uri(),
+            },
         ] {
             sender.send(event).unwrap();
         }
@@ -1877,6 +1896,33 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[tokio::test]
+    async fn hybrid_completion_waits_for_spirc_stop_before_successor_load() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let loaded = Arc::new(Mutex::new(Vec::new()));
+        let commands = Arc::clone(&loaded);
+        let notify: Notify = Arc::new(move |event| {
+            if matches!(event, EngineEvent::Hybrid { event: HybridEvent::EndOfTrack, .. }) {
+                commands.lock().unwrap().push("Load B");
+            }
+        });
+        let tag = PlaybackTag { generation: 1, occurrence: crate::hybrid_queue::EntryId(1) };
+        let mut observer = Box::pin(run_hybrid_events(receiver, uri().to_uri(), tag, notify));
+        for event in [
+            PlayerEvent::PlayRequestIdChanged { play_request_id: 42 },
+            PlayerEvent::EndOfTrack { play_request_id: 42, track_id: uri() },
+            // Neither an old Stop nor a different track acknowledges A's EOF.
+            PlayerEvent::Stopped { play_request_id: 41, track_id: uri() },
+            PlayerEvent::Stopped { play_request_id: 42, track_id: SpotifyUri::from_uri("spotify:track:6rqhFgbbKwnb9MLmUQDhG6").unwrap() },
+        ] { sender.send(event).unwrap(); }
+        assert!(futures_util::poll!(observer.as_mut()).is_pending());
+        assert!(loaded.lock().unwrap().is_empty(), "the observer ran before Spirc consumed EOF");
+        loaded.lock().unwrap().push("Spirc Stop A");
+        sender.send(PlayerEvent::Stopped { play_request_id: 42, track_id: uri() }).unwrap();
+        observer.await;
+        assert_eq!(*loaded.lock().unwrap(), ["Spirc Stop A", "Load B"]);
     }
 
     #[test]
