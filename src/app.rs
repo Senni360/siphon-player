@@ -33727,14 +33727,10 @@ mod tests {
         app.receive_album_queue(
             request,
             0,
-            Ok(crate::api::models::Page {
-                items: vec![song("spotify:track:one"), song("spotify:track:two")],
-                total: 2,
-                limit: 50,
-                offset: 0,
-                next: None,
-                ..Default::default()
-            }),
+            Ok(crate::api::models::Page::whole(vec![
+                song("spotify:track:one"),
+                song("spotify:track:two"),
+            ])),
         );
         let manual = app.manual_queue.clone();
         app.backend.shutdown();
