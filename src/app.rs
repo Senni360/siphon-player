@@ -11502,7 +11502,8 @@ impl App {
     }
 
     fn set_saved(&mut self, uri: String, saved: bool) {
-        if util::uri_kind(&uri).is_none() || uri.starts_with("spotify:local:") {
+        if !uri.starts_with("spotify:")
+            || util::uri_kind(&uri).is_none() || uri.starts_with("spotify:local:") {
             return;
         }
         if uri.starts_with("spotify:playlist:") {
@@ -11940,7 +11941,8 @@ impl App {
             Action::SetSavedMany { uris, saved } => {
                 let uris: Vec<_> = uris
                     .into_iter()
-                    .filter(|uri| matches!(util::uri_kind(uri), Some("track" | "episode")))
+                    .filter(|uri| uri.starts_with("spotify:")
+                        && matches!(util::uri_kind(uri), Some("track" | "episode")))
                     .collect();
                 let mut changed_tracks = false;
                 for uri in &uris {
@@ -11957,6 +11959,11 @@ impl App {
                 }
             }
             Action::ToggleSaved(uri) => {
+                // SoundCloud likes belong at the account-aware action seam.
+                // They must never enter Spotify's optimistic library writes.
+                if crate::soundcloud::is_uri(&uri) {
+                    return;
+                }
                 let saved = self.is_saved(&uri).unwrap_or(false);
                 let targets = if saved {
                     self.saved_toggle_targets(&uri)

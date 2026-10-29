@@ -477,12 +477,8 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     let offer_expand = art_available && !app.settings.art_expanded && app.settings.sidebar_visible;
     let over_expand = offer_expand && ui.rect_contains_pointer(expand_rect);
     if cover_response.clicked() && !over_expand {
-        if let Some(id) = &now.album_id
-            && crate::util::uri_kind(&now.uri) == Some("track")
-        {
-            app.actions.push(Action::Open(Page::Album(id.clone())));
-        } else if let Some(id) = &now.show_id {
-            app.actions.push(Action::Open(Page::Show(id.clone())));
+        if let Some(page) = app.now_playing_collection_page(now) {
+            app.actions.push(Action::Open(page));
         }
     }
     if offer_expand && (cover_response.hovered() || over_expand) {
@@ -542,12 +538,8 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     let title_response = theme::link(&mut text_ui, &now.title, theme::medium(14.0), palette.text)
         .interact(drag_sense);
     if title_response.clicked() {
-        if let Some(id) = &now.album_id
-            && crate::util::uri_kind(&now.uri) == Some("track")
-        {
-            app.actions.push(Action::Open(Page::Album(id.clone())));
-        } else if let Some(id) = &now.show_id {
-            app.actions.push(Action::Open(Page::Show(id.clone())));
+        if let Some(page) = app.now_playing_collection_page(now) {
+            app.actions.push(Action::Open(page));
         }
     }
     let mut responses = vec![cover_response, title_response];

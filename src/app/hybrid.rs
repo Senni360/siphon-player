@@ -96,11 +96,7 @@ impl App {
         let context = self.hybrid.queue.context()?;
         (!context.uri.is_empty()).then(|| PlayingFrom {
             name: context.name.clone(),
-            page: if context.uri.starts_with("spotify:") || context.uri.starts_with("spotifast:") {
-                Page::from_uri(&context.uri)
-            } else {
-                None
-            },
+            page: Page::from_uri(&context.uri),
         })
     }
 
@@ -124,17 +120,25 @@ impl App {
             return true;
         };
         match context {
+            RowContext::View { uris, context_uri, .. }
+                if self.hybrid.queue.context().is_some_and(|c| c.uri == *context_uri) =>
+            {
+                // A remembered plan index belongs to the order at the click.
+                // Once sorting moves that row, fall back to URI identity, as
+                // the ordinary Spotify row-marker path does.
+                uris.get(current_index).is_none_or(|uri| *uri != current.track.uri)
+                    || current_index == index
+            }
             RowContext::Context { uri, .. }
-            | RowContext::View {
-                context_uri: uri, ..
-            } if self.hybrid.queue.context().is_some_and(|c| c.uri == *uri) => {
+                if self.hybrid.queue.context().is_some_and(|c| c.uri == *uri) => {
                 let current_index = self
                     .hybrid
                     .pending
                     .as_ref()
                     .and_then(|p| p.request.offset_position)
                     .map_or(current_index, |i| i as usize);
-                current_index == index
+                self.context_row_holds(uri, current_index as u32, &current.track.uri) == Some(false)
+                    || current_index == index
             }
             RowContext::Uris(uris)
                 if self
@@ -1317,15 +1321,21 @@ impl App {
 
     pub(super) fn hybrid_now_playing(&self) -> Option<NowPlaying> {
         let track = &self.hybrid.queue.current()?.track;
+        let soundcloud = crate::soundcloud::is_uri(&track.uri);
         let child = self
             .hybrid
             .state
             .track
             .as_ref()
             .filter(|t| t.uri == track.uri);
-        let artists = child
+        let mut artists = child
             .filter(|t| track.artists.is_empty() && !t.artists.is_empty())
             .map_or_else(|| track.artists.clone(), |t| t.artists.clone());
+        if soundcloud {
+            for artist in &mut artists {
+                artist.id = None;
+            }
+        }
         Some(NowPlaying {
             local: true,
             device_name: Some(self.settings.device_name.clone()),
@@ -1344,7 +1354,7 @@ impl App {
             album_id: track
                 .album
                 .as_ref()
-                .filter(|a| !a.id.is_empty())
+                .filter(|a| !soundcloud && !a.id.is_empty())
                 .map(|a| a.id.clone()),
             show_id: None,
             art_url: track
@@ -1370,6 +1380,21 @@ impl App {
                 || child.is_some_and(|t| t.is_episode),
             resuming: !self.hybrid.loaded,
         })
+    }
+
+    /// Provider-safe destination for the player bar's title and cover.
+    pub fn now_playing_collection_page(&self, now: &NowPlaying) -> Option<Page> {
+        if crate::soundcloud::is_uri(&now.uri) {
+            return self.hybrid.queue.current()
+                .filter(|entry| entry.track.uri == now.uri)
+                .and_then(|entry| entry.track.album.as_ref())
+                .and_then(|album| Page::from_uri(&album.uri));
+        }
+        if util::uri_kind(&now.uri) == Some("track") {
+            now.album_id.as_ref().map(|id| Page::Album(id.clone()))
+        } else {
+            now.show_id.as_ref().map(|id| Page::Show(id.clone()))
+        }
     }
 
     pub(super) fn hybrid_snapshot(&self) -> Option<Snapshot> {
