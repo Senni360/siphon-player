@@ -100,6 +100,7 @@ pub const BUFFER_MS_RANGE: std::ops::RangeInclusive<u32> = 20..=500;
 pub struct AudioControl {
     external: Mutex<Weak<ExternalInner>>,
     external_active: AtomicBool,
+    spotify_inhibited: AtomicBool,
     producer: Mutex<()>,
     target: Mutex<AudioTarget>,
     waiting_for_track: AtomicBool,
@@ -119,6 +120,7 @@ impl AudioControl {
         Arc::new(Self {
             external: Mutex::new(Weak::new()),
             external_active: AtomicBool::new(false),
+            spotify_inhibited: AtomicBool::new(false),
             producer: Mutex::new(()),
             target: Mutex::new(AudioTarget::default()),
             waiting_for_track: AtomicBool::new(false),
@@ -128,11 +130,26 @@ impl AudioControl {
         })
     }
 
+    /// Hybrid ownership outlives an external decoder's Stop/release. Only an
+    /// explicit validated Spotify load may remove this independent gate.
+    pub(crate) fn inhibit_spotify(&self, inhibited: bool) {
+        let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
+        self.spotify_inhibited.store(inhibited, Ordering::SeqCst);
+    }
+
+    pub(crate) fn spotify_inhibited(&self) -> bool {
+        self.spotify_inhibited.load(Ordering::SeqCst)
+    }
+
+    fn spotify_blocked(&self) -> bool {
+        self.spotify_inhibited() || self.external_active.load(Ordering::SeqCst)
+    }
+
     /// Follows confirmed decoder transitions, including seeks requested by
     /// another Spotify client. Natural track changes retain gapless audio.
     pub(crate) fn handle_player_event(&self, event: &PlayerEvent) {
         let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
-        if self.external_active.load(Ordering::SeqCst) {
+        if self.spotify_blocked() {
             return;
         }
         match event {
@@ -353,8 +370,7 @@ impl Sink for SharedSink {
             .external
             .0
             .control
-            .external_active
-            .load(Ordering::SeqCst)
+            .spotify_blocked()
         {
             return Ok(());
         }
@@ -372,8 +388,7 @@ impl Sink for SharedSink {
             .external
             .0
             .control
-            .external_active
-            .load(Ordering::SeqCst)
+            .spotify_blocked()
         {
             return Ok(());
         }
@@ -392,8 +407,7 @@ impl Sink for SharedSink {
                 .external
                 .0
                 .control
-                .external_active
-                .load(Ordering::SeqCst)
+                .spotify_blocked()
             {
                 return self.spotify.write(packet, converter);
             }
@@ -1537,6 +1551,44 @@ mod tests {
         other.claim().unwrap();
         drop(other);
         assert!(!control.external_active.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn hybrid_stop_keeps_connect_replacement_silent_after_external_release() {
+        let control = AudioControl::new(DEFAULT_BUFFER_MS);
+        let calls = Arc::new(AtomicU32::new(0));
+        let pcm = external_pcm(
+            Arc::clone(&control),
+            crate::vis::AudioTap::new(),
+            crate::eq::shared(),
+            1.0,
+        );
+        let mut shared = SharedSink::new(
+            Box::new(CountedSink(Arc::clone(&calls))),
+            pcm,
+            Arc::clone(&control),
+        );
+        let mut external = control.external_output().unwrap();
+        let mut converter = Converter::new(None);
+        control.inhibit_spotify(true);
+        external.claim().unwrap();
+        // Connect loads C while SoundCloud owns the output. Stopping the
+        // final SoundCloud row must not let C's packets or transport through.
+        shared.start().unwrap();
+        external.release().unwrap();
+        shared.start().unwrap();
+        shared.stop().unwrap();
+        shared.write(AudioPacket::Samples(vec![0.0; 88]), &mut converter).unwrap();
+        control.handle_player_event(&PlayerEvent::Stopped {
+            play_request_id: 9,
+            track_id: librespot_core::SpotifyUri::from_uri("spotify:track:14XWXWv5FoCbFzLksawpEe").unwrap(),
+        });
+        assert!(control.spotify_inhibited());
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
+        // The validated replacement load explicitly returns ownership.
+        control.inhibit_spotify(false);
+        shared.start().unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[test]

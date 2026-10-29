@@ -269,6 +269,11 @@ pub enum PlaybackResume {
 }
 
 impl LoadSpec {
+    pub(crate) fn validate(&self) -> Result<()> {
+        anyhow::ensure!(self.context_uri.is_some() || !self.uris.is_empty(), "nothing to play");
+        Ok(())
+    }
+
     fn hybrid_track(&self) -> Result<SpotifyUri> {
         anyhow::ensure!(
             self.context_uri.is_none()
@@ -604,6 +609,7 @@ impl Engine {
             Arc::clone(&state),
             Arc::clone(notify),
             Arc::clone(&audio),
+            Arc::downgrade(&player),
         ));
         Ok((player, mixer, state, audio))
     }
@@ -761,6 +767,10 @@ impl Engine {
     }
 
     pub fn command(&self, command: PlayerCommand) -> Result<()> {
+        if let PlayerCommand::Load(spec) = &command {
+            spec.validate()?;
+        }
+
         if matches!(command, PlayerCommand::Load(_) | PlayerCommand::Transfer) {
             self.cancel_hybrid_events();
             self.hybrid_detached
@@ -777,7 +787,11 @@ impl Engine {
         if interrupts_audio {
             self.audio.interrupt();
         }
+        let spotify_load = matches!(command, PlayerCommand::Load(_));
         let result = self.send_command(command);
+        if spotify_load && result.is_ok() {
+            self.audio.inhibit_spotify(false);
+        }
         if interrupts_audio && result.is_err() {
             self.audio.stopped();
         }
@@ -798,6 +812,7 @@ impl Engine {
     /// Disconnect Connect and acknowledge the decoder's stop before an
     /// external producer may claim its output. Runs only on the runtime.
     pub async fn stop_for_handoff(&self) -> Result<()> {
+        self.audio.inhibit_spotify(true);
         self.cancel_hybrid_events();
         if self
             .hybrid_detached
@@ -867,6 +882,7 @@ impl Engine {
         // Spirc's from_tracks creates a synthetic context and still resolves
         // autoplay when SessionConfig enables it. Keep Spirc detached and
         // give the decoder exactly this list's sole track instead.
+        self.audio.inhibit_spotify(false);
         self.player.load(track, spec.play, spec.position_ms);
         let detached = Arc::clone(&self.hybrid_detached);
         let tagged_notify: Notify = Arc::new(move |event| {
@@ -1103,6 +1119,7 @@ async fn run_events(
     state: Arc<Mutex<LocalState>>,
     notify: Notify,
     audio: Arc<AudioControl>,
+    player: std::sync::Weak<Player>,
 ) {
     let mut play_request_id = None;
     while let Some(event) = events.recv().await {
@@ -1111,6 +1128,13 @@ async fn run_events(
         } = &event
         {
             play_request_id = Some(*next);
+            // Connect can still replace a detached player. Stop that decoder
+            // while the independent output gate keeps every packet silent.
+            if audio.spotify_inhibited()
+                && let Some(player) = player.upgrade()
+            {
+                player.stop();
+            }
             continue;
         }
         if let (Some(current), Some(incoming)) = (play_request_id, event.get_play_request_id())
