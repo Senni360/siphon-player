@@ -217,35 +217,27 @@ impl Canvas {
         );
     }
 
-    /// The app's mark in pixels: the disc with a darker rim and a lit top,
-    /// and the play triangle.
-    fn logo(&mut self, cx: i64, cy: i64, radius: i64, disc: Rgb, glyph: Rgb) {
-        let shade = |c: Rgb, f: f32| c.map(|v| (f32::from(v) * f).round() as u8);
-        let lift =
-            |c: Rgb, f: f32| c.map(|v| (f32::from(v) + (255.0 - f32::from(v)) * f).round() as u8);
-        let outer = radius * radius + radius / 2;
-        let inner = (radius - 1) * (radius - 1) + (radius - 1) / 2;
-        for y in -radius..=radius {
-            for x in -radius..=radius {
-                let d = x * x + y * y;
-                if d > outer {
+    /// The Siphon mark at the original skin logo's size and position.
+    fn logo(&mut self, cx: i64, cy: i64, radius: i64, _disc: Rgb, _glyph: Rgb) {
+        let size = (radius * 2 + 1) as usize;
+        let rgba = spotifast::util::app_icon_rgba(size);
+        for y in 0..size {
+            for x in 0..size {
+                let px = cx - radius + x as i64;
+                let py = cy - radius + y as i64;
+                if px < 0 || py < 0 || px >= i64::from(self.width) || py >= i64::from(self.height) {
                     continue;
                 }
-                let colour = if d > inner {
-                    shade(disc, 0.7)
-                } else if y < 0 {
-                    lift(disc, 0.25)
-                } else {
-                    disc
-                };
-                self.set(cx + x, cy + y, colour);
-            }
-        }
-        let half = radius / 2;
-        for dy in -half..=half {
-            let span = half - dy.abs();
-            for dx in 0..=span {
-                self.set(cx - half / 2 + dx, cy + dy, glyph);
+                let pixel = &rgba[(y * size + x) * 4..][..4];
+                let alpha = u32::from(pixel[3]);
+                let background = self.pixels[py as usize * self.width as usize + px as usize];
+                let blended = std::array::from_fn(|channel| {
+                    ((u32::from(pixel[channel]) * alpha
+                        + u32::from(background[channel]) * (255 - alpha)
+                        + 127)
+                        / 255) as u8
+                });
+                self.set(px, py, blended);
             }
         }
     }
