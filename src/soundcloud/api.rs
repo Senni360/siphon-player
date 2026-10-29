@@ -9,7 +9,8 @@
 //! <https://github.com/yt-dlp/yt-dlp/issues/17335>
 //! The 2026-10-28 anonymous fixtures include AAC 96k and an adaptive manifest.
 //! Prefer progressive MP3 when actually offered, then AAC HLS (160k first),
-//! HLS MP3 and HLS Opus. Never resolve encrypted or adaptive transcodings.
+//! then HLS MP3. Opus has no decoder in this build. Never resolve encrypted
+//! or adaptive transcodings.
 //! Discovery follows yt-dlp's reverse asset scan. A WAF challenge can make
 //! discovery unavailable; a previously persisted client ID may still work.
 //!
@@ -180,6 +181,14 @@ impl Client {
             .read()
             .unwrap_or_else(|lock| lock.into_inner())
             .clone()
+    }
+
+    /// Public browsing shares discovery and cooldown without account access.
+    pub(crate) fn anonymous(&self) -> Self {
+        Self {
+            shared: Arc::clone(&self.shared),
+            oauth_token: None,
+        }
     }
 
     pub async fn discover_client_id(&self) -> Result<String> {
@@ -411,6 +420,11 @@ impl Client {
             .filter(|item| item.preference().is_some())
             .collect::<Vec<_>>();
         choices.sort_by_key(|item| item.preference());
+        log::debug!(
+            "SoundCloud stream: track_id={} supported_transcodings={}",
+            track.id,
+            choices.len()
+        );
         for transcoding in choices {
             if !self
                 .api_url(&transcoding.url)?
@@ -456,6 +470,10 @@ impl Client {
             .text()
             .await?;
         let assets = script_assets(&html, &self.shared.home);
+        log::debug!(
+            "SoundCloud client discovery: public_assets={}",
+            assets.len()
+        );
         for asset in assets.into_iter().rev() {
             let script = match self.send(asset, false).await {
                 Ok(response) => match response.text().await {
@@ -471,6 +489,7 @@ impl Client {
                     .client_id
                     .write()
                     .unwrap_or_else(|lock| lock.into_inner()) = Some(id.clone());
+                log::info!("SoundCloud client discovery: public client ID refreshed");
                 return Ok(id);
             }
         }

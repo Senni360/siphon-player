@@ -252,6 +252,59 @@ fn finish(worker: &mut Worker) {
 }
 
 #[tokio::test]
+#[ignore = "uses SoundCloud's live anonymous search, stream resolver and audio CDN"]
+async fn live_anonymous_stream_resolves_and_decodes_to_pcm() {
+    use crate::soundcloud::{api::Client, models};
+
+    let http = crate::http::Http::default();
+    let client = Client::new(http.clone(), None, None);
+    let page = client.search_tracks("lofi", 10, 0).await.unwrap();
+    let track = page
+        .collection
+        .iter()
+        .find(|track| track.is_playable())
+        .expect("playable public track");
+    let info = client.resolve_stream(track).await.unwrap();
+    eprintln!(
+        "Anonymous SoundCloud smoke: track_id={} protocol={:?} codec={}",
+        track.id, info.protocol, info.codec
+    );
+    let stream = Stream {
+        uri: crate::soundcloud::track_uri(track.id),
+        url: info.url,
+        protocol: match info.protocol {
+            models::Protocol::Hls => Protocol::Hls,
+            models::Protocol::Progressive => Protocol::Progressive,
+        },
+        mime: info.mime,
+        duration_ms: info.duration_ms,
+        is_preview: info.is_preview,
+    };
+    let (mut worker, recorded, _) = worker();
+    worker.fetch.http = http;
+    tokio::task::spawn_blocking(move || {
+        load(&mut worker, stream, 0, true);
+        for _ in 0..512 {
+            worker.pump().unwrap();
+            if recorded
+                .lock()
+                .unwrap()
+                .pcm
+                .iter()
+                .any(|sample| sample.abs() > 0.000001)
+            {
+                worker.apply(Command::Stop).unwrap();
+                assert!(!recorded.lock().unwrap().claimed);
+                return;
+            }
+        }
+        panic!("live stream produced no non-silent PCM");
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn progressive_load_pause_resume_seek_and_end() {
     let server = Server::new().await;
     let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);

@@ -232,7 +232,7 @@ impl Transcoding {
             (Protocol::Progressive, "mp3") => 0,
             (Protocol::Hls, "aac") => 1,
             (Protocol::Hls, "mp3") => 2,
-            (Protocol::Hls, "opus") => 3,
+            // The shared Symphonia build decodes MP3 and AAC, not Opus.
             _ => return None,
         };
         Some((rank, u8::from(!self.preset.contains("160k"))))

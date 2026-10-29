@@ -2036,7 +2036,6 @@ struct Worker {
     /// second attempt does not pile up.
     engine_busy: bool,
     search_tasks: Vec<tokio::task::AbortHandle>,
-    soundcloud: crate::soundcloud::api::Client,
     soundcloud_search_task: Option<tokio::task::AbortHandle>,
     /// A user changed engine-affecting settings while the current connection
     /// attempt was in flight. Its result is stale and must not be installed.
@@ -2148,7 +2147,6 @@ impl Worker {
             prerelease_waiting: None,
             engine_busy: false,
             search_tasks: Vec::new(),
-            soundcloud: crate::soundcloud::api::Client::new(http.clone(), None, None),
             soundcloud_search_task: None,
             engine_restart_pending: false,
             signed_in: false,
@@ -2631,13 +2629,18 @@ impl Worker {
                     if request.query.is_empty() {
                         continue;
                     }
-                    let client = self.soundcloud.clone();
+                    let client = self
+                        .soundcloud_client()
+                        .expect("SoundCloud initialized before commands")
+                        .anonymous();
+                    let path = self.dirs.state.join("soundcloud-client.json");
                     let events = self.events.clone();
                     let waker = self.waker.clone();
                     self.soundcloud_search_task = Some(
                         tokio::spawn(async move {
                             let results =
                                 crate::soundcloud::browse::search(&client, &request).await;
+                            hybrid::persist_client_id(&client, path).await;
                             let _ = events.send(Event::SoundCloudSearch {
                                 request,
                                 results: Box::new(results),
@@ -2648,7 +2651,9 @@ impl Worker {
                     );
                 }
                 Command::AddSoundCloudPlaylist { id, request } => {
-                    let client = self.soundcloud.clone();
+                    let client = self
+                        .soundcloud_client()
+                        .expect("SoundCloud initialized before commands");
                     let events = self.events.clone();
                     let waker = self.waker.clone();
                     tokio::spawn(async move {
@@ -2678,13 +2683,18 @@ impl Worker {
                     generation,
                     cursor,
                 } => {
-                    let client = self.soundcloud.clone();
+                    let client = self
+                        .soundcloud_client()
+                        .expect("SoundCloud initialized before commands")
+                        .anonymous();
+                    let path = self.dirs.state.join("soundcloud-client.json");
                     let events = self.events.clone();
                     let waker = self.waker.clone();
                     tokio::spawn(async move {
                         let result =
                             crate::soundcloud::browse::collection(&client, &uri, cursor.as_deref())
                                 .await;
+                        hybrid::persist_client_id(&client, path).await;
                         let _ = events.send(Event::SoundCloudCollection {
                             uri,
                             generation,

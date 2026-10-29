@@ -23,6 +23,11 @@ client ID, cooldown and optional session. Persist discoveries with
 Local playlist changes keep using `save_playlist_sources`, including its
 unreadable-file safeguards.
 
+Public search and collection browsing share playback's discovered client ID
+and cooldown through an anonymous handle. They never forward its optional
+account token. Successful discoveries are saved for the next run, including
+discoveries made while browsing before the first playback attempt.
+
 `Backend::HybridCommand` performs child loads, transport, stream resolution
 and lookahead. A hybrid Spotify child is an explicit one-track load with
 shuffle, repeat and autoplay disabled. Librespot and SoundCloud completions
@@ -161,7 +166,9 @@ byte ranges rather than downloading a whole track. HLS follows up to four
 master/media playlist levels and fetches one compressed segment ahead, with
 a 16 MiB limit per object. Nothing is written to disk.
 
-Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4. HLS seeking starts at
+Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4. The stream resolver
+selects only MP3 or AAC, so an Opus-only track is unavailable before any stream
+request is made. HLS seeking starts at
 the containing segment and discards decoded frames up to the requested
 sample. Opus has no decoder in the existing dependency stack and returns
 `Unsupported`; choose an MP3 or AAC transcoding. Encrypted HLS, MPEG-TS,
@@ -171,3 +178,7 @@ Synthetic ffmpeg fixtures and a loopback HTTP server test transport,
 resampling, segment seeking, EOF, preload handoff and URL refresh without
 an account or audio hardware. Sink tests cover exclusivity and the tap's EQ
 and volume ordering. Native device playback still needs manual validation.
+The ignored `live_anonymous_stream_resolves_and_decodes_to_pcm` smoke test
+checks public discovery, search, resolution, CDN reads and non-silent decoded
+PCM through the production worker with a test output. It uses no account
+credentials and does not open an audio device.

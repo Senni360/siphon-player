@@ -60,7 +60,7 @@ fn ranks_formats_and_never_selects_drm_or_adaptive_manifests() {
             .iter()
             .map(|item| item.preset.as_str())
             .collect::<Vec<_>>(),
-        ["mp3_0_0", "aac_160k", "aac_96k", "mp3_0_0", "opus_0_0"]
+        ["mp3_0_0", "aac_160k", "aac_96k", "mp3_0_0"]
     );
     assert_eq!(choices[0].protocol(), Some(Protocol::Progressive));
     assert_eq!(choices[3].protocol(), Some(Protocol::Hls));
@@ -173,6 +173,27 @@ fn blocked_unstreamable_and_encrypted_only_tracks_are_unplayable() {
     track.streamable = Some(true);
     track.media.as_mut().unwrap().transcodings.truncate(2);
     assert!(!track.is_playable());
+}
+
+#[tokio::test]
+async fn opus_only_tracks_are_rejected_before_resolving_an_undecodable_stream() {
+    let client = Client::new(Http::default(), None, None);
+    let mut track = fixture_formats();
+    track
+        .media
+        .as_mut()
+        .unwrap()
+        .transcodings
+        .retain(|item| item.codec() == Some("opus"));
+    assert!(!track.is_playable());
+    assert!(matches!(
+        client.resolve_stream(&track).await,
+        Err(Error::NoStream)
+    ));
+    assert!(
+        client.client_id().is_none(),
+        "unsupported audio must not trigger network discovery"
+    );
 }
 
 #[test]
@@ -517,6 +538,33 @@ async fn refreshes_once_on_auth_failure_scanning_assets_backwards() {
         assert!(!requests[2].contains("authorization:"));
         assert!(requests[3].contains(&format!("client_id={NEW_ID}")));
     }
+}
+
+#[tokio::test]
+async fn anonymous_browsing_shares_playback_discovery_without_forwarding_its_token() {
+    let (client, task) = server(vec![
+        (403, String::new(), ""),
+        ok("<script src='/app.js'></script>"),
+        ok(format!("var config={{client_id:\"{NEW_ID}\"}};")),
+        ok(include_str!("../testdata/soundcloud/track.json")),
+        ok(include_str!("../testdata/soundcloud/track.json")),
+    ])
+    .await;
+    let anonymous = client.anonymous();
+    anonymous.track(1).await.unwrap();
+    assert_eq!(client.client_id().as_deref(), Some(NEW_ID));
+    client.track(1).await.unwrap();
+    let requests = task.await.unwrap();
+    assert!(
+        requests[..4]
+            .iter()
+            .all(|request| !request.contains("authorization:"))
+    );
+    assert!(requests[4].contains("authorization: OAuth fixture-oauth-token"));
+    assert!(
+        requests[4].contains(NEW_ID),
+        "playback reuses the ID discovered by public browsing"
+    );
 }
 
 #[tokio::test]
