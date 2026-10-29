@@ -62,6 +62,10 @@ the app opens the device menu and points to **Set up playback here** or
 every row; press Play after setup to retry it. Normal Spotify playlists and
 tracks continue through Connect, and an explicit Spotify load removes output
 inhibition after a SoundCloud stop or a failed hybrid start.
+While the local engine is connecting or indexing its configured local files
+folder, loads wait for decoder readiness instead of entering a handoff or
+reporting missing setup. Completing initialization retries the current hybrid
+occurrence with the latest play/pause intent.
 
 Playback logs report routing, local engine readiness, handoffs, load generations
 and resolved stream protocol/codec. They omit client IDs, account tokens,

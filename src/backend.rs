@@ -2594,6 +2594,7 @@ impl Worker {
                     }
                     if matches!(&command, PlayerCommand::Load(_)) {
                         self.resume = None;
+                        self.resume_verify = None;
                     }
                     match &self.engine {
                         // Until the new session picks the song up, it has
@@ -2611,6 +2612,15 @@ impl Worker {
                         // pauses and plays on its own player (#268).
                         None if command == PlayerCommand::Toggle
                             && self.kept_player.as_ref().is_some_and(KeptPlayer::toggle) => {}
+                        None if self.engine_busy && matches!(&command, PlayerCommand::Load(_)) => {
+                            if let PlayerCommand::Load(spec) = command {
+                                if let Err(error) = spec.validate() {
+                                    self.emit(Event::Error(format!("Playback error: {error}")));
+                                } else {
+                                    self.resume = Some(PlaybackResume::Track(spec));
+                                }
+                            }
+                        }
                         None => {
                             if matches!(&command, PlayerCommand::Load(_)) {
                                 // Something else chosen: the old song stops.
@@ -4176,13 +4186,30 @@ impl Worker {
             ))
             .await;
             let outcome = match connect_outcome {
-                Ok(Ok(engine)) => Command::EngineConnected {
-                    lease: lease.clone(),
-                    session_generation,
-                    engine: Box::new(Some(engine)),
-                    error: None,
-                    attempt,
-                },
+                Ok(Ok(engine)) => {
+                    // The network deadline is complete. The pinned player
+                    // may still be indexing a large local-file folder before
+                    // it can process even Stop/volume barriers. Do not publish
+                    // Ready or start hybrid handoffs until its sink exists.
+                    if engine.external_output().is_none() {
+                        log::info!(
+                            "Local playback: waiting for decoder initialization after session connection"
+                        );
+                        if config.local_files.is_some() {
+                            let _ = events.send(Event::Error("Local playback is waiting for the local-file folder to finish scanning. A large folder such as Downloads can take several minutes. Use a dedicated music folder in Settings.".into()));
+                            waker.wake();
+                        }
+                        engine.wait_for_output().await;
+                    }
+                    log::info!("Local playback: session and decoder ready");
+                    Command::EngineConnected {
+                        lease: lease.clone(),
+                        session_generation,
+                        engine: Box::new(Some(engine)),
+                        error: None,
+                        attempt,
+                    }
+                }
                 Ok(Err(error)) => {
                     log::error!("engine connect failed: {error:#}");
                     Command::EngineConnected {
@@ -4297,6 +4324,9 @@ impl Worker {
                 self.start_prerelease();
             }
             None => {
+                if self.network_reachable {
+                    self.fail_waiting_hybrid();
+                }
                 if !self.network_reachable {
                     self.waiting_for_network = true;
                     self.emit(Event::Playback(LocalPlayback::WaitingForNetwork));

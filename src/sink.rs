@@ -99,6 +99,7 @@ pub const BUFFER_MS_RANGE: std::ops::RangeInclusive<u32> = 20..=500;
 /// the decoder that has already moved to the requested position.
 pub struct AudioControl {
     external: Mutex<Weak<ExternalInner>>,
+    external_ready: tokio::sync::Notify,
     external_active: AtomicBool,
     spotify_inhibited: AtomicBool,
     producer: Mutex<()>,
@@ -119,6 +120,7 @@ impl AudioControl {
     pub fn new(buffer_ms: u32) -> Arc<Self> {
         Arc::new(Self {
             external: Mutex::new(Weak::new()),
+            external_ready: tokio::sync::Notify::new(),
             external_active: AtomicBool::new(false),
             spotify_inhibited: AtomicBool::new(false),
             producer: Mutex::new(()),
@@ -142,6 +144,18 @@ impl AudioControl {
 
     pub(crate) fn spotify_inhibited(&self) -> bool {
         self.spotify_inhibited.load(Ordering::SeqCst)
+    }
+
+    pub(crate) async fn wait_for_external_output(&self) {
+        loop {
+            let ready = self.external_ready.notified();
+            tokio::pin!(ready);
+            ready.as_mut().enable();
+            if self.external_output().is_some() {
+                return;
+            }
+            ready.await;
+        }
     }
 
     /// Serialize rejected decoder commands with the next owner's gate change.
@@ -365,6 +379,7 @@ impl SharedSink {
             .external
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Arc::downgrade(&external.0);
+        control.external_ready.notify_waiters();
         Self { spotify, external }
     }
 }
@@ -1444,6 +1459,35 @@ fn open_output(
 mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    #[tokio::test]
+    async fn output_readiness_waits_for_sink_construction_without_losing_notifications() {
+        let control = AudioControl::new(DEFAULT_BUFFER_MS);
+        let ready = control.wait_for_external_output();
+        tokio::pin!(ready);
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(ready.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        let pcm = external_pcm(
+            Arc::clone(&control),
+            crate::vis::AudioTap::new(),
+            crate::eq::shared(),
+            1.0,
+        );
+        let _shared = SharedSink::new(
+            Box::new(CountedSink(Arc::new(AtomicU32::new(0)))),
+            pcm,
+            Arc::clone(&control),
+        );
+        tokio::time::timeout(Duration::from_secs(1), ready)
+            .await
+            .unwrap();
+        // Ready before subscription must work too, including a kept player
+        // reused by a new session after reconnecting.
+        control.wait_for_external_output().await;
+    }
 
     struct CountedSink(Arc<AtomicU32>);
     impl Sink for CountedSink {

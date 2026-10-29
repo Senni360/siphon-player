@@ -451,6 +451,12 @@ impl Engine {
     pub fn external_output(&self) -> Option<crate::sink::ExternalOutput> {
         self.audio.external_output()
     }
+
+    /// The pinned player indexes local files before constructing its sink or
+    /// processing commands. Session readiness alone is not decoder readiness.
+    pub(crate) async fn wait_for_output(&self) {
+        self.audio.wait_for_external_output().await;
+    }
     pub(crate) fn credentials(&self) -> Option<Credentials> {
         self.session.cache().and_then(|cache| cache.credentials())
     }
@@ -535,7 +541,10 @@ impl Engine {
         });
 
         let device_id = config.device_id();
-        log::info!("Spotify playback: local engine connected and ready");
+        log::info!(
+            "Spotify playback: session connected; decoder_ready={}",
+            audio.external_output().is_some()
+        );
         Ok(Self {
             hybrid_events: Mutex::new(None),
             player,
@@ -580,6 +589,12 @@ impl Engine {
             local_file_directories: config.local_files.iter().cloned().collect(),
             ..PlayerConfig::default()
         };
+
+        if config.local_files.is_some() {
+            log::info!(
+                "Spotify decoder: indexing the configured local-file folder before processing playback commands"
+            );
+        }
 
         let mixer_builder =
             mixer::find(Some("softvol")).ok_or_else(|| anyhow!("soft volume mixer missing"))?;
@@ -1086,6 +1101,7 @@ fn sink_builder(
     // value to calculate the pre-volume limiter ceiling.
     let ceiling = mixer.get_soft_volume();
     let external_ceiling = mixer.get_soft_volume();
+    let initialized_at = Instant::now();
     (
         Box::new(move || {
             let sink = Arc::new(Mutex::new(
@@ -1109,7 +1125,12 @@ fn sink_builder(
                 eq,
                 normalisation,
             ));
-            Box::new(crate::sink::SharedSink::new(spotify, external, audio)) as Box<dyn Sink>
+            let shared = crate::sink::SharedSink::new(spotify, external, audio);
+            log::info!(
+                "Spotify decoder: initialized shared output after {} ms",
+                initialized_at.elapsed().as_millis()
+            );
+            Box::new(shared) as Box<dyn Sink>
         }),
         Box::new(NoOpVolume),
     )

@@ -45,6 +45,7 @@ pub(super) struct HybridRuntime {
     position_ms: u32,
     playing: bool,
     pub(super) owned: bool,
+    waiting_for_engine: bool,
     claimed: bool,
     pub(super) releasing: bool,
     pending: Option<HybridCommand>,
@@ -59,6 +60,22 @@ pub(super) struct HybridRuntime {
 }
 
 impl Worker {
+    pub(super) fn fail_waiting_hybrid(&mut self) {
+        if !std::mem::take(&mut self.hybrid.waiting_for_engine) {
+            return;
+        }
+        if let Some(tag) = self.hybrid.tag.take() {
+            self.hybrid.playing = false;
+            if self.hybrid.claimed {
+                self.release_soundcloud();
+            }
+            self.emit(Event::Hybrid {
+                tag,
+                event: HybridEvent::Failed(crate::player::LOCAL_PLAYBACK_UNAVAILABLE.into()),
+            });
+        }
+    }
+
     /// Catalogue adapters clone this handle to share discovery, cooldown and
     /// account scope with playback instead of constructing another client.
     pub(super) fn soundcloud_client(&self) -> Option<Client> {
@@ -170,9 +187,20 @@ impl Worker {
                     return;
                 }
                 if self.engine.is_none() {
+                    if self.engine_busy {
+                        // Connection/initial indexing is in flight. Ready
+                        // emits Interrupted for this tag to load the latest
+                        // selection and transport intent on the new engine.
+                        log::info!("Hybrid playback: waiting for local decoder initialization");
+                        self.hybrid.waiting_for_engine = true;
+                        return;
+                    }
                     self.hybrid.playing = false;
                     self.hybrid.tag = None;
                     self.hybrid.preload_uri = None;
+                    if self.hybrid.claimed {
+                        self.release_soundcloud();
+                    }
                     self.emit(Event::Hybrid {
                         tag,
                         event: HybridEvent::Failed(
@@ -663,6 +691,7 @@ impl Worker {
 
 impl HybridRuntime {
     fn new_owner_intent(&mut self) {
+        self.waiting_for_engine = false;
         self.owner_generation = self.owner_generation.wrapping_add(1);
         self.player_waiting.clear();
     }
@@ -702,6 +731,99 @@ pub(super) async fn persist_client_id(client: &Client, path: std::path::PathBuf)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_background_engine_failure_does_not_interrupt_an_active_child() {
+        let (_runtime, mut worker, events) =
+            super::super::authorization_tests::worker("hybrid-active-child-reconnect");
+        let tag = PlaybackTag {
+            generation: 1,
+            occurrence: crate::hybrid_queue::EntryId(1),
+        };
+        for external in [false, true] {
+            worker.hybrid.owned = true;
+            worker.hybrid.tag = Some(tag);
+            worker.hybrid.playing = true;
+            worker.hybrid.claimed = external;
+            worker.fail_waiting_hybrid();
+            assert_eq!(worker.hybrid.tag, Some(tag));
+            assert!(worker.hybrid.playing);
+            assert!(!worker.hybrid.releasing);
+            assert!(!events.try_iter().any(|event| matches!(
+                event,
+                Event::Hybrid {
+                    event: HybridEvent::Failed(_),
+                    ..
+                }
+            )));
+        }
+    }
+
+    #[test]
+    fn hybrid_waits_for_initializing_decoder_and_retains_pause_intent() {
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("hybrid-decoder-initializing");
+        worker.engine_busy = true;
+        runtime.block_on(async {
+            let tag = PlaybackTag { generation: 1, occurrence: crate::hybrid_queue::EntryId(1) };
+            worker.hybrid_command(HybridCommand::Load {
+                tag, track: Box::new(Track { uri: "soundcloud:track:7".into(), ..Default::default() }), position_ms: 0, play: true,
+            }).await;
+            assert_eq!(worker.hybrid.tag, Some(tag));
+            assert!(!events.try_iter().any(|event| matches!(event, Event::Hybrid { event: HybridEvent::Failed(_), .. })));
+            worker.hybrid_command(HybridCommand::Playing { tag, playing: false, sequence: 1 }).await;
+            assert!(!worker.hybrid.playing);
+            worker.fail_waiting_hybrid();
+            assert!(worker.hybrid.tag.is_none());
+            assert!(events.try_iter().any(|event| matches!(event, Event::Hybrid { tag: actual, event: HybridEvent::Failed(message) } if actual == tag && message == crate::player::LOCAL_PLAYBACK_UNAVAILABLE)));
+        });
+    }
+
+    #[test]
+    fn spotify_load_waits_for_decoder_initialization_instead_of_reporting_missing_setup() {
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("spotify-decoder-initializing");
+        worker.engine_busy = true;
+        let spec = LoadSpec {
+            uris: vec!["spotify:track:a".into()],
+            play: true,
+            ..Default::default()
+        };
+        let (commands, receiver) = mpsc::unbounded_channel();
+        commands
+            .send(Command::Player(PlayerCommand::Load(spec.clone())))
+            .unwrap();
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(matches!(worker.resume, Some(PlaybackResume::Track(actual)) if actual == spec));
+        assert!(!events.try_iter().any(|event| matches!(event, Event::Error(message) if message == crate::player::LOCAL_PLAYBACK_UNAVAILABLE)));
+    }
+
+    #[test]
+    fn invalid_spotify_load_cancels_the_older_initialization_request() {
+        let (runtime, mut worker, events) =
+            super::super::authorization_tests::worker("spotify-invalid-initializing");
+        worker.engine_busy = true;
+        let (commands, receiver) = mpsc::unbounded_channel();
+        for spec in [
+            LoadSpec {
+                uris: vec!["spotify:track:a".into()],
+                play: true,
+                ..Default::default()
+            },
+            LoadSpec::default(),
+        ] {
+            commands
+                .send(Command::Player(PlayerCommand::Load(spec)))
+                .unwrap();
+        }
+        commands.send(Command::Shutdown).unwrap();
+        runtime.block_on(worker.run(receiver));
+        assert!(worker.resume.is_none());
+        assert!(events.try_iter().any(
+            |event| matches!(event, Event::Error(message) if message.contains("nothing to play"))
+        ));
+    }
 
     #[test]
     fn hybrid_without_local_engine_reports_setup_before_resolving_either_source() {

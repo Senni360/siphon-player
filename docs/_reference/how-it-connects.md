@@ -611,6 +611,15 @@ does not save or log the token.
 
 ## The engine
 
+The pinned librespot player scans the configured local files folder on its
+decoder thread before constructing the shared output or processing commands.
+A large folder containing videos, such as Downloads, can delay both Spotify
+and SoundCloud playback for minutes. Spotifast keeps playback connecting until
+that output is ready, explains the wait, and retains the latest playback
+request and pause intent. This disk initialization is separate from Spotify's
+75-second network connection deadline. Use a dedicated music folder, or
+**Remove** the local files folder in Settings if you only stream music.
+
 Playback runs on a separate runtime. Librespot maintains the Spotify Connect
 session, exposes this computer as a device, receives transfers, and reports
 playback state. If the session drops, it reconnects with the stored credential.

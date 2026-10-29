@@ -98,6 +98,10 @@ This fork's SoundCloud and mixed queues use the same local audio output, so
 complete **Set up playback here** before trying either source. If playback
 is unavailable, the app opens the device menu and explains how to set it up
 or retry. After setup, press Play again to retry the selected mixed-queue row.
+If you configured a local files folder, librespot scans it before its decoder
+is ready. Playback waits for that scan and the app explains the delay. Use a
+dedicated music folder rather than a large Downloads folder, or choose
+**Remove** beside the local files folder in Settings if you only stream music.
 
 ## The Winamp mini player
 
