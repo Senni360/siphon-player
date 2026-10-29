@@ -357,7 +357,7 @@ impl ApiGateway {
     }
 
     /// Whether a shared grant is signed in or being restored. Only listeners
-    /// who signed in before Spotifast stopped offering shared access have one.
+    /// who signed in before Siphon stopped offering shared access have one.
     pub fn has_shared(&self) -> bool {
         self.state(ApiSource::Shared) != SessionState::Unavailable
     }

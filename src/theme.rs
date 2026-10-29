@@ -140,7 +140,7 @@ impl fastframe_theme::Palette for Palette {
 
     /// Menus, tooltips and dialogs follow a file's window when it leaves
     /// `overlay` out, as Omarchy's template and the shared palettes do:
-    /// otherwise they kept Spotifast's own blue-grey on every other theme.
+    /// otherwise they kept Siphon's own blue-grey on every other theme.
     /// The proportions are the built-in palettes': a step above the window
     /// toward the text in dark ones, the panel in light ones.
     fn derive(&mut self, given: &std::collections::BTreeSet<&str>) {
@@ -440,7 +440,7 @@ fn install_fonts(ctx: &egui::Context) {
 
 fastframe_icons::icons! {
     /// Every icon the interface draws. The shared Lucide icons come from
-    /// fastframe-icons; the rest are Spotifast's own files.
+    /// fastframe-icons; the rest are Siphon's own files.
     pub enum Icon {
         prefix: "spotifast-icon-",
         directory: "../assets/icons/",
@@ -612,7 +612,7 @@ pub fn icon_button(
 /// Horizontal offset that optically centers play triangles.
 ///
 /// Lucide includes a 1/24-width shift; a measured 3% shift centers the icon at
-/// Spotifast's sizes. Use this everywhere instead of per-call adjustments.
+/// Siphon's sizes. Use this everywhere instead of per-call adjustments.
 pub fn play_glyph_offset(icon: Icon, icon_size: f32) -> Vec2 {
     if matches!(icon, Icon::PlayFilled | Icon::Play) {
         Vec2::new(icon_size * (0.03 - 1.0 / 24.0), 0.0)
@@ -1061,7 +1061,7 @@ mod tests {
     }
 
     /// Palette files name the sixteen colours every app shares and
-    /// Spotifast's own `tint`, and only those: a typo is an invalid file,
+    /// Siphon's own `tint`, and only those: a typo is an invalid file,
     /// not an ignored colour.
     #[test]
     fn palette_files_set_every_base_colour() {

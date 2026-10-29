@@ -47,12 +47,12 @@ fn main() -> anyhow::Result<()> {
     let Some(spotifast::credentials::Grant::Playback(grant)) =
         stored_grant(spotifast::credentials::Slot::Playback)?
     else {
-        anyhow::bail!("Enable playback in Spotifast first");
+        anyhow::bail!("Enable playback in Siphon first");
     };
     let credentials = spotifast::zeroconf::Credentials::from_playback(&grant)?;
     println!("\nhanding the account to {} ...", receiver.name);
     let info = spotifast::zeroconf::get_info(&http, receiver)?;
-    match spotifast::zeroconf::add_user(&http, receiver, &info, &credentials, "Spotifast") {
+    match spotifast::zeroconf::add_user(&http, receiver, &info, &credentials, "Siphon") {
         Ok(()) => println!("  accepted"),
         Err(error) => {
             println!("  refused: {error}");
@@ -80,7 +80,7 @@ fn devices() -> anyhow::Result<Vec<String>> {
     let Some(spotifast::credentials::Grant::Web(token)) =
         stored_grant(spotifast::credentials::Slot::Shared)?
     else {
-        anyhow::bail!("Sign in to Spotifast first");
+        anyhow::bail!("Sign in to Siphon first");
     };
     let http = reqwest::blocking::Client::new();
     let body: serde_json::Value = http

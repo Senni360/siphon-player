@@ -521,7 +521,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     }
                     response.on_hover_text(gettext(
                         locale,
-                        "Spotifast is offline. Reconnecting automatically when connection returns.",
+                        "Siphon is offline. Reconnecting automatically when connection returns.",
                     ));
                 }
                 ui.add_space(4.0);

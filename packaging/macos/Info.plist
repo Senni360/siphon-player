@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Spotifast</string>
-    <key>CFBundleDisplayName</key><string>Spotifast</string>
+    <key>CFBundleName</key><string>Siphon</string>
+    <key>CFBundleDisplayName</key><string>Siphon</string>
     <key>CFBundleIdentifier</key><string>__IDENTIFIER__</string>
     <key>CFBundleExecutable</key><string>__EXECUTABLE__</string>
     <key>CFBundleIconFile</key><string>spotifast</string>
@@ -20,7 +20,7 @@
         <string>_spotify-connect._tcp</string>
         <string>_googlecast._tcp</string>
     </array>
-    <!-- Spotify links (spotify:track:…) open in Spotifast; src/mac_links.rs
+    <!-- Spotify links (spotify:track:…) open in Siphon; src/mac_links.rs
          takes them. Launch Services notes this when the app is first opened. -->
     <key>CFBundleURLTypes</key>
     <array>

@@ -1,4 +1,4 @@
-//! Local SoundCloud playback through Spotifast's existing output.
+//! Local SoundCloud playback through Siphon's existing output.
 //!
 //! Integration: pause Spotify first, obtain `player::Engine::external_output`,
 //! then send `Load`. Keep Spotify/Connect paused until `Stop` has reported

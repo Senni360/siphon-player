@@ -24,13 +24,13 @@ impl Watcher {
 fn config() -> fastframe_tray::Config {
     fastframe_tray::Config {
         id: "spotifast",
-        title: "Spotifast".into(),
+        title: "Siphon".into(),
         icon: spotifast::util::app_icon_rgba,
         template_icon: None,
         themed_icon: true,
         menu: vec![fastframe_tray::MenuItem::action(
             "show",
-            "Show or hide Spotifast",
+            "Show or hide Siphon",
         )],
     }
 }
@@ -106,7 +106,7 @@ fn flatpak_tray_registers_without_owning_a_name() {
             "--nocapture",
         ])
         .env(CHILD, "1")
-        .env("FLATPAK_ID", "rocks.spotifast.Spotifast")
+        .env("FLATPAK_ID", "rocks.spotifast.Siphon")
         .env("DBUS_SESSION_BUS_ADDRESS", address.trim())
         .status();
     let _ = bus.kill();

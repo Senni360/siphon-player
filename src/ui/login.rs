@@ -10,7 +10,7 @@ use crate::settings::ProxyMode;
 use crate::theme;
 
 /// Where listeners create their own Spotify app. Shown as a link they
-/// click; Spotifast never opens it by itself.
+/// click; Siphon never opens it by itself.
 pub const DASHBOARD_URL: &str = "https://developer.spotify.com/dashboard";
 
 /// The width of the card on its own, and at most of each column beside
@@ -149,11 +149,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, connecting: bool) {
                 pos2(rect.center().x, rect.bottom() - 24.0),
                 egui::Align2::CENTER_BOTTOM,
                 // Translators: {version} is the app's version number, such as 1.2.0.
-                gettext(
-                    app.locale,
-                    "Spotifast {version} • not affiliated with Spotify",
-                )
-                .replace("{version}", env!("CARGO_PKG_VERSION")),
+                gettext(app.locale, "Siphon {version} • not affiliated with Spotify")
+                    .replace("{version}", env!("CARGO_PKG_VERSION")),
                 theme::regular(11.5),
                 palette.dim,
             );
@@ -177,7 +174,7 @@ fn problem_text(locale: crate::i18n::Locale, problem: SignInProblem) -> String {
         ),
         SignInProblem::SharedRetired => gettext(
             locale,
-            "Spotify no longer accepts the shared sign-in Spotifast used before. Set up your own Spotify app to keep listening.",
+            "Spotify no longer accepts the shared sign-in Siphon used before. Set up your own Spotify app to keep listening.",
         ),
         SignInProblem::Expired => {
             gettext(locale, "Your Spotify sign-in expired. Please sign in again.")
@@ -207,7 +204,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
     ui.add_space(6.0);
     theme::text(
         ui,
-        "Spotifast",
+        "Siphon",
         theme::bold(if steps { 26.0 } else { 30.0 }),
         palette.text,
     );
@@ -305,7 +302,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 ui,
                 gettext(
                     locale,
-                    "Sign in through your browser. Spotifast never sees your password. Local playback needs Spotify Premium.",
+                    "Sign in through your browser. Siphon never sees your password. Local playback needs Spotify Premium.",
                 ),
                 theme::regular(12.5),
                 palette.secondary,
@@ -425,7 +422,7 @@ fn step(
     ui.add_space(4.0);
 }
 
-/// How to create the app Spotifast signs in with, the same steps the
+/// How to create the app Siphon signs in with, the same steps the
 /// guide gives (make-it-even-faster.md, Make a Spotify app).
 fn setup_steps(app: &mut App, ui: &mut egui::Ui, width: f32) {
     let palette = app.palette;
@@ -444,7 +441,7 @@ fn setup_steps(app: &mut App, ui: &mut egui::Ui, width: f32) {
         ui,
         gettext(
             locale,
-            "Spotifast signs in through your own free Spotify app. Spotify requires its owner to have Premium.",
+            "Siphon signs in through your own free Spotify app. Spotify requires its owner to have Premium.",
         ),
         theme::regular(13.0),
         palette.secondary,

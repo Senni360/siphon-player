@@ -15,7 +15,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     let Some(spotifast::credentials::Grant::Playback(grant)) = stored_grant()? else {
-        anyhow::bail!("Enable playback in Spotifast first");
+        anyhow::bail!("Enable playback in Siphon first");
     };
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

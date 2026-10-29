@@ -14,8 +14,8 @@ use fastframe_update::{MacConfig, ReqwestTransport, UpdateConfig};
 
 pub const CONFIG: UpdateConfig = UpdateConfig {
     macos: MacConfig {
-        bundle_ids: &["rocks.spotifast.Spotifast"],
-        executable_names: &["Spotifast"],
+        bundle_ids: &["rocks.spotifast.Siphon"],
+        executable_names: &["Siphon"],
         legacy_bundle_names: &[],
     },
     // Releases publish an Ed25519 signature for checksums.txt. Require it
@@ -27,13 +27,13 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     appimage: true,
     ..UpdateConfig::new(
         "crmne/spotifast",
-        "Spotifast",
+        "Siphon",
         "spotifast",
         env!("CARGO_PKG_VERSION"),
     )
 };
 
-/// An updater on Spotifast's HTTP client, through the configured proxy.
+/// An updater on Siphon's HTTP client, through the configured proxy.
 pub fn updater(proxy: &crate::settings::ProxyConfig) -> anyhow::Result<Updater> {
     let builder = crate::http::blocking_builder(proxy).map_err(anyhow::Error::msg)?;
     Ok(Updater::new(CONFIG, ReqwestTransport::new(builder)?))

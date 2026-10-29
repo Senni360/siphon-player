@@ -1,7 +1,7 @@
 //! Cover art and lyrics from a local file's own tags.
 //!
 //! Spotify knows a playlist's local file only by its artist, album, title
-//! and length, so it has no cover or lyrics for one. Spotifast plays the
+//! and length, so it has no cover or lyrics for one. Siphon plays the
 //! file itself from the local files folder, so it reads them from the file:
 //! the picture in its ID3 `APIC` frame or FLAC `PICTURE` block, and the
 //! words in a `.lrc` file beside it or its ID3 `USLT` frame or Vorbis

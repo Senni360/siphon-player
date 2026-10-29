@@ -1,4 +1,4 @@
-//! The macOS bundle carries the launch agent that starts Spotifast in the
+//! The macOS bundle carries the launch agent that starts Siphon in the
 //! tray at login (#122), exactly as fastframe-autostart registers it.
 use std::fs;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ fn packaging(file: &str) -> String {
 
 #[test]
 fn the_bundle_carries_the_agent_that_starts_in_the_tray() {
-    let id = "rocks.spotifast.Spotifast";
+    let id = "rocks.spotifast.Siphon";
     assert_eq!(
         packaging("autostart.plist"),
         fastframe_autostart::macos_agent_plist(id, fastframe_autostart::START_HIDDEN),

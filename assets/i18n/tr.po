@@ -1,9 +1,9 @@
-# Turkish translation of Spotifast.
-# Distributed under the same MIT license as Spotifast.
+# Turkish translation of Siphon.
+# Distributed under the same MIT license as Siphon.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Spotifast\n"
+"Project-Id-Version: Siphon\n"
 "Report-Msgid-Bugs-To: https://github.com/crmne/spotifast/issues/new?"
 "template=translation.yml\n"
 "POT-Creation-Date: 2026-10-27 03:44+0100\n"
@@ -293,8 +293,8 @@ msgid "Mute"
 msgstr "Sesi kapat"
 
 #: src/ui/player_bar.rs:981
-msgid "This device's volume can't be changed from Spotifast"
-msgstr "Bu cihazın ses düzeyi Spotifast üzerinden değiştirilemez"
+msgid "This device's volume can't be changed from Siphon"
+msgstr "Bu cihazın ses düzeyi Siphon üzerinden değiştirilemez"
 
 #: src/ui/player_bar.rs:1001 src/ui/devices.rs:401
 msgid "Connect to a device"
@@ -403,9 +403,9 @@ msgstr "Çevrimdışısınız"
 #: src/ui/collection.rs:2078 src/ui/collection.rs:2325 src/ui/home.rs:34
 #: src/ui/library.rs:262 src/ui/show.rs:69 src/ui/show.rs:115
 #: src/ui/show.rs:145
-msgid "Spotifast will reconnect automatically when your connection returns."
+msgid "Siphon will reconnect automatically when your connection returns."
 msgstr ""
-"Bağlantınız geri geldiğinde Spotifast otomatik olarak yeniden bağlanacaktır."
+"Bağlantınız geri geldiğinde Siphon otomatik olarak yeniden bağlanacaktır."
 
 #. Translators: Keep {error} unchanged. It is the original failure detail.
 #: src/ui/lyrics.rs:171 src/ui/lyrics.rs:455 src/ui/lyrics.rs:691
@@ -708,8 +708,8 @@ msgid "Restoring proxy settings"
 msgstr "Proxy ayarları geri yükleniyor"
 
 #: src/app.rs:1521
-msgid "Couldn't change how Spotifast starts with your computer."
-msgstr "Spotifast’in bilgisayarla nasıl başlayacağı değiştirilemedi."
+msgid "Couldn't change how Siphon starts with your computer."
+msgstr "Siphon’in bilgisayarla nasıl başlayacağı değiştirilemedi."
 
 #. Translators: {name} is the name of a speaker or other playback device.
 #: src/app.rs:2528
@@ -730,12 +730,12 @@ msgstr ""
 #. Translators: {version} is a version number such as 1.4.0.
 #: src/app.rs:2712
 #, rust-format
-msgid "Spotifast {version} is available"
-msgstr "Spotifast {version} sürümü hazır"
+msgid "Siphon {version} is available"
+msgstr "Siphon {version} sürümü hazır"
 
 #: src/app.rs:2729
-msgid "Spotifast is up to date"
-msgstr "Spotifast güncel"
+msgid "Siphon is up to date"
+msgstr "Siphon güncel"
 
 #. Translators: {error} is an error message.
 #: src/app.rs:2737
@@ -967,8 +967,8 @@ msgid "This song's album is not on Spotify"
 msgstr "Bu şarkının albümü Spotify'da bulunmuyor"
 
 #: src/app.rs:8588
-msgid "Spotifast cannot open this kind of Spotify link"
-msgstr "Spotifast bu tür bir Spotify bağlantısını açamaz"
+msgid "Siphon cannot open this kind of Spotify link"
+msgstr "Siphon bu tür bir Spotify bağlantısını açamaz"
 
 #: src/app.rs:8836
 msgid "Nothing is playing. Pick something first"
@@ -1246,17 +1246,17 @@ msgstr "Kişisel Spotify uygulaması"
 
 #: src/ui/settings.rs:423
 msgid ""
-"You're still signed in through the shared app Spotifast used before, which "
+"You're still signed in through the shared app Siphon used before, which "
 "Spotify can stop accepting at any time. Set up your own app to keep "
 "listening."
 msgstr ""
-"Hâlâ Spotifast'ın önceden kullandığı paylaşılan uygulama üzerinden giriş "
+"Hâlâ Siphon'ın önceden kullandığı paylaşılan uygulama üzerinden giriş "
 "yapmış durumdasınız. Spotify bu uygulamayı her an kabul etmeyi bırakabilir. "
 "Dinlemeye devam etmek için kendi uygulamanızı kurun."
 
 #: src/ui/settings.rs:428
-msgid "Spotifast signs in through your own free Spotify app."
-msgstr "Spotifast, kendi ücretsiz Spotify uygulamanız üzerinden giriş yapar."
+msgid "Siphon signs in through your own free Spotify app."
+msgstr "Siphon, kendi ücretsiz Spotify uygulamanız üzerinden giriş yapar."
 
 #: src/ui/settings.rs:433
 msgid "Create an app"
@@ -1277,8 +1277,8 @@ msgstr ""
 "uygulamayı kullanır."
 
 #: src/ui/settings.rs:448
-msgid "Spotifast uses your app for Spotify's Web API."
-msgstr "Spotifast, Spotify Web API'si için uygulamanızı kullanır."
+msgid "Siphon uses your app for Spotify's Web API."
+msgstr "Siphon, Spotify Web API'si için uygulamanızı kullanır."
 
 #: src/ui/settings.rs:453
 msgid "Authorize your personal app"
@@ -1448,15 +1448,15 @@ msgstr "Parçaları aralarında sessizlik olmadan çalar."
 
 #: src/ui/settings.rs:674
 msgid ""
-"Spotifast hides to the system tray. Quit from the tray menu or with Ctrl+Q."
+"Siphon hides to the system tray. Quit from the tray menu or with Ctrl+Q."
 msgstr ""
-"Spotifast sistem tepsisine gizlenir. Tepsi menüsünden veya Ctrl+Q ile çıkın."
+"Siphon sistem tepsisine gizlenir. Tepsi menüsünden veya Ctrl+Q ile çıkın."
 
 #: src/ui/settings.rs:679
 msgid ""
-"Spotifast hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q."
+"Siphon hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q."
 msgstr ""
-"Spotifast menü çubuğuna gizlenir. Menü çubuğundaki simgesinden veya Cmd+Q "
+"Siphon menü çubuğuna gizlenir. Menü çubuğundaki simgesinden veya Cmd+Q "
 "ile çıkın."
 
 #: src/ui/settings.rs:686
@@ -1503,10 +1503,10 @@ msgstr "Yerel dosyalar"
 
 #: src/ui/settings.rs:722
 msgid ""
-"When off, Spotifast lives in the menu bar and leaves Cmd+Tab. Open it from "
+"When off, Siphon lives in the menu bar and leaves Cmd+Tab. Open it from "
 "its menu-bar icon."
 msgstr ""
-"Kapalıyken Spotifast yalnızca menü çubuğunda kalır ve Cmd+Tab'de görünmez. "
+"Kapalıyken Siphon yalnızca menü çubuğunda kalır ve Cmd+Tab'de görünmez. "
 "Menü çubuğundaki simgesinden açın."
 
 #: src/ui/settings.rs:728
@@ -1677,9 +1677,9 @@ msgstr ""
 
 #: src/ui/settings.rs:1203
 msgid ""
-"Draw Spotifast's own title bar and window buttons instead of the desktop's."
+"Draw Siphon's own title bar and window buttons instead of the desktop's."
 msgstr ""
-"Masaüstü ortamının başlık çubuğu ve pencere düğmeleri yerine Spotifast'in "
+"Masaüstü ortamının başlık çubuğu ve pencere düğmeleri yerine Siphon'in "
 "kendi başlık çubuğunu ve pencere düğmelerini çizer."
 
 #: src/ui/settings.rs:1211
@@ -1882,40 +1882,40 @@ msgstr "Hazır ayarlar"
 #: src/ui/settings.rs:1876
 #, rust-format
 msgid ""
-"None yet in {folder}. Add .milk files here. Spotifast downloads presets when "
+"None yet in {folder}. Add .milk files here. Siphon downloads presets when "
 "MilkDrop first opens with an empty folder."
 msgstr ""
 "{folder} konumunda henüz hazır ayar yok. Buraya .milk dosyaları ekleyin. "
-"Spotifast, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
+"Siphon, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
 "indirir."
 
 #. Translators: {folder} is the path of the MilkDrop presets folder.
 #: src/ui/settings.rs:1882
 #, rust-format
 msgid ""
-"One preset in {folder}. Add .milk files here. Spotifast downloads presets "
+"One preset in {folder}. Add .milk files here. Siphon downloads presets "
 "when MilkDrop first opens with an empty folder."
 msgstr ""
 "{folder} içinde bir hazır ayar var. Buraya .milk dosyaları ekleyin. "
-"Spotifast, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
+"Siphon, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
 "indirir."
 
 #. Translators: {count} is the number of presets, {folder} the path of the MilkDrop presets folder.
 #: src/ui/settings.rs:1888
 #, rust-format
 msgid ""
-"{count} preset in {folder}. Add .milk files here. Spotifast downloads "
+"{count} preset in {folder}. Add .milk files here. Siphon downloads "
 "presets when MilkDrop first opens with an empty folder."
 msgid_plural ""
-"{count} presets in {folder}. Add .milk files here. Spotifast downloads "
+"{count} presets in {folder}. Add .milk files here. Siphon downloads "
 "presets when MilkDrop first opens with an empty folder."
 msgstr[0] ""
 "{folder} içinde {count} hazır ayar var. Buraya .milk dosyaları ekleyin. "
-"Spotifast, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
+"Siphon, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
 "indirir."
 msgstr[1] ""
 "{folder} içinde {count} hazır ayar var. Buraya .milk dosyaları ekleyin. "
-"Spotifast, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
+"Siphon, MilkDrop boş bir klasörle ilk açıldığında hazır ayarları otomatik "
 "indirir."
 
 #: src/ui/settings.rs:1897
@@ -2111,9 +2111,9 @@ msgid "In the tray"
 msgstr "Sistem tepsisinde"
 
 #: src/ui/settings.rs:2361
-msgid "Allow Spotifast in System Settings, General, Login Items."
+msgid "Allow Siphon in System Settings, General, Login Items."
 msgstr ""
-"Sistem Ayarları, Genel, Giriş Öğeleri bölümünden Spotifast’e izin verin."
+"Sistem Ayarları, Genel, Giriş Öğeleri bölümünden Siphon’e izin verin."
 
 #: src/ui/settings.rs:2367
 msgid ""
@@ -2132,13 +2132,13 @@ msgstr ""
 "etsin” açık olmalı. O zamana kadar pencere açılır."
 
 #: src/ui/settings.rs:2378
-msgid "Open Spotifast when you log in, with its window or in the menu bar."
-msgstr "Oturum açtığınızda Spotifast’i penceresiyle veya menü çubuğunda açar."
+msgid "Open Siphon when you log in, with its window or in the menu bar."
+msgstr "Oturum açtığınızda Siphon’i penceresiyle veya menü çubuğunda açar."
 
 #: src/ui/settings.rs:2383
-msgid "Open Spotifast when you log in, with its window or in the tray."
+msgid "Open Siphon when you log in, with its window or in the tray."
 msgstr ""
-"Oturum açtığınızda Spotifast’i penceresiyle veya sistem tepsisinde açar."
+"Oturum açtığınızda Siphon’i penceresiyle veya sistem tepsisinde açar."
 
 #: src/ui/settings.rs:2489
 msgctxt "language"
@@ -2482,12 +2482,12 @@ msgstr "Kendi Spotify uygulamanıza geçin"
 
 #: src/ui/dialogs.rs:46
 msgid ""
-"You're signed in through the shared app Spotifast used before. Spotifast no "
+"You're signed in through the shared app Siphon used before. Siphon no "
 "longer offers it, and Spotify can stop accepting it at any time. Set up your "
 "own free Spotify app so nothing stops your music. It takes a few minutes."
 msgstr ""
-"Spotifast'ın önceden kullandığı paylaşılan uygulama üzerinden giriş "
-"yaptınız. Spotifast artık bu uygulamayı sunmuyor ve Spotify onu her an kabul "
+"Siphon'ın önceden kullandığı paylaşılan uygulama üzerinden giriş "
+"yaptınız. Siphon artık bu uygulamayı sunmuyor ve Spotify onu her an kabul "
 "etmeyi bırakabilir. Müziğinizin kesilmemesi için kendi ücretsiz Spotify "
 "uygulamanızı kurun. Yalnızca birkaç dakika sürer."
 
@@ -2548,10 +2548,10 @@ msgstr "Bu hesap burada müzik çalamaz"
 #: src/ui/dialogs.rs:213
 msgid ""
 "Playback needs Spotify Premium. Free accounts can browse and search, but "
-"cannot play music through Spotifast."
+"cannot play music through Siphon."
 msgstr ""
 "Çalma için Spotify Premium gerekir. Ücretsiz hesaplar göz atabilir ve "
-"arayabilir, ancak Spotifast üzerinden müzik çalamaz."
+"arayabilir, ancak Siphon üzerinden müzik çalamaz."
 
 #: src/ui/dialogs.rs:222
 msgid "OK"
@@ -2908,8 +2908,8 @@ msgstr ""
 
 #: src/ui/login.rs:154
 #, rust-format
-msgid "Spotifast {version} • not affiliated with Spotify"
-msgstr "Spotifast {version} • Spotify ile bağlantılı değildir"
+msgid "Siphon {version} • not affiliated with Spotify"
+msgstr "Siphon {version} • Spotify ile bağlantılı değildir"
 
 #: src/ui/login.rs:168
 msgid ""
@@ -2937,10 +2937,10 @@ msgstr ""
 
 #: src/ui/login.rs:180
 msgid ""
-"Spotify no longer accepts the shared sign-in Spotifast used before. Set up "
+"Spotify no longer accepts the shared sign-in Siphon used before. Set up "
 "your own Spotify app to keep listening."
 msgstr ""
-"Spotify, Spotifast'ın önceden kullandığı paylaşılan girişi artık kabul "
+"Spotify, Siphon'ın önceden kullandığı paylaşılan girişi artık kabul "
 "etmiyor. Dinlemeye devam etmek için kendi Spotify uygulamanızı kurun."
 
 #: src/ui/login.rs:217
@@ -2970,10 +2970,10 @@ msgstr "Spotify ile giriş yap"
 
 #: src/ui/login.rs:308
 msgid ""
-"Sign in through your browser. Spotifast never sees your password. Local "
+"Sign in through your browser. Siphon never sees your password. Local "
 "playback needs Spotify Premium."
 msgstr ""
-"Tarayıcınız üzerinden giriş yapın. Spotifast parolanızı asla görmez. Yerel "
+"Tarayıcınız üzerinden giriş yapın. Siphon parolanızı asla görmez. Yerel "
 "çalma için Spotify Premium gerekir."
 
 #: src/ui/login.rs:317
@@ -2995,10 +2995,10 @@ msgstr "Spotify uygulamanızı kurun"
 
 #: src/ui/login.rs:447
 msgid ""
-"Spotifast signs in through your own free Spotify app. Spotify requires its "
+"Siphon signs in through your own free Spotify app. Spotify requires its "
 "owner to have Premium."
 msgstr ""
-"Spotifast, kendi ücretsiz Spotify uygulamanız üzerinden giriş yapar. "
+"Siphon, kendi ücretsiz Spotify uygulamanız üzerinden giriş yapar. "
 "Spotify, uygulama sahibinin Premium olmasını şart koşar."
 
 #: src/ui/login.rs:457
@@ -3032,10 +3032,10 @@ msgstr "Spotify paylaşılan uygulamada yavaş çalışıyor."
 
 #: src/ui/mod.rs:379
 msgid ""
-"Spotifast no longer offers the shared app, and Spotify can stop accepting it "
+"Siphon no longer offers the shared app, and Spotify can stop accepting it "
 "at any time. Set up your own free Spotify app and you won't have to wait."
 msgstr ""
-"Spotifast artık paylaşılan uygulamayı sunmuyor ve Spotify onu her an kabul "
+"Siphon artık paylaşılan uygulamayı sunmuyor ve Spotify onu her an kabul "
 "etmeyi bırakabilir. Kendi ücretsiz Spotify uygulamanızı kurarsanız "
 "beklemeniz gerekmez."
 
@@ -3047,11 +3047,11 @@ msgstr "Neden?"
 
 #: src/ui/mod.rs:412
 msgid ""
-"Spotify refused the key that unlocks the audio. Spotifast can't fix that, "
+"Spotify refused the key that unlocks the audio. Siphon can't fix that, "
 "but it sometimes clears up on its own. You can still play on your phone or "
 "another Spotify device."
 msgstr ""
-"Spotify, sesin kilidini açan anahtarı vermeyi reddetti. Spotifast bunu "
+"Spotify, sesin kilidini açan anahtarı vermeyi reddetti. Siphon bunu "
 "düzeltemez, ama bazen kendiliğinden düzelir. Telefonunuzda veya başka bir "
 "Spotify cihazında yine de çalabilirsiniz."
 
@@ -3288,9 +3288,9 @@ msgstr "Ne çalmak istersiniz?"
 
 #: src/ui/topbar.rs:524
 msgid ""
-"Spotifast is offline. Reconnecting automatically when connection returns."
+"Siphon is offline. Reconnecting automatically when connection returns."
 msgstr ""
-"Spotifast çevrimdışı. Bağlantı geri geldiğinde otomatik olarak yeniden "
+"Siphon çevrimdışı. Bağlantı geri geldiğinde otomatik olarak yeniden "
 "bağlanacaktır."
 
 #: src/ui/topbar.rs:551
@@ -3328,8 +3328,8 @@ msgid "Version {version} is available."
 msgstr "Sürüm {version} hazır."
 
 #: src/ui/update.rs:19
-msgid "Update Spotifast"
-msgstr "Spotifast'i güncelle"
+msgid "Update Siphon"
+msgstr "Siphon'i güncelle"
 
 #: src/ui/update.rs:51
 msgid "Close update"
@@ -3350,8 +3350,8 @@ msgid "Ready to install"
 msgstr "Yüklemeye hazır"
 
 #: src/ui/update.rs:115
-msgid "Music playing on this computer will stop when Spotifast restarts."
-msgstr "Spotifast yeniden başlatıldığında bu bilgisayarda çalan müzik duracak."
+msgid "Music playing on this computer will stop when Siphon restarts."
+msgstr "Siphon yeniden başlatıldığında bu bilgisayarda çalan müzik duracak."
 
 #: src/ui/update.rs:122
 msgid "Restart to update"
@@ -3677,8 +3677,8 @@ msgstr ""
 "kullanın."
 
 #: src/window.rs:31
-msgid "Spotifast cannot open its window"
-msgstr "Spotifast penceresini açamıyor"
+msgid "Siphon cannot open its window"
+msgstr "Siphon penceresini açamıyor"
 
 #: src/window.rs:34
 msgid "Open page"
@@ -3686,24 +3686,24 @@ msgstr "Sayfayı aç"
 
 #: src/window.rs:51
 msgid ""
-"On Windows on ARM, the OpenGL that Spotifast draws with comes from "
+"On Windows on ARM, the OpenGL that Siphon draws with comes from "
 "Microsoft's OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft "
 "Store page to install or repair it?"
 msgstr ""
-"ARM üzerinde Windows'ta Spotifast'in çizim için kullandığı OpenGL, "
+"ARM üzerinde Windows'ta Siphon'in çizim için kullandığı OpenGL, "
 "Microsoft'un OpenCL, OpenGL & Vulkan Compatibility Pack paketinden gelir. "
 "Yüklemek veya onarmak için Microsoft Store sayfası açılsın mı?"
 
 #. Translators: Keep {url} exactly as written. It becomes the address
-#. of the Spotifast download page.
+#. of the Siphon download page.
 #: src/window.rs:58
 #, rust-format
 msgid ""
-"Spotifast needs a graphics driver with OpenGL 2.0 or newer, and this PC or "
+"Siphon needs a graphics driver with OpenGL 2.0 or newer, and this PC or "
 "virtual machine does not provide one. Install the graphics driver, or turn "
 "on GPU acceleration for the virtual machine. Open {url} to read more?"
 msgstr ""
-"Spotifast, OpenGL 2.0 veya daha yenisini destekleyen bir grafik sürücüsüne "
+"Siphon, OpenGL 2.0 veya daha yenisini destekleyen bir grafik sürücüsüne "
 "ihtiyaç duyar ve bu bilgisayar ya da sanal makine bunu sağlamıyor. Grafik "
 "sürücüsünü yükleyin veya sanal makine için GPU hızlandırmayı açın. Daha "
 "fazlasını okumak için {url} açılsın mı?"
@@ -3725,11 +3725,11 @@ msgstr ""
 #~ msgstr "Spotify paylaşılan uygulamada yavaş olabilir"
 
 #~ msgid ""
-#~ "Everyone using Spotifast shares one app, and Spotify slows it down when "
+#~ "Everyone using Siphon shares one app, and Spotify slows it down when "
 #~ "it's busy. Set up your own personal Spotify app and you won't have to "
 #~ "wait. It's free and takes a few minutes."
 #~ msgstr ""
-#~ "Spotifast kullanan herkes tek bir uygulamayı paylaşır ve Spotify yoğun "
+#~ "Siphon kullanan herkes tek bir uygulamayı paylaşır ve Spotify yoğun "
 #~ "olduğunda bu uygulamayı yavaşlatır. Kendi kişisel Spotify uygulamanızı "
 #~ "ayarlayın, beklemek zorunda kalmayın. Ücretsizdir ve birkaç dakika sürer."
 
@@ -3744,9 +3744,9 @@ msgstr ""
 #~ "Ücretsizdir ve birkaç dakika sürer."
 
 #~ msgid ""
-#~ "Spotifast hides to the system tray. Quit from the tray menu or with Cmd+Q."
+#~ "Siphon hides to the system tray. Quit from the tray menu or with Cmd+Q."
 #~ msgstr ""
-#~ "Spotifast sistem tepsisine gizlenir. Tepsi menüsünden veya Cmd+Q ile "
+#~ "Siphon sistem tepsisine gizlenir. Tepsi menüsünden veya Cmd+Q ile "
 #~ "çıkın."
 
 #~ msgid "Your most-played tracks from the last four weeks."
@@ -3756,11 +3756,11 @@ msgstr ""
 #~ msgstr "Spotify'ı beklerken daha az zaman harcayın"
 
 #~ msgid ""
-#~ "Spotifast's default connection shares Spotify's request limit with other "
+#~ "Siphon's default connection shares Spotify's request limit with other "
 #~ "listeners. When it gets busy, loading music and using playback controls "
 #~ "can take longer."
 #~ msgstr ""
-#~ "Spotifast'in varsayılan bağlantısı, Spotify'ın istek limitini diğer "
+#~ "Siphon'in varsayılan bağlantısı, Spotify'ın istek limitini diğer "
 #~ "dinleyicilerle paylaşır. Yoğunlaştığında, müzik yüklemek ve çalma "
 #~ "kontrollerini kullanmak daha uzun sürebilir."
 

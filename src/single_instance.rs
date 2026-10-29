@@ -25,7 +25,7 @@
 //! instance the same way, as `open-link`.
 
 /// The name every request and reply starts with, so a copy of another app
-/// never obeys Spotifast's requests.
+/// never obeys Siphon's requests.
 const NAME: &str = "spotifast";
 
 /// The reply to an accepted command.
@@ -138,7 +138,7 @@ pub const NO_DEVICES: &str = "[]";
 /// runtime directory on Linux (the app's own inside Flatpak), the user's
 /// private temporary directory on macOS, where a socket path under
 /// Application Support can outgrow the 104 bytes macOS allows with a long
-/// user name, and beside Spotifast's per-user state on Windows.
+/// user name, and beside Siphon's per-user state on Windows.
 ///
 /// A portable Windows copy keeps its settings in its own folder (#703), so
 /// it gets a slot of its own for that folder, kept in the user's profile
@@ -190,7 +190,7 @@ fn reply(line: &str) -> std::io::Result<Reply> {
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "the running Spotifast answered something unexpected",
+            "the running Siphon answered something unexpected",
         ))
     }
 }
@@ -235,12 +235,12 @@ fn claim(
         }
         fastframe_instance::Claim::Running(_) => Outcome::Surfaced,
         fastframe_instance::Claim::Declined => {
-            log::warn!("Spotifast is already running and declined this launch's request");
+            log::warn!("Siphon is already running and declined this launch's request");
             Outcome::Surfaced
         }
         fastframe_instance::Claim::Unanswered => {
             log::warn!(
-                "Spotifast is already running but did not answer; not starting a second copy"
+                "Siphon is already running but did not answer; not starting a second copy"
             );
             Outcome::Surfaced
         }
@@ -520,7 +520,7 @@ mod tests {
         assert!(command("seek-to -1").is_none());
     }
 
-    /// A slot of its own in a throwaway directory, so a Spotifast already
+    /// A slot of its own in a throwaway directory, so a Siphon already
     /// running on this machine is left alone.
     fn test_slot(name: &str) -> (fastframe_instance::Slot, std::path::PathBuf) {
         let dir =
@@ -560,7 +560,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    /// A start at login in the tray finds Spotifast already running (the
+    /// A start at login in the tray finds Siphon already running (the
     /// person opened it first) and ends without bringing it forward.
     #[test]
     fn a_hidden_second_launch_leaves_the_first_where_it_is() {

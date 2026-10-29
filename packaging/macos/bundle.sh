@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Spotifast.app from a GUI binary, on a macOS machine.
+# Build Siphon.app from a GUI binary, on a macOS machine.
 #
 #   packaging/macos/bundle.sh <binary> <output.app> <version>
 #
@@ -18,8 +18,8 @@ here="$(cd "$(dirname "$0")" && pwd)"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
-executable=Spotifast
-identifier=rocks.spotifast.Spotifast
+executable=Siphon
+identifier=rocks.spotifast.Siphon
 cp "$binary" "$app/Contents/MacOS/$executable"
 chmod 755 "$app/Contents/MacOS/$executable"
 # The build number has to be numbers: a release candidate's -rc1 comes off.

@@ -96,7 +96,7 @@ fn existing_preferences_and_custom_connect_names_survive_a_save() {
 
     let scratch = Scratch::new();
     let path = scratch.0.join("settings.json");
-    for name in ["Spotifast", "Living room", "Carmine's laptop"] {
+    for name in ["Siphon", "Living room", "Carmine's laptop"] {
         let saved = Settings {
             device_name: name.into(),
             theme: ThemeChoice::Light,
@@ -110,7 +110,7 @@ fn existing_preferences_and_custom_connect_names_survive_a_save() {
         saved.save(&path);
         assert_eq!(Settings::load(&path), saved);
     }
-    assert_eq!(Settings::default().device_name, "Spotifast");
+    assert_eq!(Settings::default().device_name, "Siphon");
 }
 
 #[cfg(target_os = "linux")]
@@ -150,7 +150,7 @@ fn the_command_forwards_links_to_the_existing_instance_on_a_private_bus() {
             ])
             .env(CHILD, "1")
             // The running copy's slot lives in the runtime directory, so a
-            // Spotifast already running on this machine is left alone.
+            // Siphon already running on this machine is left alone.
             .env("XDG_RUNTIME_DIR", &scratch.0)
             .output()
             .expect("the Linux test environment needs dbus-run-session");

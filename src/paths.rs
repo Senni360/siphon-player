@@ -1,4 +1,4 @@
-//! Where Spotifast keeps its files.
+//! Where Siphon keeps its files.
 //!
 //! Configuration, durable non-secret state, and disposable caches live in the
 //! platform's conventional directories, or, for a copy started from the
@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-/// Where Spotifast's folders are: the per-user folders, or a portable copy's
+/// Where Siphon's folders are: the per-user folders, or a portable copy's
 /// own. A new portable folder copies the per-user settings and state, except
 /// the single-instance files a running installed copy holds locked and the
 /// logs of its runs.
@@ -297,7 +297,7 @@ mod tests {
     fn the_log_says_which_folders_a_portable_copy_uses_and_why() {
         let installed = AppDirs::from(fastframe_dirs::Dirs::inside(Path::new("/user")));
         assert!(describe(&installed, &fastframe_dirs::Mode::Installed).is_none());
-        let folder = PathBuf::from("/usb/Spotifast/spotifast-data");
+        let folder = PathBuf::from("/usb/Siphon/spotifast-data");
         let portable = AppDirs::from(fastframe_dirs::Dirs::inside(&folder));
         let (level, line) = describe(
             &portable,

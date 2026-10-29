@@ -1,4 +1,4 @@
-//! Spotifast's internals, exposed so diagnostics and tests can reach them.
+//! Siphon's internals, exposed so diagnostics and tests can reach them.
 
 pub mod account_cache;
 pub mod api;
@@ -9,6 +9,7 @@ pub mod auth;
 pub mod autoscroll;
 pub mod backend;
 pub mod bidi;
+pub mod brand;
 pub mod cast;
 pub mod credentials;
 #[cfg(any(test, feature = "demo"))]

@@ -841,7 +841,7 @@ pub fn populate(app: &mut App) {
     app.devices = vec![
         Device {
             id: Some("local-demo".into()),
-            name: "Spotifast".into(),
+            name: "Siphon".into(),
             is_active: false,
             is_restricted: false,
             volume_percent: Some(70),
@@ -6662,7 +6662,7 @@ mod tests {
         let painted = view_frame(&ctx, &mut app, vec![], App::frame_ui);
         let title = sidebar_text(&painted, "Light mode theme");
         assert!(sidebar_text(&painted, "Dark mode theme").top() > title.top());
-        // The picker beside the title shows Spotifast's own Light.
+        // The picker beside the title shows Siphon's own Light.
         let picker = painted
             .iter()
             .find(|(text, rect)| {
@@ -7581,7 +7581,7 @@ mod tests {
                             "{:?} is cut off at {size:?} in {state:?}",
                             text.galley.job.text
                         );
-                        if text.galley.job.text == "Spotifast" {
+                        if text.galley.job.text == "Siphon" {
                             title = Some(rect);
                         }
                     }
@@ -9707,7 +9707,7 @@ mod tests {
         app.backend.shutdown();
     }
 
-    /// "Next up" plays from the current context, not from a list Spotifast
+    /// "Next up" plays from the current context, not from a list Siphon
     /// can rewrite, so it is never a drop target: dropping a queued row on
     /// it must not move or insert anything, even though the row sits inside
     /// the same scrollable list as "Playing next".
