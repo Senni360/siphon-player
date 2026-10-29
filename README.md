@@ -155,7 +155,12 @@ Spotify playlist. Mixed playlists hold Spotify and SoundCloud tracks together,
 with the same sorting, filtering, selection and drag controls. **Add to
 playlist** lists both kinds. SoundCloud songs added to a Spotify playlist stay
 on this computer as local insertions; they do not change its Spotify contents.
-A Spotify playlist's More menu can copy its rows into a mixed playlist.
+A SoundCloud playlist or album's More menu offers **Add to playlist** for the
+whole set. Choose a Spotify playlist or an existing mixed playlist. Tracks keep
+their order and repeated occurrences, just like local single-song additions.
+Unloaded sets show placeholder rows while their metadata loads. The **SC**
+badge explains that playlist additions stay on this computer. A Spotify
+playlist's More menu can copy its rows into a mixed playlist.
 
 Local mixed-playlist and Spotify-overlay storage formats are described in
 [Settings and files](docs/_reference/settings-and-files.md#local-mixed-playlist-files).

@@ -45,7 +45,9 @@ pub fn source_badge(
         theme::semibold(9.5),
         palette.secondary,
     );
-    Some(response.on_hover_text(label))
+    Some(response.on_hover_text(format!(
+        "{label}. Playlist additions are stored on this computer only."
+    )))
 }
 
 /// Draws an image (or a placeholder) in a square.
@@ -818,6 +820,14 @@ pub fn picked_menu(
 }
 
 fn add_to_playlist_menu(ui: &mut Ui, app: &mut App, items: &[PlayableItem]) {
+    playlist_add_menu(ui, app, items, None);
+}
+
+pub(crate) fn soundcloud_playlist_add_menu(ui: &mut Ui, app: &mut App, uri: &str) {
+    playlist_add_menu(ui, app, &[], Some(uri));
+}
+
+fn playlist_add_menu(ui: &mut Ui, app: &mut App, items: &[PlayableItem], source: Option<&str>) {
     let query_id = ui.make_persistent_id("add-to-playlist-query");
     let palette = app.palette;
     let opened = menu_submenu_with_field(
@@ -832,7 +842,7 @@ fn add_to_playlist_menu(ui: &mut Ui, app: &mut App, items: &[PlayableItem]) {
                 .filter(|(last_frame, _)| frame.saturating_sub(*last_frame) <= 1);
             let fresh = previous.is_none();
             let mut query = previous.map(|(_, query)| query).unwrap_or_default();
-            let field = playlist_picker(ui, app, items, &mut query);
+            let field = playlist_picker_source(ui, app, items, &mut query, source);
             if fresh {
                 field.request_focus();
             }
@@ -844,13 +854,22 @@ fn add_to_playlist_menu(ui: &mut Ui, app: &mut App, items: &[PlayableItem]) {
     }
 }
 
-/// Shared by single-item and selection menus. Filtering is local and keeps
-/// the existing playlist edit permissions and library order.
+/// Shared by single-item and selection menus, including the player bar.
 pub(crate) fn playlist_picker(
     ui: &mut Ui,
     app: &mut App,
     items: &[PlayableItem],
     query: &mut String,
+) -> egui::Response {
+    playlist_picker_source(ui, app, items, query, None)
+}
+
+fn playlist_picker_source(
+    ui: &mut Ui,
+    app: &mut App,
+    items: &[PlayableItem],
+    query: &mut String,
+    source: Option<&str>,
 ) -> egui::Response {
     let palette = app.palette;
     let locale = app.locale;
@@ -916,9 +935,10 @@ pub(crate) fn playlist_picker(
         highlighted = (!query.trim().is_empty()).then_some(0);
     }
     ui.add_space(4.0);
-    if !items
-        .iter()
-        .any(|item| item.uri().starts_with("soundcloud:track:"))
+    if source.is_none()
+        && !items
+            .iter()
+            .any(|item| item.uri().starts_with("soundcloud:track:"))
         && menu_item(
             ui,
             &palette,
@@ -932,7 +952,7 @@ pub(crate) fn playlist_picker(
             add_uris: items.iter().map(|item| item.uri().to_string()).collect(),
         }));
     }
-    if menu_item(ui, &palette, Some(Icon::Plus), "New mixed playlist") {
+    if source.is_none() && menu_item(ui, &palette, Some(Icon::Plus), "New mixed playlist") {
         app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
             id: None,
             name: String::new(),
@@ -955,11 +975,14 @@ pub(crate) fn playlist_picker(
     highlighted = highlighted.filter(|index| *index < matches.len());
     ui.data_mut(|data| data.insert_temp(highlight_id, (frame, highlighted, query.clone())));
     if enter && let Some((id, name)) = highlighted.and_then(|index| matches.get(index)) {
-        app.actions.push(Action::AddToPlaylist {
-            playlist_id: id.clone(),
-            playlist_name: name.clone(),
-            items: items.to_vec(),
-        });
+        app.actions.push(playlist_add_action(
+            source,
+            Action::AddToPlaylist {
+                playlist_id: id.clone(),
+                playlist_name: name.clone(),
+                items: items.to_vec(),
+            },
+        ));
         ui.close();
     }
     if matches.is_empty() {
@@ -994,17 +1017,38 @@ pub(crate) fn playlist_picker(
                         row.scroll_to_me(None);
                     }
                     if clicked {
-                        app.actions.push(Action::AddToPlaylist {
-                            playlist_id: id.clone(),
-                            playlist_name: name.clone(),
-                            items: items.to_vec(),
-                        });
+                        app.actions.push(playlist_add_action(
+                            source,
+                            Action::AddToPlaylist {
+                                playlist_id: id.clone(),
+                                playlist_name: name.clone(),
+                                items: items.to_vec(),
+                            },
+                        ));
                     }
                 });
             }
         },
     );
     field
+}
+
+fn playlist_add_action(source: Option<&str>, action: Action) -> Action {
+    match (source, action) {
+        (
+            Some(uri),
+            Action::AddToPlaylist {
+                playlist_id,
+                playlist_name,
+                ..
+            },
+        ) => Action::AddSoundCloudPlaylist {
+            uri: uri.into(),
+            playlist_id,
+            playlist_name,
+        },
+        (_, action) => action,
+    }
 }
 
 pub fn item_menu(
@@ -1342,6 +1386,9 @@ pub fn context_menu_items(
         app.actions.push(Action::ShufflePlay(uri.to_string()));
     }
     if crate::soundcloud::is_uri(uri) {
+        if crate::soundcloud::playlist_id(uri).is_some() {
+            soundcloud_playlist_add_menu(ui, app, uri);
+        }
         let url = app.soundcloud_link(uri);
         soundcloud_link_menu(ui, app, url.as_deref());
         return;
@@ -4085,6 +4132,83 @@ mod tests {
     }
 
     #[test]
+    fn soundcloud_set_picker_selects_spotify_and_mixed_destinations() {
+        for mixed in [false, true] {
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            theme::install(&ctx);
+            let mut app = test_app();
+            app.user = Some(User {
+                id: "me".into(),
+                ..Default::default()
+            });
+            app.library.playlists = crate::model::Loadable::Loaded(vec![Playlist {
+                id: "spotify-destination".into(),
+                name: "Spotify target".into(),
+                collaborative: true,
+                ..Default::default()
+            }]);
+            let id = app
+                .mixed_playlists
+                .create("Mixed target".into(), String::new());
+            let mut query = if mixed { "Mixed" } else { "Spotify" }.to_string();
+            let mut frame = |events| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(600.0, 500.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        playlist_picker_source(
+                            ui,
+                            &mut app,
+                            &[],
+                            &mut query,
+                            Some("soundcloud:playlist:7"),
+                        );
+                    },
+                );
+                output.textures_delta.clear();
+                output.platform_output.accesskit_update.unwrap()
+            };
+            let tree = frame(vec![]);
+            let label = if mixed {
+                "Mixed target (Mixed)"
+            } else {
+                "Spotify target"
+            };
+            assert!(
+                !tree
+                    .nodes
+                    .iter()
+                    .any(|(_, node)| node.label() == Some("New playlist"))
+            );
+            let (node, _) = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| node.label() == Some(label))
+                .expect("filtered destination");
+            frame(vec![egui::Event::AccessKitActionRequest(
+                egui::accesskit::ActionRequest {
+                    target_tree: egui::accesskit::TreeId::ROOT,
+                    target_node: *node,
+                    action: egui::accesskit::Action::Click,
+                    data: None,
+                },
+            )]);
+            assert!(
+                matches!(app.actions.as_slice(), [Action::AddSoundCloudPlaylist { uri, playlist_id, .. }]
+                if uri == "soundcloud:playlist:7" && *playlist_id == if mixed { format!("spotifast:playlist:{id}") } else { "spotify-destination".into() })
+            );
+            app.backend.shutdown();
+        }
+    }
+
+    #[test]
     fn soundcloud_row_menu_omits_spotify_actions_and_names_its_service() {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
@@ -4156,6 +4280,10 @@ mod tests {
                 .filter_map(|(_, node)| node.label())
                 .collect();
             assert!(labels.contains(&"Open on SoundCloud"));
+            assert_eq!(
+                labels.contains(&"Add to playlist"),
+                uri.starts_with("soundcloud:playlist:")
+            );
             for absent in [
                 "Follow",
                 "Add to Your Library",

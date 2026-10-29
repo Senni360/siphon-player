@@ -123,6 +123,21 @@ pub async fn search(client: &Client, request: &SearchRequest) -> SoundCloudSearc
     out
 }
 
+/// Preserve every occurrence while its metadata batch is in flight.
+pub(crate) fn playlist_add_rows(playlist: &models::Playlist) -> Vec<crate::api::models::Track> {
+    playlist
+        .tracks
+        .iter()
+        .map(|track| {
+            let mut row = track.to_track(Some(playlist));
+            if track.is_stub() {
+                row.name = "Loading SoundCloud track…".into();
+            }
+            row
+        })
+        .collect()
+}
+
 pub async fn collection(
     client: &Client,
     uri: &str,

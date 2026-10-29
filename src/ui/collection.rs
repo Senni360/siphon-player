@@ -2703,7 +2703,7 @@ pub fn soundcloud(app: &mut App, ui: &mut egui::Ui, uri: &str) {
     let revision = state.generation;
     let page = Page::SoundCloud(uri.into());
     let fallback_title = gettext(app.locale, "SoundCloud");
-    theme::section_title(
+    let title = theme::section_title(
         ui,
         &app.palette,
         if content.title.is_empty() {
@@ -2712,6 +2712,37 @@ pub fn soundcloud(app: &mut App, ui: &mut egui::Ui, uri: &str) {
             &content.title
         },
     );
+    if crate::soundcloud::playlist_id(uri).is_some() {
+        let palette = app.palette;
+        let more = theme::icon_button(
+            ui,
+            Icon::Ellipsis,
+            26.0,
+            palette.secondary,
+            palette.text,
+            &gettext(app.locale, "More"),
+        );
+        egui::Popup::menu(&more)
+            .frame(widgets::menu_frame(&palette))
+            .show(|ui| {
+                widgets::context_menu_items(ui, app, uri, &content.title, None);
+            });
+        let title = title.interact(Sense::click());
+        title.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Label,
+                ui.is_enabled(),
+                if content.title.is_empty() {
+                    fallback_title.as_ref()
+                } else {
+                    &content.title
+                },
+            )
+        });
+        title.context_menu(|ui| {
+            widgets::context_menu_items(ui, app, uri, &content.title, None);
+        });
+    }
     widgets::source_badge(ui, &app.palette, app.locale, uri);
     let items: Vec<TableItem> = content
         .tracks
@@ -2923,6 +2954,97 @@ mod tests {
 
     fn adders(ids: &[&str]) -> std::collections::BTreeSet<String> {
         ids.iter().map(|id| (*id).to_string()).collect()
+    }
+
+    #[test]
+    fn soundcloud_set_header_opens_add_to_playlist_from_more_and_right_click() {
+        for palette in [Palette::light(), Palette::dark()] {
+            for width in [360.0, 900.0] {
+                for button in [egui::PointerButton::Primary, egui::PointerButton::Secondary] {
+                    let ctx = egui::Context::default();
+                    ctx.enable_accesskit();
+                    theme::install(&ctx);
+                    let mut app = test_app();
+                    app.palette = palette;
+                    let uri = "soundcloud:playlist:7";
+                    app.soundcloud_pages.insert(
+                        uri.into(),
+                        crate::model::SoundCloudPage {
+                            content: Loadable::Loaded(crate::model::SoundCloudCollection {
+                                title: "A SoundCloud set".into(),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        },
+                    );
+                    let mut frame = |events| {
+                        let mut output = ctx.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    vec2(width, 600.0),
+                                )),
+                                events,
+                                ..Default::default()
+                            },
+                            |ui| soundcloud(&mut app, ui, uri),
+                        );
+                        output.textures_delta.clear();
+                        output.platform_output.accesskit_update.unwrap()
+                    };
+                    let mut tree = frame(vec![]);
+                    tree.nodes.extend(frame(vec![]).nodes);
+                    let label = if button == egui::PointerButton::Primary {
+                        "More"
+                    } else {
+                        "A SoundCloud set"
+                    };
+                    let bounds = tree
+                        .nodes
+                        .iter()
+                        .find(|(_, node)| node.label().or_else(|| node.value()) == Some(label))
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "missing {label}: {:?}",
+                                tree.nodes
+                                    .iter()
+                                    .filter_map(|(_, node)| node.label().or_else(|| node.value()))
+                                    .collect::<Vec<_>>()
+                            )
+                        })
+                        .1
+                        .bounds()
+                        .unwrap();
+                    let pos = pos2(
+                        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+                        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+                    );
+                    let mut tree = frame(vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                        egui::Event::PointerButton {
+                            pos,
+                            button,
+                            pressed: false,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ]);
+                    tree.nodes.extend(frame(vec![]).nodes);
+                    assert!(
+                        tree.nodes
+                            .iter()
+                            .any(|(_, node)| node.label() == Some("Add to playlist")),
+                        "{button:?} at width {width}"
+                    );
+                    app.backend.shutdown();
+                }
+            }
+        }
     }
 
     #[test]

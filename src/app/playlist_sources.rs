@@ -91,7 +91,156 @@ fn merge_boundary(page: &PlaylistPage, overlay: &Overlay, index: usize) -> usize
         .unwrap_or(merged.len())
 }
 
+pub(super) struct PendingSoundCloudAdd {
+    target: String,
+    name: String,
+    entries: Vec<String>,
+}
+
 impl App {
+    fn soundcloud_add_entries(&mut self, target: &str) -> Vec<&mut crate::mixed_playlists::Entry> {
+        if let Some(id) = target.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
+            self.mixed_playlists
+                .get_mut(id)
+                .map(|playlist| playlist.entries.iter_mut().collect())
+                .unwrap_or_default()
+        } else {
+            self.playlist_overlay
+                .get_mut(target.strip_prefix(OVERLAY_TARGET).unwrap_or(target))
+                .entries
+                .iter_mut()
+                .map(|row| &mut row.entry)
+                .collect()
+        }
+    }
+
+    pub(super) fn add_soundcloud_playlist(&mut self, uri: &str, target: String, name: String) {
+        let Some(id) = crate::soundcloud::playlist_id(uri) else {
+            return;
+        };
+        if let Some(id) = target.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
+            if !self.mixed_playlists_writable || self.mixed_playlists.get(id).is_none() {
+                self.toast_error("Mixed playlist is unavailable");
+                return;
+            }
+        } else if !self.playlist_overlay_writable {
+            self.toast_error(
+                "Playlist overlays could not be loaded; the original file has been kept",
+            );
+            return;
+        }
+        self.load_generation += 1;
+        let request = self.load_generation;
+        self.pending_soundcloud_adds.insert(
+            request,
+            PendingSoundCloudAdd {
+                target,
+                name,
+                entries: Vec::new(),
+            },
+        );
+        if let Some(content) = self
+            .soundcloud_pages
+            .get(uri)
+            .and_then(|page| page.content.get())
+            && content.next.is_none()
+        {
+            self.soundcloud_playlist_add_finished(request, true, Ok(content.tracks.clone()));
+        } else {
+            self.backend
+                .send(Command::AddSoundCloudPlaylist { id, request });
+            self.toast("Adding SoundCloud tracks…");
+        }
+    }
+
+    pub(super) fn soundcloud_playlist_add_finished(
+        &mut self,
+        request: u64,
+        complete: bool,
+        result: Result<Vec<Track>, String>,
+    ) {
+        let Some(mut pending) = self.pending_soundcloud_adds.remove(&request) else {
+            return;
+        };
+        // A deleted destination must never be recreated by a late reply.
+        if let Some(id) = pending
+            .target
+            .strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX)
+            && self.mixed_playlists.get(id).is_none()
+        {
+            return;
+        }
+        match result {
+            Ok(tracks) => {
+                if pending.entries.is_empty() {
+                    let before: HashSet<_> = self
+                        .soundcloud_add_entries(&pending.target)
+                        .iter()
+                        .map(|entry| entry.id.clone())
+                        .collect();
+                    let items: Vec<_> = tracks.iter().cloned().map(PlayableItem::Track).collect();
+                    self.add_playlist_sources(&pending.target, &pending.name, &items, None);
+                    pending.entries = self
+                        .soundcloud_add_entries(&pending.target)
+                        .iter()
+                        .filter(|entry| !before.contains(&entry.id))
+                        .map(|entry| entry.id.clone())
+                        .collect();
+                } else {
+                    let filled: HashMap<_, _> = pending.entries.iter().zip(&tracks).collect();
+                    for entry in self.soundcloud_add_entries(&pending.target) {
+                        if let Some(track) = filled.get(&entry.id) {
+                            entry.track = (*track).clone();
+                            entry.permalink.clone_from(&track.external_urls.spotify);
+                        }
+                    }
+                    self.save_playlist_sources();
+                }
+                if complete {
+                    self.toast(format!(
+                        "Added {} SoundCloud tracks to {}",
+                        tracks.len(),
+                        pending.name
+                    ));
+                } else {
+                    self.pending_soundcloud_adds.insert(request, pending);
+                }
+            }
+            Err(error) => {
+                if let Some(id) = pending
+                    .target
+                    .strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX)
+                {
+                    if let Some(playlist) = self.mixed_playlists.get_mut(id) {
+                        playlist.remove_entries(&pending.entries);
+                    }
+                } else {
+                    let overlay = self.playlist_overlay.get_mut(
+                        pending
+                            .target
+                            .strip_prefix(OVERLAY_TARGET)
+                            .unwrap_or(&pending.target),
+                    );
+                    let ids: HashSet<_> = pending.entries.iter().collect();
+                    overlay.entries.retain(|row| !ids.contains(&row.entry.id));
+                }
+                self.save_playlist_sources();
+                self.toast_error(format!("Could not add SoundCloud playlist: {error}"));
+            }
+        }
+    }
+
+    pub(super) fn cancel_soundcloud_playlist_adds(&mut self) {
+        let requests: Vec<_> = self.pending_soundcloud_adds.keys().copied().collect();
+        for request in requests {
+            self.soundcloud_playlist_add_finished(
+                request,
+                true,
+                Err("Connection changed. Please add the playlist again.".into()),
+            );
+        }
+    }
+
     pub(super) fn save_playlist_sources(&mut self) {
         self.playlist_sources_revision = self.playlist_sources_revision.wrapping_add(1);
         if self.offline {
@@ -642,6 +791,240 @@ mod tests {
         drop(app);
         if root.exists() {
             std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    fn set_tracks(app: &mut App) -> Vec<Track> {
+        let tracks = vec![
+            track("soundcloud:track:1"),
+            track("soundcloud:track:2"),
+            track("soundcloud:track:1"),
+        ];
+        app.soundcloud_pages.insert(
+            "soundcloud:playlist:7".into(),
+            SoundCloudPage {
+                content: Loadable::Loaded(SoundCloudCollection {
+                    title: "A set".into(),
+                    tracks: tracks.clone(),
+                    next: None,
+                }),
+                ..Default::default()
+            },
+        );
+        tracks
+    }
+
+    #[test]
+    fn soundcloud_set_adds_every_occurrence_immediately_and_persists_locally() {
+        let mut app = app("set-add");
+        app.playlist_pages.insert("p".into(), spotify(&["a"]));
+        let tracks = set_tracks(&mut app);
+        let mixed = app.mixed_playlists.create("Mix".into(), String::new());
+        for target in ["p".to_string(), format!("spotifast:playlist:{mixed}")] {
+            for _ in 0..2 {
+                app.apply(
+                    Action::AddSoundCloudPlaylist {
+                        uri: "soundcloud:playlist:7".into(),
+                        playlist_id: target.clone(),
+                        playlist_name: "Destination".into(),
+                    },
+                    &egui::Context::default(),
+                );
+            }
+            let entries = app.soundcloud_add_entries(&target);
+            assert_eq!(
+                entries.iter().map(|entry| &entry.track).collect::<Vec<_>>(),
+                tracks.iter().cycle().take(6).collect::<Vec<_>>()
+            );
+            assert_eq!(
+                entries
+                    .iter()
+                    .map(|entry| &entry.id)
+                    .collect::<HashSet<_>>()
+                    .len(),
+                6
+            );
+        }
+        assert!(app.pending_soundcloud_adds.is_empty());
+        assert!(
+            app.dialog.is_none(),
+            "local single-track adds also allow duplicates"
+        );
+        assert!(app.backend.take_playlist_add_requests().is_empty());
+        assert!(
+            app.toasts
+                .iter()
+                .all(|toast| toast.message == "Added 3 SoundCloud tracks to Destination")
+        );
+        assert!(app.files.flush(Duration::from_secs(10)));
+        assert_eq!(
+            crate::playlist_overlay::Store::load(&app.dirs.playlist_overlay_file()).unwrap(),
+            app.playlist_overlay
+        );
+        assert_eq!(
+            crate::mixed_playlists::Store::load(&app.dirs.mixed_playlists_file()).unwrap(),
+            app.mixed_playlists
+        );
+        cleanup(app);
+    }
+
+    #[test]
+    fn soundcloud_set_hydrates_placeholders_by_entry_id_without_reviving_removed_rows() {
+        let mut app = app("set-hydrate");
+        app.playlist_pages.insert("p".into(), spotify(&["a"]));
+        let mixed = app.mixed_playlists.create("Mix".into(), String::new());
+        for (request, target) in [
+            (1, "p".to_string()),
+            (2, format!("spotifast:playlist:{mixed}")),
+        ] {
+            let mut filled = vec![
+                track("soundcloud:track:1"),
+                track("soundcloud:track:2"),
+                track("soundcloud:track:1"),
+            ];
+            filled[0].external_urls.spotify = Some("https://soundcloud.com/u/one".into());
+            let placeholders = filled
+                .iter()
+                .map(|track| Track {
+                    uri: track.uri.clone(),
+                    name: "Loading".into(),
+                    is_playable: Some(false),
+                    ..Default::default()
+                })
+                .collect();
+            app.pending_soundcloud_adds.insert(
+                request,
+                PendingSoundCloudAdd {
+                    target: target.clone(),
+                    name: "Target".into(),
+                    entries: Vec::new(),
+                },
+            );
+            app.handle_backend_events(vec![Event::SoundCloudPlaylistAdd {
+                request,
+                complete: false,
+                result: Ok(placeholders),
+            }]);
+            let ids = app.pending_soundcloud_adds[&request].entries.clone();
+            assert_eq!(ids.len(), 3);
+            assert!(
+                app.soundcloud_add_entries(&target)
+                    .iter()
+                    .all(|entry| entry.track.name == "Loading")
+            );
+            if target == "p" {
+                app.playlist_overlay.get_mut("p").remove(&ids[1]);
+                let source = app.source_tracks("p");
+                app.playlist_overlay
+                    .get_mut("p")
+                    .move_entry(&source, &ids[2], 0);
+            } else {
+                let playlist = app.mixed_playlists.get_mut(&mixed).unwrap();
+                playlist.remove_entries(&[ids[1].clone()]);
+                playlist.move_entries(&[ids[2].clone()], 0);
+            }
+            app.soundcloud_playlist_add_finished(request, true, Ok(filled.clone()));
+            let entries = app.soundcloud_add_entries(&target);
+            assert_eq!(
+                entries.iter().map(|entry| &entry.id).collect::<Vec<_>>(),
+                [&ids[2], &ids[0]]
+            );
+            assert_eq!(entries[1].to_track(), filled[0]);
+            assert_eq!(entries[0].to_track(), filled[2]);
+            assert!(!app.pending_soundcloud_adds.contains_key(&request));
+        }
+        cleanup(app);
+    }
+
+    #[test]
+    fn soundcloud_set_failure_or_connection_change_removes_only_its_provisional_rows() {
+        let mut app = app("set-fail");
+        for (request, fail) in [(1, true), (2, false)] {
+            app.pending_soundcloud_adds.insert(
+                request,
+                PendingSoundCloudAdd {
+                    target: "p".into(),
+                    name: "Target".into(),
+                    entries: Vec::new(),
+                },
+            );
+            app.soundcloud_playlist_add_finished(
+                request,
+                false,
+                Ok(vec![track("soundcloud:track:1")]),
+            );
+            app.add_playlist_sources(
+                "p",
+                "Target",
+                &[PlayableItem::Track(track("soundcloud:track:2"))],
+                None,
+            );
+            if fail {
+                app.soundcloud_playlist_add_finished(request, true, Err("Missing track".into()));
+            } else {
+                app.cancel_soundcloud_playlist_adds();
+            }
+            app.soundcloud_playlist_add_finished(
+                request,
+                true,
+                Ok(vec![track("soundcloud:track:1")]),
+            );
+            assert!(
+                app.soundcloud_add_entries("p")
+                    .iter()
+                    .all(|entry| entry.track.uri == "soundcloud:track:2")
+            );
+        }
+        assert_eq!(app.soundcloud_add_entries("p").len(), 2);
+        cleanup(app);
+    }
+
+    #[test]
+    fn soundcloud_set_playback_uses_the_complete_hybrid_context_including_shuffle() {
+        for shuffle in [false, true] {
+            let mut app = app("set-play");
+            app.backend.set_offline(true);
+            app.playlist_pages.insert("p".into(), spotify(&["a", "b"]));
+            let tracks = set_tracks(&mut app);
+            let mixed = app.mixed_playlists.create("Mix".into(), String::new());
+            for (target, uri) in [
+                ("p".to_string(), "spotify:playlist:p".to_string()),
+                (
+                    format!("spotifast:playlist:{mixed}"),
+                    format!("spotifast:playlist:{mixed}"),
+                ),
+            ] {
+                app.add_soundcloud_playlist("soundcloud:playlist:7", target, "Target".into());
+                app.shuffle_wanted = shuffle;
+                app.apply(
+                    Action::PlayContext {
+                        uri: uri.clone(),
+                        offset_uri: None,
+                        offset_index: None,
+                    },
+                    &egui::Context::default(),
+                );
+                assert!(app.hybrid_owned());
+                let snapshot = app.hybrid_snapshot().unwrap();
+                let queue = crate::hybrid_queue::HybridQueue::restore(snapshot).unwrap();
+                assert_eq!(queue.context().unwrap().uri, uri);
+                assert_eq!(queue.shuffle(), shuffle);
+                let mut played = vec![app.current_track_uri().unwrap()];
+                while !app.queue.get().unwrap().queue.is_empty() {
+                    app.apply(Action::Next, &egui::Context::default());
+                    played.push(app.current_track_uri().unwrap());
+                }
+                let mut expected: Vec<_> = tracks.iter().map(|track| track.uri.clone()).collect();
+                if uri.starts_with("spotify:") {
+                    expected.splice(0..0, ["spotify:track:a".into(), "spotify:track:b".into()]);
+                }
+                if shuffle {
+                    played.sort();
+                    expected.sort();
+                }
+                assert_eq!(played, expected);
+            }
+            cleanup(app);
         }
     }
 

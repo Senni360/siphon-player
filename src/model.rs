@@ -1360,6 +1360,12 @@ pub enum Action {
         uris: Vec<String>,
         saved: bool,
     },
+    /// Copy a complete SoundCloud set into local playlist storage only.
+    AddSoundCloudPlaylist {
+        uri: String,
+        playlist_id: String,
+        playlist_name: String,
+    },
     AddToPlaylist {
         playlist_id: String,
         playlist_name: String,

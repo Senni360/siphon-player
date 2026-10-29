@@ -592,6 +592,72 @@ async fn batches_at_most_fifty_ids_and_restores_request_order() {
 }
 
 #[tokio::test]
+async fn playlist_local_copy_exposes_placeholders_then_fills_every_batch_and_duplicate() {
+    let ids: Vec<u64> = (1..=121).chain([1]).collect();
+    let mut rows: Vec<_> = ids.iter().map(|id| json!({"id":id})).collect();
+    rows.insert(7, json!({"id":1000,"title":"Already complete"}));
+    let mut replies = vec![ok(
+        json!({"id":7,"title":"A large set","tracks":rows}).to_string()
+    )];
+    for chunk in ids.chunks(50) {
+        replies.push(ok(serde_json::to_string(
+            &chunk
+                .iter()
+                .rev()
+                .map(|id| json!({"id":id,"title":format!("Track {id}")}))
+                .collect::<Vec<_>>(),
+        )
+        .unwrap()));
+    }
+    let (client, task) = server(replies).await;
+    let mut playlist = client.playlist_snapshot(7).await.unwrap();
+    let provisional = crate::soundcloud::browse::playlist_add_rows(&playlist);
+    assert_eq!(provisional.len(), 123);
+    assert_eq!(provisional[7].name, "Already complete");
+    assert_eq!(provisional[0].name, "Loading SoundCloud track…");
+    assert_eq!(provisional[0].is_playable, Some(false));
+    client.fill_playlist(&mut playlist).await.unwrap();
+    let filled = playlist.to_tracks();
+    assert_eq!(filled.len(), provisional.len());
+    assert_eq!(
+        filled.iter().map(|row| &row.uri).collect::<Vec<_>>(),
+        provisional.iter().map(|row| &row.uri).collect::<Vec<_>>()
+    );
+    assert_eq!(filled[7].name, "Already complete");
+    assert_eq!(filled[0].name, "Track 1");
+    assert_eq!(filled[122].name, "Track 1");
+    assert!(
+        filled
+            .iter()
+            .all(|track| track.album.as_ref().unwrap().name == "A large set")
+    );
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[0].starts_with("GET /playlists/7?"));
+    for (request, chunk) in requests[1..].iter().zip(ids.chunks(50)) {
+        let query = Url::parse(&format!(
+            "http://test{}",
+            request
+                .lines()
+                .next()
+                .unwrap()
+                .split_whitespace()
+                .nth(1)
+                .unwrap()
+        ))
+        .unwrap();
+        assert_eq!(
+            query.query_pairs().find(|(key, _)| key == "ids").unwrap().1,
+            chunk
+                .iter()
+                .map(u64::to_string)
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+}
+
+#[tokio::test]
 async fn playlist_endpoint_hydrates_stubs_before_returning() {
     let (client, task) = server(vec![
         ok(json!({"id":7,"title":"A set","tracks":[{"id":3},{"id":1,"title":"Already complete"},{"id":2},{"id":3}]}).to_string()),

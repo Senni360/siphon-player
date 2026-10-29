@@ -2,11 +2,11 @@
 //!
 //! Transcodings checked on 2026-10-28: SoundCloud announced AAC HLS at
 //! 160/96 kbit/s and retirement of public API MP3/Opus by December 2025:
-//! https://developers.soundcloud.com/blog/api-streaming-urls/
+//! <https://developers.soundcloud.com/blog/api-streaming-urls/>
 //! The web API is a separate surface: yt-dlp still handles legacy MP3,
 //! AAC HLS and Opus, and skips CTR/CBC encrypted formats as DRM:
-//! https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/soundcloud.py
-//! https://github.com/yt-dlp/yt-dlp/issues/17335
+//! <https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/soundcloud.py>
+//! <https://github.com/yt-dlp/yt-dlp/issues/17335>
 //! The 2026-10-28 anonymous fixtures include AAC 96k and an adaptive manifest.
 //! Prefer progressive MP3 when actually offered, then AAC HLS (160k first),
 //! HLS MP3 and HLS Opus. Never resolve encrypted or adaptive transcodings.
@@ -272,9 +272,14 @@ impl Client {
     }
 
     pub async fn playlist(&self, id: u64) -> Result<Playlist> {
-        let mut playlist = self.get(&format!("playlists/{id}"), &[]).await?;
+        let mut playlist = self.playlist_snapshot(id).await?;
         self.fill_playlist(&mut playlist).await?;
         Ok(playlist)
+    }
+
+    /// Initial set membership, including stubs, for optimistic local copies.
+    pub async fn playlist_snapshot(&self, id: u64) -> Result<Playlist> {
+        self.get(&format!("playlists/{id}"), &[]).await
     }
 
     /// Also accepts a playlist returned by search or resolve. Already complete

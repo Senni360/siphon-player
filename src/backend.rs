@@ -821,6 +821,10 @@ pub enum Command {
         refresh: Option<u64>,
         result: Result<crate::soundcloud::engine::Stream, String>,
     },
+    AddSoundCloudPlaylist {
+        id: u64,
+        request: u64,
+    },
     SoundCloudSearch(crate::soundcloud::browse::SearchRequest),
     SoundCloudCollection {
         uri: String,
@@ -1100,6 +1104,11 @@ pub enum Event {
         result: Result<crate::hybrid_queue::Context, String>,
     },
     SoundCloudAccount(crate::soundcloud::account::Account),
+    SoundCloudPlaylistAdd {
+        request: u64,
+        complete: bool,
+        result: Result<Vec<Track>, String>,
+    },
     SoundCloudSearch {
         request: crate::soundcloud::browse::SearchRequest,
         results: Box<crate::model::SoundCloudSearchResults>,
@@ -2637,6 +2646,32 @@ impl Worker {
                         })
                         .abort_handle(),
                     );
+                }
+                Command::AddSoundCloudPlaylist { id, request } => {
+                    let client = self.soundcloud.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result = async {
+                            let mut playlist = client.playlist_snapshot(id).await?;
+                            let _ = events.send(Event::SoundCloudPlaylistAdd {
+                                request,
+                                complete: false,
+                                result: Ok(crate::soundcloud::browse::playlist_add_rows(&playlist)),
+                            });
+                            waker.wake();
+                            client.fill_playlist(&mut playlist).await?;
+                            Ok::<_, crate::soundcloud::api::Error>(playlist.to_tracks())
+                        }
+                        .await
+                        .map_err(|error| error.to_string());
+                        let _ = events.send(Event::SoundCloudPlaylistAdd {
+                            request,
+                            complete: true,
+                            result,
+                        });
+                        waker.wake();
+                    });
                 }
                 Command::SoundCloudCollection {
                     uri,

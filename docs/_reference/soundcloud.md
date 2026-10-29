@@ -52,6 +52,28 @@ results and resets the entity filter to All. Playlist and artist cards open nati
 collection pages with ordinary track tables; artist uploads have their own
 **Show more** pagination. No embedded browser is used.
 
+### Copy a whole SoundCloud playlist
+
+Open a SoundCloud playlist or album and use **More > Add to playlist**, or
+right-click its header. The picker lists editable Spotify
+playlists and local mixed playlists. This copies every track in set order,
+including duplicate occurrences. Adding the set again adds another copy,
+matching single-track local additions. There is no add-undo command; remove
+unwanted rows with the ordinary playlist row menu.
+
+SoundCloud rows in a Spotify playlist are local insertions. Spotify and other
+devices do not see them. The existing **SC** badge's tooltip explains this.
+Local mixed playlists also stay on this computer. Both use hybrid playback,
+including shuffle, across the complete combined list.
+
+Loaded sets appear immediately. Otherwise the runtime reads the set membership,
+inserts placeholder rows and fills every missing track through batched metadata
+requests. A failed metadata load removes only that addition's provisional rows
+and reports the error. Removing or moving rows while loading is preserved.
+Changing connections or quitting cancels pending copies. Local files keep their existing
+version and atomic background-write path. Playlist dragging in the sidebar
+reorders library entries; it does not copy playlist contents.
+
 Demo mode includes invented, deterministic SoundCloud results. Use
 `--demo-page search --demo-show soundcloud,dark` for SoundCloud alone or
 `--demo-show soundcloud-all,light` for both services. Save review captures

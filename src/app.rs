@@ -508,6 +508,7 @@ pub struct App {
     pub mixed_filters: HashMap<String, String>,
     pub playlist_sources_revision: u64,
     pending_mixed_imports: HashSet<String>,
+    pending_soundcloud_adds: HashMap<u64, playlist_sources::PendingSoundCloudAdd>,
     /// Current track timing used to decide when a play counts.
     listening: Option<Listening>,
     pub recents: crate::model::CursorList<crate::api::models::PlayHistory>,
@@ -1187,6 +1188,7 @@ impl App {
             mixed_filters: HashMap::new(),
             playlist_sources_revision: 0,
             pending_mixed_imports: HashSet::new(),
+            pending_soundcloud_adds: HashMap::new(),
             listening: None,
             recents: crate::model::CursorList::default(),
             recents_view: std::sync::Arc::from([]),
@@ -2720,6 +2722,13 @@ impl App {
                 continue;
             }
             match event {
+                Event::SoundCloudPlaylistAdd {
+                    request,
+                    complete,
+                    result,
+                } => {
+                    self.soundcloud_playlist_add_finished(request, complete, result);
+                }
                 Event::SoundCloudSearch { request, results } => {
                     self.soundcloud_search_finished(request, *results)
                 }
@@ -2828,6 +2837,7 @@ impl App {
                     self.handle_hybrid_context(generation, result)
                 }
                 Event::SoundCloudAccount(account) => {
+                    self.cancel_soundcloud_playlist_adds();
                     self.soundcloud_account = account;
                     if let Err(error) =
                         crate::soundcloud::account::State::from_account(&self.soundcloud_account)
@@ -11978,6 +11988,13 @@ impl App {
                     self.set_saved(target, !saved);
                 }
             }
+            Action::AddSoundCloudPlaylist {
+                uri,
+                playlist_id,
+                playlist_name,
+            } => {
+                self.add_soundcloud_playlist(&uri, playlist_id, playlist_name);
+            }
             Action::AddToPlaylist {
                 playlist_id,
                 playlist_name,
@@ -12470,6 +12487,7 @@ impl App {
                 });
             }
             Action::SignOut => {
+                self.cancel_soundcloud_playlist_adds();
                 if self.hybrid_owned() {
                     self.hybrid_pause_for_signout();
                 }
@@ -14000,6 +14018,7 @@ impl App {
 
     /// Final teardown at real quit.
     pub fn shutdown(&mut self) {
+        self.cancel_soundcloud_playlist_adds();
         self.save_state();
         self.flush_files();
         self.backend.shutdown();
