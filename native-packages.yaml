@@ -14,39 +14,39 @@ libraries:
     deb: libpipewire-0.3-0t64 | libpipewire-0.3-0
     rpm: pipewire-libs
 nfpm:
-  name: spotifast
+  name: siphon
   maintainer: Carmine Paolino <carmine@paolino.me>
   homepage: https://github.com/crmne/spotifast
   description: A native Spotify client
   license: MIT
   contents:
   # A glob source makes nFPM append its basename to the destination directory.
-  - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/spotifast"
+  - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/siphon"
     dst: "/usr/bin/"
     file_info:
       mode: 493
   - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/LICENSE"
-    dst: "/usr/share/licenses/spotifast/"
+    dst: "/usr/share/licenses/siphon/"
     file_info:
       mode: 420
   - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/README.md"
-    dst: "/usr/share/doc/spotifast/"
+    dst: "/usr/share/doc/siphon/"
     file_info:
       mode: 420
   - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/packaging/applications/*.desktop"
     dst: "/usr/share/applications/"
     file_info:
       mode: 420
-  - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/packaging/icons/*.svg"
+  - src: "@PAYLOAD@/*-v@VERSION@-@TARGET@/packaging/icons/siphon.svg"
     dst: "/usr/share/icons/hicolor/scalable/apps/"
     file_info:
       mode: 420
-  - src: contrib/omarchy/spotifast.json.tpl
-    dst: /usr/share/spotifast/omarchy/spotifast.json.tpl
+  - src: contrib/omarchy/siphon.json.tpl
+    dst: /usr/share/siphon/omarchy/siphon.json.tpl
     file_info:
       mode: 420
-  - src: contrib/omarchy/spotifast-theme
-    dst: /usr/share/spotifast/omarchy/spotifast-theme
+  - src: contrib/omarchy/siphon-theme
+    dst: /usr/share/siphon/omarchy/siphon-theme
     file_info:
       mode: 493
   overrides:
@@ -100,7 +100,7 @@ nfpm:
 windows:
   signing:
     provider: azure-artifact-signing
-    description: Spotifast
+    description: Siphon
     publisher: PlentyLabs UG (haftungsbeschränkt) & Co. KG
 targets:
   macos-universal:
@@ -112,7 +112,7 @@ targets:
       local: dist/macos-input
     native:
       command: [ruby, packaging/macos/dmg.rb, '@PAYLOAD@', '@PACKAGE@']
-      output: 'spotifast-@TAG@-macos-universal.dmg'
+      output: 'siphon-@TAG@-macos-universal.dmg'
   linux-amd64:
     platform: linux
     arch: amd64
@@ -122,8 +122,8 @@ targets:
     - deb
     - rpm
     input:
-      local: dist/spotifast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-      release_asset: spotifast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      local: dist/siphon-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      release_asset: siphon-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   linux-arm64:
     platform: linux
     arch: arm64
@@ -133,8 +133,8 @@ targets:
     - deb
     - rpm
     input:
-      local: dist/spotifast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-      release_asset: spotifast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      local: dist/siphon-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      release_asset: siphon-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
   # The AppImages come from the release's Linux build jobs, before the
   # release is published, so checksums.txt lists them and its signature
   # covers them: the app replaces an AppImage only with a signed one. The
@@ -147,10 +147,10 @@ targets:
     compiler_target: x86_64-unknown-linux-gnu
     formats: [appimage]
     appimage:
-      update_information: gh-releases-zsync|crmne|spotifast|latest|spotifast-*-x86_64.AppImage.zsync
+      update_information: gh-releases-zsync|crmne|spotifast|latest|siphon-*-x86_64.AppImage.zsync
     input:
-      local: dist/spotifast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-      release_asset: spotifast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      local: dist/siphon-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+      release_asset: siphon-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   appimage-arm64:
     platform: linux
     arch: arm64
@@ -158,10 +158,10 @@ targets:
     compiler_target: aarch64-unknown-linux-gnu
     formats: [appimage]
     appimage:
-      update_information: gh-releases-zsync|crmne|spotifast|latest|spotifast-*-aarch64.AppImage.zsync
+      update_information: gh-releases-zsync|crmne|spotifast|latest|siphon-*-aarch64.AppImage.zsync
     input:
-      local: dist/spotifast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-      release_asset: spotifast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      local: dist/siphon-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+      release_asset: siphon-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
   # Windows Installer packages, built on each Windows release runner from the
   # binary it built; the input folder holds what the package installs.
   windows-amd64:
@@ -174,7 +174,7 @@ targets:
       local: dist/msi-input-x86_64-pc-windows-msvc
     native:
       command: [python, packaging/windows/build-msi.py, '@PAYLOAD@', '@PACKAGE@', '@VERSION@', '@ARCH@']
-      output: 'spotifast-@TAG@-@TARGET@.msi'
+      output: 'siphon-@TAG@-@TARGET@.msi'
   windows-arm64:
     platform: windows
     arch: arm64
@@ -185,63 +185,63 @@ targets:
       local: dist/msi-input-aarch64-pc-windows-msvc
     native:
       command: [python, packaging/windows/build-msi.py, '@PAYLOAD@', '@PACKAGE@', '@VERSION@', '@ARCH@']
-      output: 'spotifast-@TAG@-@TARGET@.msi'
+      output: 'siphon-@TAG@-@TARGET@.msi'
 release:
   repository: crmne/spotifast
   prereleases: true
   checksums: checksums.txt
 assets:
   AMD64:
-    file: spotifast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
-    local: dist/spotifast-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    file: siphon-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
+    local: dist/siphon-v@VERSION@-x86_64-unknown-linux-gnu.tar.gz
   ARM64:
-    file: spotifast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
-    local: dist/spotifast-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    file: siphon-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
+    local: dist/siphon-v@VERSION@-aarch64-unknown-linux-gnu.tar.gz
   SOURCE:
-    file: spotifast-v@VERSION@-source.tar.gz
-    local: dist/spotifast-v@VERSION@-source.tar.gz
+    file: siphon-v@VERSION@-source.tar.gz
+    local: dist/siphon-v@VERSION@-source.tar.gz
   MACOS:
-    file: spotifast-v@VERSION@-macos-universal.dmg
-    local: dist/spotifast-v@VERSION@-macos-universal.dmg
+    file: siphon-v@VERSION@-macos-universal.dmg
+    local: dist/siphon-v@VERSION@-macos-universal.dmg
 templates:
-  arch/spotifast/PKGBUILD: packaging/arch/spotifast/PKGBUILD.in
-  arch/spotifast/spotifast.install: packaging/arch/spotifast.install
-  arch/spotifast-bin/PKGBUILD: packaging/arch/spotifast-bin/PKGBUILD.in
-  arch/spotifast-bin/spotifast-bin.install: packaging/arch/spotifast.install
-  arch/spotifast-git/PKGBUILD: packaging/arch/spotifast-git/PKGBUILD.in
-  arch/spotifast-git/spotifast-git.install: packaging/arch/spotifast.install
-  homebrew/spotifast.rb: packaging/homebrew/spotifast.rb.in
+  arch/siphon/PKGBUILD: packaging/arch/spotifast/PKGBUILD.in
+  arch/siphon/siphon.install: packaging/arch/spotifast.install
+  arch/siphon-bin/PKGBUILD: packaging/arch/spotifast-bin/PKGBUILD.in
+  arch/siphon-bin/siphon-bin.install: packaging/arch/spotifast.install
+  arch/siphon-git/PKGBUILD: packaging/arch/spotifast-git/PKGBUILD.in
+  arch/siphon-git/siphon-git.install: packaging/arch/spotifast.install
+  homebrew/siphon.rb: packaging/homebrew/spotifast.rb.in
 repositories:
   aur-source:
     group: aur
     url: https://aur.archlinux.org/spotifast.git
-    push_url: ssh://aur@aur.archlinux.org/spotifast.git
+    push_url: ssh://aur@aur.archlinux.org/siphon.git
     branch: master
     package_path: "."
     files:
-      arch/spotifast: "."
+      arch/siphon: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
   aur-bin:
     group: aur
     url: https://aur.archlinux.org/spotifast-bin.git
-    push_url: ssh://aur@aur.archlinux.org/spotifast-bin.git
+    push_url: ssh://aur@aur.archlinux.org/siphon-bin.git
     branch: master
     package_path: "."
     files:
-      arch/spotifast-bin: "."
+      arch/siphon-bin: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
   aur-git:
     group: aur
     url: https://aur.archlinux.org/spotifast-git.git
-    push_url: ssh://aur@aur.archlinux.org/spotifast-git.git
+    push_url: ssh://aur@aur.archlinux.org/siphon-git.git
     branch: master
     package_path: "."
     files:
-      arch/spotifast-git: "."
+      arch/siphon-git: "."
     version_file: ".SRCINFO"
     version_pattern: "^\\s*pkgver = (\\S+)"
     publish: push
@@ -251,8 +251,8 @@ repositories:
     branch: main
     package_path: Casks
     files:
-      homebrew/spotifast.rb: Casks/spotifast.rb
-    version_file: Casks/spotifast.rb
+      homebrew/siphon.rb: Casks/siphon.rb
+    version_file: Casks/siphon.rb
     version_pattern: version "([^"]+)"
     publish: push
 version_file: Cargo.toml

@@ -793,7 +793,7 @@ pub enum AutostartRequest {
 /// Siphon's registration to start at login. The hidden start passes
 /// `--start-hidden`, which the command line takes.
 pub fn autostart() -> fastframe_autostart::Autostart {
-    fastframe_autostart::Autostart::new("spotifast", "Siphon")
+    fastframe_autostart::Autostart::new(crate::brand::SLUG, crate::brand::NAME)
 }
 
 mod hybrid;
@@ -4490,7 +4490,7 @@ impl Worker {
                 if !lease.current() {
                     return Err("Sign-in changed before receiver activation.".into());
                 }
-                crate::zeroconf::add_user(&http, &receiver, &info, &credentials, "Siphon")
+                crate::zeroconf::add_user(&http, &receiver, &info, &credentials, crate::brand::NAME)
                     .map_err(|error| error.to_string())
             })();
             let _ = events.send(Event::ReceiverActivated { name, result });

@@ -6,7 +6,7 @@
     <key>CFBundleDisplayName</key><string>Siphon</string>
     <key>CFBundleIdentifier</key><string>__IDENTIFIER__</string>
     <key>CFBundleExecutable</key><string>__EXECUTABLE__</string>
-    <key>CFBundleIconFile</key><string>spotifast</string>
+    <key>CFBundleIconFile</key><string>siphon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>__VERSION__</string>
     <key>CFBundleVersion</key><string>__BUILD__</string>

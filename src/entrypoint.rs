@@ -297,7 +297,7 @@ fn write_reply(out: &mut impl std::io::Write, text: &str) -> i32 {
 /// sandbox's app id, which Flatpak always sets in `FLATPAK_ID`.
 #[cfg(target_os = "linux")]
 fn desktop_entry() -> String {
-    fastframe_now_playing::desktop_entry("spotifast")
+    fastframe_now_playing::desktop_entry(spotifast::brand::SLUG)
 }
 
 /// The `nowplaying` snapshot as one human-readable line.
@@ -429,11 +429,11 @@ pub(crate) fn run() -> eframe::Result<()> {
         None
     };
     let default_filter = if cli.verbose {
-        "info,librespot=info,spotifast=debug"
+        "info,librespot=info,spotifast=debug,siphon=debug"
     } else {
         // Which system face draws each script the interface font lacks,
         // one line per script at startup, for reports of odd-looking text.
-        "warn,spotifast=info,fastframe_fonts=info"
+        "warn,spotifast=info,siphon=info,fastframe_fonts=info"
     };
     #[cfg(feature = "demo")]
     let demo_dirs = cli.demo_data.as_ref().map(|base| paths::AppDirs {
@@ -454,14 +454,15 @@ pub(crate) fn run() -> eframe::Result<()> {
     // Launched from a desktop, stderr goes nowhere; keep the run's log where
     // a bug report can find it, and a line per panic in the panic log (with
     // any link in its message removed: a URL can carry a token).
-    if let Err(error) = fastframe_log::Logging::new("spotifast", env!("CARGO_PKG_VERSION"))
-        .filter(default_filter)
-        .file(dirs.log_file())
-        .panic_log(dirs.panic_log())
-        .panic_message(fastframe_log::PanicMessage::Redacted(
-            fastframe_log::redact::links,
-        ))
-        .init()
+    if let Err(error) =
+        fastframe_log::Logging::new(spotifast::brand::SLUG, env!("CARGO_PKG_VERSION"))
+            .filter(default_filter)
+            .file(dirs.log_file())
+            .panic_log(dirs.panic_log())
+            .panic_message(fastframe_log::PanicMessage::Redacted(
+                fastframe_log::redact::links,
+            ))
+            .init()
     {
         eprintln!("not logging: {error}");
     }
@@ -845,12 +846,12 @@ fn native_options(
     #[cfg(target_os = "linux")]
     let persistence_path = persistence_path.or_else(|| {
         // Keep the native profile path even when Flatpak supplies its app ID.
-        eframe::storage_dir("spotifast").map(|dir| dir.join("app.ron"))
+        spotifast::migration::window_state()
     });
     #[cfg(target_os = "linux")]
     let app_id = desktop_entry();
     #[cfg(not(target_os = "linux"))]
-    let app_id = "spotifast";
+    let app_id = spotifast::brand::SLUG;
     let icon = if cfg!(target_os = "macos") {
         // macOS takes the dock icon from the bundle's .icns, which is the
         // 1024px drawing with the platform's rounding. Setting a window
@@ -860,7 +861,7 @@ fn native_options(
         app_icon()
     };
     let viewport = egui::ViewportBuilder::default()
-        .with_title("Siphon")
+        .with_title(spotifast::brand::NAME)
         .with_app_id(app_id)
         .with_taskbar(true)
         .with_icon(icon);
@@ -927,7 +928,7 @@ fn native_options(
 
 fn profile_options(mut options: eframe::NativeOptions) -> eframe::NativeOptions {
     if options.persist_window {
-        options.persistence_path = eframe::storage_dir("spotifast").map(|dir| dir.join("app.ron"));
+        options.persistence_path = spotifast::migration::window_state();
     }
     options
 }
@@ -969,10 +970,7 @@ mod native_window_tests {
     #[test]
     fn window_geometry_is_kept_without_touching_demo_storage() {
         let main = profile_options(native_options(false, None, None, Geometry::default()));
-        assert_eq!(
-            main.persistence_path,
-            eframe::storage_dir("spotifast").map(|dir| dir.join("app.ron"))
-        );
+        assert_eq!(main.persistence_path, spotifast::migration::window_state());
         let demo_path = std::path::PathBuf::from("temporary/demo.ron");
         let demo = profile_options(demo_native_options(
             native_options(false, None, None, Geometry::default()),
@@ -1002,14 +1000,11 @@ mod native_window_tests {
             let id = desktop_entry();
             assert_eq!(main.viewport.app_id.as_deref(), Some(id.as_str()));
             assert_eq!(mini.viewport.app_id, main.viewport.app_id);
-            assert_eq!(
-                main.persistence_path,
-                eframe::storage_dir("spotifast").map(|dir| dir.join("app.ron"))
-            );
+            assert_eq!(main.persistence_path, spotifast::migration::window_state());
         }
         #[cfg(not(target_os = "linux"))]
         {
-            assert_eq!(main.viewport.app_id.as_deref(), Some("spotifast"));
+            assert_eq!(main.viewport.app_id.as_deref(), Some("siphon"));
             assert_eq!(mini.viewport.app_id, main.viewport.app_id);
             assert_eq!(main.persistence_path, None);
         }

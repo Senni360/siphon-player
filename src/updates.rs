@@ -14,7 +14,7 @@ use fastframe_update::{MacConfig, ReqwestTransport, UpdateConfig};
 
 pub const CONFIG: UpdateConfig = UpdateConfig {
     macos: MacConfig {
-        bundle_ids: &["rocks.spotifast.Siphon"],
+        bundle_ids: &["com.siphon.player"],
         executable_names: &["Siphon"],
         legacy_bundle_names: &[],
     },
@@ -28,7 +28,7 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     ..UpdateConfig::new(
         "crmne/spotifast",
         "Siphon",
-        "spotifast",
+        "siphon",
         env!("CARGO_PKG_VERSION"),
     )
 };

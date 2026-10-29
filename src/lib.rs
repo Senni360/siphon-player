@@ -36,6 +36,7 @@ pub mod mac_notch;
 #[cfg(target_os = "macos")]
 pub mod mac_touchbar_crash_guard;
 pub mod made_for_you;
+pub mod migration;
 pub mod milkdrop;
 pub mod mixed_playlists;
 pub mod model;

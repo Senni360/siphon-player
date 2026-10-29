@@ -88,7 +88,7 @@
       packages = forAllSystems (
         pkgs:
         let
-          spotifast =
+          siphon =
             let
               toolchain = pkgs.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
               rustPlatform = pkgs.makeRustPlatform {
@@ -110,7 +110,7 @@
               );
             in
             rustPlatform.buildRustPackage rec {
-              pname = "spotifast";
+              pname = "siphon";
               version = (pkgs.lib.importTOML ./Cargo.toml).package.version;
               src = self;
 
@@ -171,31 +171,31 @@
               # The GUI dlopens its Wayland, X11 and GL libraries at run time.
               postFixup =
                 pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-                  wrapProgram $out/bin/spotifast \
+                  wrapProgram $out/bin/siphon \
                     --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath runtimeLibs}
                 ''
                 + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-                  rcodesign sign "$out/Applications/Spotifast.app"
+                  rcodesign sign "$out/Applications/Siphon.app"
                 '';
 
               postInstall =
                 pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
-                  install -Dm644 packaging/applications/spotifast.desktop \
-                    $out/share/applications/spotifast.desktop
-                  install -Dm644 packaging/icons/spotifast.svg \
-                    $out/share/icons/hicolor/scalable/apps/spotifast.svg
-                  install -Dm644 contrib/omarchy/spotifast.json.tpl \
-                    $out/share/spotifast/omarchy/spotifast.json.tpl
-                  install -Dm755 contrib/omarchy/spotifast-theme \
-                    $out/share/spotifast/omarchy/spotifast-theme
+                  install -Dm644 packaging/applications/siphon.desktop \
+                    $out/share/applications/siphon.desktop
+                  install -Dm644 packaging/icons/siphon.svg \
+                    $out/share/icons/hicolor/scalable/apps/siphon.svg
+                  install -Dm644 contrib/omarchy/siphon.json.tpl \
+                    $out/share/siphon/omarchy/siphon.json.tpl
+                  install -Dm755 contrib/omarchy/siphon-theme \
+                    $out/share/siphon/omarchy/siphon-theme
                 ''
                 + pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''
-                  app="$out/Applications/Spotifast.app/Contents"
+                  app="$out/Applications/Siphon.app/Contents"
                   mkdir -p "$app/MacOS" "$app/Resources"
-                  executable=Spotifast
-                  identifier=rocks.spotifast.Spotifast
-                  cp "$out/bin/spotifast" "$app/MacOS/$executable"
-                  icnsify packaging/macos/icon-1024.png -o "$app/Resources/spotifast.icns"
+                  executable=Siphon
+                  identifier=com.siphon.player
+                  cp "$out/bin/siphon" "$app/MacOS/$executable"
+                  icnsify packaging/macos/icon-1024.png -o "$app/Resources/siphon.icns"
                   substitute packaging/macos/Info.plist "$app/Info.plist" \
                     --replace-fail __VERSION__ "${version}" \
                     --replace-fail __BUILD__ "${pkgs.lib.head (pkgs.lib.splitString "-" version)}" \
@@ -207,17 +207,17 @@
                 description = "Fast native Spotify client with local playback and Spotify Connect";
                 homepage = "https://spotifast.rocks";
                 license = pkgs.lib.licenses.mit;
-                mainProgram = "spotifast";
+                mainProgram = "siphon";
               };
             };
 
         in
         {
-          default = spotifast;
-          inherit spotifast;
+          default = siphon;
+          inherit siphon;
         }
         // pkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isDarwin {
-          spotifast-app = spotifast;
+          siphon-app = siphon;
         }
       );
 

@@ -2224,9 +2224,9 @@ msgstr ""
 
 #: src/theme.rs:229
 msgid ""
-"Custom themes could not be loaded. Run spotifast reload-themes to try again."
+"Custom themes could not be loaded. Run siphon reload-themes to try again."
 msgstr ""
-"사용자 지정 테마를 불러올 수 없습니다. 다시 시도하려면 spotifast reload-"
+"사용자 지정 테마를 불러올 수 없습니다. 다시 시도하려면 siphon reload-"
 "themes를 실행하세요."
 
 #: src/ui/artist.rs:32

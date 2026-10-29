@@ -170,8 +170,8 @@ pub type ThemePair = fastframe_theme::Pair<Palette>;
 /// user.
 pub fn enable_desktop_themes(catalog: &mut Catalog) {
     catalog.enable_desktop_themes(fastframe_theme::DesktopThemes {
-        slug: "spotifast",
-        omarchy_template: include_str!("../contrib/omarchy/spotifast.json.tpl"),
+        slug: "siphon",
+        omarchy_template: include_str!("../contrib/omarchy/siphon.json.tpl"),
         // The template has not changed since it first shipped.
         omarchy_previous_templates: &[],
         presets: true,
@@ -226,7 +226,7 @@ fn status_detail(status: Option<fastframe_theme::Status>, locale: Locale) -> Cow
         ),
         Status::Problem(_) => gettext(
             locale,
-            "Custom themes could not be loaded. Run spotifast reload-themes to try again.",
+            "Custom themes could not be loaded. Run siphon reload-themes to try again.",
         ),
     }
 }
@@ -621,12 +621,11 @@ pub fn play_glyph_offset(icon: Icon, icon_size: f32) -> Vec2 {
     }
 }
 
-/// The app's mark, the same picture as the app icon: the polished green
-/// disc with the play triangle, rasterised once per size by
+/// The app's nested-U mark, shared with the Siphon extension, rasterised by
 /// `util::app_icon_rgba` and drawn wherever the app shows its logo.
 pub fn logo(ui: &egui::Ui, center: egui::Pos2, diameter: f32) {
     let ppp = ui.ctx().pixels_per_point();
-    // The raster keeps two pixels of margin on each side of the disc.
+    // The raster keeps two pixels of margin on each side of the mark.
     let pixels = (diameter * ppp).round() as usize + 4;
     let id = egui::Id::new(("spotifast-logo", pixels));
     let texture = ui
@@ -1115,11 +1114,14 @@ mod tests {
     fn the_shipped_omarchy_files_are_the_shared_ones() {
         let lines = |text: &str| text.replace("\r\n", "\n");
         assert_eq!(
-            lines(include_str!("../contrib/omarchy/spotifast-theme")),
-            lines(&fastframe_theme::omarchy::hook_script("spotifast"))
+            lines(include_str!("../contrib/omarchy/siphon-theme")),
+            lines(
+                &fastframe_theme::omarchy::hook_script("siphon")
+                    .replace("/siphon/themes", "/siphonplayer/themes")
+            )
         );
         assert_eq!(
-            lines(include_str!("../contrib/omarchy/spotifast.json.tpl")),
+            lines(include_str!("../contrib/omarchy/siphon.json.tpl")),
             lines(fastframe_theme::omarchy::BASE_TEMPLATE)
         );
     }

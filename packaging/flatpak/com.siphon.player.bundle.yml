@@ -1,0 +1,39 @@
+# The release workflow's Flatpak: the binary the Linux job built, packaged
+# into the same sandbox as com.siphon.player.yml describes. The
+# job unpacks the release tarball into built/ beside this file first.
+id: com.siphon.player
+runtime: org.freedesktop.Platform
+runtime-version: '25.08'
+sdk: org.freedesktop.Sdk
+command: siphon
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  - --socket=pulseaudio
+  - --share=network
+  # Platform storage for this application's Spotify grants.
+  - --talk-name=org.freedesktop.secrets
+  - --talk-name=org.kde.StatusNotifierWatcher
+  - --own-name=org.mpris.MediaPlayer2.siphon
+  - --persist=.local/state
+  # Read the old app sandbox only to adopt this user's existing profile.
+  - --filesystem=~/.var/app/rocks.spotifast.Spotifast:ro
+modules:
+  - name: siphon
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 siphon /app/bin/siphon
+      - install -Dm644 packaging/applications/*.desktop /app/share/applications/com.siphon.player.desktop
+      - sed -i 's/^Icon=.*$/Icon=com.siphon.player/;s/^StartupWMClass=siphon$/StartupWMClass=com.siphon.player/' /app/share/applications/com.siphon.player.desktop
+      - install -Dm644 packaging/icons/siphon.svg /app/share/icons/hicolor/scalable/apps/com.siphon.player.svg
+      - install -Dm644 packaging/flatpak/com.siphon.player.metainfo.xml /app/share/metainfo/com.siphon.player.metainfo.xml
+      - install -Dm644 LICENSE /app/share/licenses/siphon/LICENSE
+    sources:
+      - type: dir
+        path: built
+      # Metainfo belongs to this packaging checkout, not the portable archive.
+      - type: file
+        path: com.siphon.player.metainfo.xml
+        dest: packaging/flatpak

@@ -2184,8 +2184,8 @@ msgstr "無法載入 Omarchy 調色盤，將保留上次可用的外觀。詳情
 
 #: src/theme.rs:229
 msgid ""
-"Custom themes could not be loaded. Run spotifast reload-themes to try again."
-msgstr "無法載入自訂主題。請執行 spotifast reload-themes 再試一次。"
+"Custom themes could not be loaded. Run siphon reload-themes to try again."
+msgstr "無法載入自訂主題。請執行 siphon reload-themes 再試一次。"
 
 #: src/ui/artist.rs:32
 msgid "Popular"

@@ -2266,9 +2266,9 @@ msgstr ""
 
 #: src/theme.rs:229
 msgid ""
-"Custom themes could not be loaded. Run spotifast reload-themes to try again."
+"Custom themes could not be loaded. Run siphon reload-themes to try again."
 msgstr ""
-"Não foi possível carregar os temas personalizados. Execute spotifast reload-"
+"Não foi possível carregar os temas personalizados. Execute siphon reload-"
 "themes para tentar novamente."
 
 #: src/ui/artist.rs:32

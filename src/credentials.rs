@@ -19,7 +19,8 @@ use sha2::{Digest, Sha256};
 
 use crate::{auth::StoredToken, paths::AppDirs};
 
-const SERVICE: &str = "rocks.spotifast.Spotifast";
+const SERVICE: &str = crate::brand::APP_ID;
+const LEGACY_SERVICE: &str = "rocks.spotifast.Spotifast";
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -263,9 +264,18 @@ trait ProtectedStore: Send {
     fn delete(&mut self, key: &str) -> Result<(), Error>;
 }
 
-#[derive(Default)]
 struct NativeStore {
     store: Option<Arc<keyring_core::api::CredentialStore>>,
+    service: &'static str,
+}
+
+impl Default for NativeStore {
+    fn default() -> Self {
+        Self {
+            store: None,
+            service: SERVICE,
+        }
+    }
 }
 
 impl NativeStore {
@@ -290,8 +300,55 @@ impl NativeStore {
         self.store
             .as_ref()
             .ok_or(Error::Unavailable)?
-            .build(SERVICE, key, modifiers)
+            .build(self.service, key, modifiers)
             .map_err(|error| native_error("entry", error))
+    }
+}
+
+/// Move native entries only after the new service has retained the bytes.
+/// Failed writes keep the old entry usable and are retried on the next read.
+struct MigratingStore<N, L> {
+    current: N,
+    legacy: L,
+}
+
+impl<N: ProtectedStore, L: ProtectedStore> ProtectedStore for MigratingStore<N, L> {
+    fn read(&mut self, key: &str) -> Result<Option<Vec<u8>>, Error> {
+        if let Some(secret) = self.current.read(key)? {
+            return Ok(Some(secret));
+        }
+        let Some(secret) = self.legacy.read(key)? else {
+            return Ok(None);
+        };
+        let adopted = self.current.write(key, &secret).and_then(|()| {
+            if self.current.read(key)?.as_deref() == Some(secret.as_slice()) {
+                self.legacy.delete(key)
+            } else {
+                Err(Error::Verification)
+            }
+        });
+        if let Err(error) = adopted {
+            log::warn!("could not migrate a legacy credential entry: {error}");
+        }
+        Ok(Some(secret))
+    }
+
+    fn write(&mut self, key: &str, secret: &[u8]) -> Result<(), Error> {
+        self.current.write(key, secret)?;
+        // A later token refresh can be the first successful write after a
+        // deferred migration. Retire its stale legacy copy only once verified.
+        if matches!(self.current.read(key), Ok(Some(saved)) if saved == secret)
+            && let Err(error) = self.legacy.delete(key)
+        {
+            log::warn!("could not retire a verified legacy credential entry: {error}");
+        }
+        Ok(())
+    }
+
+    fn delete(&mut self, key: &str) -> Result<(), Error> {
+        let current = self.current.delete(key);
+        let legacy = self.legacy.delete(key);
+        current.and(legacy)
     }
 }
 
@@ -427,7 +484,9 @@ impl<S> SealedFiles<S> {
     }
 
     fn context(key: &str) -> Vec<u8> {
-        format!("{SERVICE}\n{key}").into_bytes()
+        // This is authenticated encryption context in existing files, not
+        // the platform entry's display identity. Changing it loses grants.
+        format!("{LEGACY_SERVICE}\n{key}").into_bytes()
     }
 }
 
@@ -563,6 +622,23 @@ pub fn keep_profile(state: &Path) -> std::io::Result<()> {
     fastframe_file::write(&state.join(PROFILE_FILE), profile_of(state))
 }
 
+/// Record the old folder's key identity inside a staged migration copy.
+/// Never hash the temporary path or rewrite the source profile.
+pub(crate) fn preserve_profile(copy: &Path, source: &Path) -> std::io::Result<()> {
+    let recorded = recorded_profile(source, PROFILE_FILE);
+    // Older Flatpak mapped ~/.local/state into the sandbox without setting
+    // XDG_STATE_HOME. Those grants hashed the logical path, not its host path.
+    if recorded.is_none()
+        && crate::paths::legacy_flatpak_root().is_some()
+        && let Some(home) = std::env::home_dir()
+    {
+        let fallback = profile_of(&home.join(".local/state/spotifast"));
+        fastframe_file::write(&copy.join(ADOPT_FILE), fallback)?;
+    }
+    let profile = recorded.unwrap_or_else(|| profile_of(source));
+    fastframe_file::write(&copy.join(PROFILE_FILE), profile)
+}
+
 /// Gives `copy`, a portable folder's state copied from `source`, a profile
 /// of its own, and records `source`'s, whose grants the store saves under
 /// the new profile when it first opens. The copy then starts signed in, and
@@ -614,16 +690,23 @@ pub struct Loaded {
 
 impl Store {
     pub fn new(dirs: AppDirs) -> Self {
+        let native = MigratingStore {
+            current: NativeStore::default(),
+            legacy: NativeStore {
+                store: None,
+                service: LEGACY_SERVICE,
+            },
+        };
         #[cfg(windows)]
         let backend = Box::new(WithSealedCopy {
-            primary: NativeStore::default(),
+            primary: native,
             copy: SealedFiles {
                 dir: dirs.state.join("credential-storage"),
                 sealer: Dpapi,
             },
         });
         #[cfg(not(windows))]
-        let backend = Box::new(NativeStore::default());
+        let backend = Box::new(native);
         Self::with_backend(dirs, backend)
     }
 
@@ -1312,6 +1395,81 @@ mod tests {
         }
     }
 
+    #[test]
+    fn legacy_service_is_retained_until_the_new_entry_is_verified() {
+        let current = Arc::new(Mutex::new(Fake::default()));
+        let legacy = Arc::new(Mutex::new(Fake::default()));
+        let mut backend = MigratingStore {
+            current: Backend(current.clone()),
+            legacy: Backend(legacy.clone()),
+        };
+        for slot in Slot::ALL {
+            let key = format!("saved-profile:{}", slot.name());
+            legacy
+                .lock()
+                .unwrap()
+                .values
+                .insert(key.clone(), b"saved grant".to_vec());
+            // A refused write, then a store claiming success but losing it.
+            current.lock().unwrap().write_error = Some(Error::Locked);
+            assert_eq!(backend.read(&key).unwrap().unwrap(), b"saved grant");
+            assert!(legacy.lock().unwrap().values.contains_key(&key));
+            current.lock().unwrap().write_error = None;
+            current.lock().unwrap().discard_write = true;
+            assert_eq!(backend.read(&key).unwrap().unwrap(), b"saved grant");
+            assert!(legacy.lock().unwrap().values.contains_key(&key));
+            current.lock().unwrap().discard_write = false;
+            assert_eq!(backend.read(&key).unwrap().unwrap(), b"saved grant");
+            assert!(!legacy.lock().unwrap().values.contains_key(&key));
+            assert_eq!(current.lock().unwrap().values[&key], b"saved grant");
+        }
+    }
+
+    #[test]
+    fn current_service_wins_and_sign_out_deletes_both_services() {
+        let current = Arc::new(Mutex::new(Fake::default()));
+        let legacy = Arc::new(Mutex::new(Fake::default()));
+        current
+            .lock()
+            .unwrap()
+            .values
+            .insert("key".into(), b"new".to_vec());
+        legacy
+            .lock()
+            .unwrap()
+            .values
+            .insert("key".into(), b"old".to_vec());
+        let mut backend = MigratingStore {
+            current: Backend(current),
+            legacy: Backend(legacy),
+        };
+        assert_eq!(backend.read("key").unwrap().unwrap(), b"new");
+        backend.delete("key").unwrap();
+        assert!(backend.read("key").unwrap().is_none());
+    }
+
+    #[test]
+    fn a_later_successful_save_retires_a_deferred_migration() {
+        let current = Arc::new(Mutex::new(Fake::default()));
+        let legacy = Arc::new(Mutex::new(Fake::default()));
+        legacy
+            .lock()
+            .unwrap()
+            .values
+            .insert("key".into(), b"old".to_vec());
+        let mut backend = MigratingStore {
+            current: Backend(current.clone()),
+            legacy: Backend(legacy.clone()),
+        };
+        current.lock().unwrap().discard_write = true;
+        backend.write("key", b"new").unwrap();
+        assert!(legacy.lock().unwrap().values.contains_key("key"));
+        current.lock().unwrap().discard_write = false;
+        backend.write("key", b"new").unwrap();
+        assert!(!legacy.lock().unwrap().values.contains_key("key"));
+        assert_eq!(backend.read("key").unwrap().unwrap(), b"new");
+    }
+
     /// Any client ID will do for shared access: the slot, not the ID,
     /// says which session a grant belongs to.
     const SHARED_CLIENT: &str = "dummy-shared-client";
@@ -1902,6 +2060,26 @@ mod tests {
                 .ok_or(Error::Invalid)?;
             Ok(secret.iter().map(|byte| byte ^ 0x5a).collect())
         }
+    }
+
+    #[test]
+    fn sealed_grants_from_before_the_rebrand_still_open() {
+        let fixture = Fixture::new();
+        let mut files = sealed_files(&fixture);
+        let key = fixture.store.lease(Slot::Playback).key();
+        // An old-format fixture, independent of the new writer's constants.
+        let mut bytes = b"spotifast-sealed-grant-1\n".to_vec();
+        bytes.extend(
+            TestSealer
+                .seal(
+                    b"dummy-saved-grant",
+                    format!("rocks.spotifast.Spotifast\n{key}").as_bytes(),
+                )
+                .unwrap(),
+        );
+        std::fs::create_dir_all(&files.dir).unwrap();
+        std::fs::write(files.path(&key), bytes).unwrap();
+        assert_eq!(files.read(&key).unwrap().unwrap(), b"dummy-saved-grant");
     }
 
     /// The Windows arrangement: a native store, here the fake, and sealed

@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const COMMAND: &str = env!("CARGO_BIN_EXE_spotifast");
+const COMMAND: &str = env!("CARGO_BIN_EXE_siphon");
 
 struct Scratch(PathBuf);
 
@@ -26,16 +26,16 @@ fn the_command_reports_its_name_and_passes_the_update_version_check() {
     assert!(output.status.success());
     assert_eq!(
         String::from_utf8(output.stdout).unwrap().trim(),
-        format!("spotifast {}", env!("CARGO_PKG_VERSION"))
+        format!("siphon {}", env!("CARGO_PKG_VERSION"))
     );
     let help = Command::new(COMMAND).arg("--help").output().unwrap();
     assert!(help.status.success());
     assert!(
         String::from_utf8(help.stdout)
             .unwrap()
-            .contains("Usage: spotifast")
+            .contains("Usage: siphon")
     );
-    assert_eq!(spotifast::updates::CONFIG.slug, "spotifast");
+    assert_eq!(spotifast::updates::CONFIG.slug, "siphon");
 }
 
 /// The app's name before the rename is gone from everything but the past
@@ -240,4 +240,14 @@ fn the_command_forwards_links_to_the_existing_instance_on_a_private_bus() {
         vec![ControlCommand::ToggleSaved],
         "like only toggles the saved state, never OpenLink or Show"
     );
+}
+
+#[test]
+fn the_legacy_factory_connect_name_is_adopted_without_losing_preferences() {
+    let scratch = Scratch::new();
+    let path = scratch.0.join("settings.json");
+    std::fs::write(&path, br#"{"device_name":"Spotifast","volume":37}"#).unwrap();
+    let settings = spotifast::settings::Settings::load(&path);
+    assert_eq!(settings.device_name, "Siphon");
+    assert_eq!(settings.volume, 37);
 }

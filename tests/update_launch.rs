@@ -20,7 +20,7 @@ fn update_flags_are_intercepted_before_the_arguments_are_parsed() {
             "The update could not start. The previous version has been restored.",
         ],
     ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_spotifast"))
+        let output = Command::new(env!("CARGO_BIN_EXE_siphon"))
             .args(flags)
             .arg("--version")
             .output()
@@ -28,7 +28,7 @@ fn update_flags_are_intercepted_before_the_arguments_are_parsed() {
         assert!(output.status.success(), "{flags:?}: {output:?}");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout).trim(),
-            format!("spotifast {}", env!("CARGO_PKG_VERSION"))
+            format!("siphon {}", env!("CARGO_PKG_VERSION"))
         );
     }
 }
@@ -44,7 +44,7 @@ fn apply_update_runs_the_helper_before_the_app() {
         rand::random::<u64>()
     ));
     std::fs::create_dir(&scratch).unwrap();
-    let output = Command::new(env!("CARGO_BIN_EXE_spotifast"))
+    let output = Command::new(env!("CARGO_BIN_EXE_siphon"))
         .arg("--apply-update")
         .arg(scratch.join("missing-job.json"))
         .env("HOME", &scratch)

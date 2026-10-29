@@ -64,16 +64,16 @@ jobs:
         env:
           HOMEBREW_NO_AUTO_UPDATE: 1
         run: |
-          brew tap-new --no-git spotifast/validation
-          tap="$(brew --repository)/Library/Taps/spotifast/homebrew-validation"
+          brew tap-new --no-git siphon/validation
+          tap="$(brew --repository)/Library/Taps/siphon/homebrew-validation"
           mkdir -p "$tap/Casks"
-          cp dist/native-packages/recipes/homebrew/spotifast.rb "$tap/Casks/spotifast.rb"
-          brew install --cask spotifast/validation/spotifast
-          app=/Applications/Spotifast.app
+          cp dist/native-packages/recipes/homebrew/siphon.rb "$tap/Casks/siphon.rb"
+          brew install --cask siphon/validation/siphon
+          app=/Applications/Siphon.app
           executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app/Contents/Info.plist")
           "$app/Contents/MacOS/$executable" --version
           codesign --verify --strict "$app"
-          brew uninstall --cask spotifast/validation/spotifast
+          brew uninstall --cask siphon/validation/siphon
           test ! -e "$app"
 
   # Releases build their AppImages before publishing (release.yml), not in
@@ -125,10 +125,10 @@ jobs:
           native-packages build --release "$VERSION" --target "$TARGET" --defer-recipes --output dist/appimage
       - name: Run the AppImage and read its update information
         run: |
-          set -- dist/appimage/packages/"$TARGET"/appimage/spotifast-*-"$ARCH".AppImage
+          set -- dist/appimage/packages/"$TARGET"/appimage/siphon-*-"$ARCH".AppImage
           test "$#" -eq 1
-          "$1" --appimage-extract-and-run --version | grep -Ex 'spotifast [0-9]+\.[0-9]+\.[0-9]+.*'
-          expected="gh-releases-zsync|crmne|spotifast|latest|spotifast-*-$ARCH.AppImage.zsync"
+          "$1" --appimage-extract-and-run --version | grep -Ex 'siphon [0-9]+\.[0-9]+\.[0-9]+.*'
+          expected="gh-releases-zsync|crmne|siphon|latest|siphon-*-$ARCH.AppImage.zsync"
           found=$("$1" --appimage-updateinformation)
           test "$found" = "$expected" || { echo "Update information: $found" >&2; exit 1; }
           python3 packaging/check-appimage.py "$1" "$ARCH"
@@ -138,9 +138,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download "$VERSION" --repo "$GITHUB_REPOSITORY" --dir published \
-            --pattern "spotifast-*-$ARCH.AppImage" --pattern "spotifast-*-$ARCH.AppImage.zsync" \
+            --pattern "siphon-*-$ARCH.AppImage" --pattern "siphon-*-$ARCH.AppImage.zsync" \
             --pattern checksums.txt
-          name="spotifast-${VERSION#v}-$ARCH.AppImage"
+          name="siphon-${VERSION#v}-$ARCH.AppImage"
           python3 packaging/check-appimage.py "published/$name" "$ARCH"
           # The signed manifest lists both, so the app's updater accepts the AppImage.
           grep -E "  $name(\.zsync)?\$" published/checksums.txt > published/appimage-checksums.txt

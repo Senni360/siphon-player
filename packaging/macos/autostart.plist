@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>rocks.spotifast.Siphon.autostart</string>
+    <string>com.siphon.player.autostart</string>
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/open</string>
         <string>-g</string>
         <string>-b</string>
-        <string>rocks.spotifast.Siphon</string>
+        <string>com.siphon.player</string>
         <string>--args</string>
         <string>--start-hidden</string>
     </array>

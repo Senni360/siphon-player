@@ -5,7 +5,7 @@
 ; The Windows installer, built with Inno Setup 6.3 or later from a release
 ; binary (the release workflow did this on every tag up to 0.14.2):
 ;
-;   iscc /DVersion=0.9.1 /DArch=x86_64 /DBinary=...\spotifast.exe ^
+;   iscc /DVersion=0.9.1 /DArch=x86_64 /DBinary=...\siphon.exe ^
 ;        /DOutputDir=dist packaging\windows\spotifast.iss
 ;
 ; Arch is x86_64 or aarch64, as in the Rust target triple, so the installer
@@ -31,13 +31,13 @@
   #define InnoArch "x64compatible"
 #endif
 
-#define AppName "Spotifast"
-#define AppExeName "spotifast.exe"
-#define AppIdentity "Spotifast"
+#define AppName "Siphon"
+#define AppExeName "siphon.exe"
+#define AppIdentity "Siphon"
 
 [Setup]
-; Never change: this is how Windows tells an update from a new program.
-AppId={{FCED1EA0-EBF5-4C32-BA3B-A3AD724BACC3}
+; Siphon-only identity. Keep stable across player releases.
+AppId={{D7460CDC-1497-4FD8-8A37-05316E6EAF35}
 AppName={#AppName}
 AppVersion={#Version}
 AppVerName={#AppName} {#Version}
@@ -55,7 +55,7 @@ ArchitecturesInstallIn64BitMode={#InnoArch}
 MinVersion=10.0
 LicenseFile=..\..\LICENSE
 OutputDir={#OutputDir}
-OutputBaseFilename=spotifast-v{#Version}-{#Arch}-pc-windows-msvc-setup
+OutputBaseFilename=siphon-v{#Version}-{#Arch}-pc-windows-msvc-setup
 SetupIconFile=spotifast.ico
 Compression=lzma2/max
 SolidCompression=yes
@@ -79,29 +79,29 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 Source: "{#Binary}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
-Source: "spotifast-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "siphon-installer.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExeName}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; Tasks: desktopicon
 
 [Registry]
-; Spotify links (spotify:track:…) open in Spotifast. Registered for this
+; Spotify links (spotify:track:…) open in Siphon. Registered for this
 ; user only, like the program itself. The official client registers the same
 ; scheme when it is installed; whichever was set up last has the links, and
-; Settings > Apps > Default apps can hand them to the other, where Spotifast
+; Settings > Apps > Default apps can hand them to the other, where Siphon
 ; is listed through the capabilities below.
 Root: HKCU; Subkey: "Software\Classes\spotify"; ValueType: string; ValueName: ""; ValueData: "URL:Spotify link"
 Root: HKCU; Subkey: "Software\Classes\spotify"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
 Root: HKCU; Subkey: "Software\Classes\spotify\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"",0"
 Root: HKCU; Subkey: "Software\Classes\spotify\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
-Root: HKCU; Subkey: "Software\Classes\Spotifast.spotify"; ValueType: string; ValueName: ""; ValueData: "URL:Spotify link"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\Spotifast.spotify"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
-Root: HKCU; Subkey: "Software\Classes\Spotifast.spotify\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"",0"
-Root: HKCU; Subkey: "Software\Classes\Spotifast.spotify\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\Siphon.spotify"; ValueType: string; ValueName: ""; ValueData: "URL:Spotify link"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Siphon.spotify"; ValueType: string; ValueName: "URL Protocol"; ValueData: ""
+Root: HKCU; Subkey: "Software\Classes\Siphon.spotify\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"",0"
+Root: HKCU; Subkey: "Software\Classes\Siphon.spotify\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\{#AppExeName}"" ""%1"""
 Root: HKCU; Subkey: "Software\{#AppIdentity}\Capabilities"; ValueType: string; ValueName: "ApplicationName"; ValueData: "{#AppName}"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\{#AppIdentity}\Capabilities"; ValueType: string; ValueName: "ApplicationDescription"; ValueData: "A native Spotify client"
-Root: HKCU; Subkey: "Software\{#AppIdentity}\Capabilities\URLAssociations"; ValueType: string; ValueName: "spotify"; ValueData: "Spotifast.spotify"
+Root: HKCU; Subkey: "Software\{#AppIdentity}\Capabilities\URLAssociations"; ValueType: string; ValueName: "spotify"; ValueData: "Siphon.spotify"
 Root: HKCU; Subkey: "Software\RegisteredApplications"; ValueType: string; ValueName: "{#AppIdentity}"; ValueData: "Software\{#AppIdentity}\Capabilities"; Flags: uninsdeletevalue
 
 [Run]
@@ -124,7 +124,7 @@ begin
 end;
 #endif
 
-procedure CloseInstalledSpotifast;
+procedure CloseInstalledSiphon;
 var
   Locator, Services, Processes, Process, Path: Variant;
   Index: Integer;
@@ -141,10 +141,10 @@ begin
       // A portable copy can have the same name. Never close it by name alone.
       if not VarIsNull(Path) then
         if CompareText(Path, Exe) = 0 then
-          Log('Closing installed Spotifast: result ' + IntToStr(Process.Terminate(0)));
+          Log('Closing installed Siphon: result ' + IntToStr(Process.Terminate(0)));
     end;
   except
-    Log('Could not close installed Spotifast: ' + GetExceptionMessage);
+    Log('Could not close installed Siphon: ' + GetExceptionMessage);
   end;
 end;
 
@@ -170,13 +170,13 @@ begin
     end;
     if UninstallSilent then
       Exit;
-    case SuppressibleTaskDialogMsgBox('Spotifast cannot be removed yet.',
-      'Its program file is in use or inaccessible. Quit Spotifast and retry, or close it here to continue.' + #13#10#13#10 +
-      'Close Spotifast ends the process immediately. Unsaved changes may be lost.',
-      mbError, MB_YESNOCANCEL, ['Retry', 'Close Spotifast'], 0, IDCANCEL) of
+    case SuppressibleTaskDialogMsgBox('Siphon cannot be removed yet.',
+      'Its program file is in use or inaccessible. Quit Siphon and retry, or close it here to continue.' + #13#10#13#10 +
+      'Close Siphon ends the process immediately. Unsaved changes may be lost.',
+      mbError, MB_YESNOCANCEL, ['Retry', 'Close Siphon'], 0, IDCANCEL) of
       IDYES: ;
       IDNO: begin
-        CloseInstalledSpotifast;
+        CloseInstalledSiphon;
         Sleep(200);
       end;
     else

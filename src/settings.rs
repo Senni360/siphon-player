@@ -4,6 +4,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// The legacy spotifast: namespace is persisted in user files. Do not rename it.
 /// Local Library identity only. Never sent to Spotify as a context URI.
 pub const LIKED_SONGS_KEY: &str = "spotifast:liked-songs";
 
@@ -673,6 +674,10 @@ impl Settings {
                     log::warn!("settings at {} are unreadable: {error}", path.display());
                     Self::default()
                 });
+                // Preserve custom Connect names, but update the old factory name.
+                if settings.device_name == "Spotifast" {
+                    settings.device_name = crate::brand::NAME.to_owned();
+                }
                 settings.migrate_proxy(text);
                 settings.forget_unusable_screen_rate();
                 settings.proxy_password_legacy = !settings.proxy_password.is_empty();

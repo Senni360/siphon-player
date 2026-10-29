@@ -2256,9 +2256,9 @@ msgstr ""
 
 #: src/theme.rs:229
 msgid ""
-"Custom themes could not be loaded. Run spotifast reload-themes to try again."
+"Custom themes could not be loaded. Run siphon reload-themes to try again."
 msgstr ""
-"カスタムテーマを読み込めませんでした。spotifast reload-themesを実行してもう一"
+"カスタムテーマを読み込めませんでした。siphon reload-themesを実行してもう一"
 "度お試しください。"
 
 #: src/ui/artist.rs:32

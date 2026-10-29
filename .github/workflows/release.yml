@@ -92,10 +92,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $binary = "target\${{ matrix.target }}\release\spotifast.exe"
+          $binary = "target\${{ matrix.target }}\release\siphon.exe"
           $imports = & dumpbin /dependents $binary | Out-String
           $runtime = $imports | Select-String -Pattern 'MSVCP[0-9_]*\.dll|VCRUNTIME[0-9_]*\.dll'
-          if ($runtime) { throw "Spotifast imports an MSVC runtime:`n$runtime" }
+          if ($runtime) { throw "Siphon imports an MSVC runtime:`n$runtime" }
           # The updater picks its download by the running executable's
           # architecture, so a binary of the wrong one under this name would
           # keep every copy installed from it on the wrong architecture.
@@ -103,12 +103,12 @@ jobs:
           if ($headers -notmatch '${{ matrix.pe-machine }}') { throw "$binary is not built for ${{ matrix.target }}:`n$headers" }
           # Each Windows build runs on its own processor: start it once.
           $version = (& $binary --version | Out-String).Trim()
-          if ($version -notmatch '^spotifast \d+\.\d+\.\d+') { throw "Unexpected --version output: $version" }
+          if ($version -notmatch '^siphon \d+\.\d+\.\d+') { throw "Unexpected --version output: $version" }
           # The binary's version is the crate's, not the tag's (the CLI pins
-          # `spotifast {CARGO_PKG_VERSION}` exactly): a mismatch here is a release
+          # `siphon {CARGO_PKG_VERSION}` exactly): a mismatch here is a release
           # carrying one version's name and another's code (#1080).
           $tag = "${{ github.ref_name }}".TrimStart("v")
-          if ($version -ne "spotifast $tag") { throw "The binary reports $version, but the tag names $tag" }
+          if ($version -ne "siphon $tag") { throw "The binary reports $version, but the tag names $tag" }
 
       # Windows rows hand their checked binary to the windows job, which signs
       # it on x64 (Azure Artifact Signing doesn't run on Arm runners) and
@@ -118,21 +118,21 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/spotifast.exe
+          path: target/${{ matrix.target }}/release/siphon.exe
           if-no-files-found: error
 
       - name: Package
         if: runner.os == 'Linux'
         shell: bash
         run: |
-          name="spotifast-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="siphon-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/spotifast" "dist/$name/"
+          cp "target/${{ matrix.target }}/release/siphon" "dist/$name/"
           cp README.md LICENSE "dist/$name/"
-          cp packaging/spotifast-portable.txt "dist/$name/"
+          cp packaging/siphon-portable.txt "dist/$name/"
           # Desktop integration for package builds and hand-installs.
-          cp --parents packaging/applications/spotifast.desktop packaging/icons/spotifast.svg "dist/$name/"
-          cp --parents contrib/omarchy/spotifast.json.tpl contrib/omarchy/spotifast-theme "dist/$name/"
+          cp --parents packaging/applications/siphon.desktop packaging/icons/siphon.svg "dist/$name/"
+          cp --parents contrib/omarchy/siphon.json.tpl contrib/omarchy/siphon-theme "dist/$name/"
           cd dist
           tar czf "$name.tar.gz" "$name"
 
@@ -227,15 +227,15 @@ jobs:
       - name: Sign the binary
         if: vars.AZURE_SIGNING_PROFILE != ''
         shell: pwsh
-        run: native-packages sign-windows target\${{ matrix.target }}\release\spotifast.exe
+        run: native-packages sign-windows target\${{ matrix.target }}\release\siphon.exe
 
       - name: Package
         shell: bash
         run: |
-          name="spotifast-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="siphon-${GITHUB_REF_NAME}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp "target/${{ matrix.target }}/release/spotifast.exe" "dist/$name/"
-          cp README.md LICENSE packaging/spotifast-portable.txt "dist/$name/"
+          cp "target/${{ matrix.target }}/release/siphon.exe" "dist/$name/"
+          cp README.md LICENSE packaging/siphon-portable.txt "dist/$name/"
           cd dist
           7z a "$name.zip" "$name"
 
@@ -257,7 +257,7 @@ jobs:
           $version = $env:GITHUB_REF_NAME.TrimStart("v")
           $payload = "dist\msi-input-${{ matrix.target }}"
           New-Item -ItemType Directory -Force $payload | Out-Null
-          $files = "target\${{ matrix.target }}\release\spotifast.exe", "README.md", "LICENSE", "packaging\windows\spotifast-installer.txt"
+          $files = "target\${{ matrix.target }}\release\siphon.exe", "README.md", "LICENSE", "packaging\windows\siphon-installer.txt"
           Copy-Item $files $payload
           $packages = "$env:RUNNER_TEMP\windows-packages"
           native-packages build --version $version --target ${{ matrix.package-target }} --defer-recipes --output $packages
@@ -301,9 +301,9 @@ jobs:
         run: |
           mkdir -p universal
           lipo -create \
-            target/aarch64-apple-darwin/release/spotifast \
-            target/x86_64-apple-darwin/release/spotifast \
-            -output universal/spotifast
+            target/aarch64-apple-darwin/release/siphon \
+            target/x86_64-apple-darwin/release/siphon \
+            -output universal/siphon
 
       - uses: ruby/setup-ruby@v1
         with:
@@ -315,7 +315,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           mkdir -p dist/macos-input
-          bash packaging/macos/bundle.sh universal/spotifast dist/macos-input/Spotifast.app "$version"
+          bash packaging/macos/bundle.sh universal/siphon dist/macos-input/Siphon.app "$version"
           cp README.md LICENSE dist/macos-input/
 
       - name: Package, sign and notarize macOS app
@@ -349,12 +349,12 @@ jobs:
           path: dist
       - name: Unpack the Linux build
         run: |
-          tar xzf dist/spotifast-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz -C packaging/flatpak "spotifast-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu"
-          mv packaging/flatpak/spotifast-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu packaging/flatpak/built
+          tar xzf dist/siphon-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu.tar.gz -C packaging/flatpak "siphon-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu"
+          mv packaging/flatpak/siphon-${GITHUB_REF_NAME}-x86_64-unknown-linux-gnu packaging/flatpak/built
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
-          manifest-path: packaging/flatpak/rocks.spotifast.Spotifast.bundle.yml
-          bundle: spotifast-${{ github.ref_name }}-x86_64.flatpak
+          manifest-path: packaging/flatpak/com.siphon.player.bundle.yml
+          bundle: siphon-${{ github.ref_name }}-x86_64.flatpak
           cache: false
           upload-artifact: false
       - uses: actions/upload-artifact@v7
@@ -387,7 +387,7 @@ jobs:
         run: |
           curl --fail --location --retry 3 \
             "https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz" \
-            --output "dist/spotifast-${GITHUB_REF_NAME}-source.tar.gz"
+            --output "dist/siphon-${GITHUB_REF_NAME}-source.tar.gz"
       - name: Public filenames, updater compatibility and checksums
         run: python3 packaging/release-names.py dist "$GITHUB_REF_NAME"
       - uses: ruby/setup-ruby@v1
@@ -398,18 +398,18 @@ jobs:
       # Updaters that carry the key refuse releases without a valid one.
       - name: Sign checksums
         env:
-          SPOTIFAST_UPDATE_SIGNING_KEY: ${{ secrets.SPOTIFAST_UPDATE_SIGNING_KEY }}
+          SIPHON_UPDATE_SIGNING_KEY: ${{ secrets.SIPHON_UPDATE_SIGNING_KEY }}
         run: |
           gem install native-packages --version 0.11.0 --no-document
           native-packages sign-checksums dist/checksums.txt \
             --public-key assets/update-public-key.hex \
-            --key-env SPOTIFAST_UPDATE_SIGNING_KEY
+            --key-env SIPHON_UPDATE_SIGNING_KEY
           native-packages verify-checksums dist/checksums.txt \
             --public-key assets/update-public-key.hex
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          name: Spotifast ${{ github.ref_name }}
+          name: Siphon ${{ github.ref_name }}
           # Publish reviewed notes immediately, not a generated PR-only summary.
           body_path: packaging/release-notes/${{ github.ref_name }}.md
           generate_release_notes: false

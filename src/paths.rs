@@ -2,7 +2,7 @@
 //!
 //! Configuration, durable non-secret state, and disposable caches live in the
 //! platform's conventional directories, or, for a copy started from the
-//! portable Windows zip, in `spotifast-data` next to the executable (#703).
+//! portable Windows zip, in `siphon-data` next to the executable (#703).
 //! Spotify grants use the platform store; the token paths below are retained
 //! only for migration and sign-out cleanup.
 
@@ -12,10 +12,63 @@ use std::path::PathBuf;
 /// own. A new portable folder copies the per-user settings and state, except
 /// the single-instance files a running installed copy holds locked and the
 /// logs of its runs.
+const ORGANIZATION: &str = if cfg!(windows) { "" } else { "siphon" };
+
 const FOLDERS: fastframe_dirs::App = fastframe_dirs::App {
-    not_copied: &["instance", "spotifast.log", "panic.log"],
-    ..fastframe_dirs::App::new("spotifast", "me", "paolino", "spotifast")
+    not_copied: &["instance", "spotifast.log", "siphon.log", "panic.log"],
+    ..fastframe_dirs::App::new(
+        crate::brand::SLUG,
+        "com",
+        ORGANIZATION,
+        crate::brand::DATA_NAME,
+    )
 };
+const LEGACY_FOLDERS: fastframe_dirs::App =
+    fastframe_dirs::App::new("spotifast", "me", "paolino", "spotifast");
+
+fn rebranded_portable(legacy: fastframe_dirs::Portable) -> fastframe_dirs::Portable {
+    match legacy {
+        fastframe_dirs::Portable::Folder(folder) => {
+            fastframe_dirs::Portable::Folder(folder.with_file_name("siphon-data"))
+        }
+        other => other,
+    }
+}
+
+fn portable() -> fastframe_dirs::Portable {
+    match FOLDERS.portable() {
+        // Replacing just the executable in an old portable zip keeps it portable.
+        fastframe_dirs::Portable::No => rebranded_portable(LEGACY_FOLDERS.portable()),
+        current => current,
+    }
+}
+
+pub(crate) fn legacy_flatpak_root() -> Option<PathBuf> {
+    #[cfg(target_os = "linux")]
+    if std::env::var("FLATPAK_ID").as_deref() == Ok(crate::brand::APP_ID) {
+        return std::env::home_dir().map(|home| home.join(".var/app/rocks.spotifast.Spotifast"));
+    }
+    None
+}
+
+#[cfg(any(target_os = "linux", test))]
+fn flatpak_profile(root: &std::path::Path) -> AppDirs {
+    AppDirs {
+        config: root.join("config/spotifast"),
+        state: root.join(".local/state/spotifast"),
+        cache: root.join("cache/spotifast"),
+    }
+}
+
+fn legacy_installed() -> AppDirs {
+    #[cfg(target_os = "linux")]
+    if let Some(root) = legacy_flatpak_root() {
+        return flatpak_profile(&root);
+    }
+    LEGACY_FOLDERS
+        .installed()
+        .map_or_else(AppDirs::legacy_fallback, AppDirs::from)
+}
 
 #[derive(Clone, Debug)]
 pub struct AppDirs {
@@ -62,10 +115,57 @@ impl AppDirs {
     /// time from the per-user ones, or the per-user ones. Call it once this
     /// process is the running copy, before the window opens.
     pub fn discover() -> Found {
+        crate::migration::migrate_window_state();
+        let installed = Self::installed();
+        let old = legacy_installed();
+        if let Err(error) = crate::migration::profile(&old, &installed) {
+            return Found {
+                dirs: old,
+                lines: vec![(
+                    log::Level::Warn,
+                    format!(
+                        "could not migrate the legacy profile; using its original folders: {error}"
+                    ),
+                )],
+            };
+        }
+        // A portable copy must adopt its adjacent old data before fastframe
+        // seeds a new folder from the installed profile.
+        if let Some(new) = portable().folder() {
+            let old = new.with_file_name("spotifast-data");
+            let migrated = crate::migration::profile(
+                &fastframe_dirs::Dirs::inside(&old).into(),
+                &fastframe_dirs::Dirs::inside(new).into(),
+            )
+            .and_then(|()| {
+                if matches!(FOLDERS.portable(), fastframe_dirs::Portable::No) {
+                    let parent = new.parent().ok_or(std::io::ErrorKind::InvalidInput)?;
+                    fastframe_file::write(
+                        &parent.join("siphon-portable.txt"),
+                        "siphon-portable-v1\n",
+                    )?;
+                }
+                Ok(())
+            });
+            if let Err(error) = migrated {
+                return Found {
+                    dirs: fastframe_dirs::Dirs::inside(&old).into(),
+                    lines: vec![(
+                        log::Level::Warn,
+                        format!(
+                            "could not migrate portable data; using its original folder: {error}"
+                        ),
+                    )],
+                };
+            }
+        }
         let found = FOLDERS.discover(|copy, from| {
             // The copy starts with the sign-in it was made from, under
             // credential entries of its own.
-            crate::credentials::adopt_profile(&copy.state, &from.state)
+            crate::credentials::adopt_profile(&copy.state, &from.state)?;
+            // Older ZIPs used the installed profile. Preserve their caches
+            // too, inside fastframe's staged portable copy, before publishing.
+            crate::migration::copy_cache(&from.cache, &copy.cache)
         });
         let dirs = found.dirs.map_or_else(Self::fallback, Self::from);
         let mut lines: Vec<_> = describe(&dirs, &found.mode).into_iter().collect();
@@ -91,11 +191,20 @@ impl AppDirs {
     /// hands its launches to an installed copy, or to a portable copy in
     /// another folder, which keep other settings.
     pub fn instance_scope() -> Option<String> {
-        FOLDERS.portable().instance_scope()
+        portable().instance_scope()
     }
 
     /// No home folder at all: the current directory.
     fn fallback() -> Self {
+        let fallback = std::env::current_dir().unwrap_or_default();
+        Self {
+            config: fallback.join("siphon-config"),
+            state: fallback.join("siphon-state"),
+            cache: fallback.join("siphon-cache"),
+        }
+    }
+
+    fn legacy_fallback() -> Self {
         let fallback = std::env::current_dir().unwrap_or_default();
         Self {
             config: fallback.join("spotifast-config"),
@@ -158,7 +267,7 @@ impl AppDirs {
 
     /// The log of the current run, replaced at every start.
     pub fn log_file(&self) -> PathBuf {
-        self.state.join("spotifast.log")
+        self.state.join("siphon.log")
     }
 
     /// Where a panic is recorded before the process dies of it.
@@ -294,6 +403,31 @@ mod tests {
     use std::path::Path;
 
     #[test]
+    fn flatpak_adopts_the_original_sandbox_instead_of_the_new_xdg_roots() {
+        let root = Path::new("/home/listener/.var/app/rocks.spotifast.Spotifast");
+        let old = flatpak_profile(root);
+        assert_eq!(old.config, root.join("config/spotifast"));
+        assert_eq!(old.state, root.join(".local/state/spotifast"));
+        assert_eq!(old.cache, root.join("cache/spotifast"));
+    }
+
+    #[test]
+    fn an_old_portable_marker_selects_the_new_adjacent_data_and_instance_scope() {
+        let root = Path::new("/usb/player");
+        let selected = rebranded_portable(fastframe_dirs::Portable::Folder(
+            root.join("spotifast-data"),
+        ));
+        let expected = fastframe_dirs::Portable::Folder(root.join("siphon-data"));
+        assert_eq!(selected.folder(), expected.folder());
+        assert_eq!(selected.instance_scope(), expected.instance_scope());
+        assert!(
+            rebranded_portable(fastframe_dirs::Portable::No)
+                .folder()
+                .is_none()
+        );
+    }
+
+    #[test]
     fn the_log_says_which_folders_a_portable_copy_uses_and_why() {
         let installed = AppDirs::from(fastframe_dirs::Dirs::inside(Path::new("/user")));
         assert!(describe(&installed, &fastframe_dirs::Mode::Installed).is_none());
@@ -330,8 +464,10 @@ mod tests {
     /// Installed copies, and every copy on Linux and macOS, keep the folders
     /// they always had.
     #[test]
-    fn the_per_user_folders_are_the_ones_spotifast_always_used() {
-        let Some(project) = directories::ProjectDirs::from("me", "paolino", "spotifast") else {
+    fn the_per_user_folders_are_separate_from_the_browser_helper() {
+        let Some(project) =
+            directories::ProjectDirs::from("com", ORGANIZATION, crate::brand::DATA_NAME)
+        else {
             return;
         };
         let dirs = AppDirs::installed();
@@ -341,6 +477,18 @@ mod tests {
             project.state_dir().unwrap_or(project.data_local_dir())
         );
         assert_eq!(dirs.cache, project.cache_dir());
+        #[cfg(windows)]
+        {
+            let base = directories::BaseDirs::new().unwrap();
+            // The helper removes its entire LocalAppData/Siphon tree on
+            // uninstall. The player must be a sibling, never a child of it.
+            assert_eq!(dirs.config, base.config_dir().join("Siphon Player/config"));
+            assert_eq!(dirs.state, base.data_local_dir().join("Siphon Player/data"));
+            assert_eq!(
+                dirs.cache,
+                base.data_local_dir().join("Siphon Player/cache")
+            );
+        }
     }
 
     #[test]

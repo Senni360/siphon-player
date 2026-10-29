@@ -19,7 +19,7 @@ rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 
 executable=Siphon
-identifier=rocks.spotifast.Siphon
+identifier=com.siphon.player
 cp "$binary" "$app/Contents/MacOS/$executable"
 chmod 755 "$app/Contents/MacOS/$executable"
 # The build number has to be numbers: a release candidate's -rc1 comes off.
@@ -41,7 +41,7 @@ for size in 16 32 128 256 512; do
     double=$((size * 2))
     sips -z $double $double "$here/icon-1024.png" --out "$iconset/icon_${size}x${size}@2x.png" >/dev/null
 done
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/spotifast.icns"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/siphon.icns"
 
 # arm64 refuses to launch an unsigned bundle, so sign one way or another.
 if [ -n "${CODESIGN_IDENTITY:-}" ]; then

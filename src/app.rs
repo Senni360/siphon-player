@@ -32358,8 +32358,8 @@ mod tests {
         app.open_pending_link();
         app.apply_actions(&ctx);
         assert_eq!(*app.page(), Page::Search);
-        assert_eq!(app.search.query, "artist:BjÃƒÆ’Ã‚Â¶rk");
-        assert_eq!(app.search.committed, "artist:BjÃƒÆ’Ã‚Â¶rk");
+        assert_eq!(app.search.query, "artist:Björk");
+        assert_eq!(app.search.committed, "artist:Björk");
         assert!(app.search.focus_requested);
         assert!(app.pending_link.is_none());
         assert!(app.now_playing().is_none());
@@ -32424,7 +32424,7 @@ mod tests {
             .unwrap();
         let call = |uri: &str| {
             client.call_method(
-                Some("org.mpris.MediaPlayer2.spotifast"),
+                Some("org.mpris.MediaPlayer2.siphon"),
                 "/org/mpris/MediaPlayer2",
                 Some("org.mpris.MediaPlayer2.Player"),
                 "OpenUri",
@@ -32451,7 +32451,7 @@ mod tests {
         assert!(matches!(app.actions.as_slice(), [Action::OpenLink(_)]));
         let schemes: Vec<String> = zbus::blocking::Proxy::new(
             &client,
-            "org.mpris.MediaPlayer2.spotifast",
+            "org.mpris.MediaPlayer2.siphon",
             "/org/mpris/MediaPlayer2",
             "org.mpris.MediaPlayer2",
         )

@@ -1,6 +1,6 @@
 [package]
-name = "spotifast"
-default-run = "spotifast"
+name = "siphon"
+default-run = "siphon"
 version = "0.14.2"
 edition = "2024"
 rust-version = "1.98"
@@ -15,7 +15,7 @@ name = "spotifast"
 path = "src/lib.rs"
 
 [[bin]]
-name = "spotifast"
+name = "siphon"
 path = "src/spotifast.rs"
 
 [dependencies]
@@ -88,7 +88,7 @@ fastframe-autostart = { git = "https://github.com/crmne/fastframe", tag = "v0.15
 # launch and the command line hand their requests to.
 fastframe-instance = { git = "https://github.com/crmne/fastframe", tag = "v0.15.2" }
 # The config, state and cache folders: the per-user ones, or for a copy from
-# the portable Windows zip, spotifast-data next to the executable (#703).
+# the portable Windows zip, siphon-data next to the executable (#703).
 fastframe-dirs = { git = "https://github.com/crmne/fastframe", tag = "v0.15.2" }
 # The desktop's media controls: MPRIS on Linux, the media overlay on
 # Windows, Now Playing on macOS. The media keys and those panels send
