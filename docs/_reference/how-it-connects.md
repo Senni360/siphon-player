@@ -17,14 +17,14 @@ independent of Spotify's grants.
 
 ## Independent grants, once each
 
-Spotifast uses separate credentials for Web API access and local playback:
+Siphon uses separate credentials for Web API access and local playback:
 
 1. **Your own Spotify app**, the personal app, carries the Web API: account,
    library, catalogue, search, playlists and playback control. Since 0.14.2
    it is the only way to sign in. The sign-in screen walks through creating
    one, and its Client ID is kept in settings
    ([Getting Started](/getting-started/#make-a-spotify-app)). Before
-   opening the browser, Spotifast asks Spotify's token endpoint whether it
+   opening the browser, Siphon asks Spotify's token endpoint whether it
    knows the Client ID, with a code that cannot be valid: an unknown client
    is refused as such, a real one for the code, and the sign-in screen says
    which. Spotify's own page shows a redirect URI that does not match and
@@ -35,7 +35,7 @@ Spotifast uses separate credentials for Web API access and local playback:
 2. **A shared grant from before 0.14.2.** Earlier versions signed everyone in
    through one app, which the ncspot project registered. It stopped taking
    new sign-ins in October 2026
-   ([#1057](https://github.com/crmne/spotifast/issues/1057)), and Spotifast
+   ([#1057](https://github.com/crmne/spotifast/issues/1057)), and Siphon
    no longer carries its Client ID. A grant already saved for it keeps
    working: it is stored with the ID it was issued to and refreshes with
    that. Complete playlist-library views and the playlist half of a search
@@ -149,7 +149,7 @@ track transitions and pause/resume retain that history.
 Since 0.8.0, requests that need a grant still being
 verified wait for it instead of showing "not signed in". Sign-out cancels
 pending requests, and their late results cannot undo a new sign-in. If Spotify
-rejects a saved refresh grant, Spotifast removes that grant and asks for a new
+rejects a saved refresh grant, Siphon removes that grant and asks for a new
 browser approval. Upgrading to protected storage does not itself require
 signing in again.
 
@@ -193,7 +193,7 @@ stay visible. A failed page stops automatic loading. Spotify custom playlist
 order uses the existing account-scoped rootlist from local playback; sorting
 and dragging never write that order back to Spotify. When the window regains
 focus, or is shown again from the tray, after every playlist page has loaded,
-Spotifast reads the rootlist again over the playback session, at most once
+Siphon reads the rootlist again over the playback session, at most once
 every 5 seconds, so an order changed in another Spotify app appears without a
 restart. A return sooner than that reads once the 5 seconds have passed. This
 read uses no Web API quota.
@@ -233,7 +233,7 @@ out, or a reconnection that gives up stops it.
   one from the installed copy's state it saves those grants again under
   entries of its own, never moving or deleting the installed copy's
   ([portable copies](/settings-and-files/#portable-copies)). Librespot retains its reusable credential in
-  memory; Spotifast owns persistence. Flatpak can talk to
+  memory; Siphon owns persistence. Flatpak can talk to
   `org.freedesktop.secrets` for this.
   Version 0.7.1 still uses the older unencrypted files.
   See [migration, sign-out, and storage protection](/settings-and-files/).
@@ -254,7 +254,7 @@ out, or a reconnection that gives up stops it.
   prefixes refresh through the existing Web API grant, one page at a time,
   while the saved rows remain visible. Manual refresh starts immediately.
   Like and Unlike are kept over lagging reads until Spotify confirms them.
-- Spotifast has no telemetry, analytics, or hosted service. When the lyrics
+- Siphon has no telemetry, analytics, or hosted service. When the lyrics
   panel is open and neither Spotify nor a local file has lyrics, it sends
   the track's artist, title, album, and length to
   [lrclib.net](https://lrclib.net). It also checks
@@ -270,7 +270,7 @@ out, or a reconnection that gives up stops it.
   `checksums.txt` and `checksums.txt.sig` from the project's GitHub release. It
   verifies the manifest's Ed25519 signature against its embedded publisher key
   before downloading the matching binary archive, Windows installer, or universal
-  macOS DMG. Spotifast then checks the published SHA-256 digest and the portable
+  macOS DMG. Siphon then checks the published SHA-256 digest and the portable
   executable's reported version before offering a restart.
   Automatic downloads are optional; installation always waits for your click.
   Checks and downloads do not open the update popup. The green update pill opens
@@ -278,7 +278,7 @@ out, or a reconnection that gives up stops it.
   No Spotify credential is sent. Missing or invalid publisher signatures are
   rejected; the updater does not fall back to trusting unsigned checksums.
 
-  Updates stage their files in a private `.spotifast-update-*` directory beside
+  Updates stage their files in a private `.siphon-update-*` directory beside
   the application so replacement stays on the same filesystem. The directory
   retains the previous executable or Mac app bundle and `result.txt` for recovery and diagnosis.
   Helper startup errors are retained in `helper.log`. On macOS the helper runs
@@ -294,7 +294,7 @@ out, or a reconnection that gives up stops it.
 ## Collection loading and artwork
 
 Since 0.9.0, opening a playlist, album, artist, or podcast keeps any
-title, summary, and cover Spotifast already knows while the complete page is
+title, summary, and cover Siphon already knows while the complete page is
 requested. Controls that need unfinished details stay disabled, and a loading
 indicator marks the unfinished content. If the request fails, the known header
 stays above **Retry**. A direct link with no known details shows only the normal
@@ -328,7 +328,7 @@ rows are placeholders until their page arrives; scrolling never starts playback.
 for listeners.
 
 Each Web API session has separate concurrency and rate limits. A `Retry-After`
-response pauses only that session. Spotifast routes each request once and
+response pauses only that session. Siphon routes each request once and
 does not retry it through the other app. A playlist read the librespot session
 refuses outright, because the playlist is gone or private, is shown as such. A
 dropped connection, a read that takes longer than 30 seconds, or a page whose
@@ -359,14 +359,14 @@ session cannot read the list, the request waits for the shared grant, or
 goes to the personal app when there is none. None of these reads use Web API quota.
 
 Spotify can also explicitly refuse the key needed to decrypt a track. When
-that happens, Spotifast stops local playback and leaves the rest of the queue
+that happens, Siphon stops local playback and leaves the rest of the queue
 alone instead of treating every following track as unavailable. This refusal
 comes from Spotify; trying again later may work. A banner says so and offers
 the device picker, since other Spotify Connect devices fetch their own audio
 and keys; [Spotify refused the audio key](/troubleshooting/#audio-key)
 explains it for listeners. The banner reads the engine's own event and adds no request.
 
-Before adding songs to an existing playlist, Spotifast checks the rows it
+Before adding songs to an existing playlist, Siphon checks the rows it
 already holds. A known duplicate produces an immediate confirmation naming the
 song. Only a playlist that has not been fully loaded needs a background scan to
 rule out duplicates. Once confirmed, the new rows appear locally at once.
@@ -376,7 +376,7 @@ through the same Web API grant. Duplicate checks and confirmation retain that
 position; partial loaded pages keep the correct continuation offset. A
 successful write advances the cached playlist to Spotify's returned snapshot
 instead of downloading the playlist again. If Spotify cannot answer the scan,
-Spotifast preserves the requested edit and lets the write report its result.
+Siphon preserves the requested edit and lets the write report its result.
 
 Since 0.8.0, manually reloading an edited playlist waits for all
 pending writes and confirmation of the returned Spotify revision before
@@ -390,10 +390,10 @@ existing playlist requests and adds no periodic polling.
 ## New releases on Home
 
 Home's **New releases** shelf is read when Home refreshes, and again when
-local playback becomes ready. With local playback set up, Spotifast sends
+local playback becomes ready. With local playback set up, Siphon sends
 Spotify's own new-releases feed query (`queryWhatsNewFeed`) to Pathfinder
 with the session's Login5 bearer and client token, asking for the first 50
-albums, EPs and singles. Spotifast never sends the feed's mutation that marks
+albums, EPs and singles. Siphon never sends the feed's mutation that marks
 items as seen, so the bell in Spotify's apps is left as it was. The query
 uses no Web API quota.
 
@@ -415,8 +415,8 @@ album tracks, one request per release.
 Spotify's own playlists, Discover Weekly and the other mixes made for you,
 offer **Hide in this playlist** in a song's menu, as Spotify's apps do. The
 hidden songs live in the account's `playcontextbans` collection set on
-Spotify's client API, which librespot reads and writes for Spotifast. When
-local playback connects, Spotifast reads that set once, 500 items to a
+Spotify's client API, which librespot reads and writes for Siphon. When
+local playback connects, Siphon reads that set once, 500 items to a
 page. Hiding or showing a song greys its row out or brings it back at once,
 and sends one write for that song and playlist; if Spotify turns it away,
 the row goes back and an error is shown. While a playlist has hidden songs,
@@ -458,7 +458,7 @@ append might already have succeeded.
 ## Playlist cover uploads
 
 Since 0.9.0, **Edit details → Change cover** opens the native file
-picker. Spotifast reads only the selected JPEG or PNG, preserves its aspect ratio, flattens transparent
+picker. Siphon reads only the selected JPEG or PNG, preserves its aspect ratio, flattens transparent
 pixels onto white, and encodes a JPEG preview. Files must be smaller than 20 MB
 and no larger than 8192 pixels per side, within a 128 MB decoding budget.
 Encoding reduces the image to fit
@@ -468,7 +468,7 @@ Spotify; **Save** separately saves the name, description, and visibility.
 Uploads use the same shared or personal app routing as playlist edits. Requests
 are not retried through another app. The uploaded image stays visible while
 Spotify propagates its artwork. A changed URL can still contain an earlier
-upload, so Spotifast checks the largest returned image through its normal
+upload, so Siphon checks the largest returned image through its normal
 artwork cache, off the UI thread. Only matching image bytes or decoded pixels
 replace the temporary preview. It makes at most three immediate metadata
 rechecks; if Spotify is still catching up or the check fails, the preview stays
@@ -476,7 +476,7 @@ and a later page refresh can check again. Once confirmed, later cover changes
 from other clients can appear. The selected source file is not copied to the
 cache or settings.
 
-Image uploads require renewed Web API consent. If Spotifast asks you to sign
+Image uploads require renewed Web API consent. If Siphon asks you to sign
 in again after updating, approve the image upload permission. Reconnect your
 personal app in Settings too, if you use one. Local playback authorization is
 unchanged. Spotify can refuse changes to playlists you do not own.
@@ -497,19 +497,19 @@ seconds overall after discovery. Only responding receivers with a name and
 ID are offered. Matching IDs are combined; separate devices can have the
 same name. These reads send no account credential.
 
-When a receiver is selected, Spotifast encrypts the stored librespot credential
+When a receiver is selected, Siphon encrypts the stored librespot credential
 with a receiver-specific key and a key from a Diffie-Hellman exchange. The
-encrypted value only works for that receiver and exchange. Spotifast does not
+encrypted value only works for that receiver and exchange. Siphon does not
 save another copy of the credential.
 
-The receiver then signs in and appears in Spotify's device list. Spotifast
+The receiver then signs in and appears in Spotify's device list. Siphon
 uses the Web API for subsequent control requests.
 
 ### Restricted devices and Sonos
 
 Spotify marks some devices as restricted, Sonos players among them. The Web
 API refuses every player command for one with "Restriction violated" and
-leaves an idle one out of the device list. Spotifast sends commands for a
+leaves an idle one out of the device list. Siphon sends commands for a
 restricted device over the playback session's Connect state service instead,
 as Spotify's own apps do: a transfer, then player commands (play, pause,
 resume, skip, seek, shuffle, repeat, queue) and volume, all sent from this
@@ -530,7 +530,7 @@ control another device.
 A Sonos is recognised by its receiver endpoint (`/spotifyzc` on port 1400)
 and is offered in the picker from the network even while Spotify does not list
 it. Its receiver asks for an OAuth authorization code instead of the librespot
-credential. Spotifast does not send a login blob or access token to that HTTP
+credential. Siphon does not send a login blob or access token to that HTTP
 endpoint. Transfer and player commands go through Spotify using the existing
 playback session. Other receivers keep the encrypted login blob described above.
 
@@ -538,7 +538,7 @@ playback session. Other receivers keep the encrypted login blob described above.
 
 Cast speakers, displays and speaker groups announce `_googlecast._tcp`, not
 `_spotify-connect._tcp`. They do not run Spotify until a sender starts it.
-Spotifast lists them under their Cast name (the `fn` record) without probing
+Siphon lists them under their Cast name (the `fn` record) without probing
 them, because probing one would start Spotify on it.
 
 The picker shows the first resolved Cast announcement immediately while its
@@ -570,7 +570,7 @@ rows have separate histories. This is an ordering hint, not authenticated
 device identity; authentication still happens only on selection.
 
 Starting Spotify on a Cast device needs local playback enabled, because the
-playback session obtains the token. When a Cast device is selected, Spotifast
+playback session obtains the token. When a Cast device is selected, Siphon
 follows the steps of Spotify's own apps:
 
 1. It opens a Cast v2 connection to the device, checks that the device is a
@@ -578,35 +578,35 @@ follows the steps of Spotify's own apps:
 2. The receiver's `getInfo` reply names the Spotify client it runs as.
 3. The librespot session asks Spotify for a token issued to that client and
    to the device's ID (`/device-auth/v1/refresh`, an internal endpoint).
-4. Spotifast sends that token to the receiver with `addUser`.
+4. Siphon sends that token to the receiver with `addUser`.
 
 The device ID is the MD5 hash of the Cast name, as in Spotify's apps. The
 device then appears in Spotify's device list, and the Web API controls it
 like any other device. Right after an earlier sign-in, a receiver can
-refuse the first attempt, so Spotifast tries once more. A device that does
+refuse the first attempt, so Siphon tries once more. A device that does
 not answer within 20 seconds is reported as not answering.
 
 A Cast device presents a TLS certificate of its own, which system trust stores
 do not hold, so the connection accepts any certificate. Since 0.13.1, before
-sending anything else, Spotifast asks the device to prove it is genuine, as
+sending anything else, Siphon asks the device to prove it is genuine, as
 Chrome does. It
 sends a random challenge on Cast's `deviceauth` channel. The device signs the
 challenge and the certificate of this connection with its device key, and
-sends that key's certificate chain. Spotifast checks that the chain leads to
+sends that key's certificate chain. Siphon checks that the chain leads to
 one of Google's two Cast root certificates, which it carries, that the device
 certificate is one for signing, and that the signature is valid. Because only
 that signature vouches for the connection's certificate, the connection's
 certificate must also be valid now and for no more than four more days, as
-Chrome requires. If any check fails, Spotifast stops. It does not start
+Chrome requires. If any check fails, Siphon stops. It does not start
 Spotify on the device or ask for a token, and it reports that the device could
 not prove it is genuine. As in Chrome, older devices that sign with SHA-1 are
 accepted, and the revocation list a device may send with its answer is not
-checked (Chrome only checks it when told to require one). Spotifast 0.13.0
+checked (Chrome only checks it when told to require one). Siphon 0.13.0
 made no such check: whatever answered at the address of the selected device
 received the token.
 
 The token is issued for the Spotify client and device ID that the receiver
-names in its `getInfo` reply, not the reusable playback credential. Spotifast
+names in its `getInfo` reply, not the reusable playback credential. Siphon
 does not save or log the token.
 
 ## The engine
@@ -624,7 +624,7 @@ Playback runs on a separate runtime. Librespot maintains the Spotify Connect
 session, exposes this computer as a device, receives transfers, and reports
 playback state. If the session drops, it reconnects with the stored credential.
 On macOS, while the system reports no route to the internet at all, the
-reconnection waits for one instead of retrying. Spotifast asks the system
+reconnection waits for one instead of retrying. Siphon asks the system
 about the internet as a whole rather than about a Spotify host, so the check
 looks up no name and sends nothing over the network.
 
@@ -638,7 +638,7 @@ Spotify rejects the approval, playback is set up again, or you sign out.
 approval; the browser opens only when there is none or Spotify rejects it.
 
 On macOS, local playback and track loading declare a user-initiated activity
-so App Nap does not throttle them when another application covers Spotifast.
+so App Nap does not throttle them when another application covers Siphon.
 Pausing, stopping, or an output error releases the activity; a song playing
 on through a dropped session keeps it, and remote playback does not hold it. The activity permits idle system sleep
 and does not keep the display awake.
@@ -672,18 +672,18 @@ Audio keys are asked for one at a time, at least 200 ms apart. When Spotify
 refuses one, the session waits 3 seconds before asking for any key, then 5,
 then 10 after each further refusal in a row, and a key that arrives ends the
 wait. The song being loaded asks again after each wait, up to three times,
-before Spotifast reports the refusal; the next song's key is not prefetched
+before Siphon reports the refusal; the next song's key is not prefetched
 during a wait.
 
 Local playback has one output on every platform, fastframe-audio: CoreAudio on
 macOS, WASAPI on Windows, and on Linux PipeWire when it is running, otherwise a
 PulseAudio server, otherwise ALSA directly. It talks only to the local sound
-system. On PipeWire and PulseAudio the stream is named **Spotifast** in system
-mixers (`application.name`, with the `spotifast` icon), with **Spotify
+system. On PipeWire and PulseAudio the stream is named **Siphon** in system
+mixers (`application.name`, with the `siphon` icon), with **Spotify
 playback** as its media name and no media role, so its volume is remembered
-for Spotifast rather than shared with other music players.
+for Siphon rather than shared with other music players.
 The same session checks releases that the Web API calls `single`, so confirmed
-EPs can carry their precise label. Spotifast deduplicates these checks while
+EPs can carry their precise label. Siphon deduplicates these checks while
 the app session is active. If the engine reconnects, an interrupted check may
 be tried again; if metadata is unavailable, its label stays `Single`.
 
@@ -694,7 +694,7 @@ inbound ports have to be open.
 
 Each socket setup and handshake shares a five-second deadline. The pinned
 librespot version can try up to six access points and retry each connection
-once. Spotifast allows 75 seconds for the whole engine connection, giving
+once. Siphon allows 75 seconds for the whole engine connection, giving
 stalled endpoints more time to fall back. Resolving access points,
 authentication, and other setup also use that outer deadline, so reaching
 every fallback endpoint is not guaranteed.
@@ -723,7 +723,7 @@ Since 0.9.0, Settings → Proxy has four modes:
   Spotify hostnames are resolved by that proxy.
 
 The mode selects the protocol. Host and port are separate fields.
-These settings apply to Spotifast's requests. The external browser used
+These settings apply to Siphon's requests. The external browser used
 for Spotify approval keeps its own network and proxy settings.
 
 The Web API, artwork, lyrics, update checks and downloads, and MilkDrop preset
@@ -777,7 +777,7 @@ link or history navigation cannot be overwritten by an older response.
 
 Removing a song from a playlist uses the Web API's `DELETE
 /playlists/{id}/items`, which removes every copy of the song. When the
-playlist holds the removed song more than once, Spotifast instead reads the
+playlist holds the removed song more than once, Siphon instead reads the
 playlist's rows and revision over the session (`/playlist/v2/playlist/{id}`)
 and sends one `/playlist/v2/playlist/{id}/changes` request through librespot
 that removes the picked rows by index, based on that revision, with the

@@ -167,7 +167,7 @@ URL. It contains no token. The file is replaced atomically through the
 app's background file writer. A missing file means disconnected.
 
 Session tokens use the existing credential layer under
-`rocks.spotifast.Spotifast`, with a separate `soundcloud-session` entry for
+`com.siphon.player`, with a separate `soundcloud-session` entry for
 each application state location. Linux uses Secret Service, macOS uses
 Keychain, and Windows uses Credential Manager with the existing DPAPI-sealed
 copy. See [Settings & Files]({{ '/settings-and-files/' | relative_url }})
@@ -200,7 +200,7 @@ describes playable, preview and blocked access.
 SoundCloud rows offer **Open on SoundCloud** and **Copy SoundCloud link** when
 SoundCloud returned a public permalink. Artist links retain the full
 `soundcloud:user:<id>` URI. A missing permalink is shown as unavailable;
-Spotifast never builds a Spotify link from a SoundCloud ID.
+Siphon never builds a Spotify link from a SoundCloud ID.
 
 SoundCloud menus omit Spotify Liked Songs, radio, album navigation and credits.
 Lyrics lookup is also unavailable for SoundCloud tracks. Disabled controls

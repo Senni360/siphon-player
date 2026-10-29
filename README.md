@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/images/logo.svg" alt="Spotifast logo" width="88" height="88">
+  <img src="docs/assets/images/logo.svg" alt="Siphon logo" width="88" height="88">
 </p>
 
-<h1 align="center">Spotifast</h1>
+<h1 align="center">Siphon</h1>
 
 <p align="center"><strong>Spotify, native and fast.</strong><br>A lightweight music app for Linux, macOS, and Windows.</p>
 
@@ -19,7 +19,22 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-1ed760" alt="MIT license"></a>
 </p>
 
-Spotifast is a Spotify client written in Rust with
+Siphon began as a fork of [Spotifast](https://github.com/crmne/spotifast),
+created by Carmine Paolino and its contributors. The upstream MIT licence,
+copyright notices and dependency attributions remain intact in [LICENSE](LICENSE).
+The name and nested-U logo match the owner's Siphon browser extension;
+this player keeps its existing interface styling.
+
+On first launch, empty player folders adopt the old Spotifast settings,
+state and caches, including Spotify credentials, SoundCloud account state,
+mixed playlists and overlays. Existing Siphon data takes precedence. The
+browser helper's `%LOCALAPPDATA%\Siphon` is separate from the player's
+`%LOCALAPPDATA%\Siphon Player` data. See
+[migration and file locations](docs/_reference/settings-and-files.md#upgrading-from-spotifast).
+Upstream links and historical release notes below still describe Spotifast;
+build this fork from source for Siphon.
+
+Siphon is a Spotify client written in Rust with
 [egui](https://www.egui.rs) and [fastframe](https://fastframe.dev), the
 framework behind a family of native desktop apps. It plays music through
 [librespot](https://github.com/librespot-org/librespot), typically uses
@@ -38,12 +53,12 @@ radio, album navigation, lyrics and remote Spotify outputs are unavailable
 for them. The connection interface is not wired yet.
 
 **Playback needs Spotify Premium.** Free accounts can browse and search, but
-cannot play music through Spotifast.
+cannot play music through Siphon.
 
-![Spotifast Home with the playlist library, recommendations, queue, and player visible](docs/screenshot.png)
+![Siphon Home with the playlist library, recommendations, queue, and player visible](docs/screenshot.png)
 
 <details>
-<summary><strong>Watch Spotifast in action</strong></summary>
+<summary><strong>Watch Siphon in action</strong></summary>
 
 https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 
@@ -60,19 +75,24 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 | **Spotify Connect** | Play on this computer or control playback on your other devices, including Google Cast speakers and groups. Cast devices appear as they are discovered; frequently and recently chosen outputs rise to the top. Remote volume keeps your chosen level while Spotify updates. |
 | **Queue** | Add songs to the queue, or choose **Play next** to put a song or selection first when playing on this computer. |
 | **Themes** | Choose light, dark, system appearance, or custom colours, with one theme for light mode and one for dark mode that switch with the system. On Omarchy, follow your desktop theme. |
-| **Desktop controls** | Use keyboard shortcuts and media keys. Keep music playing from the tray when supported by your desktop and settings, and start Spotifast with your computer, with its window or in the tray. |
+| **Desktop controls** | Use keyboard shortcuts and media keys. Keep music playing from the tray when supported by your desktop and settings, and start Siphon with your computer, with its window or in the tray. |
 | **Winamp mini player** | Use classic skins with an equalizer, playlist, and animated sound displays. |
 | **MilkDrop** | Watch music-reactive visuals in a separate window or full screen. See platform availability below. |
 
 ## Install
 
-| Platform | Installation |
-|---|---|
-| **macOS** | `brew install --cask crmne/tap/spotifast`, or [download the Mac app](https://spotifast.rocks/download/#macos). |
-| **Arch Linux** | `yay -S spotifast-bin` |
-| **Windows** | Choose your build on the [Download page](https://spotifast.rocks/download/). |
-| **Other Linux** | Find Flatpak, AppImage, Nix, and other options on the [Download page](https://spotifast.rocks/download/). |
-| **From source** | Follow [Build from source](https://spotifast.rocks/getting-started/#build-from-source) for dependencies and commands. |
+Build this checkout to run Siphon:
+
+```sh
+cargo build --locked --release
+```
+
+Run `target/release/siphon` (`target\release\siphon.exe` on Windows).
+The [source-build guide](docs/_guide/getting-started.md#build-from-source)
+lists native dependencies. The inherited download, Homebrew and AUR links
+refer to upstream Spotifast and do not install this fork. Packaging templates
+in this repository now produce Siphon artifacts; release hosting and signing
+still need to be configured for the fork.
 
 ## Start listening
 
@@ -82,14 +102,14 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
    **Web API** ticked. Spotify requires Premium on the account that creates
    it. [Getting started](https://spotifast.rocks/getting-started/#make-a-spotify-app)
    has the steps.
-2. Paste its Client ID into Spotifast and choose **Sign in with Spotify**.
+2. Paste its Client ID into Siphon and choose **Sign in with Spotify**.
    Approve access in your browser, then return to the app to see your library.
 3. To listen on this computer, open the device menu in the bottom player bar
    and choose **Set up playback here**, also available in Settings.
 4. Complete the separate playback approval in your browser. Your computer
-   appears as a Spotify Connect device named **Spotifast**.
+   appears as a Spotify Connect device named **Siphon**.
 
-Library access and local playback have separate approvals. Spotifast remembers
+Library access and local playback have separate approvals. Siphon remembers
 both using your computer's protected storage. See
 [Getting started](https://spotifast.rocks/getting-started/) for the full walkthrough
 and [How it connects](https://spotifast.rocks/how-it-connects/) for the details.
@@ -111,7 +131,7 @@ a playlist, and animated sound displays. Switch with **Ctrl+M**
 The spectrum analyser and oscilloscope also work in the collapsed title bar.
 
 <p align="center">
-  <img src="docs/assets/images/winamp.png" alt="Spotifast's Winamp mini player with the built-in skin, equalizer, and playlist" width="320">
+  <img src="docs/assets/images/winamp.png" alt="Siphon's Winamp mini player with the built-in skin, equalizer, and playlist" width="320">
 </p>
 
 [Explore the mini player](https://spotifast.rocks/winamp/), including skins,
@@ -123,7 +143,7 @@ MilkDrop reacts to music playing on this computer, with more than 10,000
 presets downloaded on first use. Open it from the visualiser button,
 Settings, or the mini player's **V** menu.
 
-![MilkDrop visualiser displaying coloured concentric patterns in Spotifast](docs/assets/images/milkdrop-poster.jpg)
+![MilkDrop visualiser displaying coloured concentric patterns in Siphon](docs/assets/images/milkdrop-poster.jpg)
 
 Included on **Linux**, **macOS**, and **Windows Intel/AMD** builds.
 It is not included in the Windows on ARM download.
@@ -132,7 +152,8 @@ controls, and fullscreen mode.
 
 ## Guides and help
 
-The complete guide lives at **[spotifast.rocks](https://spotifast.rocks/)**.
+The [upstream guide](https://spotifast.rocks/) describes the original player;
+this fork's updated references live in [docs](docs/).
 
 | You want to… | Read |
 |---|---|
@@ -156,7 +177,7 @@ cargo run --features demo -- --demo
 ```
 
 Translations live in `assets/i18n/`; see
-[Translating Spotifast](docs/_reference/translating.md). Release packaging
+[Translating Siphon](docs/_reference/translating.md). Release packaging
 is described in [PACKAGING.md](PACKAGING.md).
 
 The library's **+** menu offers **New mixed playlist** alongside the usual
@@ -200,7 +221,7 @@ for public streams; the optional connection interface is not wired yet.
 ## More native apps
 
 **Want WhatsApp just as fast and native?** [ZapFast](https://zapfast.rocks)
-is Spotifast's sibling. Both are built on
+is a sibling of the upstream Spotifast project. Both are built on
 [fastframe](https://fastframe.dev).
 
 ## Sonos playback
@@ -210,20 +231,20 @@ local playback first, then select the speaker in the device picker.
 
 ## Acknowledgements
 
-Spotifast uses [librespot](https://github.com/librespot-org/librespot),
+Siphon uses [librespot](https://github.com/librespot-org/librespot),
 [egui](https://www.egui.rs), [fastframe](https://fastframe.dev), the [Inter](https://rsms.me/inter/)
 typeface (OFL), and [Lucide](https://lucide.dev) icons (ISC).
 
-Spotifast is an independent project and is not affiliated with Spotify.
+Siphon is an independent project and is not affiliated with Spotify.
 Spotify is a trademark of Spotify AB.
 
 Licensed under the [MIT License](LICENSE).
 
-## Star history
+## Upstream star history
 
 <a href="https://www.star-history.com/?repos=crmne%2Fspotifast&amp;type=date">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=crmne/spotifast&amp;type=date&amp;theme=dark">
-    <img alt="Spotifast GitHub stars over time" src="https://api.star-history.com/chart?repos=crmne/spotifast&amp;type=date">
+    <img alt="Upstream Spotifast GitHub stars over time" src="https://api.star-history.com/chart?repos=crmne/spotifast&amp;type=date">
   </picture>
 </a>

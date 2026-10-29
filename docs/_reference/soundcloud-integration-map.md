@@ -349,7 +349,7 @@ as Spotify; it is not a validator for Spotify API calls.
 | `src/app.rs:663`, `1255`, `1327`; `2486`, `2490` | local_files map, initialization, folder scan/result | Separate SoundCloud metadata/availability store; never add streams to this map |
 | `src/app.rs:1810`, `1813`, `1829`, `1832` | Exact duplicate-row start and positional URI lookup reject missing/local rows | Hybrid uses stable occurrence mapping, not Spotify index heuristics |
 | `src/app.rs:3595` | Resume manual local row through engine instead of Web API | Restore hybrid snapshot separately; never submit SoundCloud queue to either Spotify route |
-| `src/app.rs:6612` | request_contains skips Spotify locals | Also exclude SoundCloud and spotifast URIs from Spotify membership checks |
+| `src/app.rs:6612` | request_contains skips Spotify locals | Also exclude SoundCloud and siphon URIs from Spotify membership checks |
 | `src/app.rs:9065`, `9068` | playlist_start finds first available catalogue row | Use resolved hybrid order for overlay contexts before this selection |
 | `src/app.rs:10066` | Album queue excludes local/unavailable tracks | Source-aware playability for hybrid album/playlist batches |
 | `src/app.rs:10437`, `10452`, `10462`, `10474`, `10481`, `10489` | Folder setting/restart, can_queue, local_file, local_art, item_image, row_playable | Separate source eligibility; image URL path is reusable; file matching remains Spotify-local only |

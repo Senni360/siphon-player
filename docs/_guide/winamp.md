@@ -22,7 +22,7 @@ Choose **Random**, first in that list, to get a different skin each time you
 switch to the mini player, never the same one twice in a row. Settings says
 which skin it picked, and choosing a skin yourself turns Random off.
 
-You can also use an unpacked skin folder. Spotifast finds skin files inside
+You can also use an unpacked skin folder. Siphon finds skin files inside
 its subfolders, up to eight folders deep, so you do not need to move them all
 into one folder.
 
@@ -30,7 +30,7 @@ Right-click the title bar, or click **O**, to choose a size from 1x to 4x.
 Each size keeps the classic pixels sharp. The same menu can keep the player
 above other windows. **D** steps through the sizes, 1x to 4x, and **A**
 toggles always-on-top.
-Spotifast remembers the window position where your desktop allows it.
+Siphon remembers the window position where your desktop allows it.
 
 Skins can have transparent areas and shapes other than rectangles. Modern
 Winamp 3 and 5 skin formats are not supported; choose classic Winamp 2 skins.

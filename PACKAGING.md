@@ -6,17 +6,17 @@ DEB/RPM/AppImage contents, dependencies, the macOS disk image and Windows
 Installer packages, recipe templates and downstream repositories.
 Application assets and native recipes stay in `packaging/`.
 
-Public AUR, Homebrew, DEB/RPM and release download names use Spotifast, and
-Linux packages install `spotifast` as the only executable.
+Public AUR, Homebrew, DEB/RPM and release download names use Siphon, and
+Linux packages install `siphon` as the only executable.
 
-Linux builds provide `spotifast.desktop` and `spotifast.svg`, matching the
+Linux builds provide `siphon.desktop` and `spotifast.svg`, matching the
 native window and MPRIS desktop-entry ID. Flatpak installs those assets under
 its full application ID and sets the window class to match.
 `python3 packaging/test-launchers.py` exercises the actual AUR and Flatpak
 installation commands with a release payload, using Ruby to read YAML.
 
 Linux packages also install the optional Omarchy template and hook under
-`share/spotifast/omarchy` in their installation prefix. The normal application
+`share/siphon/omarchy` in their installation prefix. The normal application
 launch registers missing per-user files and prepares the current palette on an
 Omarchy desktop, without changing existing files or the selected theme. Setup
 runs in the background; package-manager scripts do not write into user homes.
@@ -26,7 +26,7 @@ portable Linux release archives carry the assets with their source/binary
 payloads. Source and binary AUR recipes also accept older releases that predate
 the integration; the git recipe requires the current files. Nix installs the
 Linux desktop assets beside its binaries and packages the signed macOS
-`Spotifast.app` bundle in the same derivation. Flatpak does not install host
+`Siphon.app` bundle in the same derivation. Flatpak does not install host
 desktop hooks.
 
 ```sh
@@ -67,7 +67,7 @@ Packaging CI builds both architectures using a pinned published release
 runs. It then installs and removes each package in clean Ubuntu 24.04, Debian
 13, Fedora 41 and current Fedora containers on native amd64 and arm64 runners.
 Each case verifies that a settings fixture survives installation and removal,
-runs `spotifast --version`, loads the GUI libraries with `dlopen`, and
+runs `siphon --version`, loads the GUI libraries with `dlopen`, and
 verifies the desktop entry and icon. They cover installation and library
 resolution, not a running desktop or Spotify playback. On release runs these
 checks follow artifact attachment; a failure marks the workflow as failed.
@@ -109,7 +109,7 @@ for commands and supported formats.
 The manual **Flatpak from release** workflow can rebuild a missing Flatpak from
 an existing tag. It verifies the published Linux archive against `checksums.txt`
 and uses that tag's version and description with the current Flatpak app ID,
-`rocks.spotifast.Spotifast`, without compiling or replacing binaries.
+`com.siphon.player`, without compiling or replacing binaries.
 It uploads a workflow artifact only. After checking the bundle, attach it to the
 existing release and add its hash to `checksums.txt`, preserving every existing
 asset and checksum. Release tags stay immutable.
@@ -158,10 +158,10 @@ their original signatures; this setup does not replace release assets.
 
 ## Windows signing
 
-Tag releases sign `spotifast.exe` and the MSI with Azure Artifact Signing, as
+Tag releases sign `siphon.exe` and the MSI with Azure Artifact Signing, as
 **PlentyLabs UG (haftungsbeschränkt) & Co. KG**, through native-packages:
 `windows.signing` in `native-packages.yaml` turns it on,
-`native-packages sign-windows` signs `spotifast.exe` before the zip and the MSI
+`native-packages sign-windows` signs `siphon.exe` before the zip and the MSI
 pack it, and `native-packages build` signs the MSI before recording its
 checksum. Each
 signature is SHA-256 Authenticode with Microsoft's RFC 3161 timestamp,
@@ -179,8 +179,8 @@ architectures and replaces the binary's artifact with the packages.
 
 No secret is involved. The `windows` jobs run in this repository's
 `windows-signing` environment, which deploys only from `v*` tags, and sign in
-through GitHub's OIDC token as the Entra app `GitHub spotifast Windows signing`.
-That app trusts only `repo:crmne@106617/spotifast@1348483831:environment:windows-signing` (GitHub's immutable subject, with the owner's and repository's ids) and holds
+through GitHub's OIDC token as the Entra app `GitHub siphon Windows signing`.
+That app trusts only `repo:crmne@106617/siphon@1348483831:environment:windows-signing` (GitHub's immutable subject, with the owner's and repository's ids) and holds
 the "Artifact Signing Certificate Profile Signer" role on the account. The
 environment's variables, none of them secret, are `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_SIGNING_ENDPOINT`,
@@ -221,7 +221,7 @@ needs them.
 The updater (fastframe-update) runs `msiexec /i PACKAGE /qn /norestart /l*v LOG
 INSTALLFOLDER="<the app's folder>"` and accepts exit codes 0 and 3010. The package:
 
-- installs per user, without elevation, to `%LOCALAPPDATA%\Programs\Spotifast`
+- installs per user, without elevation, to `%LOCALAPPDATA%\Programs\Siphon`
   or `INSTALLFOLDER`. Run by hand, it finds the folder an earlier package or
   the setup program used.
 - keeps one `UpgradeCode`, `{3DFFED43-88FE-4A31-9461-50BE03094316}`, forever.
@@ -231,11 +231,11 @@ INSTALLFOLDER="<the app's folder>"` and accepts exit codes 0 and 3010. The packa
   files, removes `unins000.*` and the `{FCED1EA0-EBF5-4C32-BA3B-A3AD724BACC3}_is1`
   uninstall entry, and keeps the Start menu entry and the desktop shortcut
   task. It never runs Inno's uninstaller, which would delete the package's files.
-- installs the `spotifast-installer.txt` marker the updater looks for.
+- installs the `siphon-installer.txt` marker the updater looks for.
 - replaces every file whatever its version or date (`REINSTALLMODE=amus`).
 - closes a running installed copy before an update, and removes nothing while
   it runs (#766). A portable copy elsewhere is never closed.
-- removes the updater's staging folders (`.spotifast-update-*`, its helper
+- removes the updater's staging folders (`.siphon-update-*`, its helper
   and the previous version) from the installation folder on a real uninstall,
   so the folder goes too. Never in an update: there the old version is
   uninstalled while the helper in one of them runs the package
@@ -243,11 +243,11 @@ INSTALLFOLDER="<the app's folder>"` and accepts exit codes 0 and 3010. The packa
 
 To build it on Windows, install WiX with
 `dotnet tool install --global wix --version 5.0.2` and open a Visual Studio
-developer prompt for the target architecture. Put `spotifast.exe`, `README.md`,
-`LICENSE` and `packaging\windows\spotifast-installer.txt` in a folder, then:
+developer prompt for the target architecture. Put `siphon.exe`, `README.md`,
+`LICENSE` and `packaging\windows\siphon-installer.txt` in a folder, then:
 
 ```powershell
-python packaging\windows\build-msi.py FOLDER dist\spotifast.msi 1.2.3 amd64
+python packaging\windows\build-msi.py FOLDER dist\siphon.msi 1.2.3 amd64
 ```
 
 With the same files in `dist\msi-input-x86_64-pc-windows-msvc`,
@@ -265,13 +265,13 @@ program's uninstaller.
 
 ## Portable archives
 
-The release workflow puts `packaging/spotifast-portable.txt` (contents
-`spotifast-portable-v1`) next to the executable in the Windows `.zip` and the
+The release workflow puts `packaging/siphon-portable.txt` (contents
+`siphon-portable-v1`) next to the executable in the Windows `.zip` and the
 Linux `.tar.gz`. The updater reads it to decide that the copy may replace its
 own executable. On Windows it also makes the copy keep its settings, state and
-caches in `spotifast-data\` beside the executable (fastframe-dirs, #703), made
+caches in `siphon-data\` beside the executable (fastframe-dirs, #703), made
 the first time from a copy of the per-user settings and state. Never put a
-`spotifast-installer.txt` beside it: the installer marker wins, and the copy
+`siphon-installer.txt` beside it: the installer marker wins, and the copy
 would update through the package and use the per-user folders. Linux copies
 keep the XDG folders. Keep the marker's name and contents as they are: older
 releases recognise exactly that file.
@@ -288,7 +288,7 @@ the signature covers. AppImages built by the packaging workflow would land in
 the unsigned `packaging-checksums.txt` instead.
 
 Each AppImage carries update information in its `.upd_info` section,
-`gh-releases-zsync|crmne|spotifast|latest|spotifast-*-x86_64.AppImage.zsync`
+`gh-releases-zsync|crmne|siphon|latest|siphon-*-x86_64.AppImage.zsync`
 (`aarch64` for ARM), so AppImageUpdate, AppImageLauncher, AM and Gear Lever
 find the newest stable release's `.zsync` file and download only the blocks
 that changed. The checks fail loudly instead of shipping a wrong string:
@@ -307,9 +307,9 @@ that changed. The checks fail loudly instead of shipping a wrong string:
   AppImage, its `.zsync` file and their lines in `checksums.txt`.
 
 To check a built AppImage by hand: `python3 packaging/check-appimage.py
-spotifast-1.2.3-x86_64.AppImage x86_64`. Building AppImages locally needs
+siphon-1.2.3-x86_64.AppImage x86_64`. Building AppImages locally needs
 `zsyncmake` (the zsync package) as well as `mksquashfs`.
 
-`packaging/release-names.py DIST TAG` checks the release's `spotifast-`
+`packaging/release-names.py DIST TAG` checks the release's `siphon-`
 downloads and writes their checksums. Run `python3 packaging/test-release-names.py`
 when changing this step. Published historical downloads are never rewritten.

@@ -27,12 +27,12 @@ app, the one you [sign in with](/getting-started/#make-a-spotify-app), has an
 allowance that is yours alone. If you create several apps, they share your
 account's allowance, following Spotify's
 [July 2026 quota update](https://developer.spotify.com/blog/2026-07-23-web-api-quota-updates).
-When it runs out for a while, Spotify asks Spotifast to wait. The top bar
-shows a spinner while you wait; hover over it to see whether Spotifast is
+When it runs out for a while, Spotify asks Siphon to wait. The top bar
+shows a spinner while you wait; hover over it to see whether Siphon is
 updating your library, checking for updates, or waiting for Spotify. Your
 playlists and Home show what they showed last time until the update arrives.
 
-Setting up playback on this computer spends less of that allowance. Spotifast
+Setting up playback on this computer spends less of that allowance. Siphon
 then reads your playlist list, other people's playlists, popular songs and
 related artists through its music connection, which uses none of it, and
 which can read the playlists Spotify keeps from apps like yours, its own
@@ -54,7 +54,7 @@ If you were signed in that way, you stay signed in until Spotify stops
 accepting it. Then the sign-in screen tells you so and shows how to make your
 own app. You can switch sooner in **Settings**, under **Personal Spotify
 app**: paste your app's Client ID and choose **Authorize**. With Premium,
-Spotifast suggests this once, and again with a banner when Spotify slows the
+Siphon suggests this once, and again with a banner when Spotify slows the
 shared app down, at most once a day and not again after you close it three
 times.
 

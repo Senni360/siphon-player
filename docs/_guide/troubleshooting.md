@@ -4,7 +4,7 @@ description: "What \"Spotify refused the audio key\" and \"Spotify is being slow
 nav_order: 7
 ---
 
-Each section starts with the words you see in Spotifast or in its log, so you
+Each section starts with the words you see in Siphon or in its log, so you
 can search this page for them.
 
 ## Spotify refused the audio key {#audio-key}
@@ -24,7 +24,7 @@ Spotify refused the audio key. Try again later
 ### What it means
 
 Spotify sends music to your computer locked. To play a song, the player has
-to ask Spotify for that song's key and use it to unlock the audio. Spotifast
+to ask Spotify for that song's key and use it to unlock the audio. Siphon
 plays music through [librespot](https://github.com/librespot-org/librespot),
 and librespot asks for a key every time a song starts. Here, Spotify said no.
 Your sign-in works and your library looks normal, but without the key there
@@ -42,7 +42,7 @@ summed up in
 
 - **Newer accounts, refused every time.** If your Spotify username is a long
   string of random letters and numbers that Spotify made up for you, Spotify
-  may refuse every key. Nothing in Spotifast or librespot can change that
+  may refuse every key. Nothing in Siphon or librespot can change that
   today.
 - **Older accounts, refused in bursts.** Some older accounts play fine for a
   long time, then get a run of refusals. It looks like Spotify limits how fast
@@ -59,18 +59,18 @@ keys.
 
 ### What works
 
-Play the music on another Spotify device and keep using Spotifast as the
+Play the music on another Spotify device and keep using Siphon as the
 remote. **Play on another device** in the banner opens the device picker, the
 same one as the devices button in the player bar. Pick your phone, a speaker,
 or a computer with the official Spotify app open. The music plays there, and
-you still choose songs, skip and change the volume from Spotifast. Those
+you still choose songs, skip and change the volume from Siphon. Those
 devices get their own keys from Spotify, so they keep playing.
 
 Close the banner with **×** and it stays away until a song plays on this
 computer again. If it happens again before that, you just get a short
 message.
 
-Spotifast follows this in
+Siphon follows this in
 [issue #283](https://github.com/crmne/spotifast/issues/283).
 
 ## Signing in fails {#sign-in}
@@ -78,7 +78,7 @@ Spotifast follows this in
 If Spotify's page says **redirect_uri: Not matching configuration**, you are
 on a version before 0.14.2, which signed in through a shared app that no
 longer accepts new sign-ins
-([#1057](https://github.com/crmne/spotifast/issues/1057)). Update Spotifast,
+([#1057](https://github.com/crmne/spotifast/issues/1057)). Update Siphon,
 then follow the steps on the sign-in screen to make your own free Spotify app.
 
 If Spotify's page says **Invalid redirect URI**, your own app is missing the
@@ -103,14 +103,14 @@ Spotify cooldown source=personal duration_ms=8000
 ### What it means
 
 Spotify limits how many requests an app can make, and tells an app that
-asks too often to wait. Spotifast waits as told, then tries again. In the
+asks too often to wait. Siphon waits as told, then tries again. In the
 log, `source=personal` means your own Spotify app is waiting;
 `source=shared` means the shared app that versions before 0.14.2 signed
 everyone in with is.
 
 While it waits, searches and your library take longer to load, playback
 controls can feel slow, and signing in can take a while. The top bar shows a
-spinner; point at it to see what Spotifast is waiting for. Your playlists and
+spinner; point at it to see what Siphon is waiting for. Your playlists and
 Home keep what they showed last time until the update arrives.
 
 ### On the shared app
@@ -127,7 +127,7 @@ own allowance.
 ### On your own app
 
 Your own app's allowance is yours alone, so it is rarely the cause. Setting
-up playback on this computer helps when it is: Spotifast then reads your
+up playback on this computer helps when it is: Siphon then reads your
 playlists, popular songs and related artists through its music connection,
 which uses none of it. [How it connects](/how-it-connects/) has the details.
 

@@ -7,11 +7,11 @@ nav_order: 2
 ## Install
 
 Choose your system on the [Download page](/download/) and follow its
-installation steps. Then open **Spotifast**.
+installation steps. Then open **Siphon**.
 
 ## Sign in
 
-Spotifast signs in through a Spotify app of your own. Spotify no longer lets
+Siphon signs in through a Spotify app of your own. Spotify no longer lets
 one app serve everyone, so each listener registers a free one. It takes a few
 minutes and needs no code, and Spotify requires the account that creates it
 to have Premium. The sign-in screen shows these same steps.
@@ -36,19 +36,19 @@ to have Premium. The sign-in screen shows these same steps.
 
 Paste the Client ID into the sign-in screen and press **Sign in with
 Spotify**. Your browser opens Spotify's sign-in page for your app. Approve
-access there, then return to Spotifast to see your library. Spotifast never
+access there, then return to Siphon to see your library. Siphon never
 sees your Spotify password.
 
 - If Spotify's page says **Invalid redirect URI**, the address from step 3
   is missing or differs by a character. Add it exactly, save, and sign in
   again.
 - If the sign-in screen says Spotify doesn't know the Client ID, copy it
-  again from your app's page. Spotifast asks Spotify before opening the
+  again from your app's page. Siphon asks Spotify before opening the
   browser.
 - If it says Spotify didn't let the account use the app, sign in with the
   Spotify account that created it, and check that it has Premium.
 
-Spotifast remembers your sign-in using your computer's protected storage,
+Siphon remembers your sign-in using your computer's protected storage,
 so you normally do not need to sign in each time you open the app. It keeps
 the Client ID after you sign out, so signing in again is one click.
 
@@ -63,24 +63,24 @@ open the device menu in the bottom player bar and select **Set up playback
 here**, or find the same option in Settings.
 
 Spotify asks you to approve playback separately from library access. Follow
-the browser prompt once; Spotifast remembers this approval too.
+the browser prompt once; Siphon remembers this approval too.
 [Read more about the two sign-ins](/how-it-connects/).
 
-The computer then appears as a Spotify Connect device named **Spotifast**.
+The computer then appears as a Spotify Connect device named **Siphon**.
 You can rename it in Settings.
 
 ## Basics
 
-- **Closing the window does not stop the music.** Spotifast keeps playing
+- **Closing the window does not stop the music.** Siphon keeps playing
   from the system tray; reopen it from the tray icon and quit from the tray
   menu or Ctrl+Q. On macOS you can also reopen it from the Dock. Settings can
-  turn this off, and on macOS can keep Spotifast out of the Dock, in the menu
+  turn this off, and on macOS can keep Siphon out of the Dock, in the menu
   bar only. On Linux, including Flatpak, a desktop with a working system
   tray is required for this behavior.
 - **The tray icon can match your panel.** On Linux and Windows, **Settings >
   Playback on this computer > Tray icon** shows it in colour, white or black.
   The macOS menu bar already draws it black or white to match itself.
-- **Spotifast can start with your computer.** Under **Settings > Playback on
+- **Siphon can start with your computer.** Under **Settings > Playback on
   this computer**, **Start with your computer** opens it when you log in,
   **With the window** or quietly **In the tray** (**In the menu bar** on
   macOS).
@@ -102,16 +102,16 @@ You can rename it in Settings.
   In **Add to playlist**, type a playlist name to find it, or choose
   **New playlist**. Typing chooses the first match, so `Enter` adds to it;
   the up and down arrows choose another. You can add one song or a selection.
-  If the playlist already contains the song, Spotifast asks before adding
+  If the playlist already contains the song, Siphon asks before adding
   another copy.
 - **The heart likes, then adds to a playlist.** In the player bar, the heart
   saves the playing song to Liked Songs. Once it is liked, the heart opens
   **Add to playlist** instead, as in Spotify, with **Remove from Liked Songs**
   below the playlists.
-- **Spotify links open in Spotifast.** A `spotify:` link shared from another
-  app opens its page, starting Spotifast if it is not running. Links to
+- **Spotify links open in Siphon.** A `spotify:` link shared from another
+  app opens its page, starting Siphon if it is not running. Links to
   `open.spotify.com` go through the browser first, which hands them over the
-  same way. `spotifast <link>` does the same from a terminal.
+  same way. `siphon <link>` does the same from a terminal.
 
 ## Match your desktop theme
 
@@ -120,12 +120,12 @@ Open **Settings → Appearance → Theme** and choose **Light**, **Dark**, or
 
 With Follow system, **Light mode theme** and **Dark mode theme** below it
 pick the theme for each: for example Catppuccin Latte while your computer is
-light and Catppuccin while it is dark. Spotifast switches between them as
+light and Catppuccin while it is dark. Siphon switches between them as
 your computer does, without interrupting the music.
 
-On Omarchy, Spotifast matches your desktop theme from the first time you open
+On Omarchy, Siphon matches your desktop theme from the first time you open
 it; the AUR package also installs the theme hook. Choose **Follow system** or **Omarchy**, then change your
-desktop theme: Spotifast's colours follow while the music keeps playing.
+desktop theme: Siphon's colours follow while the music keeps playing.
 New installations already use Follow system. Updating keeps your previous
 theme choice.
 
@@ -134,7 +134,7 @@ For your own colours or a manual installation, see
 
 ## If song titles show empty boxes
 
-Spotifast uses your computer's fonts to display titles in different languages.
+Siphon uses your computer's fonts to display titles in different languages.
 macOS and Windows already include fonts for most languages. On Linux,
 install `noto-fonts` and `noto-fonts-cjk` (Arch) or `fonts-noto` and
 `fonts-noto-cjk` (Debian or Ubuntu) if letters are missing.
@@ -148,23 +148,23 @@ Long titles are shortened with dots to fit the available space.
 
 ## Choosing the interface language
 
-Spotifast uses your computer's language when it has a translation for it, and
+Siphon uses your computer's language when it has a translation for it, and
 English otherwise. To pick another language, open **Settings → Appearance →
 Language**. Each language is listed under its own name, and the change applies
 at once. Choose **System** to follow the computer again. Spanish, Turkish and
 Ukrainian are complete; other translations are in progress, and anything not yet
-translated appears in English. See [Translating Spotifast](/translating/) to help.
+translated appears in English. See [Translating Siphon](/translating/) to help.
 
 ## Choosing which app opens Spotify links
 
-On macOS, opening Spotifast makes it available for Spotify links. If Spotify's
+On macOS, opening Siphon makes it available for Spotify links. If Spotify's
 own app is installed too, macOS uses whichever app last registered for them.
 On Windows, choose the app in **Settings → Apps → Default apps**.
 
 On Linux, after installing the current app launcher:
 
 ```sh
-xdg-mime default spotifast.desktop x-scheme-handler/spotify
+xdg-mime default siphon.desktop x-scheme-handler/spotify
 ```
 
 ## If your network needs a proxy
@@ -172,7 +172,7 @@ xdg-mime default spotifast.desktop x-scheme-handler/spotify
 **In development, not included in 0.8.0:** you can configure a proxy, a server
 your network uses to reach the internet, on the sign-in screen or in
 **Settings → Proxy**. Enter the address, port, and any login details supplied
-by your network administrator. Spotifast protects the saved proxy password.
+by your network administrator. Siphon protects the saved proxy password.
 If it cannot save the password, it tells you and uses it only until you quit.
 
 Playing music on this computer supports only HTTP proxies without a login.

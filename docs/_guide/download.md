@@ -4,7 +4,12 @@ description: Download the app for macOS, Windows, or Linux, with install instruc
 nav_order: 1
 ---
 
-{% assign v = site.spotifast_version %}
+This fork builds as **Siphon**. The package names below describe its renamed
+packaging templates. Upstream download links still refer to Spotifast;
+build this checkout until release hosting is configured for the fork.
+
+
+{% assign v = site.siphon_version %}
 {% assign base = "https://github.com/crmne/spotifast/releases/download/v" | append: v %}
 {% comment %} Releases after 0.12.0 ship a Windows Installer package (.msi). {% endcomment %}
 {% assign version = v | split: "." %}
@@ -23,58 +28,58 @@ been damaged or changed. Older versions are on the
 
 One download for both Apple Silicon and Intel:
 
-- [Download for Mac]({{ base }}/spotifast-v{{ v }}-macos-universal.dmg)
+- [Download for Mac]({{ base }}/siphon-v{{ v }}-macos-universal.dmg)
 
-Open the downloaded file and drag **Spotifast** to **Applications**.
+Open the downloaded file and drag **Siphon** to **Applications**.
 
 If you use [Homebrew](https://brew.sh), you can install it with:
 
 ```sh
-brew install --cask crmne/tap/spotifast
+brew install --cask crmne/tap/siphon
 ```
 
 ### First open on macOS
 
-Open **Spotifast** from Applications. If your Mac asks whether you want to
+Open **Siphon** from Applications. If your Mac asks whether you want to
 open an app downloaded from the internet, choose **Open**.
 
 Starting with 0.8.0, the Mac download passes Apple's security checks. You do
 not need to change security settings or run commands in Terminal to open it.
 
-Quit the old app before opening Spotifast. Your saved settings and sign-ins
+Quit the old app before opening Siphon. Your saved settings and sign-ins
 carry over. If an older version reports that its update helper exited before
 it was ready, install the DMG above manually once. The helper changes take
 effect for updates started from 0.9.1 onward.
 
 ## Windows
 
-Download and run the installer. It adds Spotifast to the Start menu and does
+Download and run the installer. It adds Siphon to the Start menu and does
 not need an administrator password. Choose the first download for most PCs,
 or the ARM version if your PC uses an ARM processor:
 
-- [Windows installer (most PCs)]({{ base }}/spotifast-v{{ v }}-x86_64-pc-windows-msvc{{ windows_installer }})
-- [Windows installer (ARM PCs)]({{ base }}/spotifast-v{{ v }}-aarch64-pc-windows-msvc{{ windows_installer }})
+- [Windows installer (most PCs)]({{ base }}/siphon-v{{ v }}-x86_64-pc-windows-msvc{{ windows_installer }})
+- [Windows installer (ARM PCs)]({{ base }}/siphon-v{{ v }}-aarch64-pc-windows-msvc{{ windows_installer }})
 {% if windows_installer == ".msi" %}
-The installer is a Windows Installer package (`.msi`). Spotifast installed
+The installer is a Windows Installer package (`.msi`). Siphon installed
 with the earlier setup program (`-setup.exe`) moves to it when you run the new
 installer, and keeps its settings, its folder and its Start menu entry.
-Windows then lists one Spotifast under installed apps. Versions 0.13.0 and
+Windows then lists one Siphon under installed apps. Versions 0.13.0 and
 later also move to it through their own updates; 0.12.x and earlier no longer
 find updates, so run the installer once by hand.
 {% endif %}
-To run Spotifast without an installer, download a ZIP file, extract it, and
-open `spotifast.exe`. Since 0.13.4, it keeps its settings, state and caches
-in a `spotifast-data` folder next to it, so the folder carries everything
+To run Siphon without an installer, download a ZIP file, extract it, and
+open `siphon.exe`. Since 0.13.4, it keeps its settings, state and caches
+in a `siphon-data` folder next to it, so the folder carries everything
 (see [portable copies](/settings-and-files/#portable-copies)).
 
-- [Windows ZIP (most PCs)]({{ base }}/spotifast-v{{ v }}-x86_64-pc-windows-msvc.zip)
-- [Windows ZIP (ARM PCs)]({{ base }}/spotifast-v{{ v }}-aarch64-pc-windows-msvc.zip)
+- [Windows ZIP (most PCs)]({{ base }}/siphon-v{{ v }}-x86_64-pc-windows-msvc.zip)
+- [Windows ZIP (ARM PCs)]({{ base }}/siphon-v{{ v }}-aarch64-pc-windows-msvc.zip)
 
 Either way, SmartScreen may warn about an unknown publisher on first run;
 choose **More info**, then **Run anyway**. The Windows files are not signed
 with a publisher certificate, so Windows has no publisher name to show.
 
-Spotifast needs OpenGL 2.0 or newer, which every current Windows graphics
+Siphon needs OpenGL 2.0 or newer, which every current Windows graphics
 driver provides. In a virtual machine or remote session that only has the
 Microsoft Basic Display Adapter, it cannot open its window and says so in a
 message that links to this page; install the machine's graphics driver, or
@@ -83,7 +88,7 @@ enable GPU acceleration for the virtual machine.
 To choose which app opens Spotify links, use **Settings → Apps → Default apps**
 in Windows.
 
-Uninstalling while Spotifast runs removes nothing until it is closed. The
+Uninstalling while Siphon runs removes nothing until it is closed. The
 installer offers to close it for you; closing it that way ends it at once.
 
 ### Check a Windows download
@@ -93,7 +98,7 @@ print its SHA-256 hash in PowerShell and compare it with that file's line,
 ignoring letter case:
 
 ```powershell
-Get-FileHash "$HOME\Downloads\spotifast-v{{ v }}-*-pc-windows-msvc*"
+Get-FileHash "$HOME\Downloads\siphon-v{{ v }}-*-pc-windows-msvc*"
 ```
 
 If Windows Security flags a download, open **Windows Security → Virus &
@@ -108,27 +113,27 @@ as incorrectly detected.
 
 ### Arch Linux
 
-Spotifast is in the AUR, Arch's community package collection. Installing it
+Siphon is in the AUR, Arch's community package collection. Installing it
 also adds it to your app launcher:
 
 ```sh
-yay -S spotifast-bin      # the released build, ready made
-yay -S spotifast          # the release, built from source
-yay -S spotifast-git      # built from the latest commit
+yay -S siphon-bin      # the released build, ready made
+yay -S siphon          # the release, built from source
+yay -S siphon-git      # built from the latest commit
 ```
 
 ### Flatpak
 
-Download the [Spotifast Flatpak]({{ base }}/spotifast-v{{ v }}-x86_64.flatpak?flatpak-id=rocks.spotifast.Spotifast).
+Download the [Siphon Flatpak]({{ base }}/siphon-v{{ v }}-x86_64.flatpak?flatpak-id=com.siphon.player).
 It requires Flatpak and the Freedesktop 25.08 runtime, a set of shared
 components used by Flatpak apps:
 
 ```sh
-flatpak install --user ~/Downloads/spotifast-v{{ v }}-x86_64.flatpak
-flatpak run rocks.spotifast.Spotifast
+flatpak install --user ~/Downloads/siphon-v{{ v }}-x86_64.flatpak
+flatpak run com.siphon.player
 ```
 
-The application ID is **`rocks.spotifast.Spotifast`**.
+The application ID is **`com.siphon.player`**.
 
 To update this Flatpak installation, download and install the new release.
 Flathub support is planned.
@@ -138,14 +143,14 @@ problems specific to those packages to their maintainers.
 
 ### AppImage
 
-- [AppImage (Intel and AMD, 64-bit)]({{ base }}/spotifast-{{ v }}-x86_64.AppImage)
-- [AppImage (ARM, 64-bit)]({{ base }}/spotifast-{{ v }}-aarch64.AppImage)
+- [AppImage (Intel and AMD, 64-bit)]({{ base }}/siphon-{{ v }}-x86_64.AppImage)
+- [AppImage (ARM, 64-bit)]({{ base }}/siphon-{{ v }}-aarch64.AppImage)
 
 One file, no installation: make it executable and run it.
 
 ```sh
-chmod +x ~/Downloads/spotifast-{{ v }}-x86_64.AppImage
-~/Downloads/spotifast-{{ v }}-x86_64.AppImage
+chmod +x ~/Downloads/siphon-{{ v }}-x86_64.AppImage
+~/Downloads/siphon-{{ v }}-x86_64.AppImage
 ```
 
 The AppImage bundles no libraries: like the DEB and RPM, it needs glibc 2.39
@@ -154,17 +159,17 @@ FUSE, start it with `--appimage-extract-and-run`.
 
 From the release after 0.13.3, the AppImage updates itself like the portable
 downloads, as long as it sits in a folder of your own, such as
-`~/Applications`: Spotifast replaces the file in place and restarts it. It
+`~/Applications`: Siphon replaces the file in place and restarts it. It
 also carries update information, so AppImageUpdate, AppImageLauncher, AM and
 Gear Lever can update it too, downloading only what changed. Copies of 0.13.3
 and earlier need one more manual download.
 
 ### Other distributions
 
-- [Linux archive (Intel and AMD, 64-bit)]({{ base }}/spotifast-v{{ v }}-x86_64-unknown-linux-gnu.tar.gz)
-- [Linux archive (ARM, 64-bit)]({{ base }}/spotifast-v{{ v }}-aarch64-unknown-linux-gnu.tar.gz)
+- [Linux archive (Intel and AMD, 64-bit)]({{ base }}/siphon-v{{ v }}-x86_64-unknown-linux-gnu.tar.gz)
+- [Linux archive (ARM, 64-bit)]({{ base }}/siphon-v{{ v }}-aarch64-unknown-linux-gnu.tar.gz)
 
-Unpack, put `spotifast` on your PATH, and copy the desktop entry and icon
+Unpack, put `siphon` on your PATH, and copy the desktop entry and icon
 from the bundled `packaging/` directory if you want it in your launcher and
 handling `spotify:` links.
 The binary needs the ALSA and PipeWire libraries, and Wayland or X11. It plays
@@ -178,24 +183,24 @@ Add the repository [flake](https://github.com/crmne/spotifast) to your
 inputs:
 
 ```nix
-inputs.spotifast.url = "github:crmne/spotifast";
+inputs.siphon.url = "github:crmne/spotifast";
 ```
 
 On NixOS, install the default package:
 
 ```nix
 environment.systemPackages = [
-  inputs.spotifast.packages."${pkgs.stdenv.hostPlatform.system}".default
+  inputs.siphon.packages."${pkgs.stdenv.hostPlatform.system}".default
 ];
 ```
 
 ### nix-darwin
 
-On macOS, use the same `spotifast` package to install Spotifast as a Mac app:
+On macOS, use the same `siphon` package to install Siphon as a Mac app:
 
 ```nix
 environment.systemPackages = [
-  inputs.spotifast.packages."${pkgs.stdenv.hostPlatform.system}".spotifast
+  inputs.siphon.packages."${pkgs.stdenv.hostPlatform.system}".siphon
 ];
 environment.pathsToLink = [ "/Applications" ];
 ```
@@ -206,6 +211,6 @@ The bundle appears in `/Applications/Nix Apps`. With Home Manager,
 
 ```nix
 home.packages = [
-  inputs.spotifast.packages."${pkgs.stdenv.hostPlatform.system}".spotifast
+  inputs.siphon.packages."${pkgs.stdenv.hostPlatform.system}".siphon
 ];
 ```
