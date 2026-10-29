@@ -34111,6 +34111,151 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_previous_visits_manual_history_before_its_context_resolves() {
+        for uris in [
+            ["spotify:track:manual", "soundcloud:track:9"],
+            ["soundcloud:track:9", "spotify:track:manual"],
+        ] {
+            let mut app = hybrid_fixture();
+            let ctx = egui::Context::default();
+            app.apply(
+                Action::PlayContext {
+                    uri: "soundcloud:playlist:unloaded".into(),
+                    offset_uri: None,
+                    offset_index: None,
+                },
+                &ctx,
+            );
+            app.apply(
+                Action::QueueMany {
+                    songs: uris
+                        .iter()
+                        .map(|uri| (uri.to_string(), "Manual".into()))
+                        .collect(),
+                },
+                &ctx,
+            );
+            app.apply(Action::Next, &ctx);
+            let first = app.hybrid_tag().unwrap();
+            app.apply(Action::Next, &ctx);
+            let second = app.hybrid_tag().unwrap();
+            let generation = app
+                .backend
+                .take_hybrid_commands()
+                .into_iter()
+                .find_map(|command| {
+                    if let crate::backend::HybridCommand::Resolve { generation, .. } = command {
+                        Some(generation)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            app.apply(Action::Previous, &ctx);
+            let rewound = app.hybrid_tag().unwrap();
+            assert_eq!(rewound.occurrence, first.occurrence);
+            assert_ne!(rewound.generation, first.generation);
+            assert!(
+                matches!(app.backend.take_hybrid_commands().first(), Some(crate::backend::HybridCommand::Load { tag, track, .. }) if *tag == rewound && track.uri == uris[0])
+            );
+            app.handle_hybrid_event(second, crate::player::HybridEvent::EndOfTrack);
+            app.handle_hybrid_context(
+                generation,
+                Ok(crate::hybrid_queue::Context {
+                    uri: "soundcloud:playlist:unloaded".into(),
+                    name: "Resolved".into(),
+                    tracks: vec![song("soundcloud:track:1"), song("spotify:track:a")],
+                }),
+            );
+            assert_eq!(app.hybrid_tag(), Some(rewound));
+            assert_eq!(app.current_track_uri().as_deref(), Some(uris[0]));
+            assert_eq!(app.manual_queue, [uris[1]]);
+            assert!(
+                !app.backend
+                    .take_hybrid_commands()
+                    .iter()
+                    .any(|command| matches!(command, crate::backend::HybridCommand::Load { .. }))
+            );
+            app.backend.shutdown();
+        }
+    }
+
+    #[test]
+    fn hybrid_previous_restarts_a_manual_child_before_its_context_resolves() {
+        for uri in ["spotify:track:manual", "soundcloud:track:9"] {
+            let mut app = hybrid_fixture();
+            let ctx = egui::Context::default();
+            app.apply(
+                Action::PlayContext {
+                    uri: "soundcloud:playlist:unloaded".into(),
+                    offset_uri: None,
+                    offset_index: None,
+                },
+                &ctx,
+            );
+            app.apply(
+                Action::AddToQueue {
+                    uri: uri.into(),
+                    label: "Manual".into(),
+                },
+                &ctx,
+            );
+            app.apply(Action::Next, &ctx);
+            let tag = app.hybrid_tag().unwrap();
+            app.handle_hybrid_event(
+                tag,
+                crate::player::HybridEvent::State(Box::new(LocalState {
+                    track: Some(crate::player::LocalTrack {
+                        uri: uri.into(),
+                        ..Default::default()
+                    }),
+                    playback: Playback::Playing,
+                    position_ms: 10_000,
+                    ..Default::default()
+                })),
+            );
+            let generation = app
+                .backend
+                .take_hybrid_commands()
+                .into_iter()
+                .find_map(|command| {
+                    if let crate::backend::HybridCommand::Resolve { generation, .. } = command {
+                        Some(generation)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            app.apply(Action::Previous, &ctx);
+            assert!(app.hybrid_position() < 1_000);
+            assert!(matches!(app.backend.take_hybrid_commands().as_slice(),
+                [crate::backend::HybridCommand::Seek { tag: actual, position_ms: 0 }] if *actual == tag
+            ));
+            app.handle_hybrid_context(
+                generation,
+                Ok(crate::hybrid_queue::Context {
+                    uri: "soundcloud:playlist:unloaded".into(),
+                    name: "Resolved".into(),
+                    tracks: vec![song("soundcloud:track:1"), song("spotify:track:a")],
+                }),
+            );
+            assert_eq!(
+                app.hybrid_tag(),
+                Some(tag),
+                "resolution must not reload the manual row"
+            );
+            assert_eq!(app.current_track_uri().as_deref(), Some(uri));
+            assert!(
+                app.backend
+                    .take_hybrid_commands()
+                    .iter()
+                    .all(|command| !matches!(command, crate::backend::HybridCommand::Load { .. }))
+            );
+            app.backend.shutdown();
+        }
+    }
+
+    #[test]
     fn playback_setup_prompt_keeps_manual_selection_when_pending_context_arrives() {
         let mut app = hybrid_fixture();
         let ctx = egui::Context::default();

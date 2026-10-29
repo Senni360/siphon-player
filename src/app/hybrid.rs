@@ -332,7 +332,28 @@ impl App {
             }
             Action::Previous => {
                 let position = self.hybrid_position();
-                if let Some(pending) = &mut self.hybrid.pending {
+                if self.hybrid.pending.is_some()
+                    && self.hybrid.tag.is_some()
+                    && (position > RESTART_BEFORE_PREVIOUS
+                        || self
+                            .hybrid
+                            .queue
+                            .history()
+                            .next_back()
+                            .is_some_and(|entry| {
+                                entry.origin == crate::hybrid_queue::Origin::Manual
+                            }))
+                {
+                    // Known manual history does not depend on the unresolved
+                    // context. Apply Previous now, including across sources.
+                    if position > RESTART_BEFORE_PREVIOUS {
+                        self.hybrid_seek(0);
+                    } else {
+                        let play = self.hybrid.play_intent;
+                        let transition = self.hybrid.queue.previous(position);
+                        self.hybrid_transition(transition, 0, play);
+                    }
+                } else if let Some(pending) = &mut self.hybrid.pending {
                     if position <= RESTART_BEFORE_PREVIOUS {
                         pending.navigation.push(false);
                     }
