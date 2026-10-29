@@ -253,6 +253,12 @@ impl App {
         // Queue additions can promote a complete local Spotify context. A
         // remote queue must never be silently pulled onto this computer.
         let additions = match action {
+            Action::AddToQueue { uri, label }
+                if self.hybrid_owned() && uri.starts_with("spotify:album:") =>
+            {
+                self.queue_album(uri.clone(), label.clone());
+                return true;
+            }
             Action::AddToQueue { uri, label } => {
                 Some((vec![self.hybrid_track(uri, Some(label))], None))
             }
@@ -264,10 +270,10 @@ impl App {
                 None,
             )),
             Action::PlayNext { items } => {
-                Some((items.iter().filter_map(as_track).collect(), Some(0)))
+                Some((items.iter().map(as_track).collect(), Some(0)))
             }
             Action::InsertInQueue { items, position } => {
-                Some((items.iter().filter_map(as_track).collect(), Some(*position)))
+                Some((items.iter().map(as_track).collect(), Some(*position)))
             }
             _ => None,
         };
@@ -331,6 +337,7 @@ impl App {
             Action::ClearQueue => {
                 self.hybrid.queue.clear_queue();
                 self.hybrid.last_added.clear();
+                self.pending_album_queues.clear();
                 self.project_hybrid();
                 self.preload_hybrid();
             }
@@ -546,7 +553,8 @@ impl App {
         self.queue_start_pending = None;
         self.pending_queue_adds.clear();
         self.pending_queue_batches.clear();
-        self.pending_album_queues.clear();
+        // Starting another local collection preserves album additions whose
+        // pages are still loading, just like already queued manual rows.
         self.resume_queue.clear();
         self.queue_shuffle_pending = None;
         self.queue_recheck_at = None;
@@ -824,7 +832,7 @@ impl App {
                             .chain(q.currently_playing.iter())
                             .find(|i| i.uri() == uri)
                     })
-                    .and_then(as_track)
+                    .map(as_track)
             })
             .or_else(|| {
                 self.playlist_pages
@@ -832,7 +840,7 @@ impl App {
                     .flat_map(|p| &p.items.items)
                     .filter_map(|i| i.playable())
                     .find(|i| i.uri() == uri)
-                    .and_then(as_track)
+                    .map(as_track)
             })
             .or_else(|| {
                 self.mixed_playlists
@@ -1334,7 +1342,8 @@ impl App {
             volume_percent: volume_to_percent(self.local.volume),
             can_control: true,
             can_set_volume: true,
-            is_episode: child.is_some_and(|t| t.is_episode),
+            is_episode: track.uri.starts_with("spotify:episode:")
+                || child.is_some_and(|t| t.is_episode),
             resuming: !self.hybrid.loaded,
         })
     }
@@ -1425,10 +1434,22 @@ impl App {
     }
 }
 
-fn as_track(item: &PlayableItem) -> Option<Track> {
+fn as_track(item: &PlayableItem) -> Track {
     match item {
-        PlayableItem::Track(t) => Some(t.clone()),
-        _ => None,
+        PlayableItem::Track(t) => t.clone(),
+        PlayableItem::Episode(e) => Track {
+            id: Some(e.id.clone()),
+            uri: e.uri.clone(),
+            name: e.name.clone(),
+            duration_ms: e.duration_ms,
+            explicit: e.explicit,
+            is_playable: e.is_playable,
+            album: Some(Album {
+                images: e.images.clone(),
+                ..Album::default()
+            }),
+            ..Track::default()
+        },
     }
 }
 fn repeat_to_queue(mode: RepeatMode) -> Repeat {
