@@ -1238,6 +1238,9 @@ impl App {
                     // occurrence for Play after setup instead of skipping the
                     // whole collection and showing the same error per track.
                     self.hybrid.play_intent = false;
+                    if let Some(pending) = &mut self.hybrid.pending {
+                        pending.play = false;
+                    }
                     self.hybrid.audible = false;
                     self.hybrid.loaded = false;
                     self.hybrid.state.loading = false;

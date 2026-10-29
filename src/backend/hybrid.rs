@@ -170,6 +170,9 @@ impl Worker {
                     return;
                 }
                 if self.engine.is_none() {
+                    self.hybrid.playing = false;
+                    self.hybrid.tag = None;
+                    self.hybrid.preload_uri = None;
                     self.emit(Event::Hybrid {
                         tag,
                         event: HybridEvent::Failed(
@@ -727,6 +730,8 @@ mod tests {
                     Event::Hybrid { tag: actual, event: HybridEvent::Failed(message) }
                     if actual == tag && message == crate::player::LOCAL_PLAYBACK_UNAVAILABLE
                 )));
+                assert!(!worker.hybrid.playing);
+                assert!(worker.hybrid.tag.is_none());
             }
         });
     }

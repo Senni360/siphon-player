@@ -1589,6 +1589,15 @@ mod tests {
         control.inhibit_spotify(false);
         shared.start().unwrap();
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        control.track_changed();
+        shared
+            .write(AudioPacket::Samples(vec![0.25; 88]), &mut converter)
+            .unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "Spotify PCM resumes on the same sink after an explicit replacement"
+        );
     }
 
     #[test]

@@ -9854,7 +9854,14 @@ impl App {
                     self.queue_start_pending = None;
                     self.clear_play_pending();
                     self.queued_play = None;
-                    self.toast(crate::player::LOCAL_PLAYBACK_UNAVAILABLE);
+                    self.toast(format!(
+                        "{}: {}",
+                        gettext(
+                            self.locale,
+                            "Choose a device, or enable playback on this computer"
+                        ),
+                        gettext(self.locale, "Set up playback here"),
+                    ));
                     self.show_devices = true;
                     self.refresh_devices();
                 }
@@ -33984,6 +33991,64 @@ mod tests {
                 .contains("Set up playback here")
         );
         assert!(app.backend.take_player_commands().is_empty());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn playback_setup_prompt_keeps_manual_selection_when_pending_context_arrives() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.playlist_overlay
+            .get_mut("cold")
+            .insert_at_position(1, &song("soundcloud:track:7"));
+        app.apply(
+            Action::PlayContext {
+                uri: "spotify:playlist:cold".into(),
+                offset_uri: Some("spotify:track:a".into()),
+                offset_index: Some(0),
+            },
+            &ctx,
+        );
+        app.apply(
+            Action::AddToQueue {
+                uri: "soundcloud:track:9".into(),
+                label: "Nine".into(),
+            },
+            &ctx,
+        );
+        app.apply(Action::Next, &ctx);
+        let tag = app.hybrid_tag().unwrap();
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::Failed(crate::player::LOCAL_PLAYBACK_UNAVAILABLE.into()),
+        );
+        let generation = app
+            .backend
+            .take_hybrid_commands()
+            .into_iter()
+            .find_map(|command| {
+                if let crate::backend::HybridCommand::Resolve { generation, .. } = command {
+                    Some(generation)
+                } else {
+                    None
+                }
+            })
+            .expect("pending context resolution");
+        app.handle_hybrid_context(
+            generation,
+            Ok(crate::hybrid_queue::Context {
+                uri: "spotify:playlist:cold".into(),
+                name: "Cold".into(),
+                tracks: vec![song("spotify:track:a"), song("spotify:track:b")],
+            }),
+        );
+        assert_eq!(
+            app.current_track_uri().as_deref(),
+            Some("soundcloud:track:9")
+        );
+        assert!(!app.now_playing().unwrap().playing);
+        assert!(!app.now_playing().unwrap().loading);
+        assert!(app.backend.take_hybrid_commands().is_empty());
         app.backend.shutdown();
     }
 
