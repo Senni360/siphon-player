@@ -33305,6 +33305,123 @@ mod tests {
         assert_eq!(server_err.as_ref(), "500 Internal Server Error");
     }
 
+    #[test]
+    fn review_hybrid_add_album_expands_tracks_instead_of_queuing_album_uri() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        app.album_pages.insert(
+            "album".into(),
+            AlbumPage {
+                tracks: PagedList {
+                    items: vec![song("spotify:track:one"), song("spotify:track:two")],
+                    loaded_once: true,
+                    next_offset: None,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        app.apply(
+            Action::AddToQueue {
+                uri: "spotify:album:album".into(),
+                label: "Album".into(),
+            },
+            &egui::Context::default(),
+        );
+        let manual = app.manual_queue.clone();
+        app.backend.shutdown();
+        assert_eq!(manual, ["spotify:track:one", "spotify:track:two"]);
+    }
+
+    #[test]
+    fn review_hybrid_pending_next_immediately_consumes_known_manual_head() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.playlist_overlay
+            .get_mut("cold")
+            .insert_at_position(1, &song("soundcloud:track:7"));
+        app.apply(
+            Action::PlayContext {
+                uri: "spotify:playlist:cold".into(),
+                offset_uri: Some("spotify:track:a".into()),
+                offset_index: Some(0),
+            },
+            &ctx,
+        );
+        app.apply(
+            Action::AddToQueue {
+                uri: "soundcloud:track:9".into(),
+                label: "Nine".into(),
+            },
+            &ctx,
+        );
+        assert_eq!(app.manual_queue, ["soundcloud:track:9"]);
+        app.apply(Action::Next, &ctx);
+        let shown = app.current_track_uri();
+        let manual = app.manual_queue.clone();
+        app.backend.shutdown();
+        assert_eq!(shown.as_deref(), Some("soundcloud:track:9"));
+        assert!(manual.is_empty());
+    }
+
+    #[test]
+    fn review_hybrid_stream_failure_keeps_play_intent_for_successor() {
+        use crate::player::HybridEvent;
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(Action::Next, &ctx);
+        let tag = app.hybrid_tag().unwrap();
+        let state = LocalState {
+            playback: Playback::Playing,
+            track: Some(crate::player::LocalTrack {
+                uri: "soundcloud:track:7".into(),
+                duration_ms: 120_000,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        app.handle_hybrid_event(tag, HybridEvent::State(Box::new(state.clone())));
+        // soundcloud::engine::Worker::failed reports a paused error state
+        // before emitting Error. The user has not requested Pause.
+        app.handle_hybrid_event(
+            tag,
+            HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Paused,
+                position_ms: 8_000,
+                error: Some("stream read failed".into()),
+                ..state
+            })),
+        );
+        app.backend.take_hybrid_commands();
+        app.handle_hybrid_event(tag, HybridEvent::Failed("stream read failed".into()));
+        let commands = app.backend.take_hybrid_commands();
+        app.backend.shutdown();
+        assert!(commands.iter().any(|command| matches!(command,
+            crate::backend::HybridCommand::Load { track, play: true, .. }
+                if track.uri == "spotify:track:a"
+        )), "a stream failure must not pause the next song: {commands:?}");
+    }
+
+    #[test]
+    fn review_hybrid_play_next_keeps_episode_items() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        app.apply(
+            Action::PlayNext {
+                items: vec![PlayableItem::Episode(crate::api::models::Episode {
+                    uri: "spotify:episode:episode".into(),
+                    name: "Episode".into(),
+                    ..Default::default()
+                })],
+            },
+            &egui::Context::default(),
+        );
+        let manual = app.manual_queue.clone();
+        app.backend.shutdown();
+        assert_eq!(manual, ["spotify:episode:episode"]);
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
