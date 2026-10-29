@@ -1255,6 +1255,7 @@ async fn run_hybrid_events(
             continue;
         }
         if let PlayerEvent::EndOfTrack { track_id, .. }
+        | PlayerEvent::Stopped { track_id, .. }
         | PlayerEvent::Unavailable { track_id, .. }
         | PlayerEvent::AudioKeyUnavailable { track_id, .. } = &event
             && track_id.to_uri() != expected
@@ -1279,6 +1280,17 @@ async fn run_hybrid_events(
                 break;
             }
             continue;
+        }
+        if matches!(event, PlayerEvent::Stopped { .. }) {
+            // A cluster disconnect already in progress can send Stop after
+            // its network wait, even after our decoder barrier and Load.
+            // This was not EOF or an explicit handoff (which cancels this
+            // observer). Retry the same occurrence with the latest intent.
+            notify(EngineEvent::Hybrid {
+                tag,
+                event: HybridEvent::Interrupted,
+            });
+            break;
         }
         let completion = match &event {
             PlayerEvent::Unavailable { .. } => Some(HybridEvent::Failed(
@@ -2056,6 +2068,42 @@ mod tests {
                 ..
             }
         )));
+    }
+
+    #[tokio::test]
+    async fn hybrid_observer_retries_a_late_connect_stop_without_advancing() {
+        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let events = Arc::clone(&recorded);
+        let notify: Notify = Arc::new(move |event| events.lock().unwrap().push(event));
+        let tag = PlaybackTag {
+            generation: 8,
+            occurrence: crate::hybrid_queue::EntryId(2),
+        };
+        for event in [
+            PlayerEvent::PlayRequestIdChanged {
+                play_request_id: 42,
+            },
+            PlayerEvent::Stopped {
+                play_request_id: 41,
+                track_id: uri(),
+            },
+            PlayerEvent::Stopped {
+                play_request_id: 42,
+                track_id: SpotifyUri::from_uri("spotify:track:6rqhFgbbKwnb9MLmUQDhG6").unwrap(),
+            },
+            PlayerEvent::Stopped {
+                play_request_id: 42,
+                track_id: uri(),
+            },
+        ] {
+            sender.send(event).unwrap();
+        }
+        drop(sender);
+        run_hybrid_events(receiver, uri().to_uri(), tag, notify).await;
+        assert!(matches!(recorded.lock().unwrap().as_slice(),
+            [EngineEvent::Hybrid { tag: actual, event: HybridEvent::Interrupted }] if *actual == tag
+        ));
     }
 
     #[tokio::test]

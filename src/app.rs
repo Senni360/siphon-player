@@ -34054,6 +34054,46 @@ mod tests {
     }
 
     #[test]
+    fn hybrid_connect_stop_retry_keeps_position_pause_intent_and_occurrence() {
+        use crate::player::HybridEvent;
+        for playing in [true, false] {
+            let mut app = hybrid_fixture();
+            start_hybrid_fixture(&mut app);
+            let tag = app.hybrid_tag().unwrap();
+            app.handle_hybrid_event(
+                tag,
+                HybridEvent::State(Box::new(LocalState {
+                    playback: Playback::Playing,
+                    position_ms: 10_000,
+                    track: Some(crate::player::LocalTrack {
+                        uri: "spotify:track:a".into(),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                })),
+            );
+            if !playing {
+                app.apply(Action::TogglePlay, &egui::Context::default());
+            }
+            let queue = queue_uris(&app);
+            app.backend.take_hybrid_commands();
+            app.handle_hybrid_event(tag, HybridEvent::Interrupted);
+            let retry = app.hybrid_tag().unwrap();
+            assert_eq!(retry.occurrence, tag.occurrence);
+            assert!(retry.generation > tag.generation);
+            assert!(matches!(app.backend.take_hybrid_commands().first(),
+                Some(crate::backend::HybridCommand::Load { tag: actual, position_ms, play, .. })
+                    if *actual == retry && (10_000..11_000).contains(position_ms) && *play == playing
+            ));
+            app.handle_hybrid_event(tag, HybridEvent::EndOfTrack);
+            assert_eq!(app.hybrid_tag(), Some(retry));
+            assert_eq!(queue_uris(&app), queue);
+            assert_eq!(app.now_playing().unwrap().playing, playing);
+            app.backend.shutdown();
+        }
+    }
+
+    #[test]
     fn hybrid_audio_key_refusal_pauses_without_consuming_mixed_successors() {
         let mut app = hybrid_fixture();
         let ctx = egui::Context::default();

@@ -54,6 +54,8 @@ completion until the matching track and play-request ID report Stopped. This
 acknowledges Spirc's Stop before the application can load the next row. Old
 requests, other tracks and duplicate EOF events cannot advance the queue.
 Explicit handoffs cancel the observer before sending their own Stop.
+An unexpected matching Stop before EOF retries the same occurrence with the
+latest transport intent, including a late Stop from a Connect cluster change.
 Returning to Spotify-only playback uses the existing Spirc load path again.
 Deferred Spotify-only commands carry an ownership generation: a newer Claim,
 Load, Stop or Release discards the older handoff's commands.
