@@ -447,7 +447,11 @@ pub(crate) fn run() -> eframe::Result<()> {
     // the first time from the per-user one (#703), or the per-user one.
     let folders = match demo_dirs {
         Some(dirs) => paths::Found::given(dirs),
-        None => paths::AppDirs::discover(),
+        None => paths::AppDirs::discover().map_err(|error| {
+            eframe::Error::AppCreation(Box::new(std::io::Error::other(format!(
+                "Could not migrate the Spotifast profile. No profile was opened; fix the folder permissions or free disk space and try again: {error}"
+            ))))
+        })?,
     };
     let dirs = folders.dirs.clone();
     let dirs_ready = dirs.ensure();

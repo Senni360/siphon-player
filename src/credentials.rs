@@ -1470,6 +1470,49 @@ mod tests {
         assert_eq!(backend.read("key").unwrap().unwrap(), b"new");
     }
 
+    #[tokio::test]
+    async fn renamed_profile_restores_every_grant_including_the_soundcloud_token() {
+        let old = Fixture::new();
+        let grants = [
+            web(SHARED_CLIENT),
+            web("personal-client"),
+            playback(),
+            proxy_password(),
+        ];
+        for (slot, grant) in Slot::ALL.into_iter().zip(&grants) {
+            old.store.lease(slot).save(grant.clone()).await.unwrap();
+        }
+        old.store
+            .lease(Slot::SoundCloud)
+            .save_secret(b"dummy-soundcloud-token".to_vec())
+            .await
+            .unwrap();
+        let new: AppDirs =
+            fastframe_dirs::Dirs::inside(&old.dirs.state.parent().unwrap().join("renamed")).into();
+        crate::migration::profile(&old.dirs, &new).unwrap();
+        let current = Arc::new(Mutex::new(Fake::default()));
+        let store = Store::with_backend(
+            new,
+            Box::new(MigratingStore {
+                current: Backend(current.clone()),
+                legacy: Backend(old.fake.clone()),
+            }),
+        );
+        for (slot, grant) in Slot::ALL.into_iter().zip(grants) {
+            assert!(store.lease(slot).load().await.unwrap().grant == Some(grant));
+        }
+        assert_eq!(
+            store.lease(Slot::SoundCloud).load_secret().await.unwrap(),
+            Some(b"dummy-soundcloud-token".to_vec())
+        );
+        for slot in Slot::ALL {
+            let key = old.store.lease(slot).key();
+            assert_eq!(store.lease(slot).key(), key);
+            assert!(current.lock().unwrap().values.contains_key(&key));
+            assert!(!old.fake.lock().unwrap().values.contains_key(&key));
+        }
+    }
+
     /// Any client ID will do for shared access: the slot, not the ID,
     /// says which session a grant belongs to.
     const SHARED_CLIENT: &str = "dummy-shared-client";

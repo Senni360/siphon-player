@@ -18,6 +18,10 @@ Windows copies adopt adjacent `spotifast-data` into `siphon-data` before
 falling back to the installed profile. An old `spotifast-portable.txt` marker
 is recognized when only the executable was replaced; the new marker is
 written after the data copy completes. Saved window geometry is adopted too.
+Copies run on a startup worker before the window opens. If any copy fails,
+startup stops with an error so that a partially adopted profile cannot fall
+back to editing the old files. Fix the reported permissions or disk-space
+problem and launch again. Completed directories are kept on retry.
 
 The renamed Flatpak has read-only access to
 `~/.var/app/rocks.spotifast.Spotifast` to copy the old sandbox's configuration,
@@ -38,9 +42,12 @@ separate `Siphon Player` folders. The binary is `siphon.exe`, distinct
 from the helper's `siphon-host.exe` and `siphon-tray.exe`. Platform identity
 `com.siphon.player` is distinct from its `com.siphon.host` registration.
 Local `spotifast:playlist:…`, `spotifast:overlay:…` and similar identifiers
-are retained because they are stored in existing user files. Custom Spotify
-Connect device names are preserved; the old factory name and a fresh profile
-default to **Siphon**.
+are retained because they are stored in existing user files. Saved Spotify
+Connect names and device IDs are preserved, including **Spotifast**. A fresh
+profile defaults to **Siphon**. Siphon also holds the old instance slot, so
+launching either binary while the other is running reaches that player
+instead of starting a competing Spotify Connect device. Flatpak shares the
+old sandbox's runtime lock directory for this purpose.
 
 ## Where things live
 
@@ -88,6 +95,15 @@ where each system keeps it, not in `settings.json`:
 
 Deleting the entry turns it off. Uninstalling Siphon does not remove the
 Linux or Windows entry; choose **Off** first.
+
+On Windows and native Linux, the first launch adopts an enabled Spotifast
+login entry's window or tray choice, verifies the new registration, then
+removes the old entry that points at Spotifast. Existing Siphon entries,
+including entries disabled in Task Manager, take precedence. Failed updates
+leave the old entry available for retry. On macOS, disable Spotifast in
+Login Items and enable Siphon in Settings. Flatpak users must similarly
+disable the old app's background startup registration before enabling the
+new one: a renamed sandbox cannot revoke another sandbox's portal grant.
 
 Clearing caches never signs you out. Sign-out from Settings covers the shared
 and personal Web API grants and the independent playback credential. It also

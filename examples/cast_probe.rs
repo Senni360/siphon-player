@@ -42,11 +42,12 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn stored_grant() -> anyhow::Result<Option<spotifast::credentials::Grant>> {
+    let dirs = spotifast::paths::AppDirs::discover()?.dirs;
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     let loaded = runtime.block_on(async {
-        let store = spotifast::credentials::Store::new(spotifast::paths::AppDirs::discover().dirs);
+        let store = spotifast::credentials::Store::new(dirs);
         store
             .lease(spotifast::credentials::Slot::Playback)
             .load()

@@ -31,6 +31,10 @@ mixed playlists and overlays. Existing Siphon data takes precedence. The
 browser helper's `%LOCALAPPDATA%\Siphon` is separate from the player's
 `%LOCALAPPDATA%\Siphon Player` data. See
 [migration and file locations](docs/_reference/settings-and-files.md#upgrading-from-spotifast).
+Migration failures stop startup for a safe retry. Saved Spotify Connect
+device names and IDs are kept, and the old and new binaries share an
+instance guard. Windows and native Linux login entries move to Siphon;
+macOS and Flatpak login entries need the manual switch described in the guide.
 Upstream links and historical release notes below still describe Spotifast;
 build this fork from source for Siphon.
 

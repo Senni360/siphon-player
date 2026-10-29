@@ -60,7 +60,7 @@ fn flatpak_profile(root: &std::path::Path) -> AppDirs {
     }
 }
 
-fn legacy_installed() -> AppDirs {
+pub(crate) fn legacy_installed() -> AppDirs {
     #[cfg(target_os = "linux")]
     if let Some(root) = legacy_flatpak_root() {
         return flatpak_profile(&root);
@@ -114,26 +114,23 @@ impl AppDirs {
     /// The folders this copy uses: a portable copy's own, made the first
     /// time from the per-user ones, or the per-user ones. Call it once this
     /// process is the running copy, before the window opens.
-    pub fn discover() -> Found {
-        crate::migration::migrate_window_state();
-        let installed = Self::installed();
-        let old = legacy_installed();
-        if let Err(error) = crate::migration::profile(&old, &installed) {
-            return Found {
-                dirs: old,
-                lines: vec![(
-                    log::Level::Warn,
-                    format!(
-                        "could not migrate the legacy profile; using its original folders: {error}"
-                    ),
-                )],
-            };
-        }
+    pub fn discover() -> std::io::Result<Found> {
+        // Startup waits before opening any window, but disk copies and durable
+        // writes still belong to a worker, never the future drawing thread.
+        std::thread::Builder::new()
+            .name("profile-migration".into())
+            .spawn(Self::discover_on_worker)?
+            .join()
+            .map_err(|_| std::io::Error::other("profile migration worker panicked"))?
+    }
+
+    fn discover_on_worker() -> std::io::Result<Found> {
+        crate::migration::migrate_window_state()?;
         // A portable copy must adopt its adjacent old data before fastframe
         // seeds a new folder from the installed profile.
         if let Some(new) = portable().folder() {
             let old = new.with_file_name("spotifast-data");
-            let migrated = crate::migration::profile(
+            crate::migration::profile(
                 &fastframe_dirs::Dirs::inside(&old).into(),
                 &fastframe_dirs::Dirs::inside(new).into(),
             )
@@ -146,18 +143,13 @@ impl AppDirs {
                     )?;
                 }
                 Ok(())
-            });
-            if let Err(error) = migrated {
-                return Found {
-                    dirs: fastframe_dirs::Dirs::inside(&old).into(),
-                    lines: vec![(
-                        log::Level::Warn,
-                        format!(
-                            "could not migrate portable data; using its original folder: {error}"
-                        ),
-                    )],
-                };
-            }
+            })?;
+        }
+        // An existing portable profile does not depend on the installed one.
+        // On failure, stop startup: falling back after publishing one tree
+        // would let edits to the old tree go missing on the next retry.
+        if portable().folder().is_none_or(|new| !new.exists()) {
+            crate::migration::profile(&legacy_installed(), &Self::installed())?;
         }
         let found = FOLDERS.discover(|copy, from| {
             // The copy starts with the sign-in it was made from, under
@@ -178,7 +170,7 @@ impl AppDirs {
                 ));
             }
         }
-        Found { dirs, lines }
+        Ok(Found { dirs, lines })
     }
 
     /// The per-user folders, which an installed copy uses whether or not
@@ -192,6 +184,16 @@ impl AppDirs {
     /// another folder, which keep other settings.
     pub fn instance_scope() -> Option<String> {
         portable().instance_scope()
+    }
+
+    pub(crate) fn legacy_instance_scope() -> Option<String> {
+        match portable() {
+            fastframe_dirs::Portable::Folder(folder) => {
+                fastframe_dirs::Portable::Folder(folder.with_file_name("spotifast-data"))
+                    .instance_scope()
+            }
+            _ => None,
+        }
     }
 
     /// No home folder at all: the current directory.

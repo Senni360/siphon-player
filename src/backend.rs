@@ -2437,7 +2437,13 @@ impl Worker {
                 Command::Autostart(request) => {
                     let events = self.events.clone();
                     let waker = self.waker.clone();
+                    #[cfg(any(windows, target_os = "linux"))]
+                    let state = self.dirs.state.clone();
                     tokio::task::spawn_blocking(move || {
+                        #[cfg(any(windows, target_os = "linux"))]
+                        if let Err(error) = crate::migration::startup::migrate(&state) {
+                            log::warn!("could not migrate the old login registration: {error}");
+                        }
                         let autostart = autostart();
                         let result = match request {
                             AutostartRequest::Read => Ok(autostart.state()),

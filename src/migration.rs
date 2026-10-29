@@ -7,6 +7,9 @@ use std::path::Path;
 
 use crate::paths::AppDirs;
 
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) mod startup;
+
 const COMPLETE: &str = "siphon-migration-v1";
 
 /// Adopt each empty destination. Existing Siphon profiles always win.
@@ -125,15 +128,14 @@ fn copy_tree(source: &Path, destination: &Path, skip_instance: bool) -> io::Resu
 }
 
 /// eframe used a separate data directory for window geometry.
-pub(crate) fn migrate_window_state() {
+pub(crate) fn migrate_window_state() -> io::Result<()> {
     let Some(new) = eframe::storage_dir(crate::brand::DATA_NAME) else {
-        return;
+        return Ok(());
     };
-    if let Some(old) = legacy_window_dir()
-        && let Err(error) = directory(&old, &new, false, |_| Ok(()))
-    {
-        log::warn!("could not migrate window state: {error}");
+    if let Some(old) = legacy_window_dir() {
+        directory(&old, &new, false, |_| Ok(()))?;
     }
+    Ok(())
 }
 
 fn legacy_window_dir() -> Option<std::path::PathBuf> {
@@ -183,12 +185,18 @@ mod tests {
         let old = scratch.dirs("spotifast-data");
         let new = scratch.dirs("siphon-data");
         old.ensure().unwrap();
-        fs::write(old.settings_file(), br#"{"device_name":"Desk"}"#).unwrap();
+        fs::write(
+            old.settings_file(),
+            br#"{"device_name":"Spotifast","local_files_folder":"D:/Music"}"#,
+        )
+        .unwrap();
         for file in [
             old.session_file(),
             old.soundcloud_account_file(),
             old.mixed_playlists_file(),
             old.playlist_overlay_file(),
+            old.history_file(),
+            old.state.join("soundcloud-client.json"),
             old.state.join("credential-storage"),
         ] {
             fs::write(file, "unchanged").unwrap();
@@ -209,12 +217,20 @@ mod tests {
             "soundcloud-account.json",
             "mixed-playlists.json",
             "playlist-overlay.json",
+            "history.json",
+            "soundcloud-client.json",
             "credential-storage",
         ] {
             assert_eq!(fs::read(new.state.join(file)).unwrap(), b"unchanged");
             assert!(old.state.join(file).exists());
         }
         assert_eq!(fs::read(new.cache.join("audio")).unwrap(), b"cached");
+        let settings = crate::settings::Settings::load(&new.settings_file());
+        assert_eq!(settings.device_name, "Spotifast");
+        assert_eq!(
+            serde_json::to_value(&settings).unwrap()["local_files_folder"],
+            "D:/Music"
+        );
         assert!(!new.state.join("instance").exists());
         assert_eq!(
             fs::read(new.config.join("skins/instance/user-art")).unwrap(),
@@ -328,5 +344,26 @@ mod tests {
         assert!(old.session_file().exists());
         profile(&old, &new).unwrap();
         assert_eq!(fs::read(new.session_file()).unwrap(), b"session");
+    }
+
+    #[test]
+    fn a_late_failure_can_retry_without_overwriting_published_or_newer_data() {
+        let scratch = Scratch::new();
+        let old = scratch.dirs("old");
+        let new = scratch.dirs("new");
+        old.ensure().unwrap();
+        fs::write(old.settings_file(), "original settings").unwrap();
+        fs::write(old.history_file(), "history").unwrap();
+        fs::create_dir_all(new.cache.parent().unwrap()).unwrap();
+        fs::write(&new.cache, "blocks the cache copy").unwrap();
+        assert!(profile(&old, &new).is_err());
+        assert!(!new.state.join(COMPLETE).exists());
+        assert_eq!(fs::read(new.history_file()).unwrap(), b"history");
+        fs::write(new.settings_file(), "newer settings").unwrap();
+        fs::remove_file(&new.cache).unwrap();
+        profile(&old, &new).unwrap();
+        assert_eq!(fs::read(new.settings_file()).unwrap(), b"newer settings");
+        assert!(new.state.join(COMPLETE).exists());
+        assert_eq!(fs::read(old.settings_file()).unwrap(), b"original settings");
     }
 }

@@ -94,6 +94,8 @@ pub enum ControlCommand {
 pub struct Guard {
     /// The slot's lock; `None` when running unguarded.
     _slot: Option<fastframe_instance::Guard>,
+    /// Keep the old binary from starting a competing Connect device.
+    _legacy_slot: Option<fastframe_instance::Guard>,
     /// Filled by control clients, drained by the app every frame.
     commands: std::sync::Arc<std::sync::Mutex<Vec<ControlCommand>>>,
     /// Current-track snapshot for `nowplaying` requests.
@@ -106,6 +108,7 @@ impl Guard {
     fn unguarded() -> Self {
         Self {
             _slot: None,
+            _legacy_slot: None,
             commands: Default::default(),
             now_playing: std::sync::Arc::new(std::sync::Mutex::new(NOTHING_PLAYING.to_owned())),
             devices: std::sync::Arc::new(std::sync::Mutex::new(NO_DEVICES.to_owned())),
@@ -163,6 +166,34 @@ fn slot() -> fastframe_instance::Slot {
     }
 }
 
+fn legacy_slot() -> fastframe_instance::Slot {
+    const LEGACY: &str = "spotifast";
+    #[cfg(not(windows))]
+    let slot = fastframe_instance::Slot::new(LEGACY);
+    #[cfg(target_os = "linux")]
+    let slot = if std::env::var_os("FLATPAK_ID").is_some() {
+        // Slot::new uses the running sandbox's ID even for a legacy name.
+        fastframe_instance::Slot::at(
+            slot.dir()
+                .parent()
+                .expect("sandbox slot has a parent")
+                .join("rocks.spotifast.Spotifast"),
+            LEGACY,
+        )
+    } else {
+        slot
+    };
+    #[cfg(windows)]
+    let slot = fastframe_instance::Slot::at(
+        crate::paths::legacy_installed().state.join("instance"),
+        LEGACY,
+    );
+    match crate::paths::AppDirs::legacy_instance_scope() {
+        Some(scope) => slot.scoped(&scope),
+        None => slot,
+    }
+}
+
 /// What the running instance said back.
 pub enum Reply {
     /// The command was accepted.
@@ -204,7 +235,34 @@ fn reply(line: &str) -> std::io::Result<Reply> {
 /// and asks that one to come forward. A `hidden` start leaves the running
 /// one where it is.
 pub fn acquire(waker: &crate::backend::Waker, link: Option<&str>, hidden: bool) -> Outcome {
-    claim(&slot(), waker, link, hidden)
+    claim_both(&slot(), &legacy_slot(), waker, link, hidden)
+}
+
+fn claim_both(
+    current: &fastframe_instance::Slot,
+    legacy: &fastframe_instance::Slot,
+    waker: &crate::backend::Waker,
+    link: Option<&str>,
+    hidden: bool,
+) -> Outcome {
+    let Outcome::Only(mut guard) = claim(current, waker, link, hidden) else {
+        return Outcome::Surfaced;
+    };
+    let handle = handler(
+        guard.commands(),
+        guard.now_playing_slot(),
+        guard.devices_slot(),
+        waker.clone(),
+    );
+    match legacy.claim(&launch_request(link, hidden), handle) {
+        fastframe_instance::Claim::First(slot) => {
+            guard._legacy_slot = Some(slot);
+            Outcome::Only(guard)
+        }
+        // A running Spotifast receives the launch. Do not migrate its live
+        // profile or start another player while it still owns the old slot.
+        _ => Outcome::Surfaced,
+    }
 }
 
 /// What a launch asks of the instance already running: open its link, stay
@@ -559,6 +617,43 @@ mod tests {
             )]
         );
         drop(first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_running_legacy_player_receives_the_launch_instead_of_a_rival() {
+        let (current, dir) = test_slot("legacy-first");
+        let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
+        let waker = crate::backend::Waker::default();
+        let Outcome::Only(old) = claim(&legacy, &waker, None, false) else {
+            panic!("old player owns its slot");
+        };
+        assert!(matches!(
+            claim_both(&current, &legacy, &waker, None, false),
+            Outcome::Surfaced
+        ));
+        assert_eq!(*old.commands.lock().unwrap(), vec![ControlCommand::Show]);
+        drop(old);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_running_siphon_also_holds_the_legacy_slot_and_accepts_its_links() {
+        let (current, dir) = test_slot("siphon-first");
+        let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
+        let waker = crate::backend::Waker::default();
+        let Outcome::Only(new) = claim_both(&current, &legacy, &waker, None, false) else {
+            panic!("new player owns both slots");
+        };
+        assert!(matches!(
+            claim(&legacy, &waker, Some("spotify:track:test"), false),
+            Outcome::Surfaced
+        ));
+        assert_eq!(
+            *new.commands.lock().unwrap(),
+            vec![ControlCommand::OpenLink("spotify:track:test".into())]
+        );
+        drop(new);
         let _ = std::fs::remove_dir_all(dir);
     }
 

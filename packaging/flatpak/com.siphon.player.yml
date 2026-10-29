@@ -40,6 +40,8 @@ finish-args:
   - --persist=.local/state
   # Read the old app sandbox only to adopt this user's existing profile.
   - --filesystem=~/.var/app/rocks.spotifast.Spotifast:ro
+  # Share the old instance lock so both players cannot run at once.
+  - --filesystem=xdg-run/app/rocks.spotifast.Spotifast
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm22/bin
   env:

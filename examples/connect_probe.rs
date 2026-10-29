@@ -109,11 +109,12 @@ fn devices() -> anyhow::Result<Vec<String>> {
 fn stored_grant(
     slot: spotifast::credentials::Slot,
 ) -> anyhow::Result<Option<spotifast::credentials::Grant>> {
+    let dirs = spotifast::paths::AppDirs::discover()?.dirs;
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     let loaded = runtime.block_on(async {
-        let store = spotifast::credentials::Store::new(spotifast::paths::AppDirs::discover().dirs);
+        let store = spotifast::credentials::Store::new(dirs);
         store.lease(slot).load().await
     })?;
     if let Some(warning) = loaded.warning {
