@@ -82,6 +82,21 @@ fn ranks_formats_and_never_selects_drm_or_adaptive_manifests() {
 }
 
 #[test]
+fn progressive_aac_remains_playable_when_it_is_the_only_encoding() {
+    for mime in ["audio/aac", "audio/mp4; codecs=\"mp4a.40.2\""] {
+        let mut track = fixture_formats();
+        let mut transcoding = track.media.as_ref().unwrap().transcodings[0].clone();
+        transcoding.url = "https://api-v2.soundcloud.com/media/progressive".into();
+        transcoding.preset = "aac_160k".into();
+        transcoding.format.protocol = "progressive".into();
+        transcoding.format.mime_type = mime.into();
+        assert!(transcoding.preference().is_some());
+        track.media.as_mut().unwrap().transcodings = vec![transcoding];
+        assert!(track.is_playable());
+    }
+}
+
+#[test]
 fn preview_detection_includes_policy_flags_and_shorter_duration() {
     let tracks: Vec<Track> =
         serde_json::from_str(include_str!("../testdata/soundcloud/previews.json")).unwrap();

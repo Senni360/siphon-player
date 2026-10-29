@@ -305,6 +305,21 @@ async fn live_anonymous_stream_resolves_and_decodes_to_pcm() {
 }
 
 #[tokio::test]
+async fn progressive_aac_decodes_to_non_silent_pcm() {
+    let server = Server::new().await;
+    let stream = server.stream("/tone.aac", Protocol::Progressive, 441);
+    let (mut worker, recorded, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        load(&mut worker, stream, 0, true);
+        finish(&mut worker);
+        assert!(recorded.lock().unwrap().pcm.iter().any(|s| s.abs() > 0.01));
+        worker.apply(Command::Stop).unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn progressive_load_pause_resume_seek_and_end() {
     let server = Server::new().await;
     let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);

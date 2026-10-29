@@ -172,7 +172,8 @@ byte ranges rather than downloading a whole track. HLS follows up to four
 master/media playlist levels and fetches one compressed segment ahead, with
 a 16 MiB limit per object. Nothing is written to disk.
 
-Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4. The stream resolver
+Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4, including progressive
+AAC when no preferred MP3 or HLS stream is offered. The stream resolver
 selects only MP3 or AAC, so an Opus-only track is unavailable before any stream
 request is made. HLS seeking starts at
 the containing segment and discards decoded frames up to the requested
