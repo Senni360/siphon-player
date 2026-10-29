@@ -42,7 +42,9 @@ output first and detaches Connect only when its cluster marks this computer
 active. It never activates an idle device just to disconnect it. Disconnect
 clears Spirc's contexts; its network-dependent acknowledgement is best effort,
 bounded to 500 ms. A missing acknowledgement does not abort playback while
-output is inhibited. The decoder's separate ordered Stop barrier is required
+output is inhibited. Disconnect never asks Spirc to pause: a delayed command
+must not pause a replacement Spotify child after that timeout. The decoder's
+separate ordered Stop barrier is required
 before loading either source.
 It validates the one-item list and loads its sole item directly on the
 librespot decoder. Hybrid pause, play and seek also address that decoder.

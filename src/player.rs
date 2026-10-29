@@ -852,7 +852,7 @@ impl Engine {
             == Some(self.device_id.as_str());
         disconnect_for_handoff(
             active,
-            || self.spirc.disconnect(true).map_err(Into::into),
+            |pause| self.spirc.disconnect(pause).map_err(Into::into),
             self.player.get_player_event_channel(),
             Duration::from_millis(500),
         )
@@ -990,7 +990,7 @@ impl Engine {
 /// decoder barrier in stop_for_handoff remains mandatory for ordered loads.
 async fn disconnect_for_handoff(
     active: bool,
-    disconnect: impl FnOnce() -> Result<()>,
+    disconnect: impl FnOnce(bool) -> Result<()>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>,
     wait: Duration,
 ) {
@@ -998,7 +998,10 @@ async fn disconnect_for_handoff(
         log::debug!("Playback handoff: Connect already inactive; stopping decoder directly");
         return;
     }
-    if let Err(error) = disconnect() {
+    // The ordered decoder Stop below owns transport. A queued Disconnect
+    // can run after this timeout and after the next hybrid Spotify Load;
+    // asking Spirc to pause then would pause that replacement instead.
+    if let Err(error) = disconnect(false) {
         log::warn!("Playback handoff: Connect disconnect unavailable ({error}); output inhibited");
         return;
     }
@@ -1606,11 +1609,50 @@ fn decode_folder_name(encoded: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[tokio::test]
+    async fn late_connect_disconnect_cannot_pause_the_replacement_child() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (events_tx, events) = tokio::sync::mpsc::unbounded_channel();
+        let (release, delayed) = tokio::sync::oneshot::channel();
+        let playing = Arc::new(AtomicBool::new(false));
+        let decoder = Arc::clone(&playing);
+        let mut disconnect_task = None;
+        disconnect_for_handoff(
+            true,
+            |pause| {
+                // Model Spirc blocked on an earlier network request. Its
+                // Disconnect reaches handle_pause only after the next Load.
+                disconnect_task = Some(tokio::spawn(async move {
+                    delayed.await.unwrap();
+                    if pause {
+                        decoder.store(false, Ordering::SeqCst);
+                    }
+                    events_tx
+                        .send(PlayerEvent::SessionDisconnected {
+                            connection_id: "test".into(),
+                            user_name: "test".into(),
+                        })
+                        .ok();
+                }));
+                Ok(())
+            },
+            events,
+            Duration::from_millis(1),
+        )
+        .await;
+        // The mandatory decoder Stop barrier and replacement Load completed.
+        playing.store(true, Ordering::SeqCst);
+        release.send(()).unwrap();
+        disconnect_task.unwrap().await.unwrap();
+        assert!(playing.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
     async fn handoff_does_not_activate_or_disconnect_inactive_connect() {
         let (_sender, events) = tokio::sync::mpsc::unbounded_channel();
         disconnect_for_handoff(
             false,
-            || panic!("inactive Connect must not receive Disconnect"),
+            |_| panic!("inactive Connect must not receive Disconnect"),
             events,
             Duration::from_millis(10),
         )
@@ -1625,7 +1667,7 @@ mod tests {
             Duration::from_secs(1),
             disconnect_for_handoff(
                 true,
-                || {
+                |_| {
                     disconnected = true;
                     Ok(())
                 },
@@ -1643,7 +1685,7 @@ mod tests {
         let (sender, events) = tokio::sync::mpsc::unbounded_channel();
         disconnect_for_handoff(
             true,
-            || {
+            |_| {
                 sender
                     .send(PlayerEvent::SessionDisconnected {
                         connection_id: "test".into(),
