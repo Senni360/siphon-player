@@ -1238,6 +1238,7 @@ impl App {
                     self.hybrid.state.playback = Playback::Paused;
                     self.hybrid.state.position_at = None;
                     self.hybrid.loaded = false;
+                    self.backend.send(Command::Hybrid(HybridCommand::Stop));
                     self.project_hybrid();
                 } else {
                     let t = self.hybrid.queue.next();
@@ -1479,11 +1480,12 @@ impl App {
                 .and_then(|entry| entry.track.album.as_ref())
                 .and_then(|album| Page::from_uri(&album.uri));
         }
-        if util::uri_kind(&now.uri) == Some("track") {
-            now.album_id.as_ref().map(|id| Page::Album(id.clone()))
-        } else {
-            now.show_id.as_ref().map(|id| Page::Show(id.clone()))
+        if let Some(id) = &now.album_id
+            && util::uri_kind(&now.uri) == Some("track")
+        {
+            return Some(Page::Album(id.clone()));
         }
+        now.show_id.as_ref().map(|id| Page::Show(id.clone()))
     }
 
     pub(super) fn hybrid_snapshot(&self) -> Option<Snapshot> {
@@ -1505,7 +1507,11 @@ impl App {
             uris: pending.request.uris.clone(),
             offset_uri: pending.request.offset_uri.clone(),
             offset_position: pending.request.offset_position,
-            position_ms: pending.request.position_ms,
+            position_ms: if pending.manual_started {
+                self.hybrid_position()
+            } else {
+                pending.request.position_ms
+            },
             shuffle: pending.shuffle,
             repeat: repeat_to_queue(pending.repeat),
             navigation: pending.navigation.clone(),
