@@ -33693,6 +33693,29 @@ mod tests {
         app.backend.shutdown();
     }
 
+    #[test]
+    fn review_hybrid_soundcloud_heart_does_not_submit_a_spotify_save() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        app.apply(Action::Next, &ctx);
+        let uri = "soundcloud:track:7";
+        // The player bar and the CLI both emit ToggleSaved for the shown URI.
+        app.apply(Action::ToggleSaved(uri.into()), &ctx);
+        let spotify_write = app.saved_writes.contains_key(uri);
+        let shown_saved = app.is_saved(uri);
+        app.backend.shutdown();
+        assert!(
+            !spotify_write,
+            "SoundCloud must not enter Spotify's SetSaved request"
+        );
+        assert_ne!(
+            shown_saved,
+            Some(true),
+            "a rejected save must not display a liked heart"
+        );
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
