@@ -798,6 +798,10 @@ pub(crate) mod soundcloud_library;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
+    ResolvePlaylistLink {
+        url: String,
+        request: u64,
+    },
     Hybrid(HybridCommand),
     SoundCloudLibrary(soundcloud_library::Request),
     SoundCloudAccount(crate::soundcloud::account::Account),
@@ -1110,6 +1114,10 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    PlaylistLinkResolved {
+        request: u64,
+        result: Result<crate::extension_bridge::ResolvedItem, String>,
+    },
     Hybrid {
         tag: crate::player::PlaybackTag,
         event: crate::player::HybridEvent,
@@ -2720,6 +2728,19 @@ impl Worker {
                         })
                         .abort_handle(),
                     );
+                }
+                Command::ResolvePlaylistLink { url, request } => {
+                    let client = self.soundcloud_client().expect("SoundCloud initialized");
+                    let path = self.dirs.state.join("soundcloud-client.json");
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result =
+                            crate::extension_bridge::resolve_soundcloud(&client, &url).await;
+                        hybrid::persist_client_id(&client, path).await;
+                        let _ = events.send(Event::PlaylistLinkResolved { request, result });
+                        waker.wake();
+                    });
                 }
                 Command::AddSoundCloudPlaylist { id, request } => {
                     let client = self

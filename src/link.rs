@@ -18,6 +18,66 @@ const KINDS: [&str; 7] = [
     "prerelease",
 ];
 
+/// The extension bridge accepts songs and whole collections, never navigation
+/// links or arbitrary hosts. Keep the result safe for the line-based IPC.
+pub fn playlist_item(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.len() > 4096 || text.chars().any(char::is_control) {
+        return None;
+    }
+    if text.starts_with("spotify:") {
+        let uri = parse(text)?;
+        return matches!(
+            crate::util::uri_kind(&uri),
+            Some("track" | "album" | "playlist")
+        )
+        .then_some(uri);
+    }
+    let url = reqwest::Url::parse(text).ok()?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return None;
+    }
+    match url.host_str()? {
+        "open.spotify.com" => {
+            let uri = parse(url.as_str())?;
+            matches!(
+                crate::util::uri_kind(&uri),
+                Some("track" | "album" | "playlist")
+            )
+            .then_some(uri)
+        }
+        "soundcloud.com" | "www.soundcloud.com" | "m.soundcloud.com" => {
+            let parts: Vec<_> = url
+                .path_segments()?
+                .filter(|part| !part.is_empty())
+                .collect();
+            let reserved = [
+                "sets",
+                "tracks",
+                "albums",
+                "likes",
+                "reposts",
+                "popular-tracks",
+                "followers",
+                "following",
+            ];
+            if !matches!(parts.as_slice(), [_, track] if !reserved.contains(track))
+                && !matches!(parts.as_slice(), [_, "sets", _])
+                && !matches!(parts.as_slice(), [_, _, secret] if secret.starts_with("s-"))
+                && !matches!(parts.as_slice(), [_, "sets", _, secret] if secret.starts_with("s-"))
+            {
+                return None;
+            }
+            soundcloud_url(text)
+        }
+        _ => None,
+    }
+}
+
 /// The canonical form of a context URI Spotify reports as playing.
 /// Personalized playlists report their context with the owner embedded,
 /// `spotify:user:NAME:playlist:ID`, while the app's models hold the plain
@@ -193,6 +253,72 @@ fn is_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playlist_items_accept_tracks_and_complete_collections() {
+        for (input, expected) in [
+            (
+                "https://open.spotify.com/track/abc?si=share",
+                "spotify:track:abc",
+            ),
+            (
+                "https://open.spotify.com/intl-nl/album/abc/",
+                "spotify:album:abc",
+            ),
+            (
+                "https://open.spotify.com/intl-de/playlist/abc#top",
+                "spotify:playlist:abc",
+            ),
+            ("spotify:track:abc", "spotify:track:abc"),
+            ("spotify:album:abc", "spotify:album:abc"),
+            ("spotify:user:owner:playlist:abc", "spotify:playlist:abc"),
+            (
+                "https://soundcloud.com/artist/song?si=share",
+                "https://soundcloud.com/artist/song?si=share",
+            ),
+            (
+                "https://soundcloud.com/artist/sets/collection#top",
+                "https://soundcloud.com/artist/sets/collection",
+            ),
+            (
+                "https://soundcloud.com/artist/song/s-secret",
+                "https://soundcloud.com/artist/song/s-secret",
+            ),
+        ] {
+            assert_eq!(playlist_item(input).as_deref(), Some(expected), "{input}");
+        }
+    }
+
+    #[test]
+    fn playlist_items_refuse_unsupported_urls_and_ipc_injection() {
+        for input in [
+            "https://example.com/track/abc",
+            "https://soundcloud.com.evil.invalid/artist/song",
+            "https://open.spotify.com.evil.invalid/track/abc",
+            "https://evil@open.spotify.com/track/abc",
+            "https://user:password@soundcloud.com/artist/song",
+            "https://soundcloud.com:8080/artist/song",
+            "http://soundcloud.com/artist/song",
+            "http://open.spotify.com/track/abc",
+            "https://open.spotify.com/artist/abc",
+            "https://open.spotify.com/show/abc",
+            "https://open.spotify.com/episode/abc",
+            "spotify:search:music",
+            "spotify:local:artist:album:song:123",
+            "spotify:artist:abc",
+            "https://soundcloud.com/artist",
+            "https://soundcloud.com/artist/sets",
+            "https://soundcloud.com/artist/likes",
+            "https://soundcloud.com/artist/reposts",
+            "soundcloud:track:123",
+            "spotify:track:abc\nshow",
+            "https://soundcloud.com/artist/song\r\nshow",
+            "",
+        ] {
+            assert!(playlist_item(input).is_none(), "{input}");
+        }
+        assert!(playlist_item(&format!("https://soundcloud.com/a/{}", "x".repeat(4096))).is_none());
+    }
 
     #[test]
     fn prerelease_web_and_protocol_links_keep_the_prerelease_id() {

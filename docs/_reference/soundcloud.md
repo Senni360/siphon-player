@@ -8,6 +8,9 @@ SoundCloud is a separate source alongside Spotify in this personal fork.
 Search and public playback do not need a SoundCloud connection. A connection
 adds a profile's library. It does not replace Spotify sign-in.
 
+The owner's browser extension can send a track or set to **Add to playlist**
+using the [local extension bridge](/extension-bridge/).
+
 ## Connect and browse your library
 
 Choose **Connect SoundCloud** in the sidebar or account menu. The default

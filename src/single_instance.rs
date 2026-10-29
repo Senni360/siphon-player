@@ -83,6 +83,8 @@ pub enum ControlCommand {
     /// Open the page for a Spotify link the desktop or another launch
     /// handed over, and bring the window forward.
     OpenLink(String),
+    /// Open the shared playlist picker for an external track or collection.
+    AddToPlaylist(String),
     /// Move playback to a Spotify Connect device, by id.
     Transfer(String),
     /// Refresh the device list. Sent by the `devices` read, which answers
@@ -236,6 +238,52 @@ fn reply(line: &str) -> std::io::Result<Reply> {
 /// one where it is.
 pub fn acquire(waker: &crate::backend::Waker, link: Option<&str>, hidden: bool) -> Outcome {
     claim_both(&slot(), &legacy_slot(), waker, link, hidden)
+}
+
+/// Deliver an extension request or claim the instance slot for a cold start.
+/// Unlike an ordinary launch, a refused or unanswered request is an error:
+/// the extension must not report success when nothing accepted its item.
+pub fn acquire_playlist_add(waker: &crate::backend::Waker, item: &str) -> std::io::Result<Outcome> {
+    claim_playlist_add(&slot(), &legacy_slot(), waker, item)
+}
+
+fn claim_playlist_add(
+    current: &fastframe_instance::Slot,
+    legacy: &fastframe_instance::Slot,
+    waker: &crate::backend::Waker,
+    item: &str,
+) -> std::io::Result<Outcome> {
+    let item = crate::link::playlist_item(item).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "unsupported playlist URL")
+    })?;
+    let request = format!("add-to-playlist {item}");
+    let mut guard = Guard::unguarded();
+    for (slot, is_legacy) in [(current, false), (legacy, true)] {
+        let handle = handler(
+            guard.commands(),
+            guard.now_playing_slot(),
+            guard.devices_slot(),
+            waker.clone(),
+        );
+        match slot.claim(&request, handle) {
+            fastframe_instance::Claim::First(slot) => {
+                if is_legacy {
+                    guard._legacy_slot = Some(slot);
+                } else {
+                    guard._slot = Some(slot);
+                }
+            }
+            fastframe_instance::Claim::Running(line) if matches!(reply(&line), Ok(Reply::Ok)) => {
+                return Ok(Outcome::Surfaced);
+            }
+            _ => {
+                return Err(std::io::Error::other(
+                    "the running player did not accept the playlist URL",
+                ));
+            }
+        }
+    }
+    Ok(Outcome::Only(guard))
 }
 
 fn claim_both(
@@ -403,6 +451,9 @@ fn parse(line: &str) -> Option<Request> {
             }
         }
         ("open-link", Some(link)) => ControlCommand::OpenLink(crate::link::parse(link)?),
+        ("add-to-playlist", Some(link)) => {
+            ControlCommand::AddToPlaylist(crate::link::playlist_item(link)?)
+        }
         ("transfer", Some(id)) => ControlCommand::Transfer(device_id(id)?),
         ("nowplaying", None) => return Some(Request::NowPlaying),
         ("devices", None) => return Some(Request::Devices),
@@ -446,6 +497,74 @@ fn device_id(text: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::player::RepeatMode;
+
+    #[test]
+    fn extension_requests_round_trip_without_opening_or_playing_the_item() {
+        let (slot, dir) = test_slot("playlist-bridge");
+        let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
+        let waker = crate::backend::Waker::default();
+        let Outcome::Only(first) =
+            claim_playlist_add(&slot, &legacy, &waker, "https://soundcloud.com/artist/song")
+                .unwrap()
+        else {
+            panic!("cold launch owns the slots");
+        };
+        assert!(first.commands.lock().unwrap().is_empty());
+        for (url, canonical) in [
+            (
+                "https://open.spotify.com/intl-nl/album/abc?si=x",
+                "spotify:album:abc",
+            ),
+            (
+                "https://soundcloud.com/artist/sets/set",
+                "https://soundcloud.com/artist/sets/set",
+            ),
+        ] {
+            assert!(matches!(
+                claim_playlist_add(&slot, &legacy, &waker, url),
+                Ok(Outcome::Surfaced)
+            ));
+            assert_eq!(
+                first.commands.lock().unwrap().pop(),
+                Some(ControlCommand::AddToPlaylist(canonical.into()))
+            );
+        }
+        assert!(matches!(
+            reply(&slot.send("add-to-playlist spotify:track:abc").unwrap()),
+            Ok(Reply::Ok)
+        ));
+        assert_eq!(
+            first.commands.lock().unwrap().pop(),
+            Some(ControlCommand::AddToPlaylist("spotify:track:abc".into()))
+        );
+        assert!(
+            slot.send("add-to-playlist https://example.com/track/abc")
+                .is_err()
+        );
+        assert!(first.commands.lock().unwrap().is_empty());
+        drop(first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn extension_requests_report_a_refusal_instead_of_success() {
+        let (slot, dir) = test_slot("playlist-bridge-refused");
+        let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
+        let fastframe_instance::Claim::First(first) = slot.claim("show", |_| None) else {
+            panic!("free test slot");
+        };
+        assert!(
+            claim_playlist_add(
+                &slot,
+                &legacy,
+                &crate::backend::Waker::default(),
+                "spotify:track:abc"
+            )
+            .is_err()
+        );
+        drop(first);
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     fn command(line: &str) -> Option<ControlCommand> {
         match parse(line) {

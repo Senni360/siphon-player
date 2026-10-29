@@ -864,7 +864,7 @@ pub(crate) fn playlist_picker(
     playlist_picker_source(ui, app, items, query, None)
 }
 
-fn playlist_picker_source(
+pub(super) fn playlist_picker_source(
     ui: &mut Ui,
     app: &mut App,
     items: &[PlayableItem],

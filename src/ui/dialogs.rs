@@ -97,6 +97,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
     }
     let palette = app.palette;
     let locale = app.locale;
+    let mut playlist_link_selected = false;
     let frame = Frame::new()
         .fill(palette.overlay)
         .stroke(Stroke::new(1.0, palette.outline))
@@ -118,6 +119,36 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
         .show(ctx, |ui| {
             ui.set_width(420.0);
             match dialog {
+                Dialog::AddToPlaylist { request, name, items, source, mut query, loading } => {
+                    theme::text(ui, gettext(locale, "Add to playlist"), theme::bold(20.0), palette.text);
+                    ui.add_space(8.0);
+                    ui.label(&name);
+                    ui.add_space(8.0);
+                    if loading {
+                        super::widgets::loading_row(ui, &palette, locale);
+                    } else {
+                        let before = app.actions.len();
+                        let field = super::widgets::playlist_picker_source(ui, app, &items, &mut query, source.as_deref());
+                        if ui.memory(|memory| memory.focused().is_none()) {
+                            field.request_focus();
+                        }
+                        if app.actions.len() > before {
+                            playlist_link_selected = true;
+                            // Apply closure before the selection. Duplicate confirmation
+                            // or a create dialog can then replace this picker normally.
+                            let adding = matches!(app.actions[before], Action::AddToPlaylist { .. } | Action::AddSoundCloudPlaylist { .. });
+                            app.actions.insert(before, if adding { Action::PlaylistLinkChosen } else { Action::CloseDialog });
+                        } else if let Some(Dialog::AddToPlaylist { request: current, query: stored, .. }) = &mut app.dialog
+                            && *current == request
+                        {
+                            *stored = query;
+                        }
+                    }
+                    ui.add_space(8.0);
+                    if theme::pill_button(ui, &palette, &gettext(locale, "Cancel"), false).clicked() {
+                        app.actions.push(Action::CloseDialog);
+                    }
+                }
                 // Drawn by cover_art above.
                 Dialog::CoverArt { .. } => {}
                 Dialog::SoundCloudConnect(_) => {
@@ -318,7 +349,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
         });
     app.dialog_rect = Some(response.response.rect);
-    if response.should_close() {
+    if response.should_close() && !playlist_link_selected {
         app.actions.push(Action::CloseDialog);
     }
 }
@@ -713,6 +744,112 @@ mod tests {
             name: name.into(),
             ..Default::default()
         })
+    }
+
+    #[test]
+    fn external_picker_selection_closes_before_adding_without_a_late_close() {
+        use crate::app::{App, AppOptions};
+        use crate::backend::Waker;
+        use crate::model::{Action, Dialog};
+        use crate::paths::AppDirs;
+        use crate::settings::Settings;
+        for dark in [false, true] {
+            for size in [[800.0, 650.0], [1280.0, 800.0]] {
+                let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join(".cache")
+                    .join(format!(
+                        "bridge-picker-{}",
+                        crate::mixed_playlists::new_id()
+                    ));
+                let mut app = App::new(
+                    &Waker::default(),
+                    AppDirs {
+                        config: root.join("config"),
+                        state: root.join("state"),
+                        cache: root.join("cache"),
+                    },
+                    Settings::default(),
+                    AppOptions {
+                        media_controls: false,
+                        restore_sign_in: false,
+                        tray: false,
+                        autostart: false,
+                    },
+                );
+                crate::demo::populate(&mut app);
+                app.palette = if dark {
+                    crate::theme::Palette::dark()
+                } else {
+                    crate::theme::Palette::light()
+                };
+                let target = app
+                    .mixed_playlists
+                    .create("Bridge destination".into(), String::new());
+                app.dialog = Some(Dialog::AddToPlaylist {
+                    request: 1,
+                    name: "Song".into(),
+                    items: vec![song("soundcloud:track:7", "Song")],
+                    source: None,
+                    query: String::new(),
+                    loading: false,
+                });
+                app.actions.clear();
+                let ctx = egui::Context::default();
+                ctx.enable_accesskit();
+                crate::theme::install(&ctx);
+                let draw = |app: &mut App, events| {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(size[0], size[1]),
+                            )),
+                            events,
+                            ..Default::default()
+                        },
+                        |_| super::show(app, &ctx),
+                    );
+                    output.textures_delta.clear();
+                    output.platform_output.accesskit_update.unwrap()
+                };
+                draw(&mut app, vec![]);
+                let tree = draw(&mut app, vec![]);
+                let (node, _) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some("Bridge destination (Mixed)"))
+                    .expect("ordinary playlist picker destination");
+                draw(
+                    &mut app,
+                    vec![egui::Event::AccessKitActionRequest(
+                        egui::accesskit::ActionRequest {
+                            target_tree: egui::accesskit::TreeId::ROOT,
+                            target_node: *node,
+                            action: egui::accesskit::Action::Click,
+                            data: None,
+                        },
+                    )],
+                );
+                assert!(
+                    matches!(app.actions.as_slice(), [Action::PlaylistLinkChosen, Action::AddToPlaylist { playlist_id, .. }] if playlist_id == &format!("spotifast:playlist:{target}"))
+                );
+                for action in std::mem::take(&mut app.actions) {
+                    app.apply(action, &ctx);
+                }
+                assert!(app.dialog.is_none());
+                assert_eq!(app.mixed_playlists.get(&target).unwrap().entries.len(), 1);
+                assert!(
+                    app.toasts
+                        .iter()
+                        .any(|toast| toast.message == "Adding to playlist…")
+                );
+                app.backend.shutdown();
+                drop(app);
+                if root.exists() {
+                    std::fs::remove_dir_all(root).unwrap();
+                }
+            }
+        }
     }
 
     #[test]

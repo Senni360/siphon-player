@@ -60,6 +60,11 @@ and playback limits. SoundCloud items use their real SoundCloud links;
 Spotify saves, radio, album navigation, lyrics and remote Spotify outputs
 are unavailable for them.
 
+The owner's browser extension can open **Add to playlist** with
+`siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,
+or a SoundCloud track or set. The player comes forward and asks for a
+destination. See the [local extension bridge contract](docs/_reference/extension-bridge.md).
+
 **Spotify playback needs Spotify Premium.** Free Spotify accounts can browse
 and search, but cannot play Spotify music through Siphon.
 

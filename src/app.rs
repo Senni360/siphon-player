@@ -1,5 +1,6 @@
 //! The application: state, event handling, and the actions views ask for.
 
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
@@ -791,6 +792,7 @@ pub struct App {
     /// A Spotify link handed over from outside, waiting for the account
     /// to be signed in and, for a song, for its album to be known.
     pending_link: Option<String>,
+    pending_playlist_link: Option<extension_bridge::PendingPlaylistLink>,
     prerelease_request: Option<u64>,
     prerelease_serial: u64,
     /// The songs behind the links last copied from a track table, so a
@@ -1351,6 +1353,7 @@ impl App {
             rootlist_wanted: false,
             editable_by_grant: std::collections::BTreeSet::new(),
             pending_link: None,
+            pending_playlist_link: None,
             prerelease_request: None,
             prerelease_serial: 0,
             copied_songs: Vec::new(),
@@ -2736,6 +2739,9 @@ impl App {
                 continue;
             }
             match event {
+                Event::PlaylistLinkResolved { request, result } => {
+                    self.playlist_link_resolved(request, result);
+                }
                 Event::SoundCloudPlaylistAdd {
                     request,
                     complete,
@@ -3085,6 +3091,7 @@ impl App {
             }
             AuthStatus::WaitingForBrowser { url } => self.sign_in_url = Some(url.clone()),
             AuthStatus::SignedOut => {
+                self.playlist_link_signed_out();
                 if self.hybrid_owned() {
                     self.hybrid_pause_for_signout();
                 }
@@ -4835,6 +4842,7 @@ impl App {
                     offset_index: None,
                 }),
                 ControlCommand::OpenLink(uri) => Some(Action::OpenLink(uri)),
+                ControlCommand::AddToPlaylist(item) => Some(Action::AddPlaylistLink(item)),
                 ControlCommand::Transfer(device_id) => Some(Action::Transfer(device_id)),
                 ControlCommand::PlaySearch { kind, query } => {
                     Some(Action::PlaySearch { kind, query })
@@ -7333,6 +7341,9 @@ impl App {
 
     /// Applies an API response to the current page and ignores stale Home data.
     fn handle_api(&mut self, mut response: ApiResponse) {
+        if self.playlist_link_response(&response) {
+            return;
+        }
         if self.hybrid_owned()
             && matches!(
                 response,
@@ -11615,6 +11626,7 @@ impl App {
                 | Action::OpenSongRadio { .. }
                 | Action::OpenUri(_)
                 | Action::OpenLink(_)
+                | Action::AddPlaylistLink(_)
                 | Action::FocusSearch
                 | Action::Back
                 | Action::Forward
@@ -11665,6 +11677,15 @@ impl App {
                 self.pending_link = Some(uri);
                 self.open_pending_link();
                 self.actions.push(Action::ShowWindow);
+            }
+            Action::AddPlaylistLink(item) => {
+                self.apply(Action::ShowWindow, ctx);
+                self.open_playlist_link(&item);
+            }
+            Action::PlaylistLinkChosen => {
+                self.pending_playlist_link = None;
+                self.dialog = None;
+                self.toast("Adding to playlist…");
             }
             Action::Back => {
                 if self.can_go_back() {
@@ -12588,6 +12609,7 @@ impl App {
                 });
             }
             Action::SignOut => {
+                self.cancel_playlist_link();
                 self.cancel_soundcloud_playlist_adds();
                 if self.hybrid_owned() {
                     self.hybrid_pause_for_signout();
@@ -13540,6 +13562,7 @@ impl App {
         self.handle_control_commands();
         self.handle_events();
         self.open_pending_link();
+        self.start_pending_playlist_link();
         self.handle_media_commands();
         self.sync_power(ctx);
         self.sync_motion(ctx);

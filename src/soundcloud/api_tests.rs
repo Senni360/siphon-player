@@ -9,6 +9,55 @@ fn fixture_track() -> Track {
     serde_json::from_str(include_str!("../testdata/soundcloud/track.json")).unwrap()
 }
 
+#[tokio::test]
+async fn extension_bridge_resolves_tracks_and_complete_sets_but_rejects_profiles() {
+    use crate::extension_bridge::{ResolvedItem, resolve_soundcloud};
+    let (client, task) = server(vec![
+        ok(include_str!("../testdata/soundcloud/track.json")),
+        ok(
+            json!({"kind":"playlist","id":7,"title":"Set","tracks":[{"id":1},{"id":2},{"id":1}]})
+                .to_string(),
+        ),
+        ok(json!([{"id":1,"title":"One"},{"id":2,"title":"Two"}]).to_string()),
+        ok(include_str!("../testdata/soundcloud/user.json")),
+    ])
+    .await;
+    assert!(matches!(
+        resolve_soundcloud(&client, "https://soundcloud.com/artist/song")
+            .await
+            .unwrap(),
+        ResolvedItem::Track(_)
+    ));
+    let ResolvedItem::Set { uri, tracks, .. } =
+        resolve_soundcloud(&client, "https://soundcloud.com/artist/sets/set")
+            .await
+            .unwrap()
+    else {
+        panic!("set resolved");
+    };
+    assert_eq!(uri, "soundcloud:playlist:7");
+    assert_eq!(
+        tracks
+            .iter()
+            .map(|track| track.uri.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "soundcloud:track:1",
+            "soundcloud:track:2",
+            "soundcloud:track:1"
+        ]
+    );
+    assert!(
+        resolve_soundcloud(&client, "https://soundcloud.com/artist/song-shaped-profile")
+            .await
+            .is_err()
+    );
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[0].starts_with("GET /resolve?url="));
+    assert!(requests[2].starts_with("GET /tracks?ids="));
+}
+
 fn fixture_formats() -> Track {
     serde_json::from_str(include_str!("../testdata/soundcloud/transcodings.json")).unwrap()
 }

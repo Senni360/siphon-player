@@ -1197,6 +1197,15 @@ pub struct DragEntry {
 
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    /// The ordinary playlist picker, opened by an external item request.
+    AddToPlaylist {
+        request: u64,
+        name: String,
+        items: Vec<PlayableItem>,
+        source: Option<String>,
+        query: String,
+        loading: bool,
+    },
     SoundCloudConnect(crate::soundcloud::connect::Draft),
     /// A page's header cover, enlarged. Clicking anywhere or Esc closes it.
     CoverArt {
@@ -1277,6 +1286,9 @@ pub enum Action {
     /// A Spotify link from outside the app: its page opens and the window
     /// comes forward, once the account is signed in.
     OpenLink(String),
+    AddPlaylistLink(String),
+    /// Close an external picker before applying its selected destination.
+    PlaylistLinkChosen,
     Back,
     Forward,
     PlayContext {

@@ -17,6 +17,10 @@ struct Cli {
     #[arg(value_name = "LINK")]
     link: Option<String>,
 
+    /// Open Add to playlist for a SoundCloud or Spotify track or collection.
+    #[arg(long, value_name = "URL", conflicts_with = "link")]
+    add_to_playlist: Option<String>,
+
     /// Spotify Connect device name for this session.
     #[arg(long)]
     device_name: Option<String>,
@@ -201,6 +205,18 @@ enum Repeat {
     Track,
 }
 
+fn playlist_item_arg(cli: &Cli) -> Result<Option<String>, &'static str> {
+    let Some(text) = cli.add_to_playlist.as_deref() else {
+        return Ok(None);
+    };
+    if cli.control.is_some() {
+        return Err("--add-to-playlist cannot be combined with a control command");
+    }
+    spotifast::link::playlist_item(text)
+        .map(Some)
+        .ok_or("unsupported playlist URL")
+}
+
 /// Sends one control verb to the running instance over the
 /// single-instance channel.
 fn run_control(control: Control) -> i32 {
@@ -367,6 +383,7 @@ pub(crate) fn run() -> eframe::Result<()> {
 
     let cli = Cli::from_arg_matches(&Cli::command().get_matches_from(&launch.arguments))
         .unwrap_or_else(|error| error.exit());
+    spotifast::extension_bridge::register_player();
     // Demo mode invents plays, settings, and a signed-in account. Without a
     // folder of its own it would write them into the real profile, where
     // they would pass for the user's history.
@@ -381,6 +398,10 @@ pub(crate) fn run() -> eframe::Result<()> {
     } else {
         cli
     };
+    let playlist_item = playlist_item_arg(&cli).unwrap_or_else(|error| {
+        eprintln!("{error}");
+        std::process::exit(2);
+    });
     // A control launch is a client, not a second app: talk to the running
     // instance and exit before touching the log file it is writing to.
     if let Some(control) = cli.control {
@@ -413,8 +434,16 @@ pub(crate) fn run() -> eframe::Result<()> {
     #[cfg(not(feature = "demo"))]
     let guarded = true;
     let instance = if guarded {
-        let hidden = cli.start_hidden && link.is_none();
-        match single_instance::acquire(&waker, link.as_deref(), hidden) {
+        let hidden = cli.start_hidden && link.is_none() && playlist_item.is_none();
+        let outcome = if let Some(item) = &playlist_item {
+            single_instance::acquire_playlist_add(&waker, item).unwrap_or_else(|error| {
+                eprintln!("{error}");
+                std::process::exit(1);
+            })
+        } else {
+            single_instance::acquire(&waker, link.as_deref(), hidden)
+        };
+        match outcome {
             single_instance::Outcome::Only(guard) => Some(guard),
             single_instance::Outcome::Surfaced if hidden => {
                 log::info!("Siphon is already running");
@@ -555,9 +584,13 @@ pub(crate) fn run() -> eframe::Result<()> {
     if let Some(guard) = &instance {
         app.set_remote_control(guard);
     }
-    let link_given = link.is_some();
+    let link_given = link.is_some() || playlist_item.is_some();
     if let Some(uri) = link {
         app.open_link(uri);
+    }
+    if let Some(item) = playlist_item {
+        app.actions
+            .push(spotifast::model::Action::AddPlaylistLink(item));
     }
     #[cfg(feature = "demo")]
     if demo {
@@ -1662,5 +1695,33 @@ mod tests {
 
         let bare = Cli::try_parse_from(["spotifast"]).expect("a plain launch parses");
         assert!(bare.link.is_none() && bare.control.is_none());
+    }
+
+    #[test]
+    fn the_extension_flag_takes_one_url_and_cannot_mix_launch_requests() {
+        let launch = Cli::try_parse_from([
+            "siphon",
+            "--add-to-playlist",
+            "https://soundcloud.com/artist/sets/set",
+        ])
+        .unwrap();
+        assert_eq!(
+            launch.add_to_playlist.as_deref(),
+            Some("https://soundcloud.com/artist/sets/set")
+        );
+        assert!(Cli::try_parse_from(["siphon", "--add-to-playlist"]).is_err());
+        assert!(
+            Cli::try_parse_from([
+                "siphon",
+                "--add-to-playlist",
+                "spotify:track:abc",
+                "spotify:album:def"
+            ])
+            .is_err()
+        );
+        let mixed =
+            Cli::try_parse_from(["siphon", "--add-to-playlist", "spotify:track:abc", "next"])
+                .unwrap();
+        assert!(playlist_item_arg(&mixed).is_err());
     }
 }
