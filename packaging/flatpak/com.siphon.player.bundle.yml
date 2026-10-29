@@ -21,7 +21,7 @@ finish-args:
   # Read the old app sandbox only to adopt this user's existing profile.
   - --filesystem=~/.var/app/rocks.spotifast.Spotifast:ro
   # Share the old instance lock so both players cannot run at once.
-  - --filesystem=xdg-run/app/rocks.spotifast.Spotifast
+  - --filesystem=xdg-run/app/rocks.spotifast.Spotifast:create
 modules:
   - name: siphon
     buildsystem: simple

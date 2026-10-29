@@ -92,6 +92,10 @@ class LauncherInstallTest(unittest.TestCase):
     def test_flatpak_install_commands_keep_app_id_and_icon_aligned(self):
         for manifest in ["com.siphon.player.yml", "com.siphon.player.bundle.yml"]:
             config = yaml(ROOT / "packaging/flatpak" / manifest)
+            # Runtime directories disappear on reboot. The shared legacy
+            # slot must also work when Siphon starts first in a new session.
+            self.assertIn("--filesystem=xdg-run/app/rocks.spotifast.Spotifast:create",
+                          config["finish-args"])
             commands = config["modules"][-1]["build-commands"]
             with self.subTest(manifest=manifest), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
