@@ -1122,7 +1122,12 @@ impl App {
                 pending.navigation.push(true);
                 self.hybrid.audible = false;
                 self.hybrid.loaded = false;
-                self.hybrid.state.loading = true;
+                self.hybrid.state.loading = pending.resolving;
+                if !pending.resolving {
+                    pending.play = false;
+                    self.hybrid.play_intent = false;
+                    self.hybrid.state.playback = Playback::Paused;
+                }
                 self.hybrid.state.position_ms = 0;
                 self.hybrid.state.position_at = None;
                 self.hybrid.tag = None;
@@ -1268,6 +1273,17 @@ impl App {
     pub(super) fn hybrid_toggle(&mut self) {
         if let Some(pending) = &mut self.hybrid.pending {
             pending.play = !self.hybrid.play_intent;
+            if !pending.resolving && pending.play {
+                pending.resolving = true;
+                if self.hybrid.tag.is_none() {
+                    self.hybrid.state.loading = true;
+                    self.backend.send(Command::Hybrid(HybridCommand::Claim));
+                }
+                self.backend.send(Command::Hybrid(HybridCommand::Resolve {
+                    generation: pending.generation,
+                    uri: pending.request.context_uri.clone().unwrap_or_default(),
+                }));
+            }
             if self.hybrid.tag.is_some() {
                 // The manual row is already playing while its context loads.
                 // Carry intent to resolution and also control that decoder.
@@ -1280,15 +1296,6 @@ impl App {
             } else {
                 Playback::Paused
             };
-            if !pending.resolving && pending.play {
-                pending.resolving = true;
-                self.hybrid.state.loading = true;
-                self.backend.send(Command::Hybrid(HybridCommand::Claim));
-                self.backend.send(Command::Hybrid(HybridCommand::Resolve {
-                    generation: pending.generation,
-                    uri: pending.request.context_uri.clone().unwrap_or_default(),
-                }));
-            }
             self.project_hybrid();
             return;
         }

@@ -33792,6 +33792,20 @@ mod tests {
             app.apply(Action::Next, &ctx);
             let tag = app.hybrid_tag();
             app.backend.take_hybrid_commands();
+            if !skipped_unknown {
+                app.handle_hybrid_context(generation, Err("Context unavailable".into()));
+                assert_eq!(app.hybrid_tag(), tag);
+                assert!(app.now_playing().unwrap().playing);
+                app.apply(Action::TogglePlay, &ctx);
+                app.apply(Action::TogglePlay, &ctx);
+                let commands = app.backend.take_hybrid_commands();
+                assert!(commands.iter().any(|command| matches!(command, crate::backend::HybridCommand::Resolve { generation: actual, .. } if *actual == generation)));
+                assert!(!commands.iter().any(|command| matches!(
+                    command,
+                    crate::backend::HybridCommand::Claim
+                        | crate::backend::HybridCommand::Load { .. }
+                )));
+            }
             app.handle_hybrid_context(
                 generation,
                 Ok(crate::hybrid_queue::Context {
