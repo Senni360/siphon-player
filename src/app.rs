@@ -33422,6 +33422,88 @@ mod tests {
         assert_eq!(manual, ["spotify:episode:episode"]);
     }
 
+    #[test]
+    fn review_hybrid_failed_loads_do_not_loop_forever_on_repeat_all() {
+        use crate::player::HybridEvent;
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.apply(Action::PlayUris {
+            uris: vec!["soundcloud:track:1".into(), "soundcloud:track:2".into()],
+            index: 0,
+        }, &ctx);
+        app.apply(Action::SetRepeat(RepeatMode::Context), &ctx);
+        for _ in 0..4 {
+            let Some(tag) = app.hybrid_tag() else { break };
+            let uri = app.current_track_uri().unwrap();
+            // A real failed SoundCloud Load emits this state then Error.
+            app.handle_hybrid_event(tag, HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Paused,
+                loading: false,
+                track: Some(crate::player::LocalTrack { uri, ..Default::default() }),
+                error: Some("Cannot decode stream".into()),
+                ..Default::default()
+            })));
+            app.handle_hybrid_event(tag, HybridEvent::Failed("Cannot decode stream".into()));
+        }
+        let playing = app.now_playing().unwrap().playing;
+        let tag = app.hybrid_tag();
+        app.backend.shutdown();
+        assert!(!playing && tag.is_none(), "a fully failing context must stop retrying");
+    }
+
+    #[test]
+    fn review_hybrid_failures_do_not_abandon_untried_manual_successor() {
+        use crate::player::HybridEvent;
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        app.apply(Action::PlayUris {
+            uris: vec!["soundcloud:track:1".into()],
+            index: 0,
+        }, &ctx);
+        app.apply(Action::QueueMany { songs: vec![
+            ("soundcloud:track:2".into(), "Unavailable".into()),
+            ("spotify:track:good".into(), "Available".into()),
+        ] }, &ctx);
+        // Stream resolution can fail before the engine emits any State.
+        for _ in 0..2 {
+            let tag = app.hybrid_tag().unwrap();
+            app.handle_hybrid_event(tag, HybridEvent::Failed("Unavailable".into()));
+        }
+        let current = app.current_track_uri();
+        app.backend.shutdown();
+        assert_eq!(current.as_deref(), Some("spotify:track:good"));
+    }
+
+    #[test]
+    fn review_hybrid_rapid_pause_resume_ignores_intermediate_pause_echo() {
+        use crate::player::HybridEvent;
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        start_hybrid_fixture(&mut app);
+        let tag = app.hybrid_tag().unwrap();
+        let playing = LocalState {
+            playback: Playback::Playing,
+            track: Some(crate::player::LocalTrack {
+                uri: "spotify:track:a".into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        app.handle_hybrid_event(tag, HybridEvent::State(Box::new(playing.clone())));
+        app.apply(Action::TogglePlay, &ctx);
+        app.apply(Action::TogglePlay, &ctx);
+        // A periodic snapshot produced before Pause reaches the app after
+        // the user's later Play. It cannot acknowledge that later command.
+        app.handle_hybrid_event(tag, HybridEvent::State(Box::new(playing.clone())));
+        app.handle_hybrid_event(tag, HybridEvent::State(Box::new(LocalState {
+            playback: Playback::Paused,
+            ..playing
+        })));
+        let shown_playing = app.now_playing().unwrap().playing;
+        app.backend.shutdown();
+        assert!(shown_playing, "the intermediate Pause must not undo the later Play");
+    }
+
     fn hybrid_fixture() -> App {
         let mut app = headless_app();
         app.backend.set_offline(true);
