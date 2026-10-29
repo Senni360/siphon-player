@@ -243,11 +243,12 @@ fn the_command_forwards_links_to_the_existing_instance_on_a_private_bus() {
 }
 
 #[test]
-fn the_legacy_factory_connect_name_is_adopted_without_losing_preferences() {
+fn the_legacy_factory_connect_name_keeps_its_device_identity_and_preferences() {
     let scratch = Scratch::new();
     let path = scratch.0.join("settings.json");
     std::fs::write(&path, br#"{"device_name":"Spotifast","volume":37}"#).unwrap();
     let settings = spotifast::settings::Settings::load(&path);
-    assert_eq!(settings.device_name, "Siphon");
+    // EngineConfig::device_id hashes this name, including the old default.
+    assert_eq!(settings.device_name, "Spotifast");
     assert_eq!(settings.volume, 37);
 }
