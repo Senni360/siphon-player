@@ -476,10 +476,11 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     );
     let offer_expand = art_available && !app.settings.art_expanded && app.settings.sidebar_visible;
     let over_expand = offer_expand && ui.rect_contains_pointer(expand_rect);
-    if cover_response.clicked() && !over_expand {
-        if let Some(page) = app.now_playing_collection_page(now) {
-            app.actions.push(Action::Open(page));
-        }
+    if cover_response.clicked()
+        && !over_expand
+        && let Some(page) = app.now_playing_collection_page(now)
+    {
+        app.actions.push(Action::Open(page));
     }
     if offer_expand && (cover_response.hovered() || over_expand) {
         let expand = ui.interact(
@@ -537,10 +538,10 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     text_ui.spacing_mut().item_spacing.y = 2.0;
     let title_response = theme::link(&mut text_ui, &now.title, theme::medium(14.0), palette.text)
         .interact(drag_sense);
-    if title_response.clicked() {
-        if let Some(page) = app.now_playing_collection_page(now) {
-            app.actions.push(Action::Open(page));
-        }
+    if title_response.clicked()
+        && let Some(page) = app.now_playing_collection_page(now)
+    {
+        app.actions.push(Action::Open(page));
     }
     let mut responses = vec![cover_response, title_response];
     text_ui.horizontal_top(|ui| {
