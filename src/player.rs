@@ -1948,7 +1948,11 @@ mod tests {
         ] {
             sender.send(event).unwrap();
         }
-        assert!(futures_util::poll!(observer.as_mut()).is_pending());
+        std::future::poll_fn(|cx| {
+            assert!(std::future::Future::poll(observer.as_mut(), cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
         assert!(
             loaded.lock().unwrap().is_empty(),
             "the observer ran before Spirc consumed EOF"
