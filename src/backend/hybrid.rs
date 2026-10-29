@@ -206,7 +206,11 @@ impl Worker {
                     let _ = engine.preload(&track.uri);
                 }
             }
-            HybridCommand::Playing { tag, playing, sequence } => {
+            HybridCommand::Playing {
+                tag,
+                playing,
+                sequence,
+            } => {
                 if self.hybrid.tag != Some(tag) {
                     return;
                 }

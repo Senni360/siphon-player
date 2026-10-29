@@ -219,6 +219,41 @@ impl HybridQueue {
         self.state.context.as_ref()
     }
 
+    /// Fill an unresolved context behind manual occurrences already played.
+    /// Their IDs, the current decoder, and remaining manual rows stay intact.
+    pub fn resolve_context_behind_manual(
+        &mut self,
+        context: Context,
+        start_at: Option<usize>,
+        shuffle: bool,
+        repeat: Repeat,
+    ) {
+        let current = self.state.current.take();
+        let history: Vec<_> = self
+            .state
+            .history
+            .drain(..)
+            .filter(|played| played.entry.origin == Origin::Manual)
+            .collect();
+        let position = self.state.position_ms;
+        self.start(context, start_at, shuffle, repeat);
+        if let Some(played) = self.state.current.take() {
+            self.state.history.push(played);
+        }
+        let anchor = self.state.anchor;
+        self.state
+            .history
+            .extend(history.into_iter().map(|mut played| {
+                played.anchor = anchor;
+                played
+            }));
+        self.state.current = current.map(|mut played| {
+            played.anchor = anchor;
+            played
+        });
+        self.state.position_ms = position;
+    }
+
     pub fn current(&self) -> Option<&Entry> {
         self.state.current.as_ref().map(|played| &played.entry)
     }

@@ -19,6 +19,7 @@ struct PendingStart {
     play: bool,
     navigation: Vec<bool>,
     resolving: bool,
+    manual_started: bool,
 }
 
 /// A not-yet-resolved context is saved as intent, never as a truncated list.
@@ -32,6 +33,8 @@ pub struct PendingHybridSnapshot {
     shuffle: bool,
     repeat: Repeat,
     navigation: Vec<bool>,
+    #[serde(default)]
+    manual_started: bool,
 }
 
 pub(super) struct HybridPlayback {
@@ -120,17 +123,24 @@ impl App {
             return true;
         };
         match context {
-            RowContext::View { uris, context_uri, .. }
-                if self.hybrid.queue.context().is_some_and(|c| c.uri == *context_uri) =>
+            RowContext::View {
+                uris, context_uri, ..
+            } if self
+                .hybrid
+                .queue
+                .context()
+                .is_some_and(|c| c.uri == *context_uri) =>
             {
                 // A remembered plan index belongs to the order at the click.
                 // Once sorting moves that row, fall back to URI identity, as
                 // the ordinary Spotify row-marker path does.
-                uris.get(current_index).is_none_or(|uri| *uri != current.track.uri)
+                uris.get(current_index)
+                    .is_none_or(|uri| *uri != current.track.uri)
                     || current_index == index
             }
             RowContext::Context { uri, .. }
-                if self.hybrid.queue.context().is_some_and(|c| c.uri == *uri) => {
+                if self.hybrid.queue.context().is_some_and(|c| c.uri == *uri) =>
+            {
                 let current_index = self
                     .hybrid
                     .pending
@@ -206,6 +216,16 @@ impl App {
             } => match context {
                 RowContext::Queue if self.hybrid_owned() => {
                     if self.hybrid.pending.is_some() {
+                        let manual = self.hybrid.queue.playing_next(usize::MAX);
+                        if let Some(entry) = manual.get(*index as usize)
+                            && entry.track.uri == *uri
+                            && let Some(transition) = self.hybrid.queue.skip_to(entry.id)
+                        {
+                            self.hybrid.pending.as_mut().unwrap().manual_started = true;
+                            let play = self.hybrid.play_intent;
+                            self.hybrid_transition(transition, 0, play);
+                            return true;
+                        }
                         if let Some(pending) = &mut self.hybrid.pending {
                             pending
                                 .navigation
@@ -278,9 +298,7 @@ impl App {
                     .collect(),
                 None,
             )),
-            Action::PlayNext { items } => {
-                Some((items.iter().map(as_track).collect(), Some(0)))
-            }
+            Action::PlayNext { items } => Some((items.iter().map(as_track).collect(), Some(0))),
             Action::InsertInQueue { items, position } => {
                 Some((items.iter().map(as_track).collect(), Some(*position)))
             }
@@ -305,14 +323,7 @@ impl App {
         match action {
             Action::TogglePlay => self.hybrid_toggle(),
             Action::Next => {
-                if let Some(pending) = &mut self.hybrid.pending {
-                    pending.navigation.push(true);
-                    pending.request.position_ms = 0;
-                } else {
-                    let play = self.hybrid.play_intent;
-                    let t = self.hybrid.queue.next();
-                    self.hybrid_transition(t, 0, play);
-                }
+                self.hybrid_next();
             }
             Action::Previous => {
                 let position = self.hybrid_position();
@@ -539,6 +550,7 @@ impl App {
                 play: true,
                 navigation: Vec::new(),
                 resolving: true,
+                manual_started: false,
             });
             self.backend.send(Command::Hybrid(HybridCommand::Resolve {
                 generation,
@@ -653,27 +665,53 @@ impl App {
                 if !context.uri.is_empty() {
                     self.note_recent_context(&context.uri);
                 }
-                let mut transition = self.hybrid.queue.start(
-                    context,
-                    index,
-                    pending.shuffle,
-                    repeat_to_queue(pending.repeat),
-                );
+                let mut transition = if pending.manual_started {
+                    self.hybrid.queue.resolve_context_behind_manual(
+                        context,
+                        index,
+                        pending.shuffle,
+                        repeat_to_queue(pending.repeat),
+                    );
+                    None
+                } else {
+                    Some(self.hybrid.queue.start(
+                        context,
+                        index,
+                        pending.shuffle,
+                        repeat_to_queue(pending.repeat),
+                    ))
+                };
                 for next in pending.navigation {
-                    transition = if next {
+                    transition = Some(if next {
                         self.hybrid.queue.next()
                     } else {
                         self.hybrid.queue.previous(0)
-                    };
+                    });
                 }
-                self.hybrid_transition(transition, pending.request.position_ms, pending.play);
+                if let Some(transition) = transition {
+                    self.hybrid_transition(transition, pending.request.position_ms, pending.play);
+                } else if self.hybrid.tag.is_none() && pending.play {
+                    if let Some(entry) = self.hybrid.queue.current() {
+                        self.hybrid_transition(
+                            Transition::Play(entry.id),
+                            pending.request.position_ms,
+                            true,
+                        );
+                    }
+                } else {
+                    self.project_hybrid();
+                    self.preload_hybrid();
+                }
             }
             Err(error) => {
-                self.hybrid.state.loading = false;
-                self.hybrid.state.playback = Playback::Paused;
+                if self.hybrid.tag.is_none() {
+                    self.hybrid.state.loading = false;
+                    self.hybrid.state.playback = Playback::Paused;
+                    self.hybrid.play_intent = false;
+                }
                 self.toast_error(error);
                 self.hybrid.pending = Some(PendingStart {
-                    play: false,
+                    play: self.hybrid.play_intent,
                     resolving: false,
                     ..pending
                 });
@@ -1015,7 +1053,9 @@ impl App {
         self.hybrid.loaded = false;
         self.hybrid.play_intent = play;
         self.hybrid.audible = false;
-        self.hybrid.pending = None;
+        if let Some(pending) = &mut self.hybrid.pending {
+            pending.request.position_ms = position_ms;
+        }
         self.listening = None;
         self.played_row = None;
         if let Some(controls) = &mut self.media_controls {
@@ -1068,6 +1108,28 @@ impl App {
         }
     }
 
+    fn hybrid_next(&mut self) {
+        if let Some(pending) = &mut self.hybrid.pending {
+            pending.request.position_ms = 0;
+            if self.hybrid.queue.playing_next(1).is_empty() {
+                pending.navigation.push(true);
+                self.hybrid.audible = false;
+                self.hybrid.loaded = false;
+                self.hybrid.state.loading = true;
+                self.hybrid.state.position_ms = 0;
+                self.hybrid.state.position_at = None;
+                self.hybrid.tag = None;
+                self.backend.send(Command::Hybrid(HybridCommand::Stop));
+                self.project_hybrid();
+                return;
+            }
+            pending.manual_started = true;
+        }
+        let play = self.hybrid.play_intent;
+        let transition = self.hybrid.queue.next();
+        self.hybrid_transition(transition, 0, play);
+    }
+
     fn preload_hybrid(&self) {
         if self.hybrid.state.playback != Playback::Playing {
             return;
@@ -1113,9 +1175,8 @@ impl App {
                         self.hybrid.seek_pending = None;
                     }
                 }
-                self.hybrid.audible = state.playback == Playback::Playing
-                    && !state.loading
-                    && state.error.is_none();
+                self.hybrid.audible =
+                    state.playback == Playback::Playing && !state.loading && state.error.is_none();
                 if self.hybrid.audible {
                     self.hybrid.failed_occurrences.clear();
                 }
@@ -1147,6 +1208,10 @@ impl App {
                     return;
                 }
                 self.hybrid.tag = None;
+                if self.hybrid.pending.is_some() && self.hybrid.queue.repeat() != Repeat::Track {
+                    self.hybrid_next();
+                    return;
+                }
                 let t = self.hybrid.queue.end_of_track();
                 self.hybrid_transition(t, 0, play);
             }
@@ -1155,11 +1220,18 @@ impl App {
                 self.toast_error(error);
                 self.hybrid.tag = None;
                 self.hybrid.failed_occurrences.insert(tag.occurrence);
+                if self.hybrid.pending.is_some() {
+                    self.hybrid_next();
+                    return;
+                }
                 // Occurrence IDs form a stable retry budget even as manual
                 // rows leave the queue. Never wrap into an already failed row.
-                if self.hybrid.queue.next_entry().is_none_or(|entry| {
-                    self.hybrid.failed_occurrences.contains(&entry.id)
-                }) {
+                if self
+                    .hybrid
+                    .queue
+                    .next_entry()
+                    .is_none_or(|entry| self.hybrid.failed_occurrences.contains(&entry.id))
+                {
                     self.hybrid.play_intent = false;
                     self.hybrid.audible = false;
                     self.hybrid.state.loading = false;
@@ -1186,7 +1258,14 @@ impl App {
 
     pub(super) fn hybrid_toggle(&mut self) {
         if let Some(pending) = &mut self.hybrid.pending {
-            pending.play = !pending.play;
+            pending.play = !self.hybrid.play_intent;
+            if self.hybrid.tag.is_some() {
+                // The manual row is already playing while its context loads.
+                // Carry intent to resolution and also control that decoder.
+                self.hybrid_toggle_loaded();
+                return;
+            }
+            self.hybrid.play_intent = pending.play;
             self.hybrid.state.playback = if pending.play {
                 Playback::Playing
             } else {
@@ -1204,6 +1283,10 @@ impl App {
             self.project_hybrid();
             return;
         }
+        self.hybrid_toggle_loaded();
+    }
+
+    fn hybrid_toggle_loaded(&mut self) {
         if self.hybrid.tag.is_none() {
             if let Some(entry) = self.hybrid.queue.current() {
                 self.hybrid_transition(
@@ -1230,8 +1313,11 @@ impl App {
         };
         self.hybrid.state.position_at = playing.then(Instant::now);
         if let Some(tag) = self.hybrid.tag {
-            self.backend
-                .send(Command::Hybrid(HybridCommand::Playing { tag, playing, sequence }));
+            self.backend.send(Command::Hybrid(HybridCommand::Playing {
+                tag,
+                playing,
+                sequence,
+            }));
         }
         self.project_hybrid();
         self.preload_hybrid();
@@ -1385,7 +1471,10 @@ impl App {
     /// Provider-safe destination for the player bar's title and cover.
     pub fn now_playing_collection_page(&self, now: &NowPlaying) -> Option<Page> {
         if crate::soundcloud::is_uri(&now.uri) {
-            return self.hybrid.queue.current()
+            return self
+                .hybrid
+                .queue
+                .current()
                 .filter(|entry| entry.track.uri == now.uri)
                 .and_then(|entry| entry.track.album.as_ref())
                 .and_then(|album| Page::from_uri(&album.uri));
@@ -1420,6 +1509,7 @@ impl App {
             shuffle: pending.shuffle,
             repeat: repeat_to_queue(pending.repeat),
             navigation: pending.navigation.clone(),
+            manual_started: pending.manual_started,
         })
     }
 
@@ -1453,6 +1543,7 @@ impl App {
             play: false,
             navigation: saved.navigation,
             resolving: false,
+            manual_started: saved.manual_started,
         });
         self.project_hybrid();
     }
