@@ -199,12 +199,13 @@ impl App {
         }
         match response {
             Response::Cached {
-                snapshot: Some(snapshot),
+                snapshot: Some(mut snapshot),
                 ..
             } => {
                 if !self.soundcloud_library.snapshot.likes_loaded
                     && self.soundcloud_library.pending.is_empty()
                 {
+                    self.overlay_soundcloud_likes(&mut snapshot.likes);
                     self.cache_soundcloud_tracks(&snapshot.likes);
                     self.soundcloud_library.snapshot = snapshot;
                     self.soundcloud_library.rebuild_membership();
@@ -449,6 +450,45 @@ mod tests {
         assert!(!app.soundcloud_library.pending.is_empty());
         assert!(!app.saved.contains_key(&uri));
         assert!(!app.saved_writes.contains_key(&uri));
+        finish(app);
+    }
+
+    #[test]
+    fn a_late_cached_library_preserves_completed_like_edits() {
+        let mut app = app("late-cache-like");
+        session(&mut app);
+        let snapshot = app.soundcloud_library.snapshot.clone();
+        let removed = snapshot.likes[0].clone();
+        let added = Track {
+            uri: crate::soundcloud::track_uri(999),
+            name: "New like".into(),
+            ..Default::default()
+        };
+        app.cache_soundcloud_tracks(&[added.clone()]);
+        app.soundcloud_library.snapshot = Default::default();
+        app.soundcloud_library.rebuild_membership();
+        // An unlike completed before this refresh started loading its cache.
+        let removed_id = crate::soundcloud::track_id(&removed.uri).unwrap();
+        app.soundcloud_library.edits.insert(removed_id, false);
+        app.toggle_soundcloud_like(&added.uri);
+        let serial = app.soundcloud_library.pending[&999].serial;
+        let generation = app.soundcloud_library.generation;
+        app.handle_soundcloud_library(Response::Liked {
+            generation,
+            id: 999,
+            serial,
+            result: Ok(()),
+        });
+        app.handle_soundcloud_library(Response::Cached {
+            generation,
+            snapshot: Some(snapshot.clone()),
+        });
+        let expected: Vec<_> = std::iter::once(added.clone())
+            .chain(snapshot.likes.into_iter().filter(|track| track.uri != removed.uri))
+            .collect();
+        assert_eq!(app.soundcloud_library.snapshot.likes, expected);
+        assert_eq!(app.is_saved(&added.uri), Some(true));
+        assert_eq!(app.is_saved(&removed.uri), Some(false));
         finish(app);
     }
 
