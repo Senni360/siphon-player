@@ -10584,7 +10584,10 @@ impl App {
 
     fn transfer(&mut self, device_id: String) {
         if self.hybrid_owned() {
-            self.toast("Mixed playback is available only on this computer");
+            self.toast(gettext(
+                self.locale,
+                "Mixed playback is available only on this computer",
+            ));
             return;
         }
         if self
@@ -13546,7 +13549,12 @@ impl App {
             .mixed_playlists
             .playlists
             .iter()
-            .map(|playlist| (playlist.uri(), format!("{} (Mixed)", playlist.name)))
+            .map(|playlist| {
+                (
+                    playlist.uri(),
+                    format!("{} ({})", playlist.name, gettext(self.locale, "Mixed")),
+                )
+            })
             .collect();
         if self.user_id().is_none() {
             return destinations;

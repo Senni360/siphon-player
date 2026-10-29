@@ -415,7 +415,10 @@ impl App {
             }
             Action::RefreshQueue => self.project_hybrid(),
             Action::Transfer(_) | Action::ActivateReceiver(_) => {
-                self.toast("Mixed playback is available only on this computer");
+                self.toast(gettext(
+                    self.locale,
+                    "Mixed playback is available only on this computer",
+                ));
             }
             // Volume and mute share the existing local mixer helpers below.
             Action::SetVolume(_)
@@ -797,7 +800,7 @@ impl App {
         {
             return Some(Context {
                 uri: uri.into(),
-                name: "Liked Songs".into(),
+                name: gettext(self.locale, "Liked Songs").into_owned(),
                 tracks: self
                     .library
                     .liked
@@ -853,10 +856,10 @@ impl App {
             }
             return Some(Context {
                 uri: uri.into(),
-                name: page
-                    .playlist
-                    .get()
-                    .map_or_else(|| "Playlist".into(), |p| p.name.clone()),
+                name: page.playlist.get().map_or_else(
+                    || gettext(self.locale, "Playlist").into_owned(),
+                    |p| p.name.clone(),
+                ),
                 tracks,
             });
         }
@@ -872,10 +875,10 @@ impl App {
             }
             return Some(Context {
                 uri: uri.into(),
-                name: page
-                    .album
-                    .get()
-                    .map_or_else(|| "Album".into(), |a| a.name.clone()),
+                name: page.album.get().map_or_else(
+                    || gettext(self.locale, "Album").into_owned(),
+                    |a| a.name.clone(),
+                ),
                 tracks: page.tracks.items.clone(),
             });
         }
@@ -922,26 +925,32 @@ impl App {
                 .unwrap_or_else(|| gettext(self.locale, "SoundCloud").into_owned());
         }
         if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
-            return self
-                .mixed_playlists
-                .get(id)
-                .map_or_else(|| "Mixed playlist".into(), |p| p.name.clone());
+            return self.mixed_playlists.get(id).map_or_else(
+                || gettext(self.locale, "Mixed playlist").into_owned(),
+                |p| p.name.clone(),
+            );
         }
         if let Some(id) = uri.strip_prefix("spotify:playlist:") {
             return self
                 .playlist_pages
                 .get(id)
                 .and_then(|p| p.playlist.get())
-                .map_or_else(|| "Playlist".into(), |p| p.name.clone());
+                .map_or_else(
+                    || gettext(self.locale, "Playlist").into_owned(),
+                    |p| p.name.clone(),
+                );
         }
         if let Some(id) = uri.strip_prefix("spotify:album:") {
             return self
                 .album_pages
                 .get(id)
                 .and_then(|p| p.album.get())
-                .map_or_else(|| "Album".into(), |p| p.name.clone());
+                .map_or_else(
+                    || gettext(self.locale, "Album").into_owned(),
+                    |p| p.name.clone(),
+                );
         }
-        "Mixed playback".into()
+        gettext(self.locale, "Mixed playback").into_owned()
     }
 
     pub(super) fn hybrid_cached_track(&self, uri: &str) -> Option<Track> {
@@ -1036,21 +1045,22 @@ impl App {
                 .remote_fresh()
                 .is_some_and(|r| r.state.is_playing && !self.local.is_active())
         {
-            self.toast("SoundCloud songs cannot be queued on another device. Start mixed playback on this computer first.");
+            self.toast(gettext(self.locale, "SoundCloud songs cannot be queued on another device. Start mixed playback on this computer first."));
             return false;
         }
         let current = self.now_playing();
         let context = if let Some(now) = &current {
             if now.shuffle {
-                self.toast(
+                self.toast(gettext(
+                    self.locale,
                     "Start a mixed playlist to keep its full shuffle order when adding SoundCloud",
-                );
+                ));
                 return false;
             }
             if let Some(uris) = &self.local_list {
                 Some(Context {
                     uri: self.playing_context_uri().unwrap_or_default(),
-                    name: "Queue".into(),
+                    name: gettext(self.locale, "Queue").into_owned(),
                     tracks: uris.iter().map(|u| self.hybrid_track(u, None)).collect(),
                 })
             } else if let Some(uri) = self.playing_context_uri() {
@@ -1058,21 +1068,22 @@ impl App {
             } else {
                 Some(Context {
                     uri: String::new(),
-                    name: "Queue".into(),
+                    name: gettext(self.locale, "Queue").into_owned(),
                     tracks: vec![self.hybrid_track(&now.uri, Some(&now.title))],
                 })
             }
         } else {
             Some(Context {
                 uri: String::new(),
-                name: "Queue".into(),
+                name: gettext(self.locale, "Queue").into_owned(),
                 tracks: Vec::new(),
             })
         };
         let Some(context) = context else {
-            self.toast(
+            self.toast(gettext(
+                self.locale,
                 "Open the complete playlist before adding SoundCloud, or start a mixed playlist",
-            );
+            ));
             return false;
         };
         let index = if let Some(now) = &current {
@@ -1092,7 +1103,7 @@ impl App {
             if let Some(index) = chosen.or_else(|| (matches.len() == 1).then(|| matches[0])) {
                 Some(index)
             } else {
-                self.toast("Start a mixed playlist to keep the current song and its complete queue when adding SoundCloud");
+                self.toast(gettext(self.locale, "Start a mixed playlist to keep the current song and its complete queue when adding SoundCloud"));
                 return false;
             }
         } else {

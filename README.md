@@ -253,7 +253,7 @@ explicitly start Spotify playback. Changing the SoundCloud account discards
 pending stream and playlist replies from the previous account. Its
 [engine contract](docs/_reference/soundcloud-engine.md) describes stream inputs,
 URL refresh and exclusive use of the output. No account connection is needed
-for public streams; the optional connection interface is not wired yet.
+for public streams; an optional connection adds your SoundCloud library.
 
 ## More native apps
 

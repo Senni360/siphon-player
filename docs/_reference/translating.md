@@ -43,6 +43,9 @@ and screen-reader names. All bundled catalogues cover every message in the
 source template. The tray menu, the macOS menu bar and Dock menu, and the Windows
 taskbar buttons are still English in every language,
 as are error details reported by Spotify, the network or the system.
+SoundCloud search, account connections, preview labels and local mixed-playlist
+controls are included in every catalogue. Common SoundCloud failures use
+translated recovery messages.
 
 A regional system language uses the closest catalogue: `es-MX` and `es-419`
 use Spanish, `de-AT` uses German, `pt-BR` and a plain `pt` use Portuguese
@@ -51,7 +54,7 @@ use Spanish, `de-AT` uses German, `pt-BR` and a plain `pt` use Portuguese
 Traditional Chinese. When the system lists several preferred languages, the
 first one with a catalogue wins.
 
-Song, album, artist and playlist names come from Spotify or their creators and
+Song, album, artist and playlist names come from Spotify, SoundCloud or their creators and
 are kept as provided, as are lyric lines and failure details. Generated queue
 playlist names translate the surrounding words while retaining the song title
 or the date in `YYYY-MM-DD` form.

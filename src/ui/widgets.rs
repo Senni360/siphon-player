@@ -1007,7 +1007,14 @@ pub(super) fn playlist_picker_source(
             add_uris: items.iter().map(|item| item.uri().to_string()).collect(),
         }));
     }
-    if source.is_none() && menu_item(ui, &palette, Some(Icon::Plus), "New mixed playlist") {
+    if source.is_none()
+        && menu_item(
+            ui,
+            &palette,
+            Some(Icon::Plus),
+            &gettext(locale, "New mixed playlist"),
+        )
+    {
         app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
             id: None,
             name: String::new(),

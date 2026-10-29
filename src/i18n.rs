@@ -262,6 +262,30 @@ pub const LOCALES: &[Locale] = &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn soundcloud_controls_and_recovery_are_translated_in_every_locale() {
+        use clap::ValueEnum;
+        for &locale in super::Locale::value_variants() {
+            if locale == super::Locale::English {
+                continue;
+            }
+            for message in [
+                "Connect SoundCloud",
+                "New mixed playlist",
+                "Edit mixed playlist",
+                "Preview only",
+                "Search source: {source}",
+                "SoundCloud could not complete this request. Try again.",
+            ] {
+                assert_ne!(
+                    super::gettext(locale, message),
+                    message,
+                    "{locale:?}: {message}"
+                );
+            }
+        }
+    }
+
     use super::*;
 
     #[test]

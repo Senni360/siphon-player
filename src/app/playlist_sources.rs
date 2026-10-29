@@ -120,13 +120,14 @@ impl App {
         };
         if let Some(id) = target.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             if !self.mixed_playlists_writable || self.mixed_playlists.get(id).is_none() {
-                self.toast_error("Mixed playlist is unavailable");
+                self.toast_error(gettext(self.locale, "Playlist unavailable"));
                 return;
             }
         } else if !self.playlist_overlay_writable {
-            self.toast_error(
-                "Playlist overlays could not be loaded; the original file has been kept",
-            );
+            self.toast_error(gettext(
+                self.locale,
+                "Playlist additions could not be loaded. Your saved file has been kept.",
+            ));
             return;
         }
         self.load_generation += 1;
@@ -149,7 +150,7 @@ impl App {
         } else {
             self.backend
                 .send(Command::AddSoundCloudPlaylist { id, request });
-            self.toast("Adding SoundCloud tracks…");
+            self.toast(gettext(self.locale, "Adding SoundCloud tracks…"));
         }
     }
 
@@ -199,11 +200,17 @@ impl App {
                     }
                 }
                 if complete {
-                    self.toast(format!(
-                        "Added {} SoundCloud tracks to {}",
-                        tracks.len(),
-                        pending.name
-                    ));
+                    self.toast(
+                        ngettext(
+                            self.locale,
+                            // Translators: {count} songs were added to playlist {name}.
+                            "Added {count} SoundCloud track to {name}",
+                            "Added {count} SoundCloud tracks to {name}",
+                            tracks.len().try_into().unwrap_or(u32::MAX),
+                        )
+                        .replace("{count}", &tracks.len().to_string())
+                        .replace("{name}", &pending.name),
+                    );
                 } else {
                     self.pending_soundcloud_adds.insert(request, pending);
                 }
@@ -228,7 +235,11 @@ impl App {
                     overlay.entries.retain(|row| !ids.contains(&row.entry.id));
                 }
                 self.save_playlist_sources();
-                self.toast_error(format!("Could not add SoundCloud playlist: {error}"));
+                log::warn!("Could not add SoundCloud playlist: {error}");
+                self.toast_error(gettext(
+                    self.locale,
+                    "Could not add the SoundCloud playlist. Try again.",
+                ));
             }
         }
     }
@@ -277,7 +288,13 @@ impl App {
                     bytes,
                     fastframe_file::Access::Private,
                 ),
-                Err(error) => self.toast_error(format!("Could not save mixed playlists: {error}")),
+                Err(error) => {
+                    log::warn!("Could not encode mixed playlists: {error}");
+                    self.toast_error(gettext(
+                        self.locale,
+                        "Could not save mixed playlists. Try again.",
+                    ));
+                }
             }
         }
         if let Some(result) = overlays {
@@ -288,7 +305,11 @@ impl App {
                     fastframe_file::Access::Private,
                 ),
                 Err(error) => {
-                    self.toast_error(format!("Could not save playlist overlays: {error}"))
+                    log::warn!("Could not encode playlist additions: {error}");
+                    self.toast_error(gettext(
+                        self.locale,
+                        "Could not save playlist additions. Try again.",
+                    ));
                 }
             }
         }
@@ -341,9 +362,10 @@ impl App {
     ) -> bool {
         if let Some(id) = target.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             if !self.mixed_playlists_writable {
-                self.toast_error(
-                    "Mixed playlists could not be loaded; the original file has been kept",
-                );
+                self.toast_error(gettext(
+                    self.locale,
+                    "Mixed playlists could not be loaded. Your saved file has been kept.",
+                ));
                 return true;
             }
             let tracks: Vec<_> = items
@@ -367,9 +389,10 @@ impl App {
             return false;
         }
         if !self.playlist_overlay_writable {
-            self.toast_error(
-                "Playlist overlays could not be loaded; the original file has been kept",
-            );
+            self.toast_error(gettext(
+                self.locale,
+                "Playlist additions could not be loaded. Your saved file has been kept.",
+            ));
             return true;
         }
         let complete = self
@@ -498,9 +521,10 @@ impl App {
             _ => false,
         };
         if mixed_edit && !self.mixed_playlists_writable {
-            self.toast_error(
-                "Mixed playlists could not be loaded; the original file has been kept",
-            );
+            self.toast_error(gettext(
+                self.locale,
+                "Mixed playlists could not be loaded. Your saved file has been kept.",
+            ));
             return None;
         }
         match action {
@@ -511,9 +535,10 @@ impl App {
                 tracks,
             } => {
                 if !self.mixed_playlists_writable {
-                    self.toast_error(
-                        "Mixed playlists could not be loaded; the original file has been kept",
-                    );
+                    self.toast_error(gettext(
+                        self.locale,
+                        "Mixed playlists could not be loaded. Your saved file has been kept.",
+                    ));
                     return None;
                 }
                 let id = if let Some(id) = id {
@@ -531,9 +556,10 @@ impl App {
             }
             Action::DuplicateMixedPlaylist(id) => {
                 if let Some(playlist) = self.mixed_playlists.get(&id)
-                    && let Some(copy) = self
-                        .mixed_playlists
-                        .duplicate(&id, format!("{} (copy)", playlist.name))
+                    && let Some(copy) = self.mixed_playlists.duplicate(
+                        &id,
+                        gettext(self.locale, "{name} (copy)").replace("{name}", &playlist.name),
+                    )
                 {
                     self.save_playlist_sources();
                     self.open(Page::MixedPlaylist(copy));
@@ -849,6 +875,45 @@ mod tests {
             },
         );
         tracks
+    }
+
+    #[test]
+    fn soundcloud_set_confirmation_translates_the_actual_song_count() {
+        for (count, locale, expected) in [
+            (
+                1,
+                crate::i18n::Locale::English,
+                "Added 1 SoundCloud track to Destination",
+            ),
+            (
+                2,
+                crate::i18n::Locale::Dutch,
+                "2 SoundCloud-nummers toegevoegd aan Destination",
+            ),
+        ] {
+            let mut app = app("set-count");
+            app.locale = locale;
+            set_tracks(&mut app);
+            app.soundcloud_pages
+                .get_mut("soundcloud:playlist:7")
+                .unwrap()
+                .content
+                .get_mut()
+                .unwrap()
+                .tracks
+                .truncate(count);
+            let id = app.mixed_playlists.create("Mix".into(), String::new());
+            app.apply(
+                Action::AddSoundCloudPlaylist {
+                    uri: "soundcloud:playlist:7".into(),
+                    playlist_id: format!("spotifast:playlist:{id}"),
+                    playlist_name: "Destination".into(),
+                },
+                &egui::Context::default(),
+            );
+            assert_eq!(app.toasts.last().unwrap().message, expected);
+            cleanup(app);
+        }
     }
 
     #[test]

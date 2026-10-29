@@ -5,7 +5,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 crate=$(cargo metadata --format-version 1 --locked |
+    sed 's#\\\\#/#g' |
     grep -o '"manifest_path":"[^"]*fastframe-i18n/Cargo.toml"' | head -n1 |
     sed 's/^"manifest_path":"//; s/Cargo.toml"$//')
-exec bash "$crate/scripts/update-translations.sh" --package Siphon --domain siphon \
+exec bash "$crate/scripts/update-translations.sh" --package Siphon --domain spotifast \
     --bugs 'https://github.com/crmne/spotifast/issues/new?template=translation.yml' --keyword gettext "$@"

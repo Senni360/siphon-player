@@ -38,3 +38,4 @@ src/soundcloud/connect.rs
 src/app/soundcloud_library.rs
 src/ui/soundcloud.rs
 src/app/hybrid.rs
+src/app/playlist_sources.rs

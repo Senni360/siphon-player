@@ -776,8 +776,8 @@ fn mixed_entry(app: &App, playlist: &crate::mixed_playlists::Playlist) -> Entry 
         image: image.clone(),
         grid_image: image,
         name: playlist.name.clone(),
-        subtitle: "Mixed playlist · On this computer".into(),
-        grid_subtitle: "Mixed playlist".into(),
+        subtitle: gettext(app.locale, "Mixed playlist · On this computer").into_owned(),
+        grid_subtitle: gettext(app.locale, "Mixed playlist").into_owned(),
         page: Page::MixedPlaylist(playlist.id.clone()),
         uri: playlist.uri(),
         round: false,
@@ -1237,7 +1237,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                         ui,
                         &palette,
                         Some(Icon::Plus),
-                        "New mixed playlist",
+                        &gettext(locale, "New mixed playlist"),
                     ) {
                         app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
                             id: None,

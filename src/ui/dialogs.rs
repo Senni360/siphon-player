@@ -963,39 +963,52 @@ fn mixed_playlist(app: &mut App, ui: &mut egui::Ui) {
     theme::text(
         ui,
         if id.is_some() {
-            "Edit mixed playlist"
+            gettext(locale, "Edit mixed playlist")
         } else {
-            "New mixed playlist"
+            gettext(locale, "New mixed playlist")
         },
         theme::bold(20.0),
         palette.text,
     );
     ui.add_space(12.0);
-    theme::text(ui, "Name", theme::medium(13.0), palette.secondary);
+    theme::text(
+        ui,
+        gettext(locale, "Name"),
+        theme::medium(13.0),
+        palette.secondary,
+    );
     let field = text_field(
         ui,
         &palette,
         locale,
         "mixed-name",
         name,
-        "My playlist",
+        &gettext(locale, "My playlist"),
         true,
     );
     ui.add_space(10.0);
-    theme::text(ui, "Description", theme::medium(13.0), palette.secondary);
+    theme::text(
+        ui,
+        gettext(locale, "Description"),
+        theme::medium(13.0),
+        palette.secondary,
+    );
     text_field(
         ui,
         &palette,
         locale,
         "mixed-description",
         description,
-        "Optional description",
+        &gettext(locale, "Optional description"),
         false,
     );
     ui.add_space(10.0);
     theme::text(
         ui,
-        "Spotify and SoundCloud songs. Saved on this computer.",
+        gettext(
+            locale,
+            "Spotify and SoundCloud songs. Saved on this computer.",
+        ),
         theme::regular(13.0),
         palette.secondary,
     );

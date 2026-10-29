@@ -430,7 +430,7 @@ pub fn actions_row(
                             ui,
                             &palette,
                             Some(Icon::ListPlus),
-                            "Import into a mixed playlist",
+                            &gettext(locale, "Import into a mixed playlist"),
                         )
                     {
                         app.actions.push(Action::ImportMixedPlaylist(id.into()));
@@ -2793,8 +2793,11 @@ pub fn mixed_playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
             ui,
             &app.palette,
             Icon::Music,
-            "Playlist unavailable",
-            "This mixed playlist was deleted from this computer.",
+            &gettext(app.locale, "Playlist unavailable"),
+            &gettext(
+                app.locale,
+                "This mixed playlist was deleted from this computer.",
+            ),
         );
         return;
     };
@@ -2819,11 +2822,11 @@ pub fn mixed_playlist(app: &mut App, ui: &mut egui::Ui, id: &str) {
                 ..Default::default()
             },
             liked: false,
-            kind: "Mixed playlist".into(),
+            kind: gettext(app.locale, "Mixed playlist"),
             title: &playlist.name,
             description: Some(playlist.description.clone()),
             byline: vec![
-                ("On this computer".into(), None),
+                (gettext(app.locale, "On this computer").into_owned(), None),
                 (
                     songs_and_duration(app.locale, items.len() as u32, duration),
                     None,
@@ -2914,7 +2917,7 @@ pub(super) fn mixed_playlist_menu(app: &mut App, ui: &mut egui::Ui, id: &str) {
     ) {
         app.actions.push(Action::ShufflePlay(playlist.uri()));
     }
-    if widgets::menu_item(ui, &palette, None, "Edit details") {
+    if widgets::menu_item(ui, &palette, None, &gettext(app.locale, "Edit details")) {
         app.actions.push(Action::ShowDialog(Dialog::MixedPlaylist {
             id: Some(id.into()),
             name: playlist.name.clone(),
@@ -2922,7 +2925,12 @@ pub(super) fn mixed_playlist_menu(app: &mut App, ui: &mut egui::Ui, id: &str) {
             tracks: Vec::new(),
         }));
     }
-    if widgets::menu_item(ui, &palette, None, "Duplicate playlist") {
+    if widgets::menu_item(
+        ui,
+        &palette,
+        None,
+        &gettext(app.locale, "Duplicate playlist"),
+    ) {
         app.actions.push(Action::DuplicateMixedPlaylist(id.into()));
     }
     if widgets::menu_item(
