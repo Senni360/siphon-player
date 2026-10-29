@@ -630,16 +630,25 @@ mod tests {
             // The old account's resolution was already in flight when the
             // account was disconnected. Its result must not refill the cache.
             worker.set_soundcloud_account(crate::soundcloud::account::Account::Disconnected);
-            worker.soundcloud_stream(tag, true, None, Ok(sc::Stream {
-                uri: "soundcloud:track:7".into(),
-                url: "https://audio.example/private-old-account".into(),
-                protocol: sc::Protocol::Progressive,
-                mime: "audio/mpeg".into(),
-                duration_ms: 120_000,
-                is_preview: false,
-            })).await;
-            assert!(worker.hybrid.streams.is_empty(),
-                "a result authorized by the old account cannot be reused after disconnect");
+            worker
+                .soundcloud_stream(
+                    tag,
+                    true,
+                    None,
+                    Ok(sc::Stream {
+                        uri: "soundcloud:track:7".into(),
+                        url: "https://audio.example/private-old-account".into(),
+                        protocol: sc::Protocol::Progressive,
+                        mime: "audio/mpeg".into(),
+                        duration_ms: 120_000,
+                        is_preview: false,
+                    }),
+                )
+                .await;
+            assert!(
+                worker.hybrid.streams.is_empty(),
+                "a result authorized by the old account cannot be reused after disconnect"
+            );
         });
     }
 

@@ -33397,10 +33397,13 @@ mod tests {
         app.handle_hybrid_event(tag, HybridEvent::Failed("stream read failed".into()));
         let commands = app.backend.take_hybrid_commands();
         app.backend.shutdown();
-        assert!(commands.iter().any(|command| matches!(command,
-            crate::backend::HybridCommand::Load { track, play: true, .. }
-                if track.uri == "spotify:track:a"
-        )), "a stream failure must not pause the next song: {commands:?}");
+        assert!(
+            commands.iter().any(|command| matches!(command,
+                crate::backend::HybridCommand::Load { track, play: true, .. }
+                    if track.uri == "spotify:track:a"
+            )),
+            "a stream failure must not pause the next song: {commands:?}"
+        );
     }
 
     #[test]
@@ -33427,28 +33430,40 @@ mod tests {
         use crate::player::HybridEvent;
         let mut app = hybrid_fixture();
         let ctx = egui::Context::default();
-        app.apply(Action::PlayUris {
-            uris: vec!["soundcloud:track:1".into(), "soundcloud:track:2".into()],
-            index: 0,
-        }, &ctx);
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["soundcloud:track:1".into(), "soundcloud:track:2".into()],
+                index: 0,
+            },
+            &ctx,
+        );
         app.apply(Action::SetRepeat(RepeatMode::Context), &ctx);
         for _ in 0..4 {
             let Some(tag) = app.hybrid_tag() else { break };
             let uri = app.current_track_uri().unwrap();
             // A real failed SoundCloud Load emits this state then Error.
-            app.handle_hybrid_event(tag, HybridEvent::State(Box::new(LocalState {
-                playback: Playback::Paused,
-                loading: false,
-                track: Some(crate::player::LocalTrack { uri, ..Default::default() }),
-                error: Some("Cannot decode stream".into()),
-                ..Default::default()
-            })));
+            app.handle_hybrid_event(
+                tag,
+                HybridEvent::State(Box::new(LocalState {
+                    playback: Playback::Paused,
+                    loading: false,
+                    track: Some(crate::player::LocalTrack {
+                        uri,
+                        ..Default::default()
+                    }),
+                    error: Some("Cannot decode stream".into()),
+                    ..Default::default()
+                })),
+            );
             app.handle_hybrid_event(tag, HybridEvent::Failed("Cannot decode stream".into()));
         }
         let playing = app.now_playing().unwrap().playing;
         let tag = app.hybrid_tag();
         app.backend.shutdown();
-        assert!(!playing && tag.is_none(), "a fully failing context must stop retrying");
+        assert!(
+            !playing && tag.is_none(),
+            "a fully failing context must stop retrying"
+        );
     }
 
     #[test]
@@ -33456,14 +33471,22 @@ mod tests {
         use crate::player::HybridEvent;
         let mut app = hybrid_fixture();
         let ctx = egui::Context::default();
-        app.apply(Action::PlayUris {
-            uris: vec!["soundcloud:track:1".into()],
-            index: 0,
-        }, &ctx);
-        app.apply(Action::QueueMany { songs: vec![
-            ("soundcloud:track:2".into(), "Unavailable".into()),
-            ("spotify:track:good".into(), "Available".into()),
-        ] }, &ctx);
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["soundcloud:track:1".into()],
+                index: 0,
+            },
+            &ctx,
+        );
+        app.apply(
+            Action::QueueMany {
+                songs: vec![
+                    ("soundcloud:track:2".into(), "Unavailable".into()),
+                    ("spotify:track:good".into(), "Available".into()),
+                ],
+            },
+            &ctx,
+        );
         // Stream resolution can fail before the engine emits any State.
         for _ in 0..2 {
             let tag = app.hybrid_tag().unwrap();
@@ -33495,31 +33518,42 @@ mod tests {
         // A periodic snapshot produced before Pause reaches the app after
         // the user's later Play. It cannot acknowledge that later command.
         app.handle_hybrid_event(tag, HybridEvent::State(Box::new(playing.clone())));
-        app.handle_hybrid_event(tag, HybridEvent::State(Box::new(LocalState {
-            playback: Playback::Paused,
-            ..playing
-        })));
+        app.handle_hybrid_event(
+            tag,
+            HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Paused,
+                ..playing
+            })),
+        );
         let shown_playing = app.now_playing().unwrap().playing;
         app.backend.shutdown();
-        assert!(shown_playing, "the intermediate Pause must not undo the later Play");
+        assert!(
+            shown_playing,
+            "the intermediate Pause must not undo the later Play"
+        );
     }
 
     #[test]
     fn review_hybrid_row_marker_survives_changing_the_display_order() {
         let mut app = hybrid_fixture();
         let tracks = vec![song("spotify:track:a"), song("soundcloud:track:7")];
-        let id = app.mixed_playlists.import("List".into(), String::new(), tracks);
+        let id = app
+            .mixed_playlists
+            .import("List".into(), String::new(), tracks);
         let uri = format!("spotifast:playlist:{id}");
         let original = RowContext::View {
             uris: Arc::from(vec!["spotify:track:a".into(), "soundcloud:track:7".into()]),
             context_uri: uri.clone(),
             editable_playlist: None,
         };
-        app.apply(Action::PlayFromRow {
-            context: original,
-            uri: "soundcloud:track:7".into(),
-            index: 1,
-        }, &egui::Context::default());
+        app.apply(
+            Action::PlayFromRow {
+                context: original,
+                uri: "soundcloud:track:7".into(),
+                index: 1,
+            },
+            &egui::Context::default(),
+        );
         // Re-sort while playback continues. The only SoundCloud row is now 0.
         let sorted = RowContext::View {
             uris: Arc::from(vec!["soundcloud:track:7".into(), "spotify:track:a".into()]),
@@ -33528,31 +33562,49 @@ mod tests {
         };
         let marked = app.row_is_played_copy(&sorted, 0, "soundcloud:track:7");
         app.backend.shutdown();
-        assert!(marked, "the only row of the playing track must retain its marker");
+        assert!(
+            marked,
+            "the only row of the playing track must retain its marker"
+        );
     }
 
     #[test]
     fn review_hybrid_history_waits_for_audible_state_and_resets_same_uri_occurrences() {
         use crate::player::HybridEvent;
         let mut app = hybrid_fixture();
+        app.plays = crate::history::History::default();
+        let state_dir = std::env::temp_dir().join(format!(
+            "spotifast-review-hybrid-history-{}",
+            std::process::id()
+        ));
+        app.dirs.state = state_dir.clone();
         let ctx = egui::Context::default();
-        app.apply(Action::PlayUris {
-            uris: vec!["soundcloud:track:7".into(), "soundcloud:track:7".into()],
-            index: 0,
-        }, &ctx);
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["soundcloud:track:7".into(), "soundcloud:track:7".into()],
+                index: 0,
+            },
+            &ctx,
+        );
         app.note_listening();
-        assert!(app.listening.is_none(), "loading must not count as listening");
+        assert!(
+            app.listening.is_none(),
+            "loading must not count as listening"
+        );
         for expected in 1..=2 {
             let tag = app.hybrid_tag().unwrap();
-            app.handle_hybrid_event(tag, HybridEvent::State(Box::new(LocalState {
-                playback: Playback::Playing,
-                track: Some(crate::player::LocalTrack {
-                    uri: "soundcloud:track:7".into(),
-                    duration_ms: 120_000,
+            app.handle_hybrid_event(
+                tag,
+                HybridEvent::State(Box::new(LocalState {
+                    playback: Playback::Playing,
+                    track: Some(crate::player::LocalTrack {
+                        uri: "soundcloud:track:7".into(),
+                        duration_ms: 120_000,
+                        ..Default::default()
+                    }),
                     ..Default::default()
-                }),
-                ..Default::default()
-            })));
+                })),
+            );
             app.note_listening();
             app.listening.as_mut().unwrap().playing_since =
                 Some(Instant::now() - Duration::from_secs(31));
@@ -33562,6 +33614,51 @@ mod tests {
             assert!(app.listening.is_none());
         }
         app.backend.shutdown();
+        app.flush_files();
+        let _ = std::fs::remove_dir_all(state_dir);
+    }
+
+    #[test]
+    fn review_hybrid_soundcloud_metadata_does_not_offer_spotify_navigation() {
+        let mut app = hybrid_fixture();
+        // These are the album and artist shapes produced by
+        // soundcloud::models::Track::to_track(Some(playlist)).
+        let track = Track {
+            album: Some(Album {
+                id: "9".into(),
+                uri: "soundcloud:playlist:9".into(),
+                name: "SoundCloud set".into(),
+                ..Default::default()
+            }),
+            artists: vec![crate::api::models::ArtistRef {
+                id: Some("42".into()),
+                uri: Some("soundcloud:user:42".into()),
+                name: "Uploader".into(),
+            }],
+            ..song("soundcloud:track:7")
+        };
+        app.cache_soundcloud_tracks(&[track]);
+        app.apply(
+            Action::PlayUris {
+                uris: vec!["soundcloud:track:7".into()],
+                index: 0,
+            },
+            &egui::Context::default(),
+        );
+        let now = app.now_playing().unwrap();
+        app.backend.shutdown();
+        // The player bar interprets album_id and artist.id as Spotify IDs
+        // when opening Page::Album and Page::Artist. Retain full metadata on
+        // the queue item, but do not offer those Spotify navigation targets.
+        assert!(
+            now.album_id.is_none(),
+            "SoundCloud set became Spotify album {:?}",
+            now.album_id
+        );
+        assert!(
+            now.artists.iter().all(|artist| artist.id.is_none()),
+            "SoundCloud uploader became a Spotify artist"
+        );
     }
 
     fn hybrid_fixture() -> App {
