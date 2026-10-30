@@ -5,8 +5,8 @@ import type { AddressInfo } from 'node:net';
 
 test('Node HTTP adapter handles streaming and pre-parsed bodies through a complete local lifecycle', async t => {
   const invite = 'local-http-test-invite';
-  process.env.SIPHON_FRIENDS_INVITE_CODE = invite;
-  const { default: handler } = await import('../src/handler.ts');
+  const { createHandler } = await import('../src/handler.ts');
+  const handler = createHandler({ SIPHON_FRIENDS_INVITE_CODE: invite });
   const server = createServer(async (req, res) => {
     if (req.headers['x-test-parsed'] === 'buffer') {
       const parts: Buffer[] = [];
@@ -16,7 +16,7 @@ test('Node HTTP adapter handles streaming and pre-parsed bodies through a comple
     await handler(req, res);
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => { server.closeAllConnections(); server.close(); delete process.env.SIPHON_FRIENDS_INVITE_CODE; });
+  t.after(() => { server.closeAllConnections(); server.close(); });
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
   const call = async (path: string, method = 'GET', data?: unknown, secret?: string, parsed = false) => {
     const response = await fetch(`${base}${path}`, {
