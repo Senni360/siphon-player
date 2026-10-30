@@ -130,6 +130,44 @@ fn hybrid_seek_folded_into_loading_request_can_finish_without_seeked() {
     }
 }
 
+#[test]
+fn hybrid_new_seek_after_load_settles_requires_numbered_ack() {
+    use crate::player::HybridEvent;
+
+    let mut app = hybrid_fixture();
+    let ctx = egui::Context::default();
+    start_hybrid_fixture(&mut app);
+    app.apply(Action::Next, &ctx);
+    let tag = app.hybrid_tag().unwrap();
+    app.apply(Action::Seek(20_000), &ctx);
+    app.handle_hybrid_event(
+        tag,
+        HybridEvent::State(Box::new(reliability_state(
+            "soundcloud:track:7",
+            10_000,
+            0,
+            true,
+        ))),
+    );
+    // The first seek allowed an unnumbered load-position acknowledgment. A
+    // newer seek issued after the decoder settles must not inherit that rule.
+    app.apply(Action::Seek(10_500), &ctx);
+    app.handle_hybrid_event(
+        tag,
+        HybridEvent::State(Box::new(reliability_state(
+            "soundcloud:track:7",
+            10_000,
+            0,
+            true,
+        ))),
+    );
+    assert_eq!(app.hybrid_position(), 10_500);
+    app.handle_hybrid_event(tag, HybridEvent::EndOfTrack);
+    assert_eq!(app.hybrid_tag().unwrap().occurrence, tag.occurrence);
+    assert_eq!(app.hybrid_position(), 10_500);
+    app.backend.shutdown();
+}
+
 mod hybrid_action_model {
     use super::*;
     use crate::hybrid_queue::{Entry, EntryId, HybridQueue, Origin, Repeat};
@@ -421,6 +459,7 @@ mod hybrid_action_model {
             let mut stale = Vec::new();
             let mut trace = Vec::new();
             start(&mut app, &mut model, 1, 0, &ctx, "initial context");
+            app.backend.take_hybrid_commands();
             for step in 0..192 {
                 let action = rng.random_range(0..16);
                 trace.push(action);

@@ -1520,10 +1520,7 @@ impl App {
             .seek_pending
             .map_or(self.hybrid.state.seek_sequence, |pending| pending.sequence)
             .wrapping_add(1);
-        let allow_load_position_ack = self.hybrid.seek_pending.map_or(
-            !self.hybrid.loaded || self.hybrid.state.loading,
-            |pending| pending.allow_load_position_ack,
-        );
+        let allow_load_position_ack = !self.hybrid.loaded || self.hybrid.state.loading;
         self.hybrid.seek_pending = Some(PendingSeek {
             position_ms,
             sequence,
