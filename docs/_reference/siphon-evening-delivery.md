@@ -141,6 +141,14 @@ the 'Billing & plans' section in your settings". Cloud cannot resolve an account
 payment/spending block or confirm access to the owner's PC. Do not retry an
 unchanged blocked run in a loop. No healthy build was cancelled.
 
+The correction was published at `1c9948944c5a8d5292a63842c096188724279b77`
+on both `siphon/evening-candidate` and `siphon/windows-candidate`.
+[Replacement run 41092769318](https://github.com/Senni360/siphon-player/actions/runs/41092769318)
+was also refused before any steps with the same billing/spending annotation.
+It produced zero artifacts. No further retry is useful until runner access is
+restored or the existing Windows agent builds locally. The shared PR7 comment
+records the fallback and outstanding frontend review; no reply has been received.
+
 The corrected workflow reuses the all-feature harness, selects its executable
 from Cargo's JSON artifacts, and allows compilation outside the native test's
 120-second process limit. Failed runs now retain the Rust cache. Both test
