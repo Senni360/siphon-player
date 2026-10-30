@@ -67,6 +67,12 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   bounded reading, SHA-256 identity, MP3 profile decoding and cancellation. The
   offline `prepare_shared_recording` example exercises it without a library
   scan, account, service request or output device. It is not an app upload flow.
+- `services/party-room` implements an isolated authoritative queue with occurrence
+  ownership, durable command receipts, ordered revisions, trusted media readiness
+  and a current-plus-two admission callback for the upload ledger. Its
+  [protocol and limits](https://github.com/Senni360/siphon-player/tree/main/services/party-room)
+  have SQLite and local Durable Object tests. It has no authentication endpoint,
+  room transport, client overlay or playback timeline, and is not app support.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -383,6 +389,9 @@ M1's approved hosted/hardware matrix remains an acceptance gate. The next bounde
 code milestone is durable reconciliation of unknown multipart creation and
 completion, including an explicit recovery path for a lost provider handle.
 The tested cleanup executor intentionally withholds those unresolved tasks.
+The independent room-queue core is now tested; its next bounded milestone is
+client snapshot/receipt recovery with pending optimistic intent, followed by a
+deterministic authoritative timeline. Neither enables a remote party by itself.
 Upload admission and native preparation remain separate components; neither
 enables a public upload endpoint. The M1 gateway needs only an operator
 `ADMIN_SECRET` and service bindings. It stores capability
@@ -476,3 +485,13 @@ resource, account or secret was used; the test runtime was disposed on completio
 The [gateway job for `7e9ad05`](https://github.com/Senni360/siphon-player/actions/runs/41099081906)
 also failed before executing any steps because of account billing/spending
 restrictions. Local success does not replace the blocked cross-platform CI gates.
+
+The room-queue core passed seventeen deterministic SQLite tests and four local
+Durable Object cases on Windows, using fake actors and media metadata. The tests
+covered occurrence ownership, stale/duplicate commands, bounded receipt eviction
+without replay, durability failures, expiry, media revisions and integration with
+the upload ledger's lookahead/cancellation checks. The 60 media-service tests
+also passed. No endpoint, participant session, room socket, audio or timeline
+was involved. Local core reconstruction is not a test of cloud eviction or
+process-crash recovery. The runtime was disposed after testing. Synchronization
+remains unmeasured.

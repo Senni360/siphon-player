@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - services/media-gateway/**
+      - services/party-room/**
       - .github/workflows/media-gateway.yml
   pull_request:
     paths:
       - services/media-gateway/**
+      - services/party-room/**
       - .github/workflows/media-gateway.yml
   workflow_dispatch:
 
@@ -30,6 +32,11 @@ jobs:
           node-version: 24
       - name: Check syntax and private-media lifecycle
         working-directory: services/media-gateway
+        run: |
+          npm run check
+          npm test
+      - name: Check authoritative room queue and upload eligibility
+        working-directory: services/party-room
         run: |
           npm run check
           npm test

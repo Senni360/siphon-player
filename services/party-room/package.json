@@ -1,0 +1,11 @@
+{
+  "name": "siphon-room-spike",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:runtime": "node test/runtime/queue.mjs",
+    "check": "node --check src/queue.mjs && node --check test/runtime/queue.mjs && node --check test/runtime/queue.worker.mjs"
+  }
+}
