@@ -105,7 +105,8 @@ This is an unreleased snapshot-schema addition. The headless queue client
 validates it, rejects stale/conflicting state and exposes `confirmed_readiness`
 without discarding pending queue intent. It also models
 [pending transport intent](TRANSPORT-CLIENT.md) in the same command sequence.
-It has no native interface, durable outbox or decoder integration.
+An optional [journal wrapper](JOURNAL.md) persists the exact pending packet.
+There is no native interface, native journal integration or decoder integration.
 Confirmed readiness can refer to a different occurrence from an optimistic
 selection and must not be used to drive audio directly.
 
@@ -124,5 +125,5 @@ readiness, two-computer playback, Chromecast timing or audible synchronization
 has been measured. M1 hosted/hardware acceptance remains open. Authenticated
 transport/session fencing, actual alarms, temporary access validation, native
 optimistic transport and real output integration remain required. The headless
-transport model is now tested; durable client journaling remains required before
-connecting its commands to a socket or playback.
+transport model and isolated journal wrapper are now tested; their native
+integration remains required before connecting commands to a socket or playback.

@@ -2,7 +2,8 @@
 
 The headless `RoomClient` now handles owner transport intent alongside queue
 intent. This is an in-memory protocol model, not a native interface, audio
-controller, socket or persistent journal. It adds no infrastructure, credentials,
+controller or socket. An optional [journal wrapper](JOURNAL.md) now persists its
+checkpoint before packet release. Neither component adds infrastructure, credentials,
 settings, provider behavior, media storage or transfer.
 
 Run `npm run check` and `npm test` in this directory with Node 24. The optional
@@ -80,11 +81,11 @@ and privacy bounds, and immutability. Fifteen local Durable Object cases pass,
 including transport overlay confirmation, reconnect retries and mixed queue/
 transport sequencing. The test runtime is disposed afterward.
 
-These are in-memory reconnect models and local runtime calls, not authenticated
-WebSockets, process-crash recovery or audible synchronization. A bounded durable
-client journal must save intent and the exact assigned packet before any socket
-send, restore uncertain outcomes without inventing IDs, and keep private grants
-out of its payload. That is the next useful bounded room milestone. Native UI,
+These transport tests are in-memory reconnect models and local runtime calls,
+not authenticated WebSockets or audible synchronization. The separate
+[journal tests](JOURNAL.md) now exercise a bounded checkpoint, persistence before
+dispatch and recovery across a child-process exit. Native journal integration,
+file access and lifecycle still need implementation. Native UI,
 composite Play interaction, output/session binding, actual decoder readiness,
 clock/output integration and two-computer/Chromecast validation remain absent.
 M1 hosted/hardware acceptance remains open.

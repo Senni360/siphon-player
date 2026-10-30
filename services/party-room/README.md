@@ -6,6 +6,8 @@ durable queue/timeline authority, an in-memory client recovery model and the que
 check used by the isolated upload ledger. It has **no server, WebSocket endpoint, participant authentication,
 UI, audio playback, provider integration or deployment configuration**.
 No new service, secret, account, setting or spending change is needed.
+An optional [client journal](JOURNAL.md) now adds validated checkpoints and a
+local SQLite spike adapter; it is not wired into the native application.
 
 Run with Node 24 or later, without installing dependencies:
 
@@ -151,6 +153,9 @@ The [transport-client contract](TRANSPORT-CLIENT.md) defines the separate
 `pending_transport` preview, occurrence/media/load checks and explicit recovery.
 It preserves pending Pause, Seek, Prepare and start intent without letting
 transport actions mutate the queue projection. It is still in memory only.
+The [journal wrapper](JOURNAL.md) gates packet release on persistence, restores
+pending outcomes and requires a fresh snapshot after reopening. Its SQLite
+adapter has local process-exit coverage; native journaling remains absent.
 
 An advance captures the current occurrence and intended next occurrence when
 queued. If they change before dispatch, the intent enters `review` instead of
@@ -275,3 +280,9 @@ Pending transport adds 23 deterministic tests, for 153 room tests in total.
 Fifteen local Durable Object cases now include the headless client's transport
 confirmation, reconnect retries and mixed queue/transport command sequence.
 No durable client journal, native UI, socket or audio integration was added.
+
+The journal checkpoint adds 22 tests, bringing the room suite to 175. They include
+real SQLite rollback and a child-process exit after packet commit, followed by
+reopening and an unchanged server retry. The fifteen local Durable Object cases
+also pass. Native file access, lifecycle/retention, session binding, networking
+and playback are still separate gates.

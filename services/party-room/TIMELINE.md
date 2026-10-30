@@ -63,8 +63,9 @@ always starts with a paused zero-position anchor. There is no automatic advance.
 The queue and transport share the same command-ID sequence and receipt window.
 Do not run independent command-ID allocators for them. The headless client now
 retains [pending transport intent](TRANSPORT-CLIENT.md) in the same command
-sequence as queue intent. Native optimistic transport and durable client
-journaling remain implementation gates. Stale revisions, wrong occurrences and
+sequence as queue intent. A [journal wrapper](JOURNAL.md) now persists its exact
+packet before dispatch. Native optimistic transport and journal integration
+remain implementation gates. Stale revisions, wrong occurrences and
 non-owner controls cannot move the anchor. Seek positions participate in command
 identity, so a retried command cannot change its target position.
 
@@ -113,7 +114,7 @@ The 750 ms lead is a testable protocol default, not a measured device guarantee.
 
 The [presence contract](PRESENCE.md) now persists grace and departure pauses.
 Actual session detection, alarms, handover, authenticated WebSockets,
-durable client journaling, optimistic transport controls, decoder readiness,
+native journal integration, optimistic transport controls, decoder readiness,
 native clock integration, receiver commands and drift correction remain absent. No
 two-computer or Chromecast run has been performed and synchronization remains
 unmeasured. Cloud and hardware acceptance for milestone 1 is still open.

@@ -4,6 +4,7 @@ import { validateTimeline } from "./timeline.mjs";
 import { validateReadiness } from "./readiness.mjs";
 
 export const CLIENT_LIMITS = Object.freeze({ intents: 16 });
+export const CHECKPOINT_LIMITS = Object.freeze({ version: 1, bytes: 65536 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set(["unavailable", "uploading", "ready"]);
 const TRANSPORT = new Set(["prepare", "play", "start_ready", "pause", "seek"]);
@@ -14,6 +15,8 @@ const REJECTIONS = new Set(["stale_revision", "queue_full", "occurrence_used", "
   "owner_unavailable", "recording_not_ready", "seek_required", "room_expiring", "readiness_required",
   "readiness_waiting", "stale_load", "load_inactive", "participants_unavailable", "readiness_limit",
   "invalid_position", "invalid_clock"]);
+const BLOCKS = new Set(["epoch_changed", "room_expired", "actor_limit", "unavailable"]);
+const REVIEWS = new Set(["queue_changed", "target_changed", "occurrence_conflict", "media_changed", "load_changed"]);
 
 export class ClientError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -99,6 +102,77 @@ function consistentRows(next, previous, previews) {
   }
 }
 
+function actionIdentity(value) { return JSON.stringify(Object.keys(value).sort().map(key => [key, value[key]])); }
+function decodeCheckpoint(identity, encoded) {
+  try {
+    requireThat(typeof encoded === "string" && encoded.length <= CHECKPOINT_LIMITS.bytes
+      && new TextEncoder().encode(encoded).length <= CHECKPOINT_LIMITS.bytes, "invalid_checkpoint");
+    const value = JSON.parse(encoded);
+    fields(value, ["version", "room_id", "actor_id", "connection_generation", "base", "intents",
+      "next_intent_id", "required_next_command_id", "blocked"]);
+    requireThat(value.version === CHECKPOINT_LIMITS.version && value.room_id === identity.roomId
+      && value.actor_id === identity.actorId && uuid(value.room_id) && uuid(value.actor_id), "invalid_checkpoint");
+    requireThat(integer(value.connection_generation) && value.connection_generation < Number.MAX_SAFE_INTEGER - 2
+      && integer(value.next_intent_id, 1) && integer(value.required_next_command_id, 1)
+      && (value.blocked === null || BLOCKS.has(value.blocked))
+      && Array.isArray(value.intents) && value.intents.length <= CLIENT_LIMITS.intents, "invalid_checkpoint");
+    const base = value.base === null ? null : snapshot(value.base);
+    requireThat(base ? base.room_id === identity.roomId : value.intents.length === 0
+      && value.blocked === null && value.next_intent_id === 1 && value.required_next_command_id === 1, "invalid_checkpoint");
+    let previousId = 0;
+    const intents = value.intents.map((item, index) => {
+      fields(item, ["id", "action", "preview", "target", "from", "transport", "state", "error", "packet", "receipt"]);
+      requireThat(integer(item.id, previousId + 1) && item.id < value.next_intent_id, "invalid_checkpoint");
+      previousId = item.id; validateRoomAction(item.action);
+      const a = item.action, preview = item.preview === null ? null : entry(item.preview);
+      const target = item.target === null ? null : entry(item.target);
+      requireThat(item.from === null || uuid(item.from), "invalid_checkpoint");
+      if (TRANSPORT.has(a.type)) {
+        fields(item.transport, ["position_ms", "playing", "load_generation"]);
+        requireThat(base.owner_id === identity.actorId && preview === null && item.from === null
+          && target?.id === a.occurrence_id && integer(item.transport.position_ms)
+          && item.transport.position_ms <= target.duration_ms && item.transport.playing === STARTS.has(a.type)
+          && integer(item.transport.load_generation) && item.transport.load_generation <= base.readiness.generation
+          && (a.type !== "seek" || a.position_ms === item.transport.position_ms)
+          && (a.type !== "start_ready" || a.generation === item.transport.load_generation), "invalid_checkpoint");
+      } else {
+        requireThat(item.transport === null, "invalid_checkpoint");
+        if (a.type === "add") requireThat(preview?.id === a.occurrence_id && preview.recording_id === a.recording_id
+          && preview.added_by === identity.actorId && target === null && item.from === null, "invalid_checkpoint");
+        else if (a.type === "remove") requireThat(preview === null && target === null && item.from === null, "invalid_checkpoint");
+        else requireThat(base.owner_id === identity.actorId && preview === null
+          && (target !== null || item.from !== null) && (target === null || target.id !== item.from), "invalid_checkpoint");
+      }
+      requireThat(["queued", "review", "sent", "accepted", "rejected", "uncertain"].includes(item.state)
+        && (index === 0 || item.state === "queued"), "invalid_checkpoint");
+      if (["queued", "review"].includes(item.state)) {
+        requireThat(item.packet === null && item.receipt === null
+          && (item.state === "queued" ? item.error === null : REVIEWS.has(item.error)), "invalid_checkpoint");
+      } else {
+        fields(item.packet, ["epoch", "command_id", "expected_revision", "action"]);
+        validateRoomAction(item.packet.action);
+        requireThat(item.packet.epoch === base.epoch && integer(item.packet.command_id, 1)
+          && item.packet.command_id < Number.MAX_SAFE_INTEGER
+          && integer(item.packet.expected_revision) && item.packet.expected_revision <= base.revision
+          && item.packet.command_id <= base.self.next_command_id
+          && value.required_next_command_id === item.packet.command_id + 1
+          && actionIdentity(item.packet.action) === actionIdentity(a), "invalid_checkpoint");
+        if (["accepted", "rejected"].includes(item.state)) {
+          const result = receipt(item.receipt);
+          requireThat(result.epoch === item.packet.epoch && result.command_id === item.packet.command_id
+            && result.accepted === (item.state === "accepted") && item.error === result.error
+            && (result.accepted ? result.revision === item.packet.expected_revision + 1
+              : result.revision >= item.packet.expected_revision), "invalid_checkpoint");
+        } else requireThat(item.receipt === null && (item.state === "sent" ? item.error === null
+          : ["receipt_expired", "command_conflict"].includes(item.error)), "invalid_checkpoint");
+      }
+      return { ...item, preview, target };
+    });
+    consistentRows(rows(base), [], intents.flatMap(item => [item.preview, item.target].filter(Boolean)));
+    return { ...value, base, intents };
+  } catch { throw new ClientError("invalid_checkpoint"); }
+}
+
 export class RoomClient {
   #roomId;
   #actor;
@@ -114,6 +188,22 @@ export class RoomClient {
   constructor({ roomId, actorId }) {
     requireThat(uuid(roomId) && uuid(actorId), "invalid_identity");
     this.#roomId = roomId; this.#actor = actorId;
+  }
+  checkpoint() {
+    const encoded = JSON.stringify({ version: CHECKPOINT_LIMITS.version, room_id: this.#roomId, actor_id: this.#actor,
+      connection_generation: this.#generation, base: this.#base, intents: this.#intents, next_intent_id: this.#nextIntent,
+      required_next_command_id: this.#requiredNextCommand, blocked: this.#blocked });
+    decodeCheckpoint({ roomId: this.#roomId, actorId: this.#actor }, encoded);
+    return encoded;
+  }
+  static restore(identity, encoded) {
+    const value = decodeCheckpoint(identity, encoded), client = new RoomClient(identity);
+    client.#base = value.base; client.#intents = value.intents; client.#nextIntent = value.next_intent_id;
+    client.#requiredNextCommand = value.required_next_command_id; client.#blocked = value.blocked;
+    // Persisted snapshots are display history, never a live connection. Fence
+    // callbacks from the previous instance and require a fresh snapshot.
+    client.#generation = value.connection_generation + 1;
+    return client;
   }
   beginConnection() {
     this.#generation++; this.#connected = false; this.#awaiting = true;

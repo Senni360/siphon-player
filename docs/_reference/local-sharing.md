@@ -79,7 +79,10 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   distinguishes these tested anchors from unimplemented playback coordination.
   Its headless client model retains pending intent across stale snapshots and
   lost acknowledgements, with bounded retries and explicit uncertain outcomes.
-  This model is in memory only and is not a native connection or crash journal.
+  The core model is in memory only; an optional
+  [journal wrapper](https://github.com/Senni360/siphon-player/blob/main/services/party-room/JOURNAL.md)
+  persists bounded checkpoints and exact packets with local SQLite process-exit
+  coverage. Neither component is a native connection or native app crash journal.
   [Pending transport intent](https://github.com/Senni360/siphon-player/blob/main/services/party-room/TRANSPORT-CLIENT.md)
   now shares that model's command sequence and preserves owner controls across
   stale snapshots, load changes and uncertain replies. It does not drive audio.
@@ -412,9 +415,10 @@ The tested cleanup executor intentionally withholds those unresolved tasks.
 The independent room queue, headless snapshot/receipt recovery and durable
 timeline anchors, bounded clock estimation and startup readiness are now tested.
 The headless client now retains queue and transport intent in one command
-sequence. The next bounded room milestone is a durable client journal that
-persists the exact packet before dispatch and restores uncertain outcomes
-without allocating a new command ID.
+sequence. Its isolated journal now persists exact packets before dispatch and
+restores uncertain outcomes without allocating a new command ID. The next
+bounded room milestone can bind readiness reports to the active participant
+output/session and reject superseded sessions without enabling a live endpoint.
 Owner-presence grace/pause is now modeled and persisted;
 session detection and alarm wiring remain gates. Native pending-intent journaling,
 optimistic transport and authenticated transport remain separate gates; none of
@@ -616,3 +620,23 @@ all-target tests, doctests, strict rustdoc, formatting and policy tests passed.
 Launcher tests retain three failures/five errors; Jekyll lacks Bundler. The
 preceding `08914b7` gateway job was blocked before steps by the confirmed
 GitHub billing/spending restriction. No new Linux/macOS coverage is claimed.
+
+The journal spike adds 22 deterministic Windows tests, bringing the room suite
+to 175. It validates a versioned checkpoint capped at 64 KiB, gates packet release
+on a durable write, preserves uncertain write bodies across retries and rejects
+conflicting writers. An actual SQLite file survives a child process exiting just
+after packet commit; the recovered packet is unchanged and server receipts
+prevent a duplicate effect. This tests that specific exit boundary, not power
+loss, native app crashes or a remote party. The test closes its handles and
+removes only its own generated files. The fifteen local Durable Object cases
+and 60 media-service tests also pass.
+Native journal access/retention, session/output binding, authenticated transport,
+decoder/output integration and M1 hosted/hardware acceptance remain open.
+No infrastructure, secrets, upload quota, audio retention or provider behavior
+changed. Audible synchronization remains unmeasured.
+Required Windows default/all-feature Clippy and all-target tests, doctests,
+strict rustdoc, formatting and policy checks passed again for this checkpoint.
+Launcher tests still report three failures and five errors; Jekyll cannot run
+without Bundler. GitHub's preceding `6eed0da` gateway run was blocked before steps
+by the confirmed billing/spending restriction. No new Linux/macOS result is
+claimed, and no billing or infrastructure changes were made.
