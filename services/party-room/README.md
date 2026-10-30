@@ -2,8 +2,8 @@
 
 This is an isolated, unreleased part of Siphon's
 [local-sharing plan](../../docs/_reference/local-sharing.md). It implements a
-durable queue authority and the queue-window check used by the isolated upload
-ledger. It has **no server, WebSocket endpoint, participant authentication,
+durable queue authority, an in-memory client recovery model and the queue-window
+check used by the isolated upload ledger. It has **no server, WebSocket endpoint, participant authentication,
 playback timeline, UI, provider integration or deployment configuration**.
 No new service, secret, account, setting or spending change is needed.
 
@@ -108,9 +108,64 @@ Acknowledgements contain `{ epoch, command_id, revision, accepted, error }`.
 They are receipts, not snapshots. An old duplicate acknowledgement may correctly
 carry an older revision than the current room. Future clients must ignore old
 snapshots, retain pending optimistic intent, and retire an accepted overlay only
-after seeing a snapshot at or beyond its acknowledged revision. A rejected intent
-must remain visible and actionable. This increment does not wire or validate a
-native client overlay, so it makes no claim of completed optimistic party UI.
+after seeing a snapshot at or beyond its acknowledged revision with a cursor
+proving the command was consumed. The headless model below tests these rules.
+It does not wire or validate a native overlay or complete the optimistic party UI.
+
+## Headless client recovery
+
+`RoomClient({ roomId, actorId })` in `src/client.mjs` models one authenticated
+actor's queue intent. It is synchronous and in memory only. It neither connects
+to a service nor drives playback. Its inputs must come from a future trusted
+transport adapter; membership and upload authority remain server decisions.
+
+| Method | Contract |
+| --- | --- |
+| `beginConnection()` | Returns a new generation. Pass it with every callback from that connection. Request a fresh snapshot before sending commands. |
+| `disconnect(generation)` | Invalidates callbacks from the old connection and retains pending actions. |
+| `receiveSnapshot(generation, snapshot)` | Accepts bounded, ordered snapshots from the same room and epoch. Rejects conflicting identity or media state. |
+| `enqueue(action, preview?)` | Immediately overlays add, remove or advance. Add requires an exact public row preview and explicit selection. Returns a local intent ID. |
+| `outbound()` | Returns one command to send, or `null`. Repeated calls return an unchanged copy until its outcome is resolved. |
+| `receiveReceipt(generation, receipt)` | Records the matching outcome. Accepted intent retires only after the confirming snapshot also arrives, in either order. |
+| `receiveFailure(generation, commandId, code)` | Consumes a normalized protocol failure. Temporary failures require a fresh snapshot; expired receipts and command conflicts stay uncertain. |
+| `view()` | Returns a copy of the projected queue and each intent's status/error. This is display state, never playback or upload authorization. |
+
+Only one command is outstanding at a time. Up to 16 pending intents remain
+visible even offline, including rejected or uncertain intent. Later commands
+wait for the first intent's outcome. The authoritative snapshot still has at
+most 32 pending rows; concurrent remote additions can temporarily leave the
+display projection with up to 48 pending rows while local intent is unresolved.
+Nothing is silently truncated to fit the server bound.
+
+An advance captures the current occurrence and intended next occurrence when
+queued. If they change before dispatch, the intent enters `review` instead of
+skipping a different recording. Multiple queued advances do not consume rows
+twice when a confirming snapshot arrives before its receipt. Snapshot revisions,
+the actor's command cursor and receipt floor cannot regress. Known occurrence
+identity and recording ownership/duration cannot change, and repeated recording
+rows must agree on media status and revision. Older connection callbacks are
+ignored. An epoch change quarantines pending commands instead of replaying them.
+
+Resolution requires an explicit future UI action:
+
+- `discard(intentId)` removes only unsent, review or definitively rejected intent.
+  It cannot cancel a sent command or erase an uncertain outcome.
+- `retryRejected(intentId)` requires a fresh snapshot proving the old command was
+  consumed. It queues that intent for a new command ID, with the same target checks.
+- `acceptUncertainOutcome(intentId)` accepts the current server state only after
+  its cursor proves the uncertain ID was consumed. It never resends the action
+  under a fresh ID. It is not wire-command cancellation.
+
+An expired room, changed epoch or exhausted lifetime actor capacity blocks
+dispatch and requires a deliberate new-room/rejoin decision. The future adapter
+must authenticate the actor, enforce message byte
+limits, correlate receipts to that connection's requests (never broadcast another
+device's receipts), schedule bounded reconnects and snapshot requests, and
+durably journal pending intent and the exact packet before sending. This model
+does **not** survive process exit, implement crash recovery, persist files, or
+provide a socket retry loop. A native implementation must preserve these tested
+rules and the project's atomic background-write contract. No settings or UI
+changes are included.
 
 ## Readiness and upload admission
 
@@ -153,7 +208,7 @@ Retention cleanup, session revocation, quotas across rooms, request byte limits
 and rate limits must be implemented before deployment.
 
 This core has run in the local Durable Object emulator, but not a deployed
-service. Production runtime wiring, authentication, WebSocket recovery, client overlays, authoritative timeline,
+service. Production runtime wiring, authentication, WebSocket recovery, native client overlays, authoritative timeline,
 clock-offset estimation, buffering, owner departure/handover and playback
 integration remain unimplemented. No two-computer party or Chromecast test has
 run, and no synchronization behavior has been measured. The hosted/hardware
@@ -170,3 +225,11 @@ crash, durable-object eviction, remote transport or playback acceptance was
 tested. Full required Windows Rust checks and the 60 media-service tests also
 passed. Launcher/Jekyll prerequisites and GitHub billing restrictions remain
 the documented contribution-check limitations.
+
+The in-memory client adds twenty-one deterministic Windows tests against the real
+SQLite queue core. They cover snapshot/receipt ordering, repeated advances,
+lost acknowledgements, old connections, command cursor changes without room
+revision changes, uncertain receipt eviction and competing device commands,
+explicit rejection retry, identity/media conflicts, exhausted actor capacity, bounded private-data-free
+messages and unchanged retry packets. These are protocol model tests, not a
+two-computer connection, native UI, playback or process-restart test.

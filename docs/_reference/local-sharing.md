@@ -72,7 +72,10 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   and a current-plus-two admission callback for the upload ledger. Its
   [protocol and limits](https://github.com/Senni360/siphon-player/tree/main/services/party-room)
   have SQLite and local Durable Object tests. It has no authentication endpoint,
-  room transport, client overlay or playback timeline, and is not app support.
+  room transport, native client overlay or playback timeline, and is not app support.
+  Its headless client model retains pending intent across stale snapshots and
+  lost acknowledgements, with bounded retries and explicit uncertain outcomes.
+  This model is in memory only and is not a native connection or crash journal.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -389,9 +392,11 @@ M1's approved hosted/hardware matrix remains an acceptance gate. The next bounde
 code milestone is durable reconciliation of unknown multipart creation and
 completion, including an explicit recovery path for a lost provider handle.
 The tested cleanup executor intentionally withholds those unresolved tasks.
-The independent room-queue core is now tested; its next bounded milestone is
-client snapshot/receipt recovery with pending optimistic intent, followed by a
-deterministic authoritative timeline. Neither enables a remote party by itself.
+The independent room-queue core and headless client snapshot/receipt recovery are
+now tested. The next bounded room milestone is a deterministic authoritative
+timeline with stale-command and buffering tests. Durable native pending-intent
+journaling and authenticated transport remain separate gates; none of these
+components enables a remote party by itself.
 Upload admission and native preparation remain separate components; neither
 enables a public upload endpoint. The M1 gateway needs only an operator
 `ADMIN_SECRET` and service bindings. It stores capability
@@ -495,3 +500,18 @@ also passed. No endpoint, participant session, room socket, audio or timeline
 was involved. Local core reconstruction is not a test of cloud eviction or
 process-crash recovery. The runtime was disposed after testing. Synchronization
 remains unmeasured.
+
+The headless room client passed twenty-one deterministic Windows tests against
+the SQLite queue core, bringing the room suite to 38 tests. It preserves pending
+adds, removals and advances across reordered snapshots/receipts and connection
+generations. Receipt eviction and conflicting command IDs require explicit
+resolution, never automatic replay under a new ID. Tests also cover stale
+media/identity, bounded messages, immutable retry packets and owner permissions.
+The projection is display intent only, not permission to play or upload. No
+socket, native UI, durable client journal, process-crash recovery or timeline is
+implemented. This checkpoint adds no infrastructure, secrets, storage retention
+changes or provider capability. Synchronization remains unmeasured.
+The four local Durable Object queue cases, all 60 media-service tests, required
+default/all-feature Windows Rust checks, formatting and policy checks passed
+again for this checkpoint. Launcher checks still reported three failures and
+five errors; local Jekyll remained unavailable because Bundler is not installed.

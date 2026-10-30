@@ -26,6 +26,8 @@ function action(input) {
   } else if (input.type === "advance") fields(input, ["type"]);
   else throw new RoomError("invalid_action");
 }
+// The headless client validates the same narrow command schema before queuing.
+export { action as validateRoomAction };
 function media(value) {
   fields(value, ["owner_id", "revision", "state", "duration_ms"]);
   requireThat(uuid(value.owner_id) && integer(value.revision, 1) && STATES.has(value.state)
