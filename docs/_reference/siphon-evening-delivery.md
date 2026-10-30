@@ -105,8 +105,10 @@ badge and preview warnings retain coverage. Two cleanup leftovers in shortcut
 tests and helper ordering were fixed without restoring removed visualizers.
 
 The local Rust-to-Node Friends round trip and 25 Node tests passed on the same
-backend/service code before the frontend/cleanup integration. A hosted-media
-FFmpeg smoke remains an explicitly ignored optional example test. Nix packaging,
+backend/service code before the frontend/cleanup integration. The optional
+hosted-media FFmpeg smoke separately passed, generating synthetic MP3 in memory
+and checking decoding, seeking and completion without an audio device. It stays
+ignored in the ordinary suite because it requires FFmpeg. Nix packaging,
 CI Ruby 4.0, real provider accounts, installed-helper behavior and audio-device
 validation have not been established by these Linux checks. Jekyll emitted an
 existing nonfatal duplicate SEO-description warning.
@@ -117,6 +119,10 @@ avoid concurrent writers and diagnose failures rather than assuming this
 checkpoint is tonight's finished application. The private Windows workflow
 artifact's manifest must identify the eventual combined commit. An executable
 from the early `c63163c` build is only an initial Windows compatibility probe.
+The combined checkpoint was submitted as `b58d09c` in
+[Windows candidate run 41086575447](https://github.com/Senni360/siphon-player/actions/runs/41086575447),
+queued behind that initial native build. Later documentation-only commits do
+not change its tested application code.
 
 ## Extra AI model
 
