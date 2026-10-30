@@ -301,6 +301,40 @@ modified or deployed by this coordinator, and must be preserved when reconciling
 final main ancestry. The exact-head integration plan remains subject to the
 20:30 ready heads and current ownership handoffs.
 
+## Follow-up, 19:30 Amsterdam
+
+All three Windows candidate runs remain completed without artifacts. No Windows
+candidate is active. Latest source submitted for Windows is still `1c99489`,
+run `41092769318`; the evening branch contains the later test-only fix `ef26777`.
+Fresh main CI `41106748506`, at `a0bfd1c`, was refused at 19:25 Amsterdam with the
+same account payment/spending annotation. No unchanged blocked run was retried,
+no healthy run was cancelled, and no old binary was promoted. Cleanup remains
+`adb6157`; there is still no local Windows package manifest or real launch report.
+
+Claude's latest observed published head is
+`07b84556e01d5cd48a9b649be50f4b1e0dce01e6`. Its handoff reports a completed
+rehearsal of frontend `e8e3097` on evening `264f3d2`: 1,903 library tests with
+`RUST_BACKTRACE=1`, demo/all-target clippy and formatting pass. This includes the
+coordinator's Cast test correction. Review of `e8e3097` confirms the remaining
+mid-swipe account isolation finding is addressed: the outgoing snapshot is
+filtered by current account at consumption, with an A-to-B mid-transition
+regression. Other new milestones add row play/heart feedback, toast entrance,
+a narrower group notice and sidebar selection motion. These are frontend-owner
+results and code review, not cloud Windows validation. Claude still promises its
+final ready head by 20:30; this check did not duplicate its integration rehearsal.
+
+Main is now `a0bfd1c7fb3c1e273c305147d7ad64219343612f`, adding party-room queue,
+intent recovery and gated timeline work after `2a2affe`. The coordinator applied
+the existing cumulative candidate delta (`cf4d941` to `264f3d2`) to that exact
+main in an isolated Git index, without changing a checkout or publishing a branch.
+The three-way application had no conflicts; all 27 new main service files were
+retained byte-for-byte. The resulting preflight tree was
+`fe9e5d6bd7797f440ca001248ee1384862684e63`. This validates the proposed linear
+integration base only. It is not a compiled combined app, a final commit, or a
+replacement for re-reading the current main and ready frontend heads at 20:30.
+No service was deployed and no claim of room functionality in the desktop UI is
+made. The Windows build/access and local verification blockers remain unchanged.
+
 ## Extra AI model
 
 The owner offered access to a model called "Jeff". Its provider/API is still
