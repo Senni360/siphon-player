@@ -65,6 +65,9 @@ pub(super) struct HybridRuntime {
     pub(super) youtube_preload: Option<tokio::task::AbortHandle>,
     pub(super) youtube_context: Option<tokio::task::AbortHandle>,
     pub(super) youtube_tracks: HashMap<String, tokio::task::AbortHandle>,
+    soundcloud_load: Option<tokio::task::AbortHandle>,
+    soundcloud_preload: Option<tokio::task::AbortHandle>,
+    catalogue_context: Option<tokio::task::AbortHandle>,
 }
 
 impl Worker {
@@ -227,6 +230,7 @@ impl Worker {
         account: crate::soundcloud::account::Account,
         request: u64,
     ) {
+        self.hybrid.cancel_soundcloud_work();
         self.track_details.clear();
         let scope = |account: &crate::soundcloud::account::Account| {
             account
@@ -347,12 +351,6 @@ impl Worker {
                 position_ms,
                 play,
             } => {
-                if let Some(task) = self.hybrid.youtube_load.take() {
-                    task.abort();
-                }
-                if let Some(task) = self.hybrid.youtube_preload.take() {
-                    task.abort();
-                }
                 self.hybrid.preload_uri = None;
                 self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;
@@ -464,13 +462,16 @@ impl Worker {
                 }
             }
             HybridCommand::Preload { tag, track } => {
-                if self.hybrid.tag != Some(tag) || self.engine.is_none() {
+                if self.hybrid.tag != Some(tag) || self.engine.is_none() || !self.hybrid.playing {
                     return;
                 }
                 if self.hybrid.preload_uri.as_ref() == Some(&track.uri) {
                     return;
                 }
                 if let Some(task) = self.hybrid.youtube_preload.take() {
+                    task.abort();
+                }
+                if let Some(task) = self.hybrid.soundcloud_preload.take() {
                     task.abort();
                 }
                 self.hybrid.preload_uri = Some(track.uri.clone());
@@ -507,6 +508,19 @@ impl Worker {
                     return;
                 }
                 self.hybrid.playing = playing;
+                if !playing {
+                    for task in [
+                        &mut self.hybrid.soundcloud_preload,
+                        &mut self.hybrid.youtube_preload,
+                    ] {
+                        if let Some(task) = task.take() {
+                            task.abort();
+                        }
+                    }
+                    // The app reissues the upcoming row on Play. Forget this
+                    // request so its cancelled/queued reply cannot refill it.
+                    self.hybrid.preload_uri = None;
+                }
                 if let Some(HybridCommand::Load { play, .. }) = &mut self.hybrid.pending {
                     *play = playing;
                 }
@@ -560,6 +574,7 @@ impl Worker {
             }
             command @ (HybridCommand::Stop | HybridCommand::Release) => {
                 self.cancel_youtube();
+                self.hybrid.cancel_soundcloud_work();
                 self.hybrid.new_owner_intent();
                 let release = matches!(command, HybridCommand::Release);
                 log::info!(
@@ -683,7 +698,7 @@ impl Worker {
         let client = self.hybrid.client.as_ref().unwrap().clone();
         let commands = self.commands.clone();
         let path = self.dirs.state.join("soundcloud-client.json");
-        tokio::spawn(async move {
+        let task = tokio::spawn(async move {
             log::debug!(
                 "SoundCloud playback: resolving stream generation={} preload={preload} refresh={}",
                 tag.generation,
@@ -722,7 +737,15 @@ impl Worker {
                 refresh,
                 result,
             });
-        });
+        }).abort_handle();
+        let slot = if preload {
+            &mut self.hybrid.soundcloud_preload
+        } else {
+            &mut self.hybrid.soundcloud_load
+        };
+        if let Some(previous) = slot.replace(task) {
+            previous.abort();
+        }
     }
 
     pub(super) async fn soundcloud_stream(
@@ -829,6 +852,9 @@ impl Worker {
     }
 
     fn resolve_hybrid_context(&mut self, generation: u64, uri: String) {
+        if let Some(task) = self.hybrid.catalogue_context.take() {
+            task.abort();
+        }
         if let Some(task) = self.hybrid.youtube_context.take() {
             task.abort();
         }
@@ -842,7 +868,7 @@ impl Worker {
         let engine = self.engine.clone();
         let commands = self.commands.clone();
         let path = self.dirs.state.join("soundcloud-client.json");
-        tokio::spawn(async move {
+        self.hybrid.catalogue_context = Some(tokio::spawn(async move {
             let result = async {
                 if let Some(id) = uri.strip_prefix("spotify:album:") {
                     let api = api.client_for(Operation::Catalog).await.map_err(|e| e.to_string())?;
@@ -943,12 +969,22 @@ impl Worker {
                 generation,
                 result,
             });
-        });
+        }).abort_handle());
     }
 }
 
 impl HybridRuntime {
     fn new_owner_intent(&mut self) {
+        for task in [
+            &mut self.soundcloud_load,
+            &mut self.soundcloud_preload,
+            &mut self.youtube_load,
+            &mut self.youtube_preload,
+        ] {
+            if let Some(task) = task.take() {
+                task.abort();
+            }
+        }
         self.waiting_for_engine = false;
         self.owner_generation = self.owner_generation.wrapping_add(1);
         self.player_waiting.clear();
@@ -972,6 +1008,24 @@ impl HybridRuntime {
     pub(super) fn tag(&self) -> Option<PlaybackTag> {
         self.tag
     }
+
+    pub(super) fn cancel_soundcloud_work(&mut self) {
+        for task in [
+            &mut self.soundcloud_load,
+            &mut self.soundcloud_preload,
+            &mut self.catalogue_context,
+        ] {
+            if let Some(task) = task.take() {
+                task.abort();
+            }
+        }
+    }
+}
+
+impl Drop for HybridRuntime {
+    fn drop(&mut self) {
+        self.cancel_soundcloud_work();
+    }
 }
 
 pub(super) async fn persist_client_id(client: &Client, path: std::path::PathBuf) {
@@ -989,6 +1043,200 @@ pub(super) async fn persist_client_id(client: &Client, path: std::path::PathBuf)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct HangingApi {
+        base: String,
+        requests: tokio::sync::mpsc::UnboundedReceiver<String>,
+        closed: tokio::sync::mpsc::UnboundedReceiver<String>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for HangingApi {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
+    impl HangingApi {
+        async fn new() -> Self {
+            use tokio::io::AsyncReadExt;
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}/", listener.local_addr().unwrap());
+            let (seen, requests) = tokio::sync::mpsc::unbounded_channel();
+            let (ended, closed) = tokio::sync::mpsc::unbounded_channel();
+            let task = tokio::spawn(async move {
+                let mut clients = tokio::task::JoinSet::new();
+                loop {
+                    tokio::select! {
+                        accepted = listener.accept() => {
+                            let (mut socket, _) = accepted.unwrap();
+                            let seen = seen.clone();
+                            let ended = ended.clone();
+                            clients.spawn(async move {
+                                let mut request = Vec::new();
+                                while !request.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                                    let Ok(byte) = socket.read_u8().await else { return; };
+                                    request.push(byte);
+                                    assert!(request.len() < 8192);
+                                }
+                                let request = String::from_utf8(request).unwrap();
+                                let path = request.split_whitespace().nth(1).unwrap()
+                                    .split('?').next().unwrap().to_owned();
+                                let _ = seen.send(path.clone());
+                                // Never respond. Aborting the caller must close
+                                // this connection, not wait for its HTTP timeout.
+                                let _ = socket.read(&mut [0; 1]).await;
+                                let _ = ended.send(path);
+                            });
+                        }
+                        _ = clients.join_next(), if !clients.is_empty() => {}
+                    }
+                }
+            });
+            Self {
+                base,
+                requests,
+                closed,
+                task,
+            }
+        }
+
+        fn client(&self) -> Client {
+            Client::with_test_base(
+                reqwest::Client::builder().no_proxy().build().unwrap(),
+                &self.base,
+            )
+        }
+
+        async fn request(&mut self) -> String {
+            tokio::time::timeout(Duration::from_secs(3), self.requests.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        }
+
+        async fn closed(&mut self) -> String {
+            tokio::time::timeout(Duration::from_secs(3), self.closed.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn superseded_soundcloud_stream_resolutions_cancel_stalled_http_requests() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("soundcloud-resolver-cancel");
+        runtime.block_on(async {
+            let mut server = HangingApi::new().await;
+            worker.hybrid.client = Some(server.client());
+            let tag = PlaybackTag {
+                generation: 1,
+                occurrence: crate::hybrid_queue::EntryId(1),
+            };
+            worker.hybrid.tag = Some(tag);
+            worker.resolve_soundcloud_stream(tag, "soundcloud:track:10".into(), None, false, None);
+            assert_eq!(server.request().await, "/tracks/10");
+            worker.resolve_soundcloud_stream(tag, "soundcloud:track:11".into(), None, false, None);
+            assert_eq!(server.request().await, "/tracks/11");
+            assert_eq!(server.closed().await, "/tracks/10");
+            worker.resolve_soundcloud_stream(tag, "soundcloud:track:20".into(), None, true, None);
+            assert_eq!(server.request().await, "/tracks/20");
+            worker.resolve_soundcloud_stream(tag, "soundcloud:track:21".into(), None, true, None);
+            assert_eq!(server.request().await, "/tracks/21");
+            assert_eq!(server.closed().await, "/tracks/20");
+            worker
+                .hybrid_command(HybridCommand::Playing {
+                    tag,
+                    playing: false,
+                    sequence: 1,
+                })
+                .await;
+            assert_eq!(server.closed().await, "/tracks/21");
+            assert!(
+                !worker
+                    .hybrid
+                    .soundcloud_load
+                    .as_ref()
+                    .unwrap()
+                    .is_finished(),
+                "pausing cancels lookahead while retaining the current load"
+            );
+            worker.hybrid_command(HybridCommand::Stop).await;
+            assert_eq!(server.closed().await, "/tracks/11");
+            assert!(worker.hybrid.soundcloud_load.is_none());
+            assert!(worker.hybrid.soundcloud_preload.is_none());
+        });
+    }
+
+    #[test]
+    fn context_replacement_and_account_switch_cancel_reads_but_manual_load_keeps_context() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("soundcloud-context-cancel");
+        runtime.block_on(async {
+            let mut server = HangingApi::new().await;
+            worker.hybrid.client = Some(server.client());
+            worker.resolve_hybrid_context(1, "soundcloud:track:30".into());
+            assert_eq!(server.request().await, "/tracks/30");
+            worker.resolve_hybrid_context(2, "soundcloud:track:31".into());
+            assert_eq!(server.request().await, "/tracks/31");
+            assert_eq!(server.closed().await, "/tracks/30");
+            worker
+                .hybrid_command(HybridCommand::Load {
+                    tag: PlaybackTag {
+                        generation: 1,
+                        occurrence: crate::hybrid_queue::EntryId(1),
+                    },
+                    track: Box::new(Track {
+                        uri: "soundcloud:track:40".into(),
+                        ..Default::default()
+                    }),
+                    position_ms: 0,
+                    play: true,
+                })
+                .await;
+            assert!(
+                !worker
+                    .hybrid
+                    .catalogue_context
+                    .as_ref()
+                    .unwrap()
+                    .is_finished(),
+                "a manual row must not discard its still-loading context tail"
+            );
+            worker.install_soundcloud_account(crate::soundcloud::account::Account::Disconnected, 1);
+            assert_eq!(server.closed().await, "/tracks/31");
+            assert!(worker.hybrid.catalogue_context.is_none());
+        });
+    }
+
+    #[test]
+    fn dropping_the_backend_cancels_soundcloud_resolvers_without_an_explicit_stop() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("soundcloud-resolver-drop");
+        runtime.block_on(async {
+            let mut server = HangingApi::new().await;
+            worker.hybrid.client = Some(server.client());
+            let tag = PlaybackTag {
+                generation: 1,
+                occurrence: crate::hybrid_queue::EntryId(1),
+            };
+            worker.resolve_soundcloud_stream(tag, "soundcloud:track:50".into(), None, false, None);
+            assert_eq!(server.request().await, "/tracks/50");
+            worker.resolve_hybrid_context(1, "soundcloud:track:51".into());
+            assert_eq!(server.request().await, "/tracks/51");
+            drop(worker);
+            let closed =
+                std::collections::BTreeSet::from([server.closed().await, server.closed().await]);
+            assert_eq!(
+                closed,
+                std::collections::BTreeSet::from([
+                    "/tracks/50".to_owned(),
+                    "/tracks/51".to_owned()
+                ])
+            );
+        });
+    }
 
     fn seed_loudness_cache(worker: &Worker) -> std::path::PathBuf {
         use sha1::{Digest, Sha1};

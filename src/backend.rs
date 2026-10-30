@@ -2673,6 +2673,7 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    self.hybrid.cancel_soundcloud_work();
                     self.cancel_youtube();
                     self.cancel_youtube_metadata();
                     self.track_details.clear();
@@ -3942,6 +3943,7 @@ impl Worker {
 
     /// Cancels in-flight account work and drops cached Home data on sign-out.
     fn sign_out(&mut self) {
+        self.hybrid.cancel_soundcloud_work();
         self.track_details.clear();
         self.invalidate_loudness_cache();
         self.hybrid.engine = None;

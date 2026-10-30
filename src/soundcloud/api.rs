@@ -226,6 +226,15 @@ impl Client {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_test_base(http: reqwest::Client, base: &str) -> Self {
+        let mut client = Self::new(http, Some("00000000000000000000000000000000".into()), None);
+        let shared = Arc::get_mut(&mut client.shared).expect("new fixture client");
+        shared.api = Url::parse(base).expect("fixture API URL");
+        shared.home = shared.api.join("home").expect("fixture homepage URL");
+        client
+    }
+
     /// Read after any request, including a failed one, to persist a new ID.
     pub fn client_id(&self) -> Option<String> {
         self.shared
