@@ -241,6 +241,10 @@ the complete mixed queue and restores it paused. Paste a SoundCloud song or
 playlist link into search and press Enter to resolve and play it.
 
 SoundCloud uses the existing local audio output, EQ, visualizers and volume.
+The existing **Normalisation** setting also matches external audio to Spotify's
+track loudness reference. First plays use R128 measurement and a conservative
+starting gain; later plays reuse a local per-track measurement. See
+[Loudness Matching](docs/_reference/loudness.md) for the method and limits.
 
 Mixed playback keeps manual additions, including albums and Spotify episodes,
 across local context changes. Next consumes known queued rows even while a

@@ -32,7 +32,7 @@ use librespot_metadata::{
 };
 use librespot_playback::{
     audio_backend::Sink,
-    config::{Bitrate, NormalisationType, PlayerConfig, VolumeCtrl},
+    config::{Bitrate, NormalisationMethod, NormalisationType, PlayerConfig, VolumeCtrl},
     mixer::{self, Mixer, MixerConfig, NoOpVolume, VolumeGetter},
     player::{Player, PlayerEvent},
 };
@@ -578,7 +578,10 @@ impl Engine {
             bitrate: config.bitrate(),
             gapless: config.gapless,
             normalisation: config.normalisation,
-            normalisation_type: NormalisationType::Auto,
+            // Track gain matches external R128 track loudness in mixed queues.
+            normalisation_type: NormalisationType::Track,
+            normalisation_method: NormalisationMethod::Dynamic,
+            normalisation_pregain_db: crate::loudness::PREGAIN_DB,
             position_update_interval: Some(Duration::from_secs(1)),
             // The fork reports each track's normalisation factor here, so
             // the tap can undo it for the visualisers: they show the music,
@@ -1104,6 +1107,8 @@ fn sink_builder(
     // value to calculate the pre-volume limiter ceiling.
     let ceiling = mixer.get_soft_volume();
     let external_ceiling = mixer.get_soft_volume();
+    let normalise_external = config.normalisation;
+    let loudness_directory = config.volume_dir.join("loudness");
     let initialized_at = Instant::now();
     (
         Box::new(move || {
@@ -1118,6 +1123,10 @@ fn sink_builder(
                 volume: external_ceiling,
                 eq: crate::eq::Processor::new(Arc::clone(&eq)),
                 limiter: crate::limiter::Limiter::new(f64::from(librespot_playback::SAMPLE_RATE)),
+                loudness: crate::loudness::Processor::new(
+                    normalise_external,
+                    Some(&loudness_directory),
+                ),
             };
             let spotify = Box::new(Tapped::new(
                 Box::new(crate::sink::LockedSink(sink)),

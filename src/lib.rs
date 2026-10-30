@@ -29,6 +29,7 @@ pub mod limiter;
 pub mod link;
 mod local_files;
 pub mod local_tags;
+pub mod loudness;
 pub mod lyrics;
 #[cfg(target_os = "macos")]
 pub mod mac_links;
