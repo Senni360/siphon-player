@@ -25,7 +25,9 @@ anchor. A synchronous trusted `readinessParticipants()` callback supplies a
 unique cohort of one to eight currently authorized actors, including the owner.
 The default empty roster refuses preparation. Participant JSON cannot choose
 the roster. An exception, promise, unauthorized actor or oversized roster fails
-closed. The future session authority must supply one active output per actor.
+closed. The optional [SessionRoom coordinator](SESSIONS.md) now supplies the live
+actor cohort and fences reports to an explicitly selected session/output. It
+still requires a future authenticated connection and native output adapter.
 
 The deadline is ten seconds after preparation. An attempt lasts at most sixty
 seconds, capped by room expiry. Preparation requires enough room lifetime for
@@ -123,7 +125,9 @@ loads after seeking. The runner disposes its local runtime afterward.
 This is not cloud eviction, process-crash or network validation. No real decoder
 readiness, two-computer playback, Chromecast timing or audible synchronization
 has been measured. M1 hosted/hardware acceptance remains open. Authenticated
-transport/session fencing, actual alarms, temporary access validation, native
+transport, actual alarms, temporary access validation, native
 optimistic transport and real output integration remain required. The headless
 transport model and isolated journal wrapper are now tested; their native
 integration remains required before connecting commands to a socket or playback.
+Session/output fencing is now tested in the isolated SessionRoom coordinator;
+this is not production authentication or a real output validation result.

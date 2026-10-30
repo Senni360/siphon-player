@@ -24,6 +24,12 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
 
 ## What exists
 
+The native-player inventory below records the initial 2026-10-30 inspection.
+Separately integrated native work is documented in the
+[backend integration contract]({% link _reference/siphon-integration-contract.md %}).
+Its presence does not validate a provider for shared-room playback or Cast;
+the provider feasibility gates in this plan remain in force.
+
 - `src/local_files.rs` indexes one chosen folder off the UI thread, matching
   tags and duration to `spotify:local:` identities. MP3, MP4, M4P and FLAC are
   scanned. The pinned librespot player has a separate startup index. WAV is
@@ -95,7 +101,12 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   [Startup readiness](https://github.com/Senni360/siphon-player/blob/main/services/party-room/READINESS.md)
   now coordinates bounded load generations, fresh participant reports and an
   explicit owner choice after a ten-second timeout. These claims cannot verify
-  media or grant access; actual decoder and session/output integration is absent.
+  media or grant access. The isolated
+  [session coordinator](https://github.com/Senni360/siphon-player/blob/main/services/party-room/SESSIONS.md)
+  now fences reports to an explicitly selected output, bounds heartbeat leases
+  and derives aggregate owner presence in the same transaction. Authentication,
+  actual connections, alarm delivery and native decoder/output integration are
+  still absent.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -640,3 +651,31 @@ Launcher tests still report three failures and five errors; Jekyll cannot run
 without Bundler. GitHub's preceding `6eed0da` gateway run was blocked before steps
 by the confirmed billing/spending restriction. No new Linux/macOS result is
 claimed, and no billing or infrastructure changes were made.
+
+Session/output coordination adds 29 deterministic Windows tests, bringing the
+room suite to 204, plus eight local Durable Object cases, for 23 total. An old
+connection or decoder revision cannot renew readiness after output replacement.
+Duplicate opens/heartbeats never extend leases; closed/expired IDs never reopen.
+Losing the last owner connection starts grace at its actual lease expiry, so
+late recovery pauses the timeline at the original deadline. Room revisions,
+command receipts and pending optimistic intent retain their existing contract.
+The local runtime validates SQLite reconstruction and is disposed afterward;
+it does not validate cloud eviction, real disconnect detection or audio timing.
+No infrastructure, secrets, upload quota, media retention or provider capability
+changed. Authentication, scheduling, native output/journal integration and M1
+hosted/hardware acceptance remain open. Audible synchronization is unmeasured.
+The next bounded room increment can use a local-only disconnect/reconnect
+transport harness with the session coordinator and journal, without a public
+endpoint or playback integration.
+
+The checkpoint was rebased without conflicts onto the other agents' published
+combined main (`6b21310`) and then checked again on Windows. Required default/
+all-feature Clippy, all-target suites (library 1865/1908 passing, eight ignored
+in each), doctests, warning-strict rustdoc and formatting passed. The room tests,
+local runtime, 60 media-service tests and repository policy checks passed.
+Launcher checks retain three failures and five errors from the documented
+Windows/Unix/Ruby prerequisites; Jekyll remains unavailable without Bundler.
+The preceding `1ceb150` gateway run was refused before steps by GitHub's
+billing/spending restriction. These Windows results do not establish new Linux,
+macOS, native UI, real-account, device or audio acceptance. No billing changes
+were made, and the published combined native changes were preserved.

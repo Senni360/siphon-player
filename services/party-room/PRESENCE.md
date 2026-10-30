@@ -8,9 +8,14 @@ Run `npm run check` and `npm test` here with Node 24.
 
 ## Trusted presence authority
 
-Only a future trusted session authority may call:
+The base `RoomQueue` accepts events only from a trusted session authority:
 
 `publishOwnerPresence({epoch, revision, connected})`.
+
+The optional [SessionRoom coordinator](SESSIONS.md) now derives these transitions
+atomically from its bounded connection leases and refuses external presence
+events. Its default-denied connection-proof adapter still needs a real
+authenticator and transport. The following base contract remains unchanged.
 
 The event describes whether **any authenticated owner session** is connected.
 A single socket closing is not proof that the owner has left when another owner
@@ -93,7 +98,7 @@ pause or change the native interface.
 A future native adapter must honor an announced deadline using bounded clock
 estimates, handle connection loss and retain optimistic intent. Server maintenance
 alone cannot ensure receivers stop on time if the network or server is unavailable.
-Session aggregation, heartbeat/disconnect detection, authenticated transport,
+Session aggregation is now modeled by SessionRoom. Real heartbeat/disconnect detection, authenticated transport,
 alarm wiring, native output control and owner handover remain unimplemented.
 Those integrations and real hardware tests are required before party support.
 

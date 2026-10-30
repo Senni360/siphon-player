@@ -15,6 +15,8 @@ function fields(value, keys) {
     && Object.keys(value).sort().join(",") === [...keys].sort().join(","));
 }
 const idle = generation => ({ generation, phase: "idle", context: null, deadline: null, expires_at: null, members: [] });
+const bindingIdentity = value => value === undefined ? undefined : value === null ? null
+  : { session_id: value.session_id, output_revision: value.output_revision };
 
 export class StartupReadiness {
   constructor(sql) {
@@ -25,7 +27,7 @@ export class StartupReadiness {
   read() { return JSON.parse(this.sql.exec("SELECT value FROM room_readiness WHERE singleton=1").toArray()[0].value); }
   write(value) { this.sql.exec("UPDATE room_readiness SET value=? WHERE singleton=1", JSON.stringify(value)); }
   invalidate() { const state = this.read(); if (state.phase !== "idle") this.write(idle(state.generation)); }
-  prepare(context, participants, owner, now, roomExpiry) {
+  prepare(context, participants, owner, now, roomExpiry, resolveOutput = () => undefined) {
     requireThat(Array.isArray(participants) && participants.length > 0 && participants.length <= READINESS_LIMITS.participants
       && participants.every(id => typeof id === "string" && UUID.test(id)) && participants.includes(owner)
       && new Set(participants).size === participants.length, "participants_unavailable");
@@ -33,21 +35,31 @@ export class StartupReadiness {
     requireThat(integer(generation, 1), "readiness_limit");
     this.write({ generation, phase: "collecting", context, deadline: now + READINESS_LIMITS.waitMs,
       expires_at: Math.min(now + READINESS_LIMITS.lifetimeMs, roomExpiry),
-      members: participants.map(id => ({ id, revision: 0, report: null, status: "waiting", ready_until: null })) });
+      members: participants.map(id => {
+        const binding = bindingIdentity(resolveOutput(id));
+        return { id, revision: 0, report: null, status: binding === null ? "unavailable" : "waiting", ready_until: null, binding };
+      }) });
   }
-  maintain(now, member) {
+  maintain(now, member, resolveOutput = () => undefined) {
     const state = this.read(); let changed = false;
-    if (!["collecting", "timed_out"].includes(state.phase)) return false;
-    if (now >= state.expires_at) {
+    const collecting = ["collecting", "timed_out"].includes(state.phase);
+    if (!collecting && state.phase !== "started") return false;
+    if (collecting && now >= state.expires_at) {
       state.phase = "expired"; changed = true;
       for (const row of state.members) { row.status = "waiting"; row.ready_until = null; }
     } else {
       if (state.phase === "collecting" && now >= state.deadline) { state.phase = "timed_out"; changed = true; }
       for (const row of state.members) {
+        const binding = bindingIdentity(resolveOutput(row.id));
+        if (!collecting && binding === undefined) continue;
+        if (binding !== undefined && JSON.stringify(binding) !== JSON.stringify(row.binding)) {
+          row.binding = binding; row.status = binding ? "waiting" : "unavailable";
+          row.ready_until = null; changed = true;
+        }
         const revoked = !member(row.id);
         if (revoked && row.status !== "unavailable") {
           row.status = "unavailable"; row.ready_until = null; changed = true;
-        } else if (row.status === "ready" && now >= row.ready_until) {
+        } else if (collecting && row.status === "ready" && now >= row.ready_until) {
           row.status = "waiting"; row.ready_until = null; changed = true;
         }
       }
@@ -55,7 +67,7 @@ export class StartupReadiness {
     if (changed) this.write(state);
     return changed;
   }
-  report(actor, event, epoch, now) {
+  report(actor, event, epoch, now, binding) {
     fields(event, ["epoch", "generation", "revision", "status"]);
     requireThat(typeof event.epoch === "string" && UUID.test(event.epoch) && integer(event.generation, 1)
       && integer(event.revision, 1) && event.revision < Number.MAX_SAFE_INTEGER && REPORTS.has(event.status));
@@ -65,10 +77,13 @@ export class StartupReadiness {
     requireThat(["collecting", "timed_out"].includes(state.phase), "load_inactive");
     const row = state.members.find(item => item.id === actor);
     requireThat(row, "not_in_load");
+    if (binding !== undefined) requireThat(binding !== null
+      && JSON.stringify(row.binding) === JSON.stringify(bindingIdentity(binding)), "stale_output");
     if (event.revision === row.revision) requireThat(event.status === row.report, "readiness_revision_conflict");
     if (event.revision <= row.revision) return false;
     row.revision = event.revision; row.report = event.status; row.status = event.status;
-    row.ready_until = event.status === "ready" ? Math.min(now + READINESS_LIMITS.freshMs, state.expires_at) : null;
+    row.ready_until = event.status === "ready" ? Math.min(now + READINESS_LIMITS.freshMs, state.expires_at,
+      binding?.expires_at ?? state.expires_at) : null;
     this.write(state); return true;
   }
   approve(context, owner, partial, generation, startAt) {

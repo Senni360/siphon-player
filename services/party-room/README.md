@@ -8,6 +8,9 @@ UI, audio playback, provider integration or deployment configuration**.
 No new service, secret, account, setting or spending change is needed.
 An optional [client journal](JOURNAL.md) now adds validated checkpoints and a
 local SQLite spike adapter; it is not wired into the native application.
+The optional [session coordinator](SESSIONS.md) binds readiness to the selected
+output and derives owner presence from bounded connection leases. Authentication
+and actual connection handling remain external and unimplemented.
 
 Run with Node 24 or later, without installing dependencies:
 
@@ -230,7 +233,7 @@ and rate limits must be implemented before deployment.
 This core has run in the local Durable Object emulator, but not a deployed
 service. Production runtime wiring, authentication, WebSocket recovery, native
 client overlays, actual decoder readiness, native clock sampling, buffering,
-session presence detection, alarm wiring, owner handover and playback
+real connection presence detection, alarm wiring, owner handover and playback
 integration remain unimplemented. No two-computer party or Chromecast test has
 run, and no synchronization behavior has been measured. The hosted/hardware
 milestone-1 gate remains open. This module does not enable milestone 3 in the app.
@@ -286,3 +289,11 @@ real SQLite rollback and a child-process exit after packet commit, followed by
 reopening and an unchanged server retry. The fifteen local Durable Object cases
 also pass. Native file access, lifecycle/retention, session binding, networking
 and playback are still separate gates.
+
+Session/output coordination adds 29 deterministic tests, bringing the room suite
+to 204, plus eight local Durable Object cases, for 23 in total. It fences stale
+output reports, preserves lease deadlines through retries/reconstruction and
+pauses at the original last-owner expiry plus grace. The existing optimistic
+client contract remains intact. The proof adapter is default-denied; tests use
+fake connection proofs. No authenticator, endpoint, native output, scheduler or
+deployment was added. See [SESSIONS.md](SESSIONS.md) for the integration boundary.

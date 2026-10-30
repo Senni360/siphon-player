@@ -117,6 +117,6 @@ The existing fifteen local Durable Object scenarios also pass. No native
 restart, authenticated WebSocket, deployed room, two-computer party, Chromecast
 output or audible synchronization was tested. No infrastructure, secrets, upload
 quota or media-retention change is required. M1 hosted/hardware acceptance is
-still open. The next bounded room increment can bind readiness reports to the
-active participant output/session so superseded sessions cannot renew votes,
-before introducing any live room endpoint.
+still open. The isolated [session coordinator](SESSIONS.md) now fences readiness
+to the active session/output, but the client journal is not bound to a native
+authenticated connection or live room endpoint.

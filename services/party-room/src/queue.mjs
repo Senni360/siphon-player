@@ -141,15 +141,23 @@ export class RoomQueue {
     try { return uuid(actor) && this.authorize(actor, this.roomId, operation) === true; }
     catch { return false; }
   }
+  beforeCommit(_now) { return false; }
+  outputBinding(_actor) { return undefined; }
+  readinessContext(_actor, context) { requireThat(context === undefined, "invalid_fields"); return undefined; }
+  maintainReadiness(now) {
+    const changed = this.readiness.maintain(now, actor => this.member(actor, "readiness"), actor => this.outputBinding(actor));
+    if (changed) this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
+    return changed;
+  }
   async commit(operation) {
     try {
       const now = this.now();
       requireThat(integer(now) && now >= this.clockFloor(), "invalid_clock");
       const result = this.storage.transactionSync(() => {
+        const extraChanged = this.beforeCommit(now);
         const expiredOwner = this.expireOwner(now);
-        const readinessChanged = this.readiness.maintain(now, actor => this.member(actor, "readiness"));
-        if (readinessChanged) this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
-        const value = operation(now, expiredOwner, readinessChanged);
+        const readinessChanged = this.maintainReadiness(now);
+        const value = operation(now, expiredOwner, readinessChanged, extraChanged);
         this.sql.exec("UPDATE room_timeline SET observed_at=? WHERE singleton=1", now);
         return value;
       });
@@ -209,27 +217,30 @@ export class RoomQueue {
   async publishOwnerPresence(event) {
     fields(event, ["epoch", "revision", "connected"]);
     requireThat(uuid(event.epoch) && integer(event.revision, 1) && typeof event.connected === "boolean", "invalid_presence");
-    return this.commit((now, expiredOwner) => {
-      const room = this.active(now), prior = this.presence();
-      requireThat(event.epoch === room.epoch, "stale_epoch");
-      const state = event.connected ? "connected" : "disconnected";
-      if (event.revision === prior.event_revision) requireThat(state === prior.state, "presence_revision_conflict");
-      let changed = expiredOwner;
-      const applied = event.revision > prior.event_revision;
-      if (applied) {
-        const transition = state !== prior.state;
-        const pauseAt = state === "connected" ? null : prior.state === "disconnected" ? prior.pause_at
-          : now + Math.min(ROOM_LIMITS.ownerGraceMs, room.expires_at - now);
-        const paused = state === "disconnected" && prior.state === "disconnected" ? prior.paused : 0;
-        this.sql.exec("UPDATE room_owner_presence SET event_revision=?,state=?,pause_at=?,paused=? WHERE singleton=1",
-          event.revision, state, pauseAt, paused);
-        if (transition) {
-          this.readiness.invalidate();
-          this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1"); changed = true;
-        }
+    return this.commit((now, expiredOwner) => this.applyOwnerPresence(event, now, expiredOwner));
+  }
+  // Internal synchronous transition used by trusted session coordination in the
+  // same transaction. Transport handlers must never expose it as an endpoint.
+  applyOwnerPresence(event, now, expiredOwner = false) {
+    const room = this.active(now), prior = this.presence();
+    requireThat(event.epoch === room.epoch, "stale_epoch");
+    const state = event.connected ? "connected" : "disconnected";
+    if (event.revision === prior.event_revision) requireThat(state === prior.state, "presence_revision_conflict");
+    let changed = expiredOwner;
+    const applied = event.revision > prior.event_revision;
+    if (applied) {
+      const transition = state !== prior.state;
+      const pauseAt = state === "connected" ? null : prior.state === "disconnected" ? prior.pause_at
+        : now + Math.min(ROOM_LIMITS.ownerGraceMs, room.expires_at - now);
+      const paused = state === "disconnected" && prior.state === "disconnected" ? prior.paused : 0;
+      this.sql.exec("UPDATE room_owner_presence SET event_revision=?,state=?,pause_at=?,paused=? WHERE singleton=1",
+        event.revision, state, pauseAt, paused);
+      if (transition) {
+        this.readiness.invalidate();
+        this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1"); changed = true;
       }
-      return { applied, changed, revision: this.room().revision, next_alarm_at: this.nextPresenceAlarm() };
-    });
+    }
+    return { applied, changed, revision: this.room().revision, next_alarm_at: this.nextPresenceAlarm() };
   }
   // A future alarm/recovery loop must call this even without participant traffic.
   async tickOwnerPresence() {
@@ -246,11 +257,12 @@ export class RoomQueue {
   }
   // Actor identity comes from the future authenticated session, never JSON.
   // These bounded status claims do not mark media verified or grant access.
-  async publishReadiness(actor, event) {
+  async publishReadiness(actor, event, context) {
     return this.commit(now => {
       requireThat(this.member(actor, "readiness"), "unavailable");
       const room = this.active(now);
-      const applied = this.readiness.report(actor, event, room.epoch, now);
+      const binding = this.readinessContext(actor, context);
+      const applied = this.readiness.report(actor, event, room.epoch, now, binding);
       if (applied) this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
       return { applied, revision: this.room().revision, next_alarm_at: this.readiness.nextAlarm() };
     });
@@ -346,7 +358,7 @@ export class RoomQueue {
       try { participants = this.readinessParticipants(); } catch { throw new RoomError("participants_unavailable"); }
       requireThat(Array.isArray(participants) && participants.length <= READINESS_LIMITS.participants
         && participants.every(id => this.member(id, "readiness")), "participants_unavailable");
-      this.readiness.prepare(context(paused), participants, room.owner_id, now, room.expires_at);
+      this.readiness.prepare(context(paused), participants, room.owner_id, now, room.expires_at, actor => this.outputBinding(actor));
       this.storeTimeline(paused, current);
     } else if (["play", "start_ready"].includes(operation.type)) {
       requireThat(this.presence().state === "connected", "owner_unavailable");

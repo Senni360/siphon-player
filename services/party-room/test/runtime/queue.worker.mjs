@@ -4,6 +4,7 @@ import { projectTimeline, TIMELINE_LIMITS } from "../../src/timeline.mjs";
 import { READINESS_LIMITS } from "../../src/readiness.mjs";
 import { RoomClient } from "../../src/client.mjs";
 import { UploadLedger } from "../../../media-gateway/src/uploads.mjs";
+export { SessionProbe } from "./sessions.worker.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const owner = uuid(1), member = uuid(2), roomId = uuid(3), epoch = uuid(4);
@@ -152,6 +153,7 @@ export class QueueProbe {
 export default {
   fetch(request, env) {
     if (new URL(request.url).hostname !== "localhost") return new Response(null, { status: 404 });
+    if (new URL(request.url).pathname === "/sessions") return env.SESSION_TEST.get(env.SESSION_TEST.newUniqueId()).fetch("http://test/run");
     return env.QUEUE_TEST.get(env.QUEUE_TEST.newUniqueId()).fetch("http://test/run");
   },
 };
