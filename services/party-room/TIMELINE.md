@@ -61,9 +61,10 @@ At EOF the owner must seek before starting again. Selecting another occurrence
 always starts with a paused zero-position anchor. There is no automatic advance.
 
 The queue and transport share the same command-ID sequence and receipt window.
-Do not run independent command-ID allocators for them. The headless queue client
-still enqueues only add/remove/advance; native optimistic transport and a unified
-outbox remain implementation gates. Stale revisions, wrong occurrences and
+Do not run independent command-ID allocators for them. The headless client now
+retains [pending transport intent](TRANSPORT-CLIENT.md) in the same command
+sequence as queue intent. Native optimistic transport and durable client
+journaling remain implementation gates. Stale revisions, wrong occurrences and
 non-owner controls cannot move the anchor. Seek positions participate in command
 identity, so a retried command cannot change its target position.
 

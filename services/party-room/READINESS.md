@@ -103,8 +103,9 @@ hash, URL or credential is exposed. Phases are `idle`, `collecting`, `timed_out`
 
 This is an unreleased snapshot-schema addition. The headless queue client
 validates it, rejects stale/conflicting state and exposes `confirmed_readiness`
-without discarding pending queue intent. It still enqueues only queue actions.
-It has no optimistic transport overlay, durable outbox or decoder integration.
+without discarding pending queue intent. It also models
+[pending transport intent](TRANSPORT-CLIENT.md) in the same command sequence.
+It has no native interface, durable outbox or decoder integration.
 Confirmed readiness can refer to a different occurrence from an optimistic
 selection and must not be used to drive audio directly.
 
@@ -122,6 +123,6 @@ This is not cloud eviction, process-crash or network validation. No real decoder
 readiness, two-computer playback, Chromecast timing or audible synchronization
 has been measured. M1 hosted/hardware acceptance remains open. Authenticated
 transport/session fencing, actual alarms, temporary access validation, native
-optimistic transport and real output integration remain required. A useful next
-bounded increment is the unified client transport intent/outbox protocol before
-connecting any room commands to playback.
+optimistic transport and real output integration remain required. The headless
+transport model is now tested; durable client journaling remains required before
+connecting its commands to a socket or playback.

@@ -6,9 +6,14 @@ import { validateReadiness } from "./readiness.mjs";
 export const CLIENT_LIMITS = Object.freeze({ intents: 16 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set(["unavailable", "uploading", "ready"]);
+const TRANSPORT = new Set(["prepare", "play", "start_ready", "pause", "seek"]);
+const STARTS = new Set(["play", "start_ready"]);
 const REJECTIONS = new Set(["stale_revision", "queue_full", "occurrence_used", "occurrence_limit",
   "recording_unavailable", "invalid_fields", "invalid_media", "media_identity_conflict",
-  "media_revision_conflict", "not_pending", "forbidden", "queue_empty"]);
+  "media_revision_conflict", "not_pending", "forbidden", "queue_empty", "wrong_occurrence",
+  "owner_unavailable", "recording_not_ready", "seek_required", "room_expiring", "readiness_required",
+  "readiness_waiting", "stale_load", "load_inactive", "participants_unavailable", "readiness_limit",
+  "invalid_position", "invalid_clock"]);
 
 export class ClientError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -209,8 +214,31 @@ export class RoomClient {
         target = shown.pending[0] ?? null; from = shown.current?.id ?? null;
       }
     }
+    return this.#append(operation, row, target, from, null);
+  }
+
+  // Presentation intent only. The caller supplies its displayed position;
+  // this value never replaces the authority's pause/prepare/play position.
+  enqueueTransport(operation, preview) {
+    requireThat(this.#base && !this.#blocked, "needs_snapshot");
+    requireThat(this.#intents.length < CLIENT_LIMITS.intents, "pending_limit");
+    try { validateRoomAction(operation); } catch { throw new ClientError("invalid_action"); }
+    requireThat(TRANSPORT.has(operation.type), "invalid_action");
+    requireThat(this.#actor === this.#base.owner_id, "forbidden");
+    fields(preview, ["position_ms"]);
+    const current = this.#project().current;
+    requireThat(current && current.id === operation.occurrence_id, "wrong_occurrence");
+    requireThat(integer(preview.position_ms) && preview.position_ms <= current.duration_ms
+      && (operation.type !== "seek" || preview.position_ms === operation.position_ms), "invalid_preview");
+    requireThat(operation.type !== "start_ready" || operation.generation === this.#base.readiness.generation, "load_changed");
+    return this.#append(operation, null, current, null, { position_ms: preview.position_ms,
+      playing: STARTS.has(operation.type), load_generation: this.#base.readiness.generation });
+  }
+
+  #append(operation, preview, target, from, transport) {
+    requireThat(this.#nextIntent < Number.MAX_SAFE_INTEGER, "intent_limit");
     const id = this.#nextIntent++;
-    this.#intents.push({ id, action: structuredClone(operation), preview: row, target, from,
+    this.#intents.push({ id, action: structuredClone(operation), preview, target, from, transport,
       state: "queued", error: null, packet: null, receipt: null });
     return id;
   }
@@ -229,6 +257,11 @@ export class RoomClient {
     if (a.type === "remove" && !this.#base.pending.some(row => row.id === a.occurrence_id)) conflict = "target_changed";
     if (a.type === "add" && (this.#base.pending.length >= ROOM_LIMITS.pending
       || [this.#base.current, ...this.#base.pending].some(row => row?.id === a.occurrence_id))) conflict = "occurrence_conflict";
+    if (intent.transport) {
+      if (this.#base.current?.id !== intent.target.id) conflict = "target_changed";
+      else if (["prepare", ...STARTS].includes(a.type) && this.#base.current.media_revision !== intent.target.media_revision) conflict = "media_changed";
+      else if (STARTS.has(a.type) && this.#base.readiness.generation !== intent.transport.load_generation) conflict = "load_changed";
+    }
     if (conflict) { intent.state = "review"; intent.error = conflict; return null; }
     const id = this.#base.self.next_command_id;
     requireThat(id < Number.MAX_SAFE_INTEGER, "command_limit");
@@ -263,6 +296,7 @@ export class RoomClient {
     const latest = new Map([current, ...pending].filter(Boolean).map(row => [row.id, row]));
     for (const intent of this.#intents) {
       const a = intent.action;
+      if (intent.transport) continue;
       if (a.type === "add") {
         if (![current, ...pending].some(row => row?.id === a.occurrence_id)) pending.push(intent.preview);
       } else if (a.type === "remove") pending = pending.filter(row => row.id !== a.occurrence_id);
@@ -276,12 +310,16 @@ export class RoomClient {
     return { current, pending };
   }
   view() {
+    const projected = this.#project(), transport = this.#intents.findLast(intent => intent.transport);
     return structuredClone({ mode: this.#blocked ? "blocked" : this.#connected ? "ready" : this.#awaiting ? "syncing" : "offline",
       blocked: this.#blocked, epoch: this.#base?.epoch ?? null, revision: this.#base?.revision ?? null,
       confirmed_timeline: this.#base?.timeline ?? null,
       confirmed_owner_presence: this.#base?.owner_presence ?? null,
       confirmed_readiness: this.#base?.readiness ?? null,
-      ...this.#project(), intents: this.#intents.map(item => ({ intent_id: item.id, action: item.action,
+      pending_transport: transport ? { intent_id: transport.id, occurrence_id: transport.action.occurrence_id,
+        action: transport.action.type, position_ms: transport.transport.position_ms, playing: transport.transport.playing,
+        applies_to_current: projected.current?.id === transport.action.occurrence_id, state: transport.state, error: transport.error } : null,
+      ...projected, intents: this.#intents.map(item => ({ intent_id: item.id, action: item.action,
         state: item.state, error: item.error })) });
   }
 }

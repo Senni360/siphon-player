@@ -80,6 +80,9 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   Its headless client model retains pending intent across stale snapshots and
   lost acknowledgements, with bounded retries and explicit uncertain outcomes.
   This model is in memory only and is not a native connection or crash journal.
+  [Pending transport intent](https://github.com/Senni360/siphon-player/blob/main/services/party-room/TRANSPORT-CLIENT.md)
+  now shares that model's command sequence and preserves owner controls across
+  stale snapshots, load changes and uncertain replies. It does not drive audio.
   A separate [clock model](https://github.com/Senni360/siphon-player/blob/main/services/party-room/CLOCK.md)
   bounds server-time uncertainty using timestamp samples, rejects stale replies
   and invalidates after suspension. It is not wired to native playback.
@@ -408,8 +411,10 @@ completion, including an explicit recovery path for a lost provider handle.
 The tested cleanup executor intentionally withholds those unresolved tasks.
 The independent room queue, headless snapshot/receipt recovery and durable
 timeline anchors, bounded clock estimation and startup readiness are now tested.
-The next bounded room milestone is unified client transport intent and outbox
-recovery, preserving optimistic state across competing commands and reconnection.
+The headless client now retains queue and transport intent in one command
+sequence. The next bounded room milestone is a durable client journal that
+persists the exact packet before dispatch and restores uncertain outcomes
+without allocating a new command ID.
 Owner-presence grace/pause is now modeled and persisted;
 session detection and alarm wiring remain gates. Native pending-intent journaling,
 optimistic transport and authenticated transport remain separate gates; none of
@@ -596,3 +601,18 @@ retain three failures and five errors; local Jekyll lacks Bundler. GitHub's
 preceding `a440b75` gateway job did not start, with the billing/spending
 restriction confirmed in its annotation. No billing changes were made and no
 new Linux/macOS coverage is claimed.
+
+Pending transport adds 23 deterministic Windows tests, bringing the room suite
+to 153. Fifteen local Durable Object cases pass, including confirmation that
+does not erase a later seek, unchanged reconnect retries and mixed queue/
+transport commands. Occurrence, media and load changes require review before
+unsent starts; sent commands retain their original packet until reconciled.
+These are in-memory recovery models, not app-restart, socket or audio tests.
+No native controls, service endpoint, credentials, upload quota, retention or
+provider behavior changed. A durable journal and the existing cloud/hardware
+acceptance gates remain open; audible synchronization is still unmeasured.
+All 60 media-service tests, required Windows default/all-feature Clippy and
+all-target tests, doctests, strict rustdoc, formatting and policy tests passed.
+Launcher tests retain three failures/five errors; Jekyll lacks Bundler. The
+preceding `08914b7` gateway job was blocked before steps by the confirmed
+GitHub billing/spending restriction. No new Linux/macOS coverage is claimed.

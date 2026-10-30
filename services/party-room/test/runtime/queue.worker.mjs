@@ -2,6 +2,7 @@
 import { RoomQueue, ROOM_LIMITS } from "../../src/queue.mjs";
 import { projectTimeline, TIMELINE_LIMITS } from "../../src/timeline.mjs";
 import { READINESS_LIMITS } from "../../src/readiness.mjs";
+import { RoomClient } from "../../src/client.mjs";
 import { UploadLedger } from "../../../media-gateway/src/uploads.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -118,8 +119,32 @@ export class QueueProbe {
     try { await queue.publishReadiness(member, { epoch, generation: preparing.readiness.generation, revision: 1, status: "ready" }); }
     catch (error) { staleLoad = error.code === "stale_load"; }
     check(staleLoad, "previous load callback refused after seek and new preparation");
+    const client = new RoomClient({ roomId, actorId: owner });
+    let connection = client.beginConnection();
+    client.receiveSnapshot(connection, await queue.snapshot(owner));
+    client.enqueueTransport({ type: "seek", occurrence_id: occurrence(2), position_ms: 4000 }, { position_ms: 4000 });
+    client.enqueueTransport({ type: "seek", occurrence_id: occurrence(2), position_ms: 6000 }, { position_ms: 6000 });
+    const firstSeek = client.outbound(), firstReceipt = await queue.command(owner, firstSeek);
+    client.receiveSnapshot(connection, await queue.snapshot(owner));
+    check(client.view().pending_transport.position_ms === 6000, "newest seek survives old snapshot confirmation");
+    client.receiveReceipt(connection, firstReceipt);
+    const secondSeek = client.outbound(), secondReceipt = await queue.command(owner, secondSeek);
+    const oldConnection = connection; client.disconnect(connection); connection = client.beginConnection();
+    check(!client.receiveReceipt(oldConnection, secondReceipt), "old connection cannot acknowledge transport");
+    client.receiveSnapshot(connection, await queue.snapshot(owner));
+    check(JSON.stringify(client.outbound()) === JSON.stringify(secondSeek), "reconnect retains original transport packet");
+    client.receiveReceipt(connection, await queue.command(owner, client.outbound()));
+    check(client.view().pending_transport === null && client.view().confirmed_timeline.position_ms === 6000, "seek retires only after receipt and snapshot");
+    client.enqueue({ type: "advance" });
+    client.enqueueTransport({ type: "pause", occurrence_id: occurrence(3) }, { position_ms: 0 });
+    for (let n = 0; n < 2; n++) {
+      const packet = client.outbound(); check(!!packet, "mixed queue and transport packet available");
+      const receipt = await queue.command(owner, packet); check(receipt.accepted, "mixed command accepted");
+      client.receiveSnapshot(connection, await queue.snapshot(owner)); client.receiveReceipt(connection, receipt);
+    }
+    check(client.view().current.id === occurrence(3) && client.view().intents.length === 0, "one command sequence handles queue and transport");
     final = await queue.snapshot(owner);
-    return Response.json({ cases: 12, revision: final.revision, current: final.current.id, pending: final.pending.length,
+    return Response.json({ cases: 15, revision: final.revision, current: final.current.id, pending: final.pending.length,
       generation: final.readiness.generation, playing: final.timeline.playing });
   }
 }

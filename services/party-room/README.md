@@ -134,6 +134,7 @@ transport adapter; membership and upload authority remain server decisions.
 | `disconnect(generation)` | Invalidates callbacks from the old connection and retains pending actions. |
 | `receiveSnapshot(generation, snapshot)` | Accepts bounded, ordered snapshots from the same room and epoch. Rejects conflicting identity or media state. |
 | `enqueue(action, preview?)` | Immediately overlays add, remove or advance. Add requires an exact public row preview and explicit selection. Returns a local intent ID. |
+| `enqueueTransport(action, {position_ms})` | Retains explicit owner transport intent in the same command sequence. The position is a display preview, not playback authorization. |
 | `outbound()` | Returns one command to send, or `null`. Repeated calls return an unchanged copy until its outcome is resolved. |
 | `receiveReceipt(generation, receipt)` | Records the matching outcome. Accepted intent retires only after the confirming snapshot also arrives, in either order. |
 | `receiveFailure(generation, commandId, code)` | Consumes a normalized protocol failure. Temporary failures require a fresh snapshot; expired receipts and command conflicts stay uncertain. |
@@ -145,6 +146,11 @@ wait for the first intent's outcome. The authoritative snapshot still has at
 most 32 pending rows; concurrent remote additions can temporarily leave the
 display projection with up to 48 pending rows while local intent is unresolved.
 Nothing is silently truncated to fit the server bound.
+
+The [transport-client contract](TRANSPORT-CLIENT.md) defines the separate
+`pending_transport` preview, occurrence/media/load checks and explicit recovery.
+It preserves pending Pause, Seek, Prepare and start intent without letting
+transport actions mutate the queue projection. It is still in memory only.
 
 An advance captures the current occurrence and intended next occurrence when
 queued. If they change before dispatch, the intent enters `review` instead of
@@ -264,3 +270,8 @@ three further local Durable Object cases, for twelve. Fixed load generations,
 freshness expiry and explicit partial starts share the existing room revisions
 and command receipts. Participant reports do not verify media or authorize
 access. Session/output fencing, native readiness and playback remain absent.
+
+Pending transport adds 23 deterministic tests, for 153 room tests in total.
+Fifteen local Durable Object cases now include the headless client's transport
+confirmation, reconnect retries and mixed queue/transport command sequence.
+No durable client journal, native UI, socket or audio integration was added.
