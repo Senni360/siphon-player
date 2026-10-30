@@ -170,7 +170,14 @@ All requests use the app's configured HTTP client and proxy on its Tokio
 runtime, with a 15-second request deadline. A separate feeder performs
 blocking demuxing and decoding; it never runs on the UI thread. Transport
 commands cancel outstanding HTTP requests. Progressive audio uses 32 KiB
-byte ranges rather than downloading a whole track. HLS follows up to four
+byte ranges rather than downloading a whole track. Range replies must agree
+with the requested offset, declared end and actual body length; changing
+object lengths fail playback instead of splicing different representations.
+A 416 response is EOF only with a valid `Content-Range: bytes */length`
+proving the requested position is at or beyond that length. Malformed or
+truncated replies produce a playback error and cannot advance the queue as
+if the song finished. Small complete 200 responses, including chunked bodies,
+are accepted without a redundant EOF request. HLS follows up to four
 master/media playlist levels and fetches one compressed segment ahead, with
 a 16 MiB limit per object. Compressed audio is not written to disk. With
 normalisation enabled, decoded loudness measurements are cached locally;

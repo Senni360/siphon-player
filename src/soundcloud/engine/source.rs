@@ -59,7 +59,16 @@ impl Fetch {
             let client = self.http.client().map_err(Error::Network)?;
             let mut request = client.get(url).timeout(Duration::from_secs(15));
             if let Some((start, end)) = range {
-                request = request.header(reqwest::header::RANGE, format!("bytes={start}-{end}"));
+                if end
+                    .checked_sub(start)
+                    .and_then(|size| size.checked_add(1))
+                    .is_none_or(|size| size > RANGE_BYTES)
+                {
+                    return Err(Error::Network("Invalid audio byte range".into()));
+                }
+                request = request
+                    .header(reqwest::header::RANGE, format!("bytes={start}-{end}"))
+                    .header(reqwest::header::ACCEPT_ENCODING, "identity");
             }
             let mut response = request.send().await.map_err(network)?;
             let status = response.status();
@@ -68,49 +77,68 @@ impl Fetch {
                 return Err(Error::Expired);
             }
             if status == reqwest::StatusCode::RANGE_NOT_SATISFIABLE {
-                return Ok(Object {
-                    bytes: vec![],
-                    total: None,
-                });
+                // 416 is EOF only when the server proves the requested start
+                // is at/beyond its length. A bare 416 can be a broken CDN
+                // response, not a completed song that should advance queue.
+                let total = response
+                    .headers()
+                    .get(reqwest::header::CONTENT_RANGE)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.strip_prefix("bytes */"))
+                    .and_then(decimal);
+                if let Some((start, _)) = range
+                    && let Some(total) = total
+                    && start >= total
+                {
+                    return Ok(Object {
+                        bytes: vec![],
+                        total: Some(total),
+                    });
+                }
+                return Err(Error::Network("Invalid HTTP range end response".into()));
             }
             response.error_for_status_ref().map_err(network)?;
             let content_range = response
                 .headers()
                 .get(reqwest::header::CONTENT_RANGE)
                 .and_then(|s| s.to_str().ok());
-            let total = content_range
-                .and_then(|s| s.rsplit_once('/')?.1.parse().ok())
-                .or_else(|| {
-                    (status == reqwest::StatusCode::OK)
-                        .then(|| response.content_length())
-                        .flatten()
-                });
-            if let Some((start, _)) = range {
+            let (total, expected) = if let Some((start, end)) = range {
                 if status == reqwest::StatusCode::PARTIAL_CONTENT {
-                    let received = content_range.and_then(|s| {
-                        s.strip_prefix("bytes ")?
-                            .split_once('-')?
-                            .0
-                            .parse::<u64>()
-                            .ok()
-                    });
-                    if received != Some(start) {
-                        return Err(Error::Network("Invalid HTTP range response".into()));
-                    }
+                    let (received_start, received_end, total) = content_range
+                        .and_then(content_range_parts)
+                        .filter(|(received_start, received_end, _)| {
+                            *received_start == start && *received_end <= end
+                        })
+                        .ok_or_else(|| Error::Network("Invalid HTTP range response".into()))?;
+                    (total, Some(received_end - received_start + 1))
+                } else if status != reqwest::StatusCode::OK || content_range.is_some() {
+                    return Err(Error::Network("Invalid HTTP range response".into()));
                 } else if start != 0 {
                     return Err(Error::Unsupported(
                         "The stream server does not support byte ranges".into(),
                     ));
-                }
-                if status != reqwest::StatusCode::PARTIAL_CONTENT
-                    && response
+                } else {
+                    if response
                         .content_length()
                         .is_some_and(|size| size > RANGE_BYTES)
-                {
-                    return Err(Error::Unsupported(
-                        "The stream server ignored the byte range".into(),
-                    ));
+                    {
+                        return Err(Error::Unsupported(
+                            "The stream server ignored the byte range".into(),
+                        ));
+                    }
+                    (response.content_length(), None)
                 }
+            } else if status == reqwest::StatusCode::OK {
+                (response.content_length(), None)
+            } else {
+                return Err(Error::Network("Invalid HTTP audio response".into()));
+            };
+            if let (Some(expected), Some(length)) = (expected, response.content_length())
+                && expected != length
+            {
+                return Err(Error::Network(
+                    "Truncated or oversized HTTP range response".into(),
+                ));
             }
             let mut bytes = Vec::new();
             while let Some(chunk) = response.chunk().await.map_err(network)? {
@@ -126,6 +154,18 @@ impl Fetch {
                 }
                 bytes.extend_from_slice(&chunk);
             }
+            if expected.is_some_and(|expected| expected != bytes.len() as u64) {
+                return Err(Error::Network(
+                    "Truncated or oversized HTTP range response".into(),
+                ));
+            }
+            // A complete 200 response has reached EOF, including chunked
+            // responses without Content-Length. Do not request another range.
+            let total = if status == reqwest::StatusCode::OK {
+                Some(bytes.len() as u64)
+            } else {
+                total
+            };
             Ok(Object { bytes, total })
         };
         tokio::select! {
@@ -138,6 +178,25 @@ impl Fetch {
     pub fn read(&self, url: &str, range: Option<(u64, u64)>) -> Result<Object, Error> {
         self.runtime.block_on(self.get(url, range))
     }
+}
+
+fn decimal(value: &str) -> Option<u64> {
+    (!value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+        .then(|| value.parse().ok())
+        .flatten()
+}
+
+fn content_range_parts(value: &str) -> Option<(u64, u64, Option<u64>)> {
+    let (range, total) = value.strip_prefix("bytes ")?.split_once('/')?;
+    let (start, end) = range.split_once('-')?;
+    let start = decimal(start)?;
+    let end = decimal(end)?;
+    let total = if total == "*" {
+        None
+    } else {
+        Some(decimal(total)?)
+    };
+    (end >= start && total.is_none_or(|total| end < total)).then_some((start, end, total))
 }
 
 fn network(error: reqwest::Error) -> Error {
@@ -174,7 +233,14 @@ impl RangeSource {
 
 impl Read for RangeSource {
     fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
-        if out.is_empty() || self.total.is_some_and(|total| self.at >= total) {
+        if out.is_empty() {
+            return Ok(0);
+        }
+        if let Err(error) = self.fetch.check() {
+            *self.error.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
+            return Err(io::Error::other("Audio stream read cancelled"));
+        }
+        if self.total.is_some_and(|total| self.at >= total) {
             return Ok(0);
         }
         if self.at < self.start || self.at >= self.start + self.bytes.len() as u64 {
@@ -183,6 +249,15 @@ impl Read for RangeSource {
                 Some((self.at, self.at.saturating_add(RANGE_BYTES - 1))),
             ) {
                 Ok(object) => {
+                    if let (Some(previous), Some(current)) = (self.total, object.total)
+                        && previous != current
+                    {
+                        *self.error.lock().unwrap_or_else(PoisonError::into_inner) =
+                            Some(Error::Network(
+                                "The audio stream length changed during playback".into(),
+                            ));
+                        return Err(io::Error::other("Audio stream changed"));
+                    }
                     self.start = self.at;
                     self.bytes = object.bytes;
                     self.total = object.total.or(self.total);

@@ -6,6 +6,125 @@ use tokio::net::TcpListener;
 const MP3: &[u8] = include_bytes!("../../testdata/soundcloud/tone.mp3");
 const AAC: &[u8] = include_bytes!("../../testdata/soundcloud/tone.aac");
 
+async fn reply_server(replies: Vec<Vec<u8>>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!(
+        "http://{}/audio?secret=fixture",
+        listener.local_addr().unwrap()
+    );
+    let task = tokio::spawn(async move {
+        for reply in replies {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let byte = socket.read_u8().await.unwrap();
+                request.push(byte);
+                assert!(request.len() < 8192);
+            }
+            let _ = socket.write_all(&reply).await;
+        }
+    });
+    (url, task)
+}
+
+#[tokio::test]
+async fn malformed_range_responses_fail_without_claiming_a_track_finished() {
+    let cases = [
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 1-3/4\r\nContent-Length: 3\r\n\r\nbcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-4/5\r\nContent-Length: 5\r\n\r\nabcde",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/3\r\nContent-Length: 4\r\n\r\nabcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/+4\r\nContent-Length: 4\r\n\r\nabcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\n\r\nabcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 3\r\n\r\nabc",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 5\r\n\r\nabcde",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
+        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */10\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 204 No Content\r\n\r\n",
+    ];
+    for response in cases {
+        let (url, server) = reply_server(vec![response.as_bytes().to_vec()]).await;
+        let (worker, _, _) = worker();
+        let result = worker.fetch.get(&url, Some((0, 3))).await;
+        let error = match result {
+            Ok(_) => panic!("accepted malformed response: {response}"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Network(_)), "{error}");
+        assert!(!error.to_string().contains("secret"));
+        assert!(!error.to_string().contains("fixture"));
+        server.await.unwrap();
+    }
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */0\r\nContent-Length: 0\r\n\r\n".to_vec(),
+    ]).await;
+    let (worker, _, _) = worker();
+    assert!(
+        worker.fetch.get(&url, None).await.is_err(),
+        "HLS 416 is not EOF"
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn range_source_accepts_proven_eof_and_complete_chunked_responses() {
+    for replies in [
+        vec![b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nabcd\r\n0\r\n\r\n".to_vec()],
+        vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/*\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+            b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */4\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        ],
+    ] {
+        let (url, server) = reply_server(replies).await;
+        let (worker, _, _) = worker();
+        tokio::task::spawn_blocking(move || {
+            use symphonia::core::io::MediaSource;
+            let mut source = source::RangeSource::new(worker.fetch, url, Arc::new(Mutex::new(None))).unwrap();
+            let mut body = Vec::new();
+            source.read_to_end(&mut body).unwrap();
+            assert_eq!(body, b"abcd");
+            assert_eq!(source.byte_len(), Some(4));
+            let mut extra = [0; 1];
+            assert_eq!(source.read(&mut extra).unwrap(), 0);
+        }).await.unwrap();
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn changed_stream_lengths_and_cached_read_cancellation_are_not_eof() {
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/8\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-7/9\r\nContent-Length: 4\r\n\r\nefgh".to_vec(),
+    ]).await;
+    let (worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let error = Arc::new(Mutex::new(None));
+        let mut source = source::RangeSource::new(worker.fetch, url, Arc::clone(&error)).unwrap();
+        assert!(source.read_to_end(&mut Vec::new()).is_err());
+        assert!(matches!(*error.lock().unwrap(), Some(Error::Network(_))));
+    })
+    .await
+    .unwrap();
+    server.await.unwrap();
+
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+    ]).await;
+    let (worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let error = Arc::new(Mutex::new(None));
+        let interrupt = Arc::clone(&worker.fetch.interrupt);
+        let mut source = source::RangeSource::new(worker.fetch, url, Arc::clone(&error)).unwrap();
+        interrupt.revision.store(1, Ordering::SeqCst);
+        assert!(source.read(&mut [0; 1]).is_err());
+        assert_eq!(*error.lock().unwrap(), Some(Error::Cancelled));
+    })
+    .await
+    .unwrap();
+    server.await.unwrap();
+}
+
 struct Server {
     base: String,
     requests: Arc<Mutex<Vec<String>>>,
