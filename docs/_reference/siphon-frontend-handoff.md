@@ -15,20 +15,19 @@ backend contract wins on behaviour and this file is updated to match.
 
 ## Status (2026-10-30)
 
-- Phase 1, three app directions: **published for the owner's choice. No
-  direction is approved.** A private interactive canvas (Ledger, Stage,
-  Workbench) has theme, width (1280 / 880) and state switches (ready,
-  loading, empty, Spotify down, helper off). Mockups are HTML review
-  evidence only; they are not committed and nothing in the app uses a
-  browser engine.
-- Phase 2, native implementation: not started. It starts after the choice.
+- Phase 1, app direction: **approved.** The owner chose direction **D
+  (Hybrid)**: A's top bar and a floating sidebar, B's content, player island
+  and now-playing view, C's download options, and the reactive motion
+  catalogue. `DESIGN.md` at the repository root is the reference. The
+  mockups stay outside the repository as review evidence.
+- Phase 2, native implementation: started with shared tokens and reusable
+  controls under `src/ui/`. Views are rebuilt in the order of the brief
+  (shell, Home, lists, player, Group, downloads, settings).
 - `siphon-integration-contract.md` had not arrived on any branch when this
   was written (`main` at `ac4bd07`; `siphon/cleanup`, `credits-isrc`,
   `friends-feed`, `loudness`, `soundcloud`, `youtube` inspected).
 
-## Decisions shared by all three directions
-
-These hold whichever direction is chosen.
+## Decisions carried into D
 
 - **Source colour is on the title, never a chip.** Dark theme: Spotify
   `#1ED760`, SoundCloud `#FF8A1F`, YouTube `#FF4848`. Light theme: Spotify
@@ -114,10 +113,23 @@ the backend contract decides. Each item lists what exists today.
     `Ok | Degraded(String)` so a banner can name the service and offer
     Retry.
 
+12. **Queue for the island.** The upcoming queue (at least the next three
+    items with artwork) and actions `Next`, `Previous`, `SkipTo(index)`.
+    The island animates from the queue it showed before the change, so the
+    UI keeps its own snapshot; the backend only needs to report the new
+    queue after each change, in order.
+13. **Paste-to-play.** `Resolve(url)` for Spotify, SoundCloud (including
+    private `s-` links) and YouTube links, returning `Resolving | Ready(item)
+    | Failed(reason)`. Search shows the skeleton while it resolves.
+14. **Share from anywhere.** `friends::Action::Share(NewPost)` from the
+    island, a row or a playlist, with an optional note (the composer).
+15. **Download completion.** `Summary.last_file` plus the folder, so the
+    toast's Show opens it, and per-item stems output when stems were asked.
+
 Until an item lands, its UI shows an honest unavailable or loading state in
 shipping builds and uses a fixture only under the `demo` feature.
 
-## Files the frontend expects to touch (after the choice)
+## Files the frontend expects to touch
 
 New modules under `src/ui/` (tokens, source title, row tools, shell pieces)
 and the existing views. `app.rs`, `model.rs`, `backend.rs`, `settings.rs`,
