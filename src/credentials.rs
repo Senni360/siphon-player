@@ -1478,15 +1478,42 @@ mod tests {
     async fn friends_identity_is_protected_and_revoked_independently() {
         let f = Fixture::new();
         let lease = f.store.lease(Slot::Friends);
-        lease.save_secret(b"dummy-friends-identity".to_vec()).await.unwrap();
-        f.store.lease(Slot::Shared).save(web(SHARED_CLIENT)).await.unwrap();
+        lease
+            .save_secret(b"dummy-friends-identity".to_vec())
+            .await
+            .unwrap();
+        f.store
+            .lease(Slot::Shared)
+            .save(web(SHARED_CLIENT))
+            .await
+            .unwrap();
         f.store.revoke_spotify().unwrap();
-        assert_eq!(f.restart().lease(Slot::Friends).load_secret().await.unwrap(), Some(b"dummy-friends-identity".to_vec()));
+        assert_eq!(
+            f.restart()
+                .lease(Slot::Friends)
+                .load_secret()
+                .await
+                .unwrap(),
+            Some(b"dummy-friends-identity".to_vec())
+        );
         f.store.invalidate(Slot::Friends);
-        assert_eq!(lease.save_secret(b"stale-identity".to_vec()).await, Err(Error::Stale));
+        assert_eq!(
+            lease.save_secret(b"stale-identity".to_vec()).await,
+            Err(Error::Stale)
+        );
         f.fake.lock().unwrap().delete_error = Some(Error::Locked);
-        assert_eq!(f.store.lease(Slot::Friends).clear_secret(false).await, Err(Error::Locked));
-        assert_eq!(f.restart().lease(Slot::Friends).load_secret().await.unwrap(), None);
+        assert_eq!(
+            f.store.lease(Slot::Friends).clear_secret(false).await,
+            Err(Error::Locked)
+        );
+        assert_eq!(
+            f.restart()
+                .lease(Slot::Friends)
+                .load_secret()
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     #[tokio::test]

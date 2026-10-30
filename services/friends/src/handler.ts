@@ -12,7 +12,8 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     // Vercel may have parsed the body before invoking the Node handler.
     const parsed = (req as IncomingMessage & { body?: unknown }).body;
     const requestBody = parsed === undefined ? Readable.toWeb(req) as ReadableStream :
-      typeof parsed === 'string' || Buffer.isBuffer(parsed) ? parsed : JSON.stringify(parsed);
+      Buffer.isBuffer(parsed) ? new Uint8Array(parsed) :
+      typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
     const request = new Request(`http://localhost${req.url}`, {
       method: req.method, headers,
       ...(!['GET', 'HEAD'].includes(req.method ?? 'GET') ? { body: requestBody, duplex: 'half' } : {}),

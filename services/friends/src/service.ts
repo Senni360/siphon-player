@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import type { Payload, State, Storage } from './storage.ts';
+import type { Payload, State, Storage, User } from './storage.ts';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 class HttpError extends Error { constructor(public status: number, message: string) { super(message); } }
@@ -54,7 +54,7 @@ function payload(body: Record<string, unknown>): Payload {
   return { url, source, title: text(body.title, 'title', 300), artists, artwork_url: artwork, duration_ms: Number(body.duration_ms), note: text(body.note, 'note', 280, true) };
 }
 async function body(request: Request): Promise<Record<string, unknown>> {
-  if (!request.headers.get('content-type')?.startsWith('application/json')) fail(415, 'Use application/json');
+  if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') fail(415, 'Use application/json');
   if (Number(request.headers.get('content-length')) > 16384) fail(413, 'Request too large');
   const reader = request.body?.getReader();
   if (!reader) return fail(400, 'Expected JSON object');
@@ -84,10 +84,20 @@ async function change<T>(storage: Storage, update: (state: State) => T): Promise
   return fail(503, 'Feed busy, try again');
 }
 
+function member(state: State, secretHash: string): User {
+  return state.users.find(user => user.secret_hash === secretHash) ?? fail(401, 'Sign in to the group');
+}
+
+function memberChange<T>(storage: Storage, secretHash: string, update: (state: State, user: User) => T): Promise<T> {
+  // Authorization must still hold in the revision we commit. A request that
+  // started before membership revocation cannot write after it, even on retry.
+  return change(storage, state => update(state, member(state, secretHash)));
+}
+
 export function createService(storage: Storage, inviteCode: string) {
   return async (request: Request, clientIp = 'local'): Promise<Response> => {
     try {
-      if (!inviteCode || inviteCode.length < 12) return fail(503, 'Group invite is not configured');
+      if (inviteCode.length < 12 || inviteCode.length > 256 || inviteCode.trim() !== inviteCode || /[\x00-\x1f\x7f]/.test(inviteCode)) return fail(503, 'Group invite is not configured');
       const path = new URL(request.url).pathname.replace(/^\/api/, '').replace(/\/$/, '');
       const method = request.method;
       // IP identifiers are hashed before storage. On Vercel the adapter supplies
@@ -111,14 +121,21 @@ export function createService(storage: Storage, inviteCode: string) {
       if (!bearer || !/^Bearer [a-f0-9]{64}$/.test(bearer)) return fail(401, 'Sign in to the group');
       const secret_hash = hash(bearer.slice(7));
       const state = await storage.read();
-      const user = state.users.find(u => u.secret_hash === secret_hash);
-      if (!user) return fail(401, 'Sign in to the group');
-      if (!await storage.limit(`user:${user.user_id}`, method === 'GET' ? 120 : 60, 60)) return fail(429, 'Too many requests');
+      const user = member(state, secret_hash);
+      const reads = method === 'GET';
+      if (!await storage.limit(`user:${user.user_id}:${reads ? 'read' : 'write'}`, reads ? 120 : 60, 60)) return fail(429, 'Too many requests');
       if (path === '/me' && method === 'GET') return json({ user_id: user.user_id, display_name: user.display_name });
       if (path === '/me' && method === 'PATCH') {
         const display_name = text((await body(request)).display_name, 'display_name', 40);
-        await change(storage, s => { s.users.find(u => u.user_id === user.user_id)!.display_name = display_name; });
+        await memberChange(storage, secret_hash, (_s, current) => { current.display_name = display_name; });
         return json({ user_id: user.user_id, display_name });
+      }
+      if (path === '/me' && method === 'DELETE') {
+        await memberChange(storage, secret_hash, (s, current) => {
+          s.users = s.users.filter(u => u.user_id !== current.user_id);
+          for (const post of s.posts) post.likes = post.likes.filter(id => id !== current.user_id);
+        });
+        return json({ ok: true });
       }
       if (path === '/posts' && method === 'GET') {
         const params = new URL(request.url).searchParams;
@@ -137,22 +154,23 @@ export function createService(storage: Storage, inviteCode: string) {
           .sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id));
         const page = posts.slice(0, limit);
         const last = page.at(-1);
-        return json({ posts: page.map(({ likes, ...p }) => ({ ...p, author_name: state.users.find(u => u.user_id === p.author_id)?.display_name ?? 'Friend', like_count: likes.length, liked: likes.includes(user.user_id) })),
+        return json({ posts: page.map(({ likes, ...p }) => ({ ...p, author_name: state.users.find(u => u.user_id === p.author_id)?.display_name ?? 'Former member', like_count: likes.length, liked: likes.includes(user.user_id) })),
           next_cursor: posts.length > limit && last ? Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString('base64url') : null });
       }
       if (path === '/posts' && method === 'POST') {
         const input = payload(await body(request));
         const post = { ...input, id: randomUUID(), author_id: user.user_id, created_at: Date.now(), likes: [] as string[] };
-        await change(storage, s => {
+        const author_name = await memberChange(storage, secret_hash, (s, current) => {
           if (s.posts.length >= 5000) fail(409, 'Feed is full, delete older posts');
           s.posts.push(post);
+          return current.display_name;
         });
         const { likes, ...result } = post;
-        return json({ ...result, author_name: user.display_name, like_count: likes.length, liked: false }, 201);
+        return json({ ...result, author_name, like_count: likes.length, liked: false }, 201);
       }
       const match = /^\/posts\/([a-f0-9-]{36})(\/like)?$/.exec(path);
       if (match && (method === 'DELETE' || match[2] && method === 'PUT')) {
-        await change(storage, s => {
+        await memberChange(storage, secret_hash, s => {
           const post = s.posts.find(p => p.id === match[1]);
           if (!post) return fail(404, 'Post not found');
           if (match[2]) {

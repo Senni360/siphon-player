@@ -2383,6 +2383,10 @@ impl Worker {
                         | Command::SignIn { .. }
                         | Command::SignOut
                         | Command::CancelSignIn
+                        | Command::Friends(crate::friends::Request {
+                            action: crate::friends::Action::Leave,
+                            ..
+                        })
                         | Command::Shutdown
                 )
             {

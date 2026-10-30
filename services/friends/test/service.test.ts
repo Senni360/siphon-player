@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createService, hash, validateUrl } from '../src/service.ts';
-import { MemoryStorage, RedisStorage, configuredStorage } from '../src/storage.ts';
+import { MemoryStorage, RedisStorage, configuredStorage, type Storage } from '../src/storage.ts';
 
 const invite = 'a-long-test-invite';
 const post = { url: 'https://soundcloud.com/friend/song/s-private?secret_token=s-private', source: 'soundcloud', title: 'Beat', artists: ['Friend'], artwork_url: null, duration_ms: 12345, note: 'Listen to this' };
@@ -131,4 +131,151 @@ test('Redis REST adapter uses atomic CAS and expiring counters and fails closed'
     assert.throws(() => configuredStorage({ VERCEL: '1' }));
     assert(configuredStorage({ UPSTASH_REDIS_REST_URL: 'https://redis.invalid', UPSTASH_REDIS_REST_TOKEN: 'token' }) instanceof RedisStorage);
   } finally { globalThis.fetch = original; }
+});
+
+test('Redis configuration never combines credentials from different naming schemes', () => {
+  for (const env of [
+    { KV_REST_API_URL: 'https://first.invalid', UPSTASH_REDIS_REST_TOKEN: 'second' },
+    { KV_REST_API_TOKEN: 'first', UPSTASH_REDIS_REST_URL: 'https://second.invalid' },
+    { KV_REST_API_URL: 'https://first.invalid', UPSTASH_REDIS_REST_URL: 'https://second.invalid', UPSTASH_REDIS_REST_TOKEN: 'second' },
+  ]) assert.throws(() => configuredStorage(env));
+  for (const url of ['http://redis.invalid', 'https://user:password@redis.invalid', 'https://redis.invalid?token=secret']) {
+    assert.throws(() => new RedisStorage(url, 'token'));
+  }
+});
+
+test('Redis rejects missing, malformed and corrupt replies without replacing stored data', async () => {
+  const original = globalThis.fetch;
+  let reply: unknown;
+  globalThis.fetch = (async () => new Response(JSON.stringify(reply))) as typeof fetch;
+  try {
+    const store = new RedisStorage('https://redis.invalid', 'token');
+    for (const value of [null, {}, { error: '' }, { result: false }, { result: '{}' }, { result: '{"revision":0,"users":{},"posts":[]}' }]) {
+      reply = value;
+      await assert.rejects(store.read());
+    }
+    for (const result of [null, '1', -1, false]) {
+      reply = { result };
+      await assert.rejects(store.limit('test', 1, 60));
+      await assert.rejects(store.compareAndSet(0, { revision: 1, users: [], posts: [] }));
+    }
+    reply = { result: 0 };
+    assert.equal(await store.compareAndSet(0, { revision: 1, users: [], posts: [] }), false);
+    await assert.rejects(store.limit('test', 1, 60));
+  } finally { globalThis.fetch = original; }
+});
+
+test('separate Redis-backed service instances retain posts and resolve CAS conflicts', async () => {
+  const original = globalThis.fetch;
+  let persisted: string | null = null;
+  const counters = new Map<string, number>();
+  let conflicts = 0;
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    assert.equal(init.redirect, 'error');
+    assert(init.signal);
+    const command = JSON.parse(String(init.body));
+    let result: unknown;
+    if (command[0] === 'GET') result = persisted;
+    else if (command[1].includes("redis.call('INCR'")) {
+      const key = command[3];
+      result = (counters.get(key) ?? 0) + 1;
+      counters.set(key, result as number);
+    } else {
+      const revision = persisted ? JSON.parse(persisted).revision : 0;
+      if (revision === command[4]) { persisted = command[5]; result = 1; }
+      else { conflicts++; result = 0; }
+    }
+    return new Response(JSON.stringify({ result }));
+  }) as typeof fetch;
+  try {
+    const make = () => createService(new RedisStorage('https://redis.invalid', 'token'), invite);
+    const first = make();
+    const request = (path: string, method: string, data?: unknown, secret?: string) => new Request(`https://test/api${path}`, {
+      method, headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      body: data === undefined ? undefined : JSON.stringify(data),
+    });
+    const joined = await first(request('/join', 'POST', { invite_code: invite, display_name: 'A' }));
+    const { secret } = await joined.json() as { secret: string };
+    const second = make();
+    const writes = await Promise.all([first, second].map(service => service(request('/posts', 'POST', post, secret))));
+    assert(writes.every(response => response.status === 201));
+    assert(conflicts > 0);
+    const feed = await make()(request('/posts', 'GET', undefined, secret));
+    const data = await feed.json() as { posts: { url: string }[] };
+    assert.equal(data.posts.length, 2);
+    assert(data.posts.every(p => p.url === post.url));
+    assert(!persisted!.includes(secret));
+  } finally { globalThis.fetch = original; }
+});
+
+test('read and write budgets are independent and invalid configuration fails closed', async () => {
+  const { call, join } = fixture();
+  const a = await join('A');
+  for (let i = 0; i < 60; i++) assert.equal((await call('/me', 'GET', undefined, a.secret)).status, 200);
+  for (let i = 0; i < 60; i++) assert.equal((await call('/me', 'PATCH', { display_name: 'B' }, a.secret)).status, 200);
+  assert.equal((await call('/me', 'PATCH', { display_name: 'C' }, a.secret)).status, 429);
+  for (const code of ['too short', 'x'.repeat(257), 'space around invite ', 'control\ncharacters']) {
+    const service = createService(new MemoryStorage(), code);
+    assert.equal((await service(new Request('https://test/api/me'))).status, 503);
+  }
+});
+
+test('leaving revokes the bearer, removes hearts and retains shared posts without the old name', async () => {
+  const { call, join, store } = fixture();
+  const a = await join('Alice');
+  const b = await join('Bob');
+  const created = await call('/posts', 'POST', post, a.secret);
+  const path = `/posts/${created.body.id}/like`;
+  await call(path, 'PUT', undefined, a.secret);
+  await call(path, 'PUT', undefined, b.secret);
+  assert.equal((await call('/me', 'DELETE', undefined, a.secret)).status, 200);
+  assert.equal((await call('/me', 'GET', undefined, a.secret)).status, 401);
+  assert.equal((await call('/posts', 'POST', post, a.secret)).status, 401);
+  const remaining = (await call('/posts', 'GET', undefined, b.secret)).body.posts;
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0].url, post.url);
+  assert.equal(remaining[0].author_name, 'Former member');
+  assert.equal(remaining[0].like_count, 1);
+  assert.equal((await store.read()).users.some(u => u.user_id === a.user_id), false);
+});
+
+test('requests authenticated before leave cannot commit a mutation after revocation', async () => {
+  for (const action of ['post', 'rename', 'like', 'delete']) {
+    const memory = new MemoryStorage();
+    let block = false;
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    const storage: Storage = {
+      read: () => memory.read(),
+      async compareAndSet(previous, next) {
+        if (block) { block = false; entered(); await resume; }
+        return memory.compareAndSet(previous, next);
+      },
+      limit: (key, max, seconds) => memory.limit(key, max, seconds),
+    };
+    const service = createService(storage, invite);
+    const request = (path: string, method: string, data?: unknown, secret?: string) => service(new Request(`https://test/api${path}`, {
+      method, headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      body: data === undefined ? undefined : JSON.stringify(data),
+    }));
+    const joined = await request('/join', 'POST', { invite_code: invite, display_name: 'A' });
+    const { secret } = await joined.json() as { secret: string };
+    const created = await request('/posts', 'POST', post, secret);
+    const { id } = await created.json() as { id: string };
+    block = true;
+    const pending = action === 'post' ? request('/posts', 'POST', post, secret) :
+      action === 'rename' ? request('/me', 'PATCH', { display_name: 'Too late' }, secret) :
+      action === 'like' ? request(`/posts/${id}/like`, 'PUT', undefined, secret) :
+      request(`/posts/${id}`, 'DELETE', undefined, secret);
+    await started;
+    assert.equal((await request('/me', 'DELETE', undefined, secret)).status, 200);
+    release();
+    assert.equal((await pending).status, 401, action);
+    const state = await memory.read();
+    assert.equal(state.posts.length, 1);
+    assert.equal(state.posts[0].likes.length, 0);
+    assert.equal(state.users.length, 0);
+  }
 });

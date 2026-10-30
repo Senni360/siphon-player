@@ -13,7 +13,10 @@ pub enum Action {
         display_name: String,
     },
     Rename(String),
+    /// Forget the credential on this device, including while offline.
     Leave,
+    /// Revoke group membership remotely, then forget the device credential.
+    LeaveGroup,
     Refresh,
     More,
     Share(NewPost),
@@ -34,6 +37,7 @@ impl std::fmt::Debug for Action {
             Self::Join { .. } => "Friends::Join",
             Self::Rename(_) => "Friends::Rename",
             Self::Leave => "Friends::Leave",
+            Self::LeaveGroup => "Friends::LeaveGroup",
             Self::Refresh => "Friends::Refresh",
             Self::More => "Friends::More",
             Self::Share(_) => "Friends::Share",
@@ -93,20 +97,24 @@ impl Model {
             self.recovery_secret = None;
             return None;
         }
-        if self.busy && !matches!(action, Action::Leave) {
+        if self.busy && !matches!(action, Action::Leave | Action::LeaveGroup) {
             return None;
         }
-        if matches!(action, Action::Leave) {
-            let generation = self.generation.wrapping_add(1);
+        if matches!(action, Action::More) && self.next_cursor.is_none() {
+            return None;
+        }
+        let generation = self.generation.wrapping_add(1);
+        if matches!(
+            action,
+            Action::Leave | Action::LeaveGroup | Action::Join { .. }
+        ) {
             *self = Self {
                 generation,
                 restored: true,
                 ..Self::default()
             };
         }
-        if matches!(action, Action::More) && self.next_cursor.is_none() {
-            return None;
-        }
+        self.generation = generation;
         self.busy = true;
         self.error = None;
         match &action {
@@ -194,7 +202,14 @@ impl Model {
                         self.next_poll = Some(Instant::now());
                         return;
                     }
-                    Update::Renamed(profile) => self.profile = Some(profile),
+                    Update::Renamed(profile) => {
+                        for post in &mut self.posts {
+                            if post.author_id == profile.user_id {
+                                post.author_name.clone_from(&profile.display_name);
+                            }
+                        }
+                        self.profile = Some(profile);
+                    }
                     Update::Left => {}
                     Update::Feed(feed, append) => {
                         if append {
@@ -226,8 +241,9 @@ impl Model {
     }
 }
 
-/// One ordered actor on the existing backend runtime. Serial operations stop
-/// a late restoration or join from overwriting a leave or a newer identity.
+/// One actor on the existing backend runtime. A newer request (only sign-out
+/// actions are allowed while busy) cancels pending network work immediately.
+/// Credential leases prevent a cancelled join from saving after sign-out.
 #[derive(Default)]
 pub struct Runtime {
     identity: Option<Identity>,
@@ -240,13 +256,35 @@ impl Runtime {
         credentials: CredentialStore,
         emit: impl Fn(Event) + Send + 'static,
     ) -> tokio::sync::mpsc::UnboundedSender<(Request, Http)> {
+        Self::spawn_with_client(credentials, emit, Client::configured)
+    }
+
+    pub(super) fn spawn_with_client(
+        credentials: CredentialStore,
+        emit: impl Fn(Event) + Send + 'static,
+        client: impl Fn(Http) -> Result<Client, String> + Send + 'static,
+    ) -> tokio::sync::mpsc::UnboundedSender<(Request, Http)> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(Request, Http)>();
         tokio::spawn(async move {
             let mut runtime = Self::default();
-            while let Some((request, http)) = rx.recv().await {
+            let mut pending = None;
+            loop {
+                let Some((request, http)) = (match pending.take() {
+                    Some(request) => Some(request),
+                    None => rx.recv().await,
+                }) else {
+                    break;
+                };
                 let generation = request.generation;
-                let result = runtime.execute(request.action, &http, &credentials).await;
-                emit(Event { generation, result });
+                tokio::select! {
+                    result = runtime.execute(request.action, client(http), &credentials) => {
+                        emit(Event { generation, result });
+                    }
+                    newer = rx.recv() => {
+                        let Some(newer) = newer else { break; };
+                        pending = Some(newer);
+                    }
+                }
             }
         });
         tx
@@ -255,7 +293,7 @@ impl Runtime {
     async fn execute(
         &mut self,
         action: Action,
-        http: &Http,
+        client: Result<Client, String>,
         credentials: &CredentialStore,
     ) -> Result<Update, String> {
         if matches!(action, Action::Leave) {
@@ -270,7 +308,7 @@ impl Runtime {
                 .map_err(|_| "Friends sign-out could not be saved. Try Leave again.".to_owned())?;
             return Ok(Update::Left);
         }
-        let client = Client::configured(http.clone())?;
+        let client = client?;
         if matches!(action, Action::Join { .. }) {
             let Action::Join {
                 invite_code,
@@ -279,18 +317,29 @@ impl Runtime {
             else {
                 unreachable!()
             };
-            let identity = client.join(&invite_code, &display_name).await?;
+            // Join is a new identity boundary, even if its request fails.
+            // Revoke any prior local identity before issuing the request.
+            self.identity = None;
+            self.cursor = None;
+            self.loaded = true;
             credentials.invalidate(Slot::Friends);
+            let lease = credentials.lease(Slot::Friends);
+            let cleared = lease.clear_secret(true).await;
+            let identity = client.join(&invite_code, &display_name).await?;
             let bytes = serde_json::to_vec(&identity)
                 .map_err(|_| "Friends identity could not be encoded.")?;
-            let saved = credentials.lease(Slot::Friends).save_secret(bytes).await;
+            // A failed removal may still have safely written the revocation
+            // marker. Never remember a new identity over an uncertain removal.
+            let saved = match cleared {
+                Ok(()) => lease.save_secret(bytes).await,
+                Err(error) => Err(error),
+            };
             let profile = Profile {
                 user_id: identity.user_id.clone(),
                 display_name: display_name.trim().to_owned(),
             };
             let secret = identity.secret.clone();
             self.identity = Some(identity);
-            self.loaded = true;
             let warning = saved.err().map(|_| "Joined for this session. The protected credential store could not remember it. Keep your secret before leaving.".into());
             return Ok(Update::Joined(profile, secret, warning));
         }
@@ -334,6 +383,23 @@ impl Runtime {
             Action::Delete(id) => {
                 client.delete(identity, &id).await?;
                 Update::Changed
+            }
+            Action::LeaveGroup => {
+                client.leave(identity).await.map_err(|_| {
+                    "Leaving the group could not be confirmed. Retry your saved identity, or forget this device.".to_owned()
+                })?;
+                self.identity = None;
+                self.cursor = None;
+                credentials.invalidate(Slot::Friends);
+                credentials
+                    .lease(Slot::Friends)
+                    .clear_secret(false)
+                    .await
+                    .map_err(|_| {
+                        "Left the group, but credential removal failed. Forget this device again."
+                            .to_owned()
+                    })?;
+                Update::Left
             }
             Action::Leave | Action::Join { .. } | Action::DismissSecret => unreachable!(),
         };

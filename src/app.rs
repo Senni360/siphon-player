@@ -11684,7 +11684,11 @@ impl App {
             }
             Action::Open(page) => self.open(page),
             Action::Friends(action) => {
-                if !self.offline
+                if (!self.offline
+                    || matches!(
+                        action,
+                        crate::friends::Action::Leave | crate::friends::Action::DismissSecret
+                    ))
                     && let Some(request) = self.friends_feed.begin(action)
                 {
                     self.backend.send(Command::Friends(request));
@@ -22265,6 +22269,24 @@ mod tests {
         );
         app.reveal_theme_changes = false;
         app
+    }
+
+    #[test]
+    fn friends_can_forget_identity_and_dismiss_secret_while_offline() {
+        let ctx = egui::Context::default();
+        let mut app = test_app("friends-offline-leave");
+        app.offline = true;
+        app.friends_feed.profile = Some(crate::friends::Profile {
+            user_id: "fixture-user".into(),
+            display_name: "Fixture".into(),
+        });
+        app.friends_feed.recovery_secret = Some("fixture-secret".into());
+        app.apply(Action::Friends(crate::friends::Action::DismissSecret), &ctx);
+        assert!(app.friends_feed.recovery_secret.is_none());
+        app.apply(Action::Friends(crate::friends::Action::Leave), &ctx);
+        assert!(app.friends_feed.profile.is_none());
+        assert!(app.friends_feed.posts.is_empty());
+        app.backend.shutdown();
     }
 
     /// Friend activity takes the right panel's place: opening it closes the
