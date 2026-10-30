@@ -349,7 +349,7 @@ The isolated checkout is `/workspace/work/windows-cross-candidate`, branch
 `siphon/windows-cross-probe`, starting at `784e08f`. Its own `target/` is separate
 from every other checkout. Tool setup is `/workspace/work/windows-cross-env.sh`;
 SDK status is `/workspace/work/windows-cross-tools/cache.log`. The application
-cross-build is running at exact source `c2e5e1396ea7f8e0188f70d1eee02d7eb3e2b210`;
+cross-build completed at exact source `c2e5e1396ea7f8e0188f70d1eee02d7eb3e2b210`;
 its log and source/status record are `/workspace/work/logs/windows-cross-probe.log`
 and `windows-cross-probe.json`. Inspect live processes and logs before reusing
 this checkout. The initial build only tests
@@ -364,9 +364,40 @@ host. Correction `698b8fd` makes the existing resource build dependency availabl
 to every host and selects embedding by target OS, preserving native Windows
 behavior. Linux all-feature/all-target clippy, formatting and dependency-policy
 checks pass. A separate minimal linker probe produced an x64 PE importing only
-Windows system DLLs. That probe is not Siphon; the application cross-build is
-still pending and has not been executed on Windows. Missing SDK PDB warnings
+Windows system DLLs. That minimal probe is not Siphon. The application cross-build has since
+completed successfully in 7 minutes 47 seconds, but has not been executed on Windows. Missing SDK PDB warnings
 affect debugger symbols, not a runtime DLL dependency.
+
+### Cross-build result, 20:00 Amsterdam
+
+The compatibility build produced
+`target/x86_64-pc-windows-msvc/release/siphon.exe` in the isolated cross checkout:
+
+- Exact source: `c2e5e1396ea7f8e0188f70d1eee02d7eb3e2b210`.
+- Size: 33,432,064 bytes.
+- SHA-256: `7205de1de8275aba82bfd2a1132e81e7de4ad4e06bb51b83368b2a62fb24e897`.
+- Windows x64 GUI PE, unsigned, with icon/group-icon/version resources; product
+  and file identity are Siphon 0.14.2. All 28 direct/delayed imports are Windows
+  system DLLs; no separately installed MSVC runtime is required.
+- `pefile` reports no structural warnings. No Windows execution, live account,
+  audio-device or installed-helper check is implied by file inspection.
+
+The detailed inspection is `/workspace/work/logs/windows-cross-probe-pe.json`,
+created by `/workspace/work/windows-cross-tools/inspect-candidate.py`. Source
+cleanliness and exact HEAD were checked before and after the build. The ordinary
+candidate workflow has still produced no artifact. This cross-built probe has
+not been packaged for owner delivery because it lacks the final frontend.
+
+For the 20:30 integration, preserve the now-warm cross checkout/target. After its
+build process has exited (it has at this checkpoint), check out the accepted
+combined source there on a new branch, without discarding another writer's work.
+Use `source /workspace/work/windows-cross-env.sh`, then
+`cargo xwin build --locked --release --target x86_64-pc-windows-msvc --bin siphon`.
+Re-run PE inspection against the exact new HEAD, and create a fresh portable
+package with that executable, license, portable marker, launch instructions,
+checksum and truthful source/build-method manifest. Never stamp the probe's old
+binary with the new HEAD. Retain the existing Linux checks; this fallback changes
+how the Windows binary is produced, not what the final validation can claim.
 
 ## Extra AI model
 
