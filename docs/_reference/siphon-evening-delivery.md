@@ -6,6 +6,58 @@ nav_exclude: true
 
 # Evening delivery, 30 October 2026
 
+## Delivered combined Windows candidate
+
+[Download the private Windows ZIP](https://drive.google.com/file/d/1x_y7Pwni_60U1gicWuZLX4hzkvmVRxJ0/view?usp=drivesdk).
+Extract the whole ZIP into a writable folder, then open `Siphon/siphon.exe`.
+No compiler or branch selection is required. It is in the owner's connected
+Drive, with `shared=false` and only the owner permission. The
+[combined UI gallery](https://drive.google.com/file/d/1FtFy8PnhBZl0z8j65n4G-3BiJv-bNYi0/view?usp=drivesdk)
+contains the inspected Linux fixture renders, not Windows execution evidence.
+
+The package was freshly rebuilt at exact source
+`4a303b1f955897dc9cf7fcc1ef9d21180db48a23`, successfully promoted to main by an
+atomic fast-forward from `1ceb150`. The new branch
+`siphon/combined-main-20261030` preserves the same accepted source. No existing
+published branch was reset or force-pushed. Later delivery-documentation commits
+do not change the executable's source manifest or application code.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `siphon.exe` | 33,548,800 | `4939dc11ee382bd8a937ca21b26fc46f9c02e9864943596b34b2499e92d40b86` |
+| `Siphon-Windows-x64-4a303b1f9558.zip` | 15,370,517 | `7eff67450d9222d2739180b7d1297391bff1e165d91f8df964648fd189fc5e47` |
+
+The exact-head MSVC release rebuild finished in 1m49s. Source was clean and
+unchanged before and after. The unsigned Windows x64 GUI PE has Siphon 0.14.2
+icon/group-icon/version resources, only Windows-system DLL imports, no separate
+MSVC runtime and no PE parser warnings. Missing SDK debugger PDB messages affect
+debug symbols, not runtime DLLs. The fresh ZIP contains the executable, LICENSE,
+portable marker, OPEN-ME instructions, `build.json` and `SHA256SUMS.txt`.
+
+The uploaded ZIP was downloaded again through the connected Drive account.
+Its full SHA-256, ZIP integrity, every inner checksum, executable hash and exact
+manifest commit all match the built package. Local build/PE/package evidence is
+under `/workspace/work/logs/windows-combined-*`; independent download verification
+is `final-delivery-readback.json`. The package remains under
+`/workspace/work/delivery` in the managed cloud. It is the actual combined app,
+not either earlier compatibility probe and not a demo-only executable.
+
+GitHub release-asset uploads returned HTTP 401 even though source pushes and
+release metadata worked. The empty unpublished draft created for that attempted
+delivery was removed after verifying it contained zero assets. No release or tag
+was published. Drive delivery required no new credential, public sharing or
+service deployment. GitHub Windows runners still have the separate account
+billing/spending block; this binary was built in cloud without those runners.
+
+**Remaining verification:** no local Windows agent acknowledgment or native
+launch/account/audio/helper result has arrived. The manifest truthfully records
+`native_windows_tested: false`. This package includes all accepted published
+frontend/backend work and cleanup `adb6157`; it does not invent unpublished
+helper work. BPM/key analysis and new helper formats/stems remain unavailable.
+Keep the existing installed helper and use the portable folder separately.
+The owner's 22:00 verification should inspect this delivered package and any
+new local-agent evidence, not restart integration or retry refused builds.
+
 ## Combined integration, 20:30 run
 
 Promotion follow-up: main advanced to `1ceb15035bcf4ec41be4b9a9a372aa932e982ef9`
@@ -26,10 +78,9 @@ on Windows. The final promotion source is being rebuilt again so the delivered
 manifest identifies the exact accepted commit, not a relabeled earlier file.
 
 This managed cloud cannot write the chat's designated `/codex/.../output`
-directory (OS permission denied; no sudo is installed). The private delivery
-fallback is an **unpublished draft** with assets in the verified private GitHub
-repository. It creates no public release, published tag or service deployment.
-The owner only needs to download/extract the ZIP and open `Siphon/siphon.exe`.
+directory (OS permission denied; no sudo is installed). A private unpublished
+GitHub draft was attempted, but its upload endpoint rejected the configured
+authentication. The completed private Drive fallback is recorded above.
 
 The accepted frontend milestone is `808bc3147b1f3c101846ac5a14b63dfeb5ea37a4`
 on `claude/focused-rubin-pxfk32` (last code commit `37fbbd8`). Claude explicitly
