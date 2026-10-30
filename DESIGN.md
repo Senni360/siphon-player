@@ -58,8 +58,8 @@ Source colours, on song titles only, never as chips:
 
 | Source | Dark | Light | On artwork (now playing, share hero) |
 | --- | --- | --- | --- |
-| Spotify | `#1ED760` | `#0A8A3F` | `#3EE27A` |
-| SoundCloud | `#FF8A1F` | `#C25100` | `#FF9A3D` |
+| Spotify | `#1ED760` | `#097F3A` | `#3EE27A` |
+| SoundCloud | `#FF8A1F` | `#B84D00` | `#FF9A3D` |
 | YouTube | `#FF4848` | `#CC1F26` | `#FF5A5A` |
 
 Orange leans yellow and red leans crimson so they never read as the same

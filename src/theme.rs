@@ -444,6 +444,7 @@ fastframe_icons::icons! {
     pub enum Icon {
         prefix: "spotifast-icon-",
         directory: "../assets/icons/",
+        Activity => "activity",
         ArrowLeft => lucide "arrow-left",
         ArrowRight => "arrow-right",
         AudioLines => "audio-lines",
@@ -472,6 +473,7 @@ fastframe_icons::icons! {
         Eye => "eye",
         EyeOff => "eye-off",
         ExternalLink => lucide "external-link",
+        FileText => "file-text",
         Gamepad => "gamepad-2",
         Globe => "globe",
         GripVertical => "grip-vertical",
