@@ -52,6 +52,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         || (app.is_connected() && app.user.is_none());
     if !signed_in {
         player_bar::end_tint_session(ctx);
+        // Nothing an account saw survives into the next one.
+        player_bar::forget_island(ctx);
+        row_tools::forget(ctx);
+        now_playing::close(ctx);
         login::show(app, ui, connecting);
         update::show(app, ctx);
         toasts(app, ctx, 20.0);
@@ -101,7 +105,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         }
     }
     keep_room_for_panels(app, ctx);
-    row_tools::remember_last_playlist(ctx, &app.actions);
+    row_tools::remember_last_playlist(
+        ctx,
+        app.user.as_ref().map(|user| user.id.as_str()),
+        &app.actions,
+    );
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
     update::show(app, ctx);
