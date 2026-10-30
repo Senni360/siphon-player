@@ -19,6 +19,7 @@ pub mod player_bar;
 mod prerelease;
 pub mod queue;
 pub mod radio;
+pub(crate) mod row_tools;
 pub mod search;
 pub mod settings;
 pub mod show;
@@ -91,6 +92,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         }
     }
     keep_room_for_panels(app, ctx);
+    row_tools::remember_last_playlist(ctx, &app.actions);
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
     update::show(app, ctx);
