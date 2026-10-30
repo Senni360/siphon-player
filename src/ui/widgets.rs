@@ -1408,15 +1408,24 @@ fn item_menu_at(
 /// SoundCloud shares only the permalink returned by its catalogue.
 fn soundcloud_link_menu(ui: &mut Ui, app: &mut App, url: Option<&str>) {
     let palette = app.palette;
+    let youtube = url.and_then(crate::youtube::parse).is_some();
     for (icon, label, open) in [
         (
             Icon::Copy,
-            gettext(app.locale, "Copy SoundCloud link"),
+            if youtube {
+                std::borrow::Cow::Borrowed("Copy YouTube link")
+            } else {
+                gettext(app.locale, "Copy SoundCloud link")
+            },
             false,
         ),
         (
             Icon::ExternalLink,
-            gettext(app.locale, "Open on SoundCloud"),
+            if youtube {
+                std::borrow::Cow::Borrowed("Open on YouTube")
+            } else {
+                gettext(app.locale, "Open on SoundCloud")
+            },
             true,
         ),
     ] {

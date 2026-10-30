@@ -10,6 +10,15 @@ pub(super) struct State {
 }
 
 impl App {
+    /// Install explicitly invented library states without disk or helper work.
+    #[cfg(feature = "demo")]
+    pub fn set_demo_youtube_likes(&mut self, likes: Loadable<Likes>) {
+        self.youtube.generation = self.youtube.generation.wrapping_add(1);
+        self.youtube.account = self.user_id().map(str::to_owned);
+        self.youtube.likes = likes;
+        self.refresh_youtube_likes_page();
+    }
+
     pub fn youtube_likes(&self) -> Option<&[Track]> {
         if self.youtube.account.as_deref() != self.user_id() {
             return None;
