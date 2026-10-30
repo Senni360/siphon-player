@@ -520,7 +520,7 @@ mod tests {
         use std::io::Write;
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!(
-            "http://{}/test?grant=private",
+            "http://{}/test?grant=probe-private-grant-83a719",
             listener.local_addr().unwrap()
         );
         let thread = std::thread::spawn(move || {
@@ -564,7 +564,13 @@ mod tests {
         ] {
             let (url, server) = serve(response);
             let error = range(&client, &url, 0, None).unwrap_err();
-            assert!(!format!("{error:?}").contains("private"));
+            // Debug backtraces can contain anyhow::__private. Check the actual
+            // fixture grant and URL, including the displayed error chain.
+            for rendered in [format!("{error:?}"), format!("{error:#}")] {
+                assert!(!rendered.contains("probe-private-grant-83a719"));
+                assert!(!rendered.contains("grant="));
+                assert!(!rendered.contains(&url));
+            }
             server.join().unwrap();
         }
     }
@@ -627,15 +633,12 @@ mod tests {
             .timeout(Duration::from_secs(1))
             .build()
             .unwrap();
-        let error = request(
-            &client,
-            &format!("http://{address}/test?grant=private"),
-            0,
-            1,
-            None,
-        )
-        .unwrap_err();
-        assert!(!format!("{error:?}").contains("private"));
-        assert!(!format!("{error:?}").contains("grant="));
+        let url = format!("http://{address}/test?grant=probe-private-grant-83a719");
+        let error = request(&client, &url, 0, 1, None).unwrap_err();
+        for rendered in [format!("{error:?}"), format!("{error:#}")] {
+            assert!(!rendered.contains("probe-private-grant-83a719"));
+            assert!(!rendered.contains("grant="));
+            assert!(!rendered.contains(&url));
+        }
     }
 }
