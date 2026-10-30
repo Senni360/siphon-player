@@ -162,7 +162,10 @@ mod tests {
             following: super::super::following::Snapshot {
                 items: vec![super::super::following::Item {
                     kind: super::super::following::Kind::Reposted,
-                    by: Artist { uri: "soundcloud:user:42".into(), ..Default::default() },
+                    by: Artist {
+                        uri: "soundcloud:user:42".into(),
+                        ..Default::default()
+                    },
                     created_at: "2026-10-30T12:00:00Z".into(),
                     content: super::super::following::Content::Track(track(1)),
                 }],
@@ -197,7 +200,8 @@ mod tests {
 
     #[test]
     fn old_library_snapshots_default_to_unloaded_social_data() {
-        let snapshot: Snapshot = serde_json::from_str(r#"{"likes":[],"likes_loaded":true}"#).unwrap();
+        let snapshot: Snapshot =
+            serde_json::from_str(r#"{"likes":[],"likes_loaded":true}"#).unwrap();
         assert!(!snapshot.reposts.loaded);
         assert!(!snapshot.following.loaded);
     }

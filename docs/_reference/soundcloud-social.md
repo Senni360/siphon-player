@@ -20,7 +20,7 @@ feed. Public-profile connections report a **Connect SoundCloud** state.
 
 The SoundCloud web application's endpoint table, fetched from
 `https://soundcloud.com/` and its
-`https://a-v2.sndcdn.com/assets/55-4f297086.js` bundle on 2026-10-30, defines
+`https://a-v2.sndcdn.com/assets/55-c7bcef92.js` bundle on 2026-10-30, defines
 `stream` as GET `stream` on api-v2. This is the following feed. The table also
 defines `stream/posts`, `stream/notifications`, `activities` and
 `activities/:filter`; those are not requested here.
@@ -29,10 +29,15 @@ Reposts use PUT or DELETE `me/track_reposts/:id` and
 `me/playlist_reposts/:id`. Library refresh reads both corresponding `/ids`
 endpoints with `limit=200`, following their cursors. Feed reads use GET
 `stream?limit=50&linked_partitioning=1`, then its `next_href`. Only cursors on
-the same API origin and the expected endpoint are accepted. These requests
+the same API origin and the expected endpoint are accepted. Returned social
+cursors are validated before caching, normalized to absolute URLs and stripped
+of credential parameters and fragments. A refresh counts distinct posts when
+catching up to cached pages, so overlapping pages cannot truncate the feed.
+These requests
 use the existing session authorization and configured proxy. Writes use the
 existing no-redirect, no-retry client. No session credentials go to artwork
-hosts, and expired sessions do not fall back to anonymous social requests.
+hosts, and expired sessions do not fall back to anonymous social requests,
+including requests already waiting for a transport slot.
 
 The existing `soundcloud-library/<user-id>-session.json` cache now contains
 repost IDs and loaded feed pages as optional, backward-compatible fields.
@@ -72,9 +77,12 @@ then `created_at`, and from `playback_count`. Missing values stay absent,
 including in older caches. Other source adapters can fill the same fields
 when their data is available; no popularity-to-play-count conversion is used.
 
-SoundCloud's wire `Track` also retains `label_name` and `publisher_metadata`:
+The shared `Track` also retains optional `label_name` and `publisher_metadata`:
 `isrc`, `artist`, `album_title`, `release_title`, `writer_composer`,
-`publisher`, `p_line`, and `upc_or_ean`, all optional strings. Artist conversion
+`publisher`, `p_line`, and `upc_or_ean`, all optional strings. The wire and shared
+models use the same `PublisherMetadata` type. ISRC is also copied to the common
+`Track.external_ids.isrc` field; no catalogue match is implied by that metadata.
+These fields survive mixed-playlist and account-cache round trips. Artist conversion
 continues using the publisher artist when available. The existing artwork
 conversion supplies the `-t500x500` variant to the common image selector,
 including large cover views.

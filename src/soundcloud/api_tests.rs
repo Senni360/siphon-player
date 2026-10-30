@@ -6,18 +6,117 @@ const OLD_ID: &str = "00000000000000000000000000000000";
 const NEW_ID: &str = "11111111111111111111111111111111";
 
 #[tokio::test]
+async fn waiting_social_reads_stop_when_the_session_expires_or_changes() {
+    for revoked in [false, true] {
+        let (client, task) = server(Vec::new()).await;
+        let permits = client.shared.limiter.acquire_many(4).await.unwrap();
+        let read = client.following_feed(None);
+        tokio::pin!(read);
+        tokio::select! {
+            biased;
+            result = &mut read => panic!("the request must wait for a slot: {result:?}"),
+            () = tokio::task::yield_now() => {}
+        }
+        if revoked {
+            client.revoke();
+        } else {
+            client.expire_session();
+        }
+        drop(permits);
+        let result = read.await;
+        assert!(if revoked {
+            matches!(result, Err(Error::NotSignedIn))
+        } else {
+            matches!(result, Err(Error::SessionExpired))
+        });
+        assert!(task.await.unwrap().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn social_cursors_are_validated_before_caching_and_omit_credentials() {
+    let (client, task) = server(vec![ok(
+        r#"{"collection":[],"next_href":"stream?cursor=older&limit=50&oauth_token=private&access_token=private&client_id=old&secret_token=private&track_authorization=private#private"}"#,
+    )])
+    .await;
+    let page = client.following_feed(None).await.unwrap();
+    let cursor = page.next_href.unwrap();
+    let url = Url::parse(&cursor).unwrap();
+    assert_eq!(url.origin(), client.shared.api.origin());
+    assert_eq!(url.path(), "/stream");
+    assert_eq!(url.query(), Some("cursor=older&limit=50"));
+    assert!(url.fragment().is_none());
+    task.await.unwrap();
+
+    for cursor in ["https://attacker.invalid/stream", "stream/notifications"] {
+        let (client, task) = server(vec![ok(
+            json!({"collection":[],"next_href":cursor}).to_string()
+        )])
+        .await;
+        assert!(matches!(
+            client.following_feed(None).await,
+            Err(Error::InvalidUrl)
+        ));
+        assert_eq!(task.await.unwrap().len(), 1);
+    }
+}
+
+#[tokio::test]
+async fn following_catch_up_counts_distinct_posts_and_canonicalizes_loop_cursors() {
+    let item = |id| {
+        json!({
+            "type":"track", "created_at":"2026-10-30T12:00:00Z",
+            "user":{"id":10}, "track":{"id":id,"title":"Fixture"}
+        })
+    };
+    let (client, task) = server(vec![
+        ok(json!({"collection":[item(1)],"next_href":"stream?cursor=two"}).to_string()),
+        ok(json!({"collection":[item(1),item(2)],"next_href":"stream?cursor=three"}).to_string()),
+        ok(json!({"collection":[item(3)],"next_href":"stream?cursor=four"}).to_string()),
+    ])
+    .await;
+    let page = crate::backend::soundcloud_library::following(&client, None, 3)
+        .await
+        .unwrap();
+    assert_eq!(page.collection.len(), 3);
+    assert!(page.next_href.unwrap().ends_with("/stream?cursor=four"));
+    assert_eq!(task.await.unwrap().len(), 3);
+
+    let (client, task) = server(vec![ok(
+        r#"{"collection":[],"next_href":"/stream?cursor=loop&oauth_token=discarded"}"#,
+    )])
+    .await;
+    let cursor = client.shared.api.join("stream?cursor=loop").unwrap();
+    assert!(matches!(
+        client.following_feed(Some(cursor.as_str())).await,
+        Err(Error::Decode)
+    ));
+    task.await.unwrap();
+}
+
+#[tokio::test]
 async fn expired_social_reads_never_fall_back_to_public_requests() {
     for feed in [true, false] {
         let (client, task) = server(vec![
             (401, String::new(), ""),
             ok("<html>Discovery unavailable</html>"),
             (401, String::new(), ""),
-        ]).await;
-        let result = if feed { client.following_feed(None).await.map(|_| ()) }
-            else { client.reposted_ids().await.map(|_| ()) };
+        ])
+        .await;
+        let result = if feed {
+            client.following_feed(None).await.map(|_| ())
+        } else {
+            client.reposted_ids().await.map(|_| ())
+        };
         assert!(matches!(result, Err(Error::SessionExpired)));
-        assert!(matches!(client.following_feed(None).await, Err(Error::SessionExpired)));
-        assert!(matches!(client.reposted_ids().await, Err(Error::SessionExpired)));
+        assert!(matches!(
+            client.following_feed(None).await,
+            Err(Error::SessionExpired)
+        ));
+        assert!(matches!(
+            client.reposted_ids().await,
+            Err(Error::SessionExpired)
+        ));
         let requests = task.await.unwrap();
         assert_eq!(requests.len(), 3);
         assert!(requests[2].starts_with("GET /me?"));
@@ -30,12 +129,20 @@ async fn following_refresh_catches_up_to_cached_prefix_and_rejects_cursor_loops(
         ok(include_str!("../testdata/soundcloud/following.json")),
         ok(r#"{"collection":[{"type":"track","created_at":"2026-10-29T00:00:00Z","user":{"id":10},"track":{"id":2,"title":"Older"}}],"next_href":null}"#),
     ]).await;
-    let page = crate::backend::soundcloud_library::following(&client, None, 5).await.unwrap();
+    let page = crate::backend::soundcloud_library::following(&client, None, 5)
+        .await
+        .unwrap();
     assert_eq!(page.collection.len(), 5);
     assert!(page.next_href.is_none());
     assert_eq!(task.await.unwrap().len(), 2);
-    let (client, task) = server(vec![ok(r#"{"collection":[],"next_href":"stream?cursor=loop"}"#)]).await;
-    assert!(matches!(client.following_feed(Some("stream?cursor=loop")).await, Err(Error::Decode)));
+    let (client, task) = server(vec![ok(
+        r#"{"collection":[],"next_href":"stream?cursor=loop"}"#,
+    )])
+    .await;
+    assert!(matches!(
+        client.following_feed(Some("stream?cursor=loop")).await,
+        Err(Error::Decode)
+    ));
     task.await.unwrap();
 }
 
@@ -187,6 +294,12 @@ fn richer_metadata_preserves_optional_values_and_release_date_precedence() {
         Some("https://i1.sndcdn.com/artworks-fixture-t500x500.jpg")
     );
     assert_eq!(track.label_name.as_deref(), Some("Fixture label"));
+    assert_eq!(converted.label_name, track.label_name);
+    assert_eq!(converted.publisher_metadata, track.publisher_metadata);
+    assert_eq!(converted.external_ids.isrc.as_deref(), Some("USAAA2500001"));
+    let cached: crate::api::models::Track =
+        serde_json::from_slice(&serde_json::to_vec(&converted).unwrap()).unwrap();
+    assert_eq!(cached, converted);
     let publisher = track.publisher_metadata.as_ref().unwrap();
     assert_eq!(publisher.isrc.as_deref(), Some("USAAA2500001"));
     assert_eq!(publisher.album_title.as_deref(), Some("Fixture album"));
@@ -207,6 +320,8 @@ fn richer_metadata_preserves_optional_values_and_release_date_precedence() {
         serde_json::from_str(r#"{"uri":"spotify:track:old"}"#).unwrap();
     assert_eq!(old.release_date, None);
     assert_eq!(old.play_count, None);
+    assert_eq!(old.publisher_metadata, None);
+    assert_eq!(old.label_name, None);
 }
 
 #[tokio::test]
