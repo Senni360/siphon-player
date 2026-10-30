@@ -717,7 +717,13 @@ fn leading_stamp(text: &str) -> Option<(u32, usize)> {
         Some(_) => return None,
         None => 0,
     };
-    Some((minutes * 60_000 + seconds * 1_000 + fraction_ms, close + 2))
+    // Lyrics can come from a remote service or an arbitrary local tag. Reject
+    // timestamps outside the playback clock instead of panicking or wrapping.
+    let at_ms = minutes
+        .checked_mul(60_000)?
+        .checked_add(seconds.checked_mul(1_000)?)?
+        .checked_add(fraction_ms)?;
+    Some((at_ms, close + 2))
 }
 
 // ---- cache ------------------------------------------------------------------
@@ -987,6 +993,32 @@ mod tests {
         assert_eq!(lines[0].text, "Early");
         assert_eq!(lines[2].text, "Twice");
         assert_eq!(lines[3].text, "Twice");
+    }
+
+    #[test]
+    fn overflowing_lrc_timestamps_are_ignored_without_losing_valid_lines() {
+        for stamp in [
+            "[4294967295:00]",
+            "[00:4294967295]",
+            "[71582:47.296]",
+            "[71582:48]",
+        ] {
+            assert_eq!(leading_stamp(stamp), None, "{stamp}");
+            let lines = parse_lrc(&format!("{stamp}Invalid\n[00:01.25]Valid"));
+            assert_eq!(
+                lines,
+                vec![Line {
+                    at_ms: Some(1_250),
+                    text: "Valid".into(),
+                }],
+                "{stamp}"
+            );
+        }
+        assert_eq!(
+            leading_stamp("[71582:47.295]"),
+            Some((u32::MAX, "[71582:47.295]".len()))
+        );
+        assert_eq!(leading_stamp("[00:90]"), Some((90_000, 7)));
     }
 
     #[test]
