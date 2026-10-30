@@ -34,8 +34,9 @@ impl App {
         self.youtube.account = None;
         self.youtube.likes = Loadable::NotLoaded;
         self.soundcloud_pages.remove("youtube:likes");
-        self.track_cache
-            .retain(|uri, _| !crate::youtube::is_track_uri(uri));
+        self.track_cache.retain(|uri, track| {
+            !crate::youtube::is_track_uri(uri) && !crate::youtube::is_track_uri(&track.uri)
+        });
         self.backend.send(Command::CancelYouTubeMetadata);
     }
 

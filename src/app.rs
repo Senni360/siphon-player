@@ -1725,7 +1725,9 @@ impl App {
     }
 
     pub fn soundcloud_link(&self, uri: &str) -> Option<String> {
-        if let Some(url) = crate::youtube::permalink(uri) {
+        if let Some(url) =
+            crate::youtube::parse(uri).and_then(|uri| crate::youtube::permalink(&uri))
+        {
             return Some(url);
         }
         if !crate::soundcloud::is_uri(uri) {
@@ -1797,7 +1799,7 @@ impl App {
         crate::soundcloud::permalink(url).map(str::to_owned)
     }
 
-    /// Spotify Connect, Cast and Sonos cannot receive SoundCloud audio.
+    /// Spotify Connect, Cast and Sonos cannot receive external-source audio.
     pub fn can_use_spotify_outputs(&self) -> bool {
         !self
             .now_playing()
