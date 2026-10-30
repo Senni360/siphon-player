@@ -450,8 +450,10 @@ impl Worker {
                 start_position_ms,
                 autoplay,
             } => {
-                if !super::is_track_uri(&stream.uri) {
-                    return Err(Error::Unsupported("Expected a SoundCloud track URI".into()));
+                if !crate::youtube::is_external(&stream.uri) {
+                    return Err(Error::Unsupported(
+                        "Expected a SoundCloud or YouTube track URI".into(),
+                    ));
                 }
                 if !self.claimed {
                     self.output.claim()?;

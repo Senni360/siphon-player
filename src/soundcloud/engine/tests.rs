@@ -57,11 +57,20 @@ impl Server {
                     // A virtual large object exercises more than the first
                     // range without committing another binary fixture.
                     let large = MP3.repeat(16);
+                    let m4a = [
+                        include_bytes!("../../testdata/soundcloud/init.mp4").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac0.m4s").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac1.m4s").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac2.m4s").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac3.m4s").as_slice(),
+                    ]
+                    .concat();
                     let bytes: &[u8] = match path {
                         "/large.mp3" | "/expires-on-range.mp3" => &large,
                         "/tone.mp3" | "/next.mp3" => MP3,
                         "/range-only.mp3" if request.to_ascii_lowercase().contains("range: bytes=") => MP3,
                         "/tone.aac" => AAC,
+                        "/tone.m4a" => &m4a,
                         "/aac.m3u8" | "/fresh/aac.m3u8" | "/expired/aac.m3u8" => include_bytes!("../../testdata/soundcloud/aac.m3u8"),
                         "/master.m3u8" => b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=32000,CODECS=\"mp4a.40.2\"\naac.m3u8\n",
                         "/adts.m3u8" => b"#EXTM3U\n#EXTINF:0.441179,\ntone.aac\n#EXTINF:0.441179,\ntone.aac\n#EXT-X-ENDLIST\n",
@@ -314,6 +323,30 @@ async fn progressive_aac_decodes_to_non_silent_pcm() {
         finish(&mut worker);
         assert!(recorded.lock().unwrap().pcm.iter().any(|s| s.abs() > 0.01));
         worker.apply(Command::Stop).unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn canonical_youtube_and_soundcloud_m4a_use_the_same_pcm_path() {
+    let server = Server::new().await;
+    let mut stream = server.stream("/tone.m4a", Protocol::Progressive, 1223);
+    stream.mime = "audio/mp4".into();
+    let (mut worker, recorded, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        load(&mut worker, stream.clone(), 0, true);
+        finish(&mut worker);
+        let soundcloud_pcm = std::mem::take(&mut recorded.lock().unwrap().pcm);
+        assert!(soundcloud_pcm.iter().any(|sample| sample.abs() > 0.01));
+        stream.uri = "youtube:video:dQw4w9WgXcQ".into();
+        load(&mut worker, stream, 0, true);
+        finish(&mut worker);
+        assert_eq!(recorded.lock().unwrap().pcm, soundcloud_pcm);
+        assert_eq!(
+            worker.state.track.as_ref().unwrap().uri,
+            "youtube:video:dQw4w9WgXcQ"
+        );
     })
     .await
     .unwrap();
