@@ -2386,7 +2386,19 @@ fn track_row_contents(
             } else {
                 gettext(app.locale, "Save to Liked Songs")
             };
-            if theme::icon_button(&mut child, icon, 16.0, color, hover, &tooltip).clicked() {
+            // A heart pops when it is given, not when a liked song scrolls in.
+            let given = saved == Some(true);
+            let pop = child.ctx().animate_bool_with_time(
+                egui::Id::new(("row-heart-pop", row.item.uri())),
+                given,
+                crate::motion::seconds(child.ctx(), super::kit::motion::POP),
+            );
+            let size = if given {
+                16.0 * super::kit::motion::pop(pop)
+            } else {
+                16.0
+            };
+            if theme::icon_button(&mut child, icon, size, color, hover, &tooltip).clicked() {
                 app.actions
                     .push(if crate::soundcloud::is_track_uri(row.item.uri()) {
                         Action::ToggleSoundCloudLike(row.item.uri().to_owned())

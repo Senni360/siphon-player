@@ -107,6 +107,15 @@ pub fn running(ctx: &Context, id: Id) -> Option<f32> {
     Some(transition.progress(ctx))
 }
 
+/// How long a heart pops when it is given.
+pub const POP: f32 = 0.3;
+
+/// The scale of a heart popping at progress `t`: it swells by up to 30%
+/// and settles back to its size.
+pub fn pop(t: f32) -> f32 {
+    1.0 + (t.clamp(0.0, 1.0) * std::f32::consts::PI).sin() * 0.3
+}
+
 /// How long the light takes to cross a row that started playing.
 pub const SWEEP: f32 = 0.55;
 
@@ -212,6 +221,13 @@ impl Swipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pop_swells_and_settles() {
+        assert_eq!(pop(0.0), 1.0);
+        assert!((pop(1.0) - 1.0).abs() < 1e-5);
+        assert!((pop(0.5) - 1.3).abs() < 1e-5);
+    }
 
     /// A refusal swings both ways, stays within 4 points and comes to rest
     /// where it started.
