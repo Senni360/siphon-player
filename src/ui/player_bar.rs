@@ -1082,7 +1082,7 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
     }
     let lyrics_supported = app
         .now_playing()
-        .is_none_or(|now| !crate::soundcloud::is_uri(&now.uri));
+        .is_none_or(|now| !now.is_episode && crate::lyrics::supports_uri(&now.uri));
     let lyrics_button = ui
         .add_enabled_ui(lyrics_supported || app.show_lyrics_panel, |ui| {
             theme::icon_button(
@@ -1099,10 +1099,7 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
             )
         })
         .inner
-        .on_disabled_hover_text(gettext(
-            app.locale,
-            "Lyrics are unavailable for SoundCloud tracks",
-        ));
+        .on_disabled_hover_text(gettext(app.locale, "No lyrics found for this track."));
     if lyrics_button.clicked() {
         app.actions.push(Action::ToggleLyricsPanel);
     }
