@@ -1130,6 +1130,54 @@ fn nav_row(
     response
 }
 
+/// How long the open page's highlight takes to glide to a new row.
+const HIGHLIGHT_SLIDE: f32 = 0.22;
+
+/// Where the library's highlight was and is going: the open page it marks,
+/// the row it left, and when it set off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Highlight {
+    key: egui::Id,
+    from: Option<Rect>,
+    shown: Option<Rect>,
+    transition: super::kit::motion::Transition,
+}
+
+impl Highlight {
+    fn moving_at(&self, now: f64) -> bool {
+        self.from.is_some() && !self.transition.finished_at(now)
+    }
+}
+
+/// Where the highlight is drawn at `now`, for the open page `key` whose row
+/// sits at `to` (or is not on screen). Opening another page sets it gliding
+/// from where it was drawn to the new row over `duration` seconds; it
+/// follows the row while the list scrolls.
+fn glide(
+    before: Option<Highlight>,
+    key: egui::Id,
+    to: Option<Rect>,
+    now: f64,
+    duration: f32,
+) -> (Option<Rect>, Highlight) {
+    let highlight = match before {
+        Some(before) if before.key == key => before,
+        before => Highlight {
+            key,
+            from: before.and_then(|before| before.shown),
+            shown: None,
+            transition: super::kit::motion::Transition::at(now, duration),
+        },
+    };
+    let shown = to.map(|to| match highlight.from {
+        Some(from) if !highlight.transition.finished_at(now) => {
+            from.lerp_towards(&to, highlight.transition.progress_at(now))
+        }
+        _ => to,
+    });
+    (shown, Highlight { shown, ..highlight })
+}
+
 /// Keep SoundCloud identities out of Spotify folders and edit targets.
 fn soundcloud_rows(app: &App, needle: &str) -> Vec<(String, Page, Icon)> {
     if app.soundcloud_account.user().is_none() {
@@ -1736,6 +1784,10 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 (((pos.y - list_top) / row_height).round().max(0.0) as usize).min(entries.len())
             });
             let art = app.backend.art().clone();
+            // The open page's highlight is painted under the rows once they
+            // are laid out, so it can glide from the row that was open.
+            let highlight_slot = ui.painter().add(egui::Shape::Noop);
+            let mut active_rect = None;
             super::widgets::virtual_rows(ui, entries.len(), row_height, |ui, index| {
                 let entry = &entries[index];
                 if !app.settings.sidebar_compact
@@ -1790,11 +1842,13 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 // Set when the cover play button takes a click, so a double
                 // click on it does not also play from the row.
                 let mut cover_took_click = false;
+                // The open page's own fill is painted under the rows, by
+                // `highlight_slot`.
+                if active {
+                    active_rect = Some(rect);
+                }
                 if ui.is_rect_visible(rect) {
-                    if active {
-                        ui.painter()
-                            .rect_filled(rect, CornerRadius::same(6), palette.surface);
-                    } else if response.hovered() {
+                    if !active && response.hovered() {
                         ui.painter().rect_filled(
                             rect,
                             CornerRadius::same(6),
@@ -1979,6 +2033,22 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                     true,
                 );
             });
+            let key = egui::Id::new(&current_page);
+            let id = ui.id().with("library-highlight");
+            let now = ui.input(|input| input.time);
+            let duration = crate::motion::seconds(ui.ctx(), HIGHLIGHT_SLIDE);
+            let before = ui.ctx().data(|data| data.get_temp::<Highlight>(id));
+            let (shown, highlight) = glide(before, key, active_rect, now, duration);
+            ui.ctx().data_mut(|data| data.insert_temp(id, highlight));
+            if let Some(shown) = shown {
+                if highlight.moving_at(now) {
+                    ui.ctx().request_repaint();
+                }
+                ui.painter().set(
+                    highlight_slot,
+                    egui::Shape::rect_filled(shown, CornerRadius::same(6), palette.surface),
+                );
+            }
             if let Some(slot) = reorder_slot {
                 // A line in the gap the rows opened, so the eye lands
                 // where the row will.
@@ -2557,6 +2627,32 @@ pub fn liked_cover(ui: &egui::Ui, rect: Rect, radius: f32) {
 #[cfg(all(test, feature = "demo"))]
 mod ordering_tests {
     use super::*;
+
+    /// Opening another page glides the highlight from the row that was open
+    /// to the new one; it then follows its row, and arrives at once under
+    /// reduced motion or when nothing was highlighted before.
+    #[test]
+    fn the_library_highlight_glides_to_the_open_page() {
+        let row = |top: f32| Rect::from_min_size(pos2(0.0, top), vec2(200.0, 56.0));
+        let (a, b) = (egui::Id::new("a"), egui::Id::new("b"));
+        let (shown, first) = glide(None, a, Some(row(0.0)), 0.0, 0.22);
+        assert_eq!(shown, Some(row(0.0)), "nothing to glide from");
+        let (shown, gliding) = glide(Some(first), b, Some(row(112.0)), 1.0, 0.22);
+        assert_eq!(shown, Some(row(0.0)), "sets off from the old row");
+        let (shown, _) = glide(Some(gliding), b, Some(row(112.0)), 1.05, 0.22);
+        let top = shown.unwrap().top();
+        assert!(top > 0.0 && top < 112.0, "on its way: {top}");
+        let (shown, settled) = glide(Some(gliding), b, Some(row(112.0)), 1.3, 0.22);
+        assert_eq!(shown, Some(row(112.0)));
+        let (shown, _) = glide(Some(settled), b, Some(row(80.0)), 2.0, 0.22);
+        assert_eq!(
+            shown,
+            Some(row(80.0)),
+            "follows its row as the list scrolls"
+        );
+        let (shown, _) = glide(Some(settled), a, Some(row(0.0)), 2.0, 0.0);
+        assert_eq!(shown, Some(row(0.0)), "reduced motion arrives at once");
+    }
     use crate::api::models::Playlist;
     use crate::settings::Settings;
 
