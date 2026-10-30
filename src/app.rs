@@ -1,7 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
-mod extension_bridge;
 mod download_actions;
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;

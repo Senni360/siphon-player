@@ -145,6 +145,8 @@ protobuf = "3"
 # already plays local files with. AAC and ISO MP4 also decode SoundCloud's
 # ADTS and fragmented MP4 HLS streams without a second decoder stack.
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "aac", "isomp4"] }
+# Pure Rust EBU R128 integrated loudness for every external PCM source.
+ebur128 = "0.1.10"
 # Local playback's audio sink is this crate's own (src/sink.rs): librespot's
 # rodio backend unwraps the device open on the player thread, and a release
 # build aborts on panic, so it is left out. rodio supplies the mixer and the
