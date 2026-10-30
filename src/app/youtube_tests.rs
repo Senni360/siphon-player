@@ -165,6 +165,9 @@ fn youtube_likes_duplicate_load_and_round_trip_failure_cannot_undo_current_edits
         Some(crate::youtube::likes::RESTORE_WARNING)
     );
     app.youtube.write_revision = 9;
+    // Accept synthetic local events while the backend remains network-offline.
+    // Demo-mode App filtering would otherwise drop every tested callback.
+    app.offline = false;
     app.handle_backend_events(vec![
         Event::YouTubeLikesWriteFailed {
             account: "alice".into(),
