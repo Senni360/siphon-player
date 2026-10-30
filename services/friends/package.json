@@ -1,0 +1,15 @@
+{
+  "name": "siphon-friends",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/local.ts",
+    "test": "tsx --test test/*.test.ts",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  }
+}

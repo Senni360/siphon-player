@@ -799,6 +799,7 @@ pub(crate) mod soundcloud_library;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
+    Friends(crate::friends::Request),
     ResolvePlaylistLink {
         url: String,
         request: u64,
@@ -1122,6 +1123,7 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    Friends(crate::friends::Event),
     PlaylistLinkResolved {
         request: u64,
         result: Result<crate::extension_bridge::ResolvedItem, String>,
@@ -2031,6 +2033,7 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    friends_feed: Option<mpsc::UnboundedSender<(crate::friends::Request, Http)>>,
     download_jobs: download_jobs::Jobs,
     hybrid: hybrid::HybridRuntime,
     dirs: AppDirs,
@@ -2160,6 +2163,7 @@ impl Worker {
     ) -> Self {
         Self {
             hybrid: hybrid::HybridRuntime::default(),
+            friends_feed: None,
             download_jobs: download_jobs::Jobs::default(),
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
@@ -2379,6 +2383,10 @@ impl Worker {
                         | Command::SignIn { .. }
                         | Command::SignOut
                         | Command::CancelSignIn
+                        | Command::Friends(crate::friends::Request {
+                            action: crate::friends::Action::Leave,
+                            ..
+                        })
                         | Command::Shutdown
                 )
             {
@@ -2386,6 +2394,20 @@ impl Worker {
                 continue;
             }
             match command {
+                Command::Friends(request) => {
+                    let tx = self.friends_feed.get_or_insert_with(|| {
+                        let events = self.events.clone();
+                        let waker = self.waker.clone();
+                        crate::friends::Runtime::spawn(self.credentials.clone(), move |event| {
+                            let _ = events.send(Event::Friends(event));
+                            waker.wake();
+                        })
+                    });
+                    let http = crate::http::build_collection_client(&self.engine_config.proxy)
+                        .map(Http::new)
+                        .unwrap_or_else(Http::unavailable);
+                    let _ = tx.send((request, http));
+                }
                 Command::DiscoverDownloadHelper => self.discover_download_helper(),
                 Command::Download(request) => self.start_download(request),
                 Command::CancelDownload(id) => self.download_jobs.cancel(id),

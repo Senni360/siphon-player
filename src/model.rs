@@ -1270,6 +1270,7 @@ pub struct Toast {
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
+    Friends(crate::friends::Action),
     Download(Vec<PlayableItem>),
     DownloadAll {
         uri: String,
