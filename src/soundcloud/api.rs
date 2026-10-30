@@ -315,6 +315,12 @@ impl Client {
         self.get(&format!("tracks/{id}"), &[]).await
     }
 
+    /// A narrow projection for credits and recording identity. Kept independent
+    /// of catalogue rows so missing publisher fields never become guessed data.
+    pub async fn credits_metadata(&self, id: u64) -> Result<crate::credits::SoundCloudMetadata> {
+        self.get(&format!("tracks/{id}"), &[]).await
+    }
+
     /// Ordered like ids, including duplicates. Missing tracks are errors,
     /// never silently dropped, so playlist positions remain trustworthy.
     pub async fn tracks(&self, ids: &[u64]) -> Result<Vec<Track>> {

@@ -29,9 +29,24 @@ const RATE_LIMIT_RETRIES: u32 = 3;
 /// and a click on it asks again.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 
-/// Lyrics providers only support Spotify catalogue tracks and matched local files.
+/// Sources with a lyrics route. Non-Spotify sources require strict matching.
 pub fn supports_uri(uri: &str) -> bool {
-    uri.starts_with("spotify:track:") || uri.starts_with("spotify:local:")
+    uri.starts_with("spotify:track:")
+        || uri.starts_with("spotify:local:")
+        || crate::soundcloud::track_id(uri).is_some()
+        || uri.starts_with("youtube:video:")
+        || uri.starts_with("youtube:track:")
+}
+
+/// Only a catalogue URI or a verified SoundCloud ISRC mapping may ask Spotify.
+pub fn spotify_uri<'a>(uri: &'a str, matched: Option<&'a str>) -> Option<&'a str> {
+    if uri.starts_with("spotify:track:") {
+        Some(uri)
+    } else if crate::soundcloud::track_id(uri).is_some() {
+        matched.filter(|uri| uri.starts_with("spotify:track:"))
+    } else {
+        None
+    }
 }
 
 /// Track metadata used for lyrics lookup.
@@ -170,6 +185,66 @@ async fn lookup(http: &reqwest::Client, query: &Query) -> Result<Option<Lyrics>>
     .await?
     .unwrap_or_default();
     Ok(pick(candidates, query).and_then(|record| record.lyrics()))
+}
+
+/// LRCLIB for SoundCloud and YouTube. This deliberately has a separate cache
+/// namespace and never strips version, remix, live or featured-artist labels.
+pub async fn fetch_strict(
+    http: &reqwest::Client,
+    cache_dir: &Path,
+    query: &Query,
+) -> Result<Option<Lyrics>> {
+    let path = cache_dir.join(format!("strict-v1-{}.json", cache_key(query)));
+    if let Some(cached) = read_cache(&path) {
+        return Ok(cached);
+    }
+    let found = lookup_strict(http, API, query).await?;
+    write_cache(&path, &found);
+    Ok(found)
+}
+
+async fn lookup_strict(http: &reqwest::Client, api: &str, query: &Query) -> Result<Option<Lyrics>> {
+    if query.duration_ms == 0
+        || normalize(&query.artist).is_empty()
+        || normalize(&query.title).is_empty()
+    {
+        return Ok(None);
+    }
+    let duration = (f64::from(query.duration_ms) / 1000.0).to_string();
+    let params = [
+        ("artist_name", query.artist.as_str()),
+        ("track_name", query.title.as_str()),
+        ("duration", duration.as_str()),
+    ];
+    if let Some(record) = get_from::<Record>(http, api, "/get", &params).await?
+        && strict_match(&record, query)
+        && let Some(lyrics) = record.lyrics()
+    {
+        return Ok(Some(lyrics));
+    }
+    let records = get_from::<Vec<Record>>(http, api, "/search", &params[..2])
+        .await?
+        .unwrap_or_default();
+    Ok(records
+        .into_iter()
+        .filter(|record| strict_match(record, query))
+        .filter_map(|record| record.lyrics())
+        .max_by_key(|lyrics| lyrics.synced))
+}
+
+fn strict_match(record: &Record, query: &Query) -> bool {
+    let artist = normalize(&query.artist);
+    let title = normalize(&query.title);
+    !artist.is_empty()
+        && !title.is_empty()
+        && normalize(&record.artist_name) == artist
+        && normalize(&record.track_name) == title
+        && query.duration_ms > 0
+        && record.duration.is_some_and(|duration| {
+            duration.is_finite()
+                && duration > 0.0
+                && (duration - f64::from(query.duration_ms) / 1000.0).abs() <= 2.0
+        })
 }
 
 /// One LRCLIB request. A 404 is "nobody has transcribed this" and a 400 is
@@ -856,8 +931,18 @@ mod source_guard_tests {
     use super::*;
 
     #[test]
-    fn soundcloud_never_uses_spotify_or_inferred_lyrics() {
-        assert!(!supports_uri("soundcloud:track:123"));
+    fn unmatched_sources_never_use_spotify_or_loose_lyrics() {
+        assert!(supports_uri("soundcloud:track:123"));
+        assert!(supports_uri("youtube:video:123"));
+        assert_eq!(spotify_uri("soundcloud:track:123", None), None);
+        assert_eq!(
+            spotify_uri("youtube:video:123", Some("spotify:track:abc")),
+            None
+        );
+        assert_eq!(
+            spotify_uri("soundcloud:track:123", Some("spotify:track:abc")),
+            Some("spotify:track:abc")
+        );
         assert!(!supports_uri("spotifast:playlist:123"));
         assert!(supports_uri("spotify:track:123"));
         assert!(supports_uri("spotify:local:a:b:c:1"));

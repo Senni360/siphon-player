@@ -1,7 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
-mod extension_bridge;
 mod download_actions;
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
@@ -618,6 +618,7 @@ pub struct App {
     pub lyrics_uri: Option<String>,
     /// `Loaded(None)` when no lyrics are available.
     pub lyrics: Loadable<Option<crate::lyrics::Lyrics>>,
+    pub credits: crate::credits::State,
     /// Whether the panel follows the current line. Manual scrolling disables
     /// it until Follow is used or the track changes.
     pub lyrics_following: bool,
@@ -1266,6 +1267,7 @@ impl App {
             softened_covers: Default::default(),
             lyrics_uri: None,
             lyrics: Loadable::NotLoaded,
+            credits: Default::default(),
             lyrics_following: true,
             lyrics_line_shown: None,
             show_devices: false,
@@ -2927,6 +2929,9 @@ impl App {
                     }
                     Err(error) => log::warn!("rootlist unavailable: {error}"),
                 },
+                Event::Credits { uri, request, result } => {
+                    self.credits.finish(&uri, request, result);
+                }
                 Event::Lyrics { uri, result } => {
                     if self.lyrics_uri.as_deref() == Some(uri.as_str()) {
                         self.lyrics = match result {
@@ -3379,6 +3384,7 @@ impl App {
         // Friends belong to the signed-out account; an answer still on its
         // way is dropped.
         self.friends = Loadable::NotLoaded;
+        self.credits.clear();
         self.friends_in_flight = false;
         self.friends_fetched_at = None;
         self.friends_generation += 1;
@@ -4074,7 +4080,7 @@ impl App {
         self.lyrics_uri = Some(now.uri.clone());
         self.lyrics_following = true;
         self.lyrics_line_shown = None;
-        if now.is_episode || crate::soundcloud::is_uri(&now.uri) || self.offline {
+        if now.is_episode || !crate::lyrics::supports_uri(&now.uri) || self.offline {
             self.lyrics = Loadable::Loaded(None);
             return;
         }
@@ -12714,6 +12720,19 @@ impl App {
             }
             Action::PauseLyricsFollow => self.lyrics_following = false,
             Action::RetryLyrics => self.request_lyrics(),
+            Action::RequestCredits(uri) => {
+                if let Some(request) = self.credits.begin(&uri) {
+                    if self.offline {
+                        self.credits.finish(
+                            &uri,
+                            request,
+                            Err("Credits are unavailable offline.".into()),
+                        );
+                    } else {
+                        self.backend.send(Command::Credits { uri, request });
+                    }
+                }
+            }
             Action::ToggleDevicesPopup => {
                 self.show_devices = !self.show_devices;
                 if self.show_devices {
