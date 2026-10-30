@@ -381,6 +381,69 @@ async fn leave_cancels_a_stalled_join_and_revokes_the_saved_identity() {
     std::fs::remove_dir_all(root).unwrap();
 }
 
+#[tokio::test]
+async fn joining_stops_before_network_when_previous_identity_cannot_be_revoked() {
+    use crate::credentials::{Slot, Store};
+    use crate::paths::AppDirs;
+    use std::time::Duration;
+
+    let root = std::env::temp_dir().join(format!(
+        "siphon-friends-revoke-{}-{}",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let dirs = AppDirs {
+        config: root.join("config"),
+        state: root.join("state"),
+        cache: root.join("cache"),
+    };
+    dirs.ensure().unwrap();
+    let marker = dirs.state.join("credential-storage/friends-session.json");
+    let credentials = Store::in_memory(dirs);
+    credentials
+        .lease(Slot::Friends)
+        .save_secret(b"previous-identity".to_vec())
+        .await
+        .unwrap();
+    std::fs::remove_file(&marker).unwrap();
+    std::fs::create_dir(&marker).unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/api", listener.local_addr().unwrap());
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let requests = Runtime::spawn_with_client(
+        credentials.clone(),
+        move |event| {
+            let _ = events_tx.send(event);
+        },
+        move |http| Client::new(http, &base),
+    );
+    requests
+        .send((
+            Request {
+                generation: 1,
+                action: Action::Join {
+                    invite_code: "fixture-invite".into(),
+                    display_name: "B".into(),
+                },
+            },
+            Http::new(reqwest::Client::builder().no_proxy().build().unwrap()),
+        ))
+        .unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(2), events_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(event.result.is_err());
+    assert!(
+        tokio::time::timeout(Duration::from_millis(10), listener.accept())
+            .await
+            .is_err()
+    );
+    drop(requests);
+    drop(credentials);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// Explicitly opt in against the disposable local Node runner, never the
 /// production group. Does not load or write any real app credentials.
 #[tokio::test]

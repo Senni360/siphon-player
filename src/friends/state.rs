@@ -325,6 +325,17 @@ impl Runtime {
             credentials.invalidate(Slot::Friends);
             let lease = credentials.lease(Slot::Friends);
             let cleared = lease.clear_secret(true).await;
+            if matches!(
+                cleared,
+                Err(crate::credentials::Error::Filesystem
+                    | crate::credentials::Error::Invalid
+                    | crate::credentials::Error::Stale)
+            ) {
+                return Err(
+                    "The previous Friends identity could not be forgotten. Check the app's state folder and retry."
+                        .into(),
+                );
+            }
             let identity = client.join(&invite_code, &display_name).await?;
             let bytes = serde_json::to_vec(&identity)
                 .map_err(|_| "Friends identity could not be encoded.")?;
