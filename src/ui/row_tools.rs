@@ -235,59 +235,12 @@ fn credits_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor
             theme::medium(13.0),
             palette.text,
         );
-        match &state {
-            None | Some(Loadable::NotLoaded) | Some(Loadable::Loading) => {
-                theme::text(
-                    ui,
-                    gettext(locale, "Loading credits…"),
-                    theme::regular(12.5),
-                    palette.secondary,
-                );
-            }
-            Some(Loadable::Loaded(Some(credits))) => {
-                for credit in credits.contributors.iter().take(12) {
-                    ui.horizontal(|ui| {
-                        let role = credit
-                            .role
-                            .as_deref()
-                            .or(credit.group.as_deref())
-                            .unwrap_or("");
-                        ui.allocate_ui_with_layout(
-                            vec2(96.0, 16.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| theme::text(ui, role, theme::regular(12.0), palette.dim),
-                        );
-                        theme::text(ui, &credit.name, theme::regular(12.5), palette.text);
-                    });
-                }
-                if !credits.sources.is_empty() {
-                    theme::text(
-                        ui,
-                        gettext(locale, "From {sources}")
-                            .replace("{sources}", &credits.sources.join(", ")),
-                        theme::regular(11.5),
-                        palette.dim,
-                    );
-                }
-            }
-            Some(Loadable::Loaded(None)) => {
-                theme::text(
-                    ui,
-                    gettext(locale, "No credits for this song."),
-                    theme::regular(12.5),
-                    palette.secondary,
-                );
-            }
-            Some(Loadable::Failed(_)) => {
-                theme::text(
-                    ui,
-                    gettext(locale, "Credits couldn't be loaded."),
-                    theme::regular(12.5),
-                    palette.secondary,
-                );
-                retry = ui.button(gettext(locale, "Try again")).clicked();
-            }
-        }
+        retry = credits_body(
+            ui,
+            locale,
+            state.as_ref(),
+            [palette.text, palette.secondary, palette.dim],
+        );
     });
     if retry {
         app.actions.push(Action::RequestCredits(uri.to_string()));
@@ -296,6 +249,73 @@ fn credits_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor
         close_credits(app, uri);
         ctx.data_mut(|data| data.remove::<Tool>(id.with("open")));
     }
+}
+
+/// A song's credits as a list of roles and names, or the reason there are
+/// none. `colors` are the text, secondary and dim colours of the surface it
+/// sits on. Returns whether Try again was clicked after a failure.
+pub(crate) fn credits_body(
+    ui: &mut Ui,
+    locale: crate::i18n::Locale,
+    state: Option<&Loadable<Option<crate::credits::Credits>>>,
+    colors: [egui::Color32; 3],
+) -> bool {
+    let [text, secondary, dim] = colors;
+    let mut retry = false;
+    match state {
+        None | Some(Loadable::NotLoaded) | Some(Loadable::Loading) => {
+            theme::text(
+                ui,
+                gettext(locale, "Loading credits…"),
+                theme::regular(12.5),
+                secondary,
+            );
+        }
+        Some(Loadable::Loaded(Some(credits))) => {
+            for credit in credits.contributors.iter().take(12) {
+                ui.horizontal(|ui| {
+                    let role = credit
+                        .role
+                        .as_deref()
+                        .or(credit.group.as_deref())
+                        .unwrap_or("");
+                    ui.allocate_ui_with_layout(
+                        vec2(96.0, 16.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| theme::text(ui, role, theme::regular(12.0), dim),
+                    );
+                    theme::text(ui, &credit.name, theme::regular(12.5), text);
+                });
+            }
+            if !credits.sources.is_empty() {
+                theme::text(
+                    ui,
+                    gettext(locale, "From {sources}")
+                        .replace("{sources}", &credits.sources.join(", ")),
+                    theme::regular(11.5),
+                    dim,
+                );
+            }
+        }
+        Some(Loadable::Loaded(None)) => {
+            theme::text(
+                ui,
+                gettext(locale, "No credits for this song."),
+                theme::regular(12.5),
+                secondary,
+            );
+        }
+        Some(Loadable::Failed(_)) => {
+            theme::text(
+                ui,
+                gettext(locale, "Credits couldn't be loaded."),
+                theme::regular(12.5),
+                secondary,
+            );
+            retry = ui.button(gettext(locale, "Try again")).clicked();
+        }
+    }
+    retry
 }
 
 fn playlist_popover(app: &mut App, ctx: &egui::Context, id: Id, item: &PlayableItem, anchor: Rect) {

@@ -15,6 +15,7 @@ pub mod library;
 pub mod login;
 mod lyrics;
 pub mod new_releases;
+pub mod now_playing;
 pub mod player_bar;
 mod prerelease;
 pub mod queue;
@@ -69,6 +70,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ),
         );
     }
+    let window = ui.max_rect();
     player_bar::show(app, ui);
     let content = ui.available_rect_before_wrap();
     if app.lyrics_fullscreen.is_some() {
@@ -86,7 +88,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if app.show_friends_panel {
             friends::side_panel(app, ui);
         }
+        let page = ui.available_rect_before_wrap();
         central(app, ui);
+        let strip = Rect::from_min_max(
+            egui::pos2(window.left(), window.bottom() - theme::PLAYER_BAR_HEIGHT),
+            window.max,
+        );
+        now_playing::show(app, ui, page, player_bar::island_rect(strip));
         if !app.settings.sidebar_visible {
             sidebar::floating(app, ui, content);
         }
