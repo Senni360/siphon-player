@@ -466,6 +466,30 @@ fn side_panel(app: &mut App, ui: &mut Ui, rect: Rect, uri: &str, position_ms: u3
     }
 }
 
+/// What Up next last showed at its head, and how it last changed.
+#[derive(Clone, Debug)]
+struct UpNext {
+    head: Option<String>,
+    change: Option<(motion::Swipe, motion::Transition)>,
+}
+
+/// How the queue's head moving from `before` to `head` reads, with `playing`
+/// now playing: the old head playing is Next, anything else replaced the
+/// queue. `None` when the head did not move.
+fn queue_change(
+    before: Option<&str>,
+    head: Option<&str>,
+    playing: Option<&str>,
+) -> Option<motion::Swipe> {
+    if before == head {
+        None
+    } else if before.is_some() && before == playing {
+        Some(motion::Swipe::Next)
+    } else {
+        Some(motion::Swipe::Replace)
+    }
+}
+
 fn up_next(app: &mut App, ui: &mut Ui) {
     let upcoming: Vec<PlayableItem> = app
         .queue
@@ -484,8 +508,46 @@ fn up_next(app: &mut App, ui: &mut Ui) {
         );
         return;
     }
-    for item in &upcoming {
-        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::hover());
+    // The list moves with the queue: up one place on Next, in afresh when
+    // the queue was replaced.
+    let ctx = ui.ctx().clone();
+    let head = upcoming.first().map(|item| item.uri().to_owned());
+    let playing = app.now_playing().map(|now| now.uri);
+    let state_id = Id::new("now-playing-up-next");
+    let before = ctx.data(|data| data.get_temp::<UpNext>(state_id));
+    if before.as_ref().map(|before| &before.head) != Some(&head) {
+        let change = before.and_then(|before| {
+            queue_change(before.head.as_deref(), head.as_deref(), playing.as_deref())
+        });
+        let state = UpNext {
+            head: head.clone(),
+            change: change.map(|change| (change, motion::Transition::start(&ctx, motion::ENTER))),
+        };
+        ctx.data_mut(|data| data.insert_temp(state_id, state));
+    }
+    let change = ctx
+        .data(|data| data.get_temp::<UpNext>(state_id))
+        .and_then(|state| state.change);
+    let now = ctx.input(|input| input.time);
+    if change.is_some_and(|(_, transition)| !transition.finished_at(now)) {
+        ctx.request_repaint();
+    }
+    for (index, item) in upcoming.iter().enumerate() {
+        let (slot, _) = ui.allocate_exact_size(vec2(ui.available_width(), 52.0), Sense::hover());
+        let (dy, alpha) = match change {
+            Some((motion::Swipe::Next, transition)) => {
+                ((1.0 - transition.progress_at(now)) * slot.height(), 1.0)
+            }
+            Some((_, transition)) => {
+                let t = transition.delayed(motion::stagger(index)).progress_at(now);
+                ((1.0 - t) * 10.0, t)
+            }
+            None => (0.0, 1.0),
+        };
+        let row = slot.translate(vec2(0.0, dy));
+        let mut cell = ui.new_child(UiBuilder::new().max_rect(row));
+        cell.multiply_opacity(alpha);
+        let ui = &mut cell;
         let cover = Rect::from_min_size(pos2(row.left(), row.center().y - 20.0), vec2(40.0, 40.0));
         super::widgets::paint_cover(
             ui,
@@ -593,6 +655,25 @@ fn lyrics(app: &mut App, ui: &mut Ui, uri: &str, position_ms: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The queue's head starting to play moves Up next up one place; a new
+    /// head from anywhere else brings the list in afresh.
+    #[test]
+    fn up_next_reads_a_head_change_as_next_or_replace() {
+        assert_eq!(queue_change(Some("a"), Some("a"), Some("z")), None);
+        assert_eq!(
+            queue_change(Some("a"), Some("b"), Some("a")),
+            Some(motion::Swipe::Next)
+        );
+        assert_eq!(
+            queue_change(Some("a"), Some("x"), Some("q")),
+            Some(motion::Swipe::Replace)
+        );
+        assert_eq!(
+            queue_change(None, Some("x"), None),
+            Some(motion::Swipe::Replace)
+        );
+    }
 
     /// The island's cover opens Now playing and a second click closes it;
     /// it starts closed in a new window.
