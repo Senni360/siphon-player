@@ -6,6 +6,69 @@ nav_exclude: true
 
 # Evening delivery, 30 October 2026
 
+## Combined integration, 20:30 run
+
+The accepted frontend milestone is `808bc3147b1f3c101846ac5a14b63dfeb5ea37a4`
+on `claude/focused-rubin-pxfk32` (last code commit `37fbbd8`). Claude explicitly
+declared it ready for tonight in PR7 and its handoff. The new linear integration
+branch is `siphon/combined-20261030`, with combined application source at
+`ea4970a777aa2050f9be631c88b32ff638459925`. It starts from main
+`6eed0da585b42c9ecdd653b697109a9788589338`, applies the evening `478169d` delta
+against `cf4d941` once, then carries all accepted frontend commits after
+`0d2943a` in order. Original published branches and commits remain intact.
+
+This includes backend reliability `1c619b4`, cleanup `adb6157`, the corrected
+Windows native-test workflow, Cast redaction test correction and cross-host
+icon/version embedding. All 44 non-overlapping files added/changed by newer
+main were retained byte-for-byte. Main's README, module registration and
+single-instance changes were reconciled without losing either side. The two
+documented `src/demo.rs` conflicts retain both the coordinator's rendered-title
+color/placement checks and Claude's island source-title regression.
+
+An all-target run with `RUST_BACKTRACE=1` exposed the same generic `private`
+backtrace false positive in main's `hosted_media_probe` example. Test-only fix
+`ea4970a` checks distinctive fixture grant/URL values in both Debug and displayed
+error chains, retaining actual redaction coverage. The example passes with
+backtraces enabled and disabled. No application behavior changed in that fix.
+
+Combined-source validation on Linux, at `ea4970a`:
+
+- Default-feature all-target tests: 1,871 library tests passed, 8 ignored;
+  binary, integration and example targets passed.
+- All-feature all-target tests: 1,914 library tests passed, 8 ignored;
+  binary, integration and example targets passed. Both full runs used backtraces.
+- Default/all-feature all-target clippy with warnings denied, formatting,
+  whitespace and repository dependency/review/settings policy checks passed.
+- Policy regressions (27), launcher (4), release-name (8), and Flatpak metadata
+  (4) tests passed. Doctests and rustdoc with warnings denied passed.
+- Friends service tests (25) and TypeScript check, preserved party-room tests
+  (153) and media-gateway tests (60) plus syntax checks passed. No service deployed.
+- Production Jekyll build passed using the isolated locked Ruby environment,
+  with the existing nonfatal duplicate SEO-description warning.
+- The native Linux demo built and rendered the combined source under Xvfb and
+  software OpenGL. Four inspected long-title captures cover dark/light at
+  1280x800 and 880x800: source-colored titles, fitting columns, row tools and
+  the floating sidebar/island. Capture logs contain no warnings, errors or
+  panics. These invented fixtures are not Windows or live-account evidence.
+
+The translation-template check could not run because GNU `xgettext` is absent;
+compiled application catalogs still build normally. Nix and native Windows
+checks are not established here. Ordinary ignored live/device/credential checks
+are not represented as passes.
+
+The private GitHub Windows workflows still produced no artifact. Latest observed
+main CI `41115686942`, at `6eed0da`, was also refused before starting for account
+billing/spending. The combined executable will be rebuilt using the proven
+Linux MSVC cross toolchain, with clean exact HEAD checks before and after and
+a new package manifest. The old `c2e5e13` probe is not an owner deliverable.
+
+Cleanup still publishes only `adb6157`. There is no local Windows acknowledgment
+or evidence of launch, accounts, audio-device or installed-helper validation.
+No new helper completion is implied. The frontend's built-versus-planned table
+in `DESIGN.md` remains authoritative: BPM/key analysis, new helper formats/stems,
+glass/grain and Geist are not completed by this candidate. No service or public
+release is deployed. The sections below preserve the earlier checkpoints.
+
 The owner's requested outcome is a combined, runnable Windows application by
 22:00–22:30 Europe/Amsterdam. The owner should not compile anything.
 
