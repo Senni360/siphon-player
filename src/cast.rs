@@ -35,6 +35,8 @@ use rustls::pki_types::{
 };
 use serde_json::{Value, json};
 
+pub mod media;
+
 pub(crate) const SERVICE: &str = "_googlecast._tcp.local.";
 /// Spotify's Cast receiver app.
 const SPOTIFY_APP: &str = "CC32E753";

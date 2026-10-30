@@ -4,6 +4,11 @@ description: Independent Spotify grants, what is stored, and how API traffic is 
 nav_order: 1
 ---
 
+The opt-in [hosted-media diagnostic](/local-sharing/) makes HTTPS range reads
+without provider credentials to an approved test URL and can send that URL to a genuine
+local Cast receiver. It does not upload media or change normal playback. Its
+proposed sharing and room services are not deployed application capabilities.
+
 This personal fork's SoundCloud engine accepts resolved audio URLs through
 the configured HTTP client and proxy. Its bounded range/segment reads, URL
 refresh and shared-output handoff are documented in the

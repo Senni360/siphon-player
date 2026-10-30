@@ -38,6 +38,11 @@ macOS and Flatpak login entries need the manual switch described in the guide.
 Upstream links and historical release notes below still describe Spotifast;
 build this fork from source for Siphon.
 
+The personal fork's [local-sharing and listening-party plan](docs/_reference/local-sharing.md)
+includes an opt-in hosted MP3 diagnostic for desktop and Chromecast. Sharing,
+parties and local-file Cast playback are not yet supported application features;
+hosting and real-device acceptance remain gated.
+
 Siphon is a Spotify client written in Rust with
 [egui](https://www.egui.rs) and [fastframe](https://fastframe.dev), the
 framework behind a family of native desktop apps. It plays music through
