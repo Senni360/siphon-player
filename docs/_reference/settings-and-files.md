@@ -257,6 +257,11 @@ restart even if Spotify's next read still reports the old state. This cache
 contains metadata, not offline audio, and can be deleted without signing out.
 Signing out deletes it.
 
+Applying retained edits to a large Liked Songs library uses one indexed pass
+instead of scanning and shifting the full list for each edit. Refreshes retain
+the same ordering, duplicate-occurrence and stale-response rules. This changes
+neither the cache file format nor when Spotify is contacted.
+
 Device-picker choices are kept in `session.json` as the last 32 selected
 preference keys and their Spotify account ID. Signed-in outputs use device IDs;
 waiting Cast receivers use an opaque hash of their transfer ID, address and port
