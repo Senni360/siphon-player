@@ -41,14 +41,14 @@ impl Default for Resolver {
         #[cfg(debug_assertions)]
         let override_path = std::env::var_os("SIPHON_YTDLP").map(PathBuf::from);
         #[cfg(not(debug_assertions))]
-        let override_path = None;
+        let override_path: Option<PathBuf> = None;
         #[cfg(windows)]
         let installed = std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
             .filter(|path| path.is_absolute())
             .map(|path| path.join("Siphon/bin/yt-dlp/yt-dlp.exe"));
         #[cfg(not(windows))]
-        let installed = None;
+        let installed: Option<PathBuf> = None;
         Self {
             executable: override_path
                 .filter(|path| path.is_absolute())
