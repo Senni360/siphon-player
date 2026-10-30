@@ -119,15 +119,15 @@ impl Model {
         self.error = None;
         match &action {
             Action::Like { id, liked } => {
-                if let Some(post) = self.posts.iter_mut().find(|p| p.id == *id) {
-                    if post.liked != *liked {
-                        post.like_count = if *liked {
-                            post.like_count.saturating_add(1)
-                        } else {
-                            post.like_count.saturating_sub(1)
-                        };
-                        post.liked = *liked;
-                    }
+                if let Some(post) = self.posts.iter_mut().find(|p| p.id == *id)
+                    && post.liked != *liked
+                {
+                    post.like_count = if *liked {
+                        post.like_count.saturating_add(1)
+                    } else {
+                        post.like_count.saturating_sub(1)
+                    };
+                    post.liked = *liked;
                 }
                 self.optimistic = true;
             }
