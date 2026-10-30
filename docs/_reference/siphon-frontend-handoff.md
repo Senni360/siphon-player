@@ -31,7 +31,8 @@ backend contract wins on behaviour and this file is updated to match.
 
 - **Source colour is on the title, never a chip.** Dark theme: Spotify
   `#1ED760`, SoundCloud `#FF8A1F`, YouTube `#FF4848`. Light theme: Spotify
-  `#0A8A3F`, SoundCloud `#C25100`, YouTube `#CC1F26`. Orange is pushed toward
+  `#097F3A`, SoundCloud `#B84D00`, YouTube `#CC1F26` (darker than the
+  mockups so each title keeps 4.5:1 on the light window). Orange is pushed toward
   yellow and red toward crimson so the two never read as the same colour.
   Everything else is neutral (zinc greys). The brand accent is the text
   colour itself, never green, so the app is not a Spotify recolour.
@@ -129,6 +130,36 @@ the backend contract decides. Each item lists what exists today.
 Until an item lands, its UI shows an honest unavailable or loading state in
 shipping builds and uses a fixture only under the `demo` feature.
 
+## Milestones
+
+### 1. Design kit (`src/ui/kit/`)
+
+The pieces every redesigned view shares. Nothing on screen changes yet:
+the current views do not use the kit until the shell lands.
+
+- `kit::source`: `Source::of(uri)` (Spotify, SoundCloud, YouTube by the
+  helper's `youtube:video:` URIs), title colours per theme and over
+  artwork, and `title()`, a one-line elided title in its source colour
+  that goes through `crate::bidi`. Tests hold every title colour to 4.5:1
+  on both built-in themes and keep orange and red at least 25 degrees of
+  hue apart.
+- `kit::motion`: the one curve (ease-out quint), the durations, staggering,
+  `Transition` (repaints only while running, takes no time under reduced
+  motion), and `Swipe` placements for the island's Replace, Next and
+  Previous.
+- `kit::tools`: the four square row tools with `Ready`, `Off(reason)`,
+  `Running { fraction }` (a progress ring with a stop square, nothing
+  spins) and `Done` states, tooltips on every state, and right-click
+  reported separately.
+- `theme::Icon` gains `Activity` (BPM/key) and `FileText` (credits), Lucide
+  icons added under `assets/icons/`.
+
+Not yet: the built-in palettes still carry the old colours (they switch to
+the `DESIGN.md` ramp with the shell, so the app does not change look
+halfway), and Geist is not bundled yet (Inter stays until its size is
+measured). Once `siphon/youtube` lands, `kit::Source::of` should defer to
+`crate::soundcloud::Source::of`, which gains the YouTube case there.
+
 ## Files the frontend expects to touch
 
 New modules under `src/ui/` (tokens, source title, row tools, shell pieces)
@@ -138,4 +169,9 @@ listed in each milestone report.
 
 ## Checks
 
-None run for this milestone: it changes documentation only.
+Milestone 1, on Linux in the cloud container (not Windows):
+`cargo clippy --no-default-features --features demo --all-targets -- -D
+warnings` clean; the kit's 13 unit tests and the existing theme and motion
+tests pass; `rustfmt --check` on the new files. `cargo fmt --check` over the whole crate fails on `main` already
+(`src/app.rs` module order) and was left alone. Not run: the full test
+suite, a native demo render, anything on Windows.
