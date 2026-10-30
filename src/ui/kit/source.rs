@@ -16,16 +16,12 @@ pub enum Source {
 }
 
 impl Source {
-    /// The service behind `uri`. YouTube songs carry the helper's
-    /// `youtube:video:` URIs; SoundCloud decides its own as
-    /// `crate::soundcloud::Source` does, and everything else is Spotify's.
+    /// The service behind `uri`, as playback decides it.
     pub fn of(uri: &str) -> Self {
-        if uri.starts_with("youtube:") {
-            Self::YouTube
-        } else if crate::soundcloud::is_uri(uri) {
-            Self::SoundCloud
-        } else {
-            Self::Spotify
+        match crate::soundcloud::Source::of(uri) {
+            crate::soundcloud::Source::Spotify => Self::Spotify,
+            crate::soundcloud::Source::SoundCloud => Self::SoundCloud,
+            crate::soundcloud::Source::YouTube => Self::YouTube,
         }
     }
 

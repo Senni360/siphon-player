@@ -157,8 +157,7 @@ the current views do not use the kit until the shell lands.
 Not yet: the built-in palettes still carry the old colours (they switch to
 the `DESIGN.md` ramp with the shell, so the app does not change look
 halfway), and Geist is not bundled yet (Inter stays until its size is
-measured). Once `siphon/youtube` lands, `kit::Source::of` should defer to
-`crate::soundcloud::Source::of`, which gains the YouTube case there.
+measured). `kit::Source::of` defers to `crate::soundcloud::Source::of`.
 
 ## Files the frontend expects to touch
 
