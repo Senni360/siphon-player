@@ -8,6 +8,29 @@ nav_exclude: true
 
 ## Combined integration, 20:30 run
 
+Promotion follow-up: main advanced to `1ceb15035bcf4ec41be4b9a9a372aa932e982ef9`
+while the first combined Windows build was running. Its room-client journal work
+is preserved on the new linear `siphon/combined-main-20261030` branch. The original
+published `siphon/combined-20261030` remains at `d71f7e2`; it is not rewritten.
+The replay has byte-identical Rust source, assets, Cargo manifests/lockfile,
+build configuration, examples and packaging to the checked `d71f7e2` snapshot.
+The updated room service passes all 175 tests and syntax checks. Its service is
+still not deployed or claimed as a desktop UI feature.
+
+The first actual combined Windows build, exact `d71f7e2`, succeeded in 4m02s:
+33,548,800 bytes, SHA-256
+`4cba8921d0435e56dca69e06e04bf5ad9bfa8e3cb7c971eeb97523be81115ed0`.
+Its x64 GUI PE has Siphon 0.14.2 icon/version resources, only Windows-system DLL
+imports, no separate MSVC runtime and no PE parser warnings. It was not executed
+on Windows. The final promotion source is being rebuilt again so the delivered
+manifest identifies the exact accepted commit, not a relabeled earlier file.
+
+This managed cloud cannot write the chat's designated `/codex/.../output`
+directory (OS permission denied; no sudo is installed). The private delivery
+fallback is an **unpublished draft** with assets in the verified private GitHub
+repository. It creates no public release, published tag or service deployment.
+The owner only needs to download/extract the ZIP and open `Siphon/siphon.exe`.
+
 The accepted frontend milestone is `808bc3147b1f3c101846ac5a14b63dfeb5ea37a4`
 on `claude/focused-rubin-pxfk32` (last code commit `37fbbd8`). Claude explicitly
 declared it ready for tonight in PR7 and its handoff. The new linear integration
