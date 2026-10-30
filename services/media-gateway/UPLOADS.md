@@ -1,9 +1,11 @@
 # Upload admission and cancellation ledger
 
 `src/uploads.mjs` is a tested SQLite foundation for milestone 2. **It is not
-connected to the Worker, an HTTP endpoint, R2, a signer or the native app.** The
-existing test-media gateway still has no upload API. This change requires no
-new secrets, services, billing changes or deployment.
+connected to the gateway Worker, an HTTP endpoint, a signer or the native app.**
+The separate `src/upload-cleanup.mjs` adapter can execute settled cleanup tasks
+against an R2 binding. It is tested locally but is not scheduled or instantiated
+by the gateway. This change requires no new secrets, services, billing changes
+or deployment, and the gateway still has no upload API.
 
 Run the complete service suite with Node 24 or later:
 
@@ -93,6 +95,70 @@ executor must call `cleanupTasks`, settle ambiguous operations, abort multipart
 work and confirm object deletion before `acknowledgeCleanup`. That method refuses
 to release quota while creation or completion remains pending. Permanent
 tombstones prevent reuse after deletion.
+
+### Executing settled cleanup
+
+`new UploadCleanup(ledger, bucket).run()` processes at most sixteen tasks
+sequentially and returns only `{ attempted, cleaned, retry }`. The future owning
+Durable Object must retain one executor instance; overlapping calls on that
+instance share one run. This is a bound on operations, not a wall-clock deadline.
+There is no timer or alarm wiring in this increment.
+
+For each task it aborts the known multipart upload, deletes the unique object key,
+and requires `head(key) === null` before acknowledging cleanup. An R2 abort
+promise confirms abort; merely resuming a handle does not prove that the upload
+exists or is gone. These semantics come from the
+[Workers API reference](https://developers.cloudflare.com/r2/api/workers/workers-api-reference/).
+The only accepted missing-upload error is the documented Workers `10024` suffix.
+Generic HTTP 404, permission errors and timeouts are retried, never interpreted
+as absence. See [R2 error codes](https://developers.cloudflare.com/r2/api/error-codes/).
+
+Lost abort/delete replies retain quota and enter the existing durable backoff.
+A later run repeats the idempotent operations and checks absence again. Failed
+state acknowledgements produce a fixed private error and no success count.
+Tasks are accepted only for the exact `uploads/<reservation UUID>.mp3` key; keys
+are never reused. The executor takes tasks from the ledger, never from request
+JSON, and emits no provider errors, handles or keys.
+
+Unknown creation/completion outcomes are withheld by the ledger and are not
+included in `attempted`. A zero-task result does not mean all storage is clean.
+This executor neither discovers lost multipart handles nor settles unknown
+outcomes. It must not guess absence from elapsed time, a missing final object
+or an empty object listing. Reconciliation and an orphaned-part lifecycle
+backstop remain required before uploads can be enabled.
+
+### Local runtime check
+
+The ordinary suite remains dependency-free. An optional runtime test uses a
+separately installed Miniflare tool (including one installed with Wrangler):
+
+```sh
+npm run test:runtime -- /absolute/path/to/node_modules/miniflare
+```
+
+If Miniflare is already resolvable by Node, omit the path. The checked version
+was Miniflare `5.20261023.3-beta` from Wrangler `4.156.0`. The runner uses the
+tool's compatibility adapter for that API version. It does not read the
+deployment configuration or `.dev.vars`, and provides only disposable local R2
+and SQLite bindings. It disables telemetry, the `cf` lookup and worker outbound
+network access, binds to loopback, and disposes the runtime in `finally`.
+
+The fixture generates five two-part uploads (8 MiB plus 37 bytes each). These
+are synthetic bytes, not recordings or playable assets. Cases cover partial
+multipart cancellation, lost abort/delete replies, failed absence checks, and
+a lost completion reply. In the last case it reads and hashes the stored object
+before submitting an explicitly unsupported profile, which can never make the
+asset ready. An additional case keeps unknown creation pending. It checks that
+old handles reject further writes and independently checks object absence through
+the runtime's external R2 binding. This fixture is test code, never a deployment
+entrypoint or a pattern for proxying production uploads through a Worker.
+
+On 2026-10-30 all six runtime cases and thirteen focused cleanup tests passed on
+Windows. All 60 Node tests passed. Local ledger reconstruction and injected lost
+replies do not establish cloud crash recovery, concurrent in-flight abort
+semantics, public access, server-side audio validation or platform coverage
+beyond Windows. Full required Rust checks passed again; the previously recorded
+launcher, Jekyll and GitHub account limitations remain open.
 
 ## Part progress and verification boundary
 

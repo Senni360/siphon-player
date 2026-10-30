@@ -3,5 +3,9 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
-  "scripts": { "test": "node --test test/*.test.mjs", "check": "node --check src/gateway.mjs && node --check src/registry.mjs && node --check src/uploads.mjs && node --check admin.mjs" }
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:runtime": "node test/runtime/upload-cleanup.mjs",
+    "check": "node --check src/gateway.mjs && node --check src/registry.mjs && node --check src/uploads.mjs && node --check src/upload-cleanup.mjs && node --check admin.mjs && node --check test/runtime/upload-cleanup.mjs && node --check test/runtime/upload-cleanup.worker.mjs"
+  }
 }

@@ -17,7 +17,9 @@ service or a scalable general media-hosting design.
 
 The separate [upload ledger](UPLOADS.md) is an isolated milestone-2 foundation
 for reservations, bounded part progress, cancellation races and cleanup. It has
-no HTTP route, signer or storage executor and does not enable uploads here.
+no HTTP route or signer and does not enable uploads here. Its separate cleanup
+executor now aborts known multipart work, deletes its object and confirms absence
+before releasing quota. Neither component is wired into this gateway.
 
 ## Run locally
 
@@ -40,6 +42,11 @@ grant retries, full/range reads, conditional ETags, revocation, expiry and an
 alarm that physically deleted a generated MP3 from local R2. Cloud routing,
 account configuration and public receiver reachability still require an
 approved deployment test.
+
+The optional [upload-cleanup runtime check](UPLOADS.md#local-runtime-check)
+also exercises real local multipart operations and lost replies using generated
+bytes. It requires a separately installed Miniflare tool; the ordinary test suite
+still needs only Node and performs no network requests.
 
 The Rust diagnostic also passed HTTPS ranges against that emulator, decoded and
 submitted a five-second segment starting at five seconds to the Windows default
