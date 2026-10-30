@@ -253,7 +253,10 @@ out, or a reconnection that gives up stops it.
   when a song starts, even when no view on screen is showing it. Linux MPRIS
   carries the Spotify artwork URL for the desktop to resolve and asks for
   nothing extra.
-- Lyrics, in the cache directory, for a month.
+- Positive lyrics, in the cache directory, for a month, written atomically.
+  Missing answers are not persisted. External-source lookup and the
+  session-only ISRC mapping cache are described in
+  [Track details](/track-details/).
 - Liked Songs metadata, scoped to the verified account, in the cache directory.
   This behavior is available since 0.8.0.
   Cached pages less than 15 minutes old need no repeat request. Older cached

@@ -1,7 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
-mod extension_bridge;
 mod download_actions;
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
@@ -618,6 +618,9 @@ pub struct App {
     pub lyrics_uri: Option<String>,
     /// `Loaded(None)` when no lyrics are available.
     pub lyrics: Loadable<Option<crate::lyrics::Lyrics>>,
+    lyrics_request: u64,
+    lyrics_query: Option<crate::lyrics::Query>,
+    pub credits: crate::credits::State,
     /// Whether the panel follows the current line. Manual scrolling disables
     /// it until Follow is used or the track changes.
     pub lyrics_following: bool,
@@ -1266,6 +1269,9 @@ impl App {
             softened_covers: Default::default(),
             lyrics_uri: None,
             lyrics: Loadable::NotLoaded,
+            lyrics_request: 0,
+            lyrics_query: None,
+            credits: Default::default(),
             lyrics_following: true,
             lyrics_line_shown: None,
             show_devices: false,
@@ -2927,14 +2933,10 @@ impl App {
                     }
                     Err(error) => log::warn!("rootlist unavailable: {error}"),
                 },
-                Event::Lyrics { uri, result } => {
-                    if self.lyrics_uri.as_deref() == Some(uri.as_str()) {
-                        self.lyrics = match result {
-                            Ok(found) => Loadable::Loaded(found),
-                            Err(error) => Loadable::Failed(error),
-                        };
-                    }
+                Event::Credits { uri, request, result } => {
+                    self.credits.finish(&uri, request, result);
                 }
+                Event::Lyrics { uri, request, result } => self.receive_lyrics(&uri, request, result),
                 Event::PlaylistCache {
                     account_id,
                     id,
@@ -3152,6 +3154,7 @@ impl App {
                     self.load_made_for_you(false);
                 }
                 if became_ready {
+                    self.retry_missing_lyrics();
                     self.reread_playlists_over_session();
                     // The session reads Spotify's own feed of new releases,
                     // which the Web API stand-in only approximates.
@@ -3209,6 +3212,7 @@ impl App {
     }
 
     fn on_network_restored(&mut self) {
+        self.retry_missing_lyrics();
         if !self.is_connected() {
             return;
         }
@@ -3379,6 +3383,7 @@ impl App {
         // Friends belong to the signed-out account; an answer still on its
         // way is dropped.
         self.friends = Loadable::NotLoaded;
+        self.reset_track_details();
         self.friends_in_flight = false;
         self.friends_fetched_at = None;
         self.friends_generation += 1;
@@ -3626,7 +3631,12 @@ impl App {
             self.local.volume = volume;
         }
         if track_changed {
+            self.frame_now = None;
             self.on_now_playing_changed();
+            if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
+                // Metadata can arrive without changing the URI or occurrence.
+                self.request_lyrics();
+            }
         }
         if reconnected {
             self.replay_queued_play();
@@ -4064,36 +4074,162 @@ impl App {
     /// way. Podcasts have no lyrics to ask for.
     pub fn request_lyrics(&mut self) {
         let Some(now) = self.now_playing() else {
+            self.clear_lyrics();
             return;
         };
+        let query = crate::lyrics::Query {
+            artist: now
+                .artists
+                .first()
+                .map(|artist| artist.name.clone())
+                .unwrap_or_default(),
+            title: now.title,
+            album: now.album_name,
+            duration_ms: now.duration_ms,
+        };
         if self.lyrics_uri.as_deref() == Some(now.uri.as_str())
-            && !matches!(self.lyrics, Loadable::NotLoaded | Loadable::Failed(_))
+            && self.lyrics_query.as_ref() == Some(&query)
+            && (self.offline || !matches!(self.lyrics, Loadable::NotLoaded | Loadable::Failed(_)))
         {
             return;
         }
         self.lyrics_uri = Some(now.uri.clone());
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_query = Some(query.clone());
         self.lyrics_following = true;
         self.lyrics_line_shown = None;
-        if now.is_episode || crate::soundcloud::is_uri(&now.uri) || self.offline {
+        if now.is_episode || !crate::lyrics::supports_uri(&now.uri) || self.offline {
+            self.backend.send(Command::CancelLyrics);
             self.lyrics = Loadable::Loaded(None);
             return;
         }
         self.lyrics = Loadable::Loading;
         let local_file = self.local_file(&now.uri).map(std::path::Path::to_path_buf);
         self.backend.send(Command::Lyrics(Box::new(LyricsRequest {
+            request: self.lyrics_request,
             uri: now.uri,
-            query: crate::lyrics::Query {
-                artist: now
-                    .artists
-                    .first()
-                    .map(|artist| artist.name.clone())
-                    .unwrap_or_default(),
-                title: now.title,
-                album: now.album_name,
-                duration_ms: now.duration_ms,
-            },
+            query,
             local_file,
         })));
+    }
+
+    fn receive_lyrics(
+        &mut self,
+        uri: &str,
+        request: u64,
+        result: Result<Option<crate::lyrics::Lyrics>, String>,
+    ) {
+        if self.lyrics_request == request && self.lyrics_uri.as_deref() == Some(uri) {
+            self.lyrics = match result {
+                Ok(found) => Loadable::Loaded(found),
+                Err(error) => Loadable::Failed(error),
+            };
+        }
+    }
+
+    fn clear_lyrics(&mut self) {
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_uri = None;
+        self.lyrics_query = None;
+        self.lyrics = Loadable::NotLoaded;
+        self.backend.send(Command::CancelLyrics);
+    }
+
+    fn retry_missing_lyrics(&mut self) {
+        if !matches!(self.lyrics, Loadable::Loaded(Some(_))) {
+            self.clear_lyrics();
+            if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
+                self.request_lyrics();
+            }
+        }
+    }
+
+    pub(super) fn reset_track_details(&mut self) {
+        self.credits.clear();
+        self.frame_now = None;
+        self.clear_lyrics();
+        if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
+            self.request_lyrics();
+        }
+    }
+
+    /// Install an invented paused song and its complete lyrics request state.
+    /// This only changes in-memory demo state; no command or file write runs.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn install_demo_track_details(
+        &mut self,
+        track: &Track,
+        lyrics: Loadable<Option<crate::lyrics::Lyrics>>,
+    ) {
+        self.backend.set_offline(true);
+        self.offline = true;
+        self.playback_owner = PlaybackOwner::SpotifyConnect;
+        self.remote = None;
+        self.frame_now = None;
+        self.intent_track = None;
+        self.queued_play = None;
+        self.local_transfer_sequence = None;
+        self.pending_local_position = None;
+        self.optimistic_playing = None;
+        self.local_ready = true;
+        self.local_device_id = Some("local-demo".into());
+        self.local_playback = LocalPlayback::Ready {
+            device_id: "local-demo".into(),
+        };
+        self.local = LocalState {
+            playback: Playback::Paused,
+            track: Some(crate::player::LocalTrack {
+                uri: track.uri.clone(),
+                title: track.name.clone(),
+                artists: track.artists.clone(),
+                album: track
+                    .album
+                    .as_ref()
+                    .map(|album| album.name.clone())
+                    .unwrap_or_default(),
+                art_url: track
+                    .album
+                    .as_ref()
+                    .and_then(|album| pick_image(&album.images, 640))
+                    .map(str::to_owned),
+                art_small_url: track
+                    .album
+                    .as_ref()
+                    .and_then(|album| pick_image(&album.images, 64))
+                    .map(str::to_owned),
+                duration_ms: track.duration_ms,
+                is_episode: false,
+            }),
+            volume: self.settings.volume,
+            ..Default::default()
+        };
+        if let Some(id) = &track.id {
+            self.track_cache.insert(id.clone(), track.clone());
+        }
+        self.install_demo_lyrics(lyrics);
+        self.lyrics_following = true;
+        self.lyrics_line_shown = None;
+    }
+
+    /// Seed lyrics for the current demo song without changing its playback or
+    /// follow position. Include the query so opening a panel reuses the fixture.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn install_demo_lyrics(&mut self, lyrics: Loadable<Option<crate::lyrics::Lyrics>>) {
+        self.frame_now = None;
+        let now = self.now_playing();
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_uri = now.as_ref().map(|now| now.uri.clone());
+        self.lyrics_query = now.map(|now| crate::lyrics::Query {
+            artist: now
+                .artists
+                .first()
+                .map(|artist| artist.name.clone())
+                .unwrap_or_default(),
+            title: now.title,
+            album: now.album_name,
+            duration_ms: now.duration_ms,
+        });
+        self.lyrics = lyrics;
     }
 
     /// Pushes the Winamp window's always-on-top level to the live window.
@@ -8989,7 +9125,15 @@ impl App {
                             Some(PlayableItem::Track(track.clone())),
                         );
                         self.track_cache.insert(id.clone(), track);
+                        let current_lyrics = self.lyrics_uri.as_deref()
+                            == Some(format!("spotify:track:{id}").as_str());
                         self.track_used.insert(id, Instant::now());
+                        if current_lyrics
+                            && (self.show_lyrics_panel || self.lyrics_fullscreen.is_some())
+                        {
+                            self.frame_now = None;
+                            self.request_lyrics();
+                        }
                     }
                     Err(error) => {
                         self.resolve_pasted_song(&format!("spotify:track:{id}"), None);
@@ -12713,7 +12857,28 @@ impl App {
                 self.lyrics_line_shown = None;
             }
             Action::PauseLyricsFollow => self.lyrics_following = false,
-            Action::RetryLyrics => self.request_lyrics(),
+            Action::RetryLyrics => {
+                self.clear_lyrics();
+                self.request_lyrics();
+            }
+            Action::RequestCredits(uri) => {
+                if let Some(request) = self.credits.begin(&uri) {
+                    if self.offline {
+                        self.credits.finish(
+                            &uri,
+                            request,
+                            Err("Credits are unavailable offline.".into()),
+                        );
+                    } else {
+                        self.backend.send(Command::Credits { uri, request });
+                    }
+                }
+            }
+            Action::CancelCredits(uri) => {
+                if let Some(request) = self.credits.cancel(&uri) {
+                    self.backend.send(Command::CancelCredits { uri, request });
+                }
+            }
             Action::ToggleDevicesPopup => {
                 self.show_devices = !self.show_devices;
                 if self.show_devices {
@@ -15758,6 +15923,142 @@ mod tests {
             (stored_width(&ctx) - crate::theme::SIDE_PANEL_MIN_WIDTH).abs() < 1.0,
             "the panel draws at its own minimum"
         );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn lyrics_retries_reject_late_answers_for_the_same_uri() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.request_lyrics();
+        let first = app.lyrics_request;
+        let uri = app.lyrics_uri.clone().unwrap();
+        app.apply(Action::RetryLyrics, &egui::Context::default());
+        let current = app.lyrics_request;
+        assert_ne!(first, current);
+        app.receive_lyrics(&uri, first, Ok(None));
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        app.receive_lyrics(&uri, current, Err("Fixture failure".into()));
+        assert!(matches!(app.lyrics, Loadable::Failed(_)));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn opening_lyrics_preserves_all_installed_demo_read_states() {
+        let mut app = headless_app();
+        let track = Track {
+            id: Some("0000000000000000000001".into()),
+            uri: "spotify:track:0000000000000000000001".into(),
+            name: "Invented fixture song".into(),
+            artists: vec![crate::api::models::ArtistRef {
+                name: "Demo Artist".into(),
+                ..Default::default()
+            }],
+            duration_ms: 180_000,
+            ..Default::default()
+        };
+        let states = [
+            Loadable::Loading,
+            Loadable::Loaded(None),
+            Loadable::Failed("Fixture failure".into()),
+            Loadable::Loaded(Some(crate::lyrics::Lyrics {
+                lines: vec![crate::lyrics::Line {
+                    at_ms: Some(0),
+                    text: "Invented fixture lyric".into(),
+                }],
+                synced: true,
+                instrumental: false,
+            })),
+        ];
+        let ctx = egui::Context::default();
+        for state in states {
+            app.install_demo_track_details(&track, state.clone());
+            let request = app.lyrics_request;
+            app.show_lyrics_panel = false;
+            app.apply(Action::ToggleLyricsPanel, &ctx);
+            assert_eq!(app.now_playing().unwrap().uri, track.uri);
+            assert_eq!(app.lyrics_request, request);
+            assert_eq!(
+                app.lyrics, state,
+                "opening the panel replaced the fixture state"
+            );
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn lyrics_metadata_changes_retry_a_previous_unavailable_result() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+            duration_ms: 0,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.request_lyrics();
+        let first = app.lyrics_request;
+        let uri = app.lyrics_uri.clone().unwrap();
+        app.receive_lyrics(&uri, first, Ok(None));
+        app.local.track.as_mut().unwrap().duration_ms = 200_000;
+        app.request_lyrics();
+        assert_ne!(first, app.lyrics_request);
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_account_reset_discards_credits_and_retries_lyrics() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.show_lyrics_panel = true;
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "soundcloud:track:123".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        let credits_request = app.credits.begin("soundcloud:track:123").unwrap();
+        app.request_lyrics();
+        let previous = app.lyrics_request;
+        app.receive_lyrics("soundcloud:track:123", previous, Ok(None));
+        app.reset_soundcloud_collections();
+        app.credits
+            .finish("soundcloud:track:123", credits_request, Ok(None));
+        app.receive_lyrics("soundcloud:track:123", previous, Ok(None));
+        assert!(app.credits.get("soundcloud:track:123").is_none());
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        assert_ne!(previous, app.lyrics_request);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn playback_session_ready_retries_missing_lyrics() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.show_lyrics_panel = true;
+        app.local_ready = false;
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.request_lyrics();
+        let previous = app.lyrics_request;
+        let uri = app.lyrics_uri.clone().unwrap();
+        app.receive_lyrics(&uri, previous, Ok(None));
+        app.handle_playback(LocalPlayback::Ready {
+            device_id: "fixture-device".into(),
+        });
+        assert_ne!(previous, app.lyrics_request);
+        assert!(matches!(app.lyrics, Loadable::Loading));
         app.backend.shutdown();
     }
 

@@ -796,6 +796,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 mod download_jobs;
 mod hybrid;
 pub(crate) mod soundcloud_library;
+mod track_details;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
@@ -998,6 +999,15 @@ pub enum Command {
     },
     /// The words of a track, from LRCLIB.
     Lyrics(Box<LyricsRequest>),
+    CancelLyrics,
+    CancelCredits {
+        uri: String,
+        request: u64,
+    },
+    Credits {
+        uri: String,
+        request: u64,
+    },
     /// The account's playlist tree, folders and all, from the session.
     Rootlist,
     /// Internal: a rootlist read completed for this signed-in session.
@@ -1113,6 +1123,8 @@ pub enum Command {
 }
 
 pub struct LyricsRequest {
+    /// Monotonic UI request identity, including retries of the same track.
+    pub request: u64,
     /// The track the answer is for, so a stale one is ignored.
     pub uri: String,
     pub query: crate::lyrics::Query,
@@ -1122,6 +1134,11 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    Credits {
+        uri: String,
+        request: u64,
+        result: Result<Option<crate::credits::Credits>, String>,
+    },
     PlaylistLinkResolved {
         request: u64,
         result: Result<crate::extension_bridge::ResolvedItem, String>,
@@ -1239,6 +1256,7 @@ pub enum Event {
     },
     /// Track lyrics, or `None` when unavailable.
     Lyrics {
+        request: u64,
         uri: String,
         result: Result<Option<crate::lyrics::Lyrics>, String>,
     },
@@ -2032,6 +2050,7 @@ impl PlaylistHeaderLookup {
 
 struct Worker {
     download_jobs: download_jobs::Jobs,
+    track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
     dirs: AppDirs,
     credentials: CredentialStore,
@@ -2161,6 +2180,7 @@ impl Worker {
         Self {
             hybrid: hybrid::HybridRuntime::default(),
             download_jobs: download_jobs::Jobs::default(),
+            track_details: track_details::Jobs::default(),
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2362,6 +2382,7 @@ impl Worker {
     }
 
     async fn run(&mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
+        track_details::remove_legacy_isrc_cache(&self.dirs.cache).await;
         self.init_soundcloud();
         self.discover_download_helper();
         let (cache_writes, cache_write_receiver) = mpsc::channel(1);
@@ -2590,6 +2611,7 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    self.track_details.clear();
                     self.download_jobs.cancel_all();
                     if self.hybrid.holds_output() {
                         self.hybrid.shutdown_pending = true;
@@ -3074,6 +3096,11 @@ impl Worker {
                     });
                 }
                 Command::Lyrics(request) => self.fetch_lyrics(*request),
+                Command::CancelLyrics => self.track_details.cancel_lyrics(),
+                Command::CancelCredits { uri, request } => {
+                    self.track_details.cancel_credits(&uri, request)
+                }
+                Command::Credits { uri, request } => self.fetch_credits(uri, request),
                 Command::Rootlist => self.fetch_rootlist(),
                 Command::RootlistFinished { generation, result } => {
                     self.on_rootlist_finished(generation, result);
@@ -3830,6 +3857,7 @@ impl Worker {
 
     /// Cancels in-flight account work and drops cached Home data on sign-out.
     fn sign_out(&mut self) {
+        self.track_details.clear();
         self.hybrid.engine = None;
         self.spotify_restore_started = true;
         self.cancel_search();
@@ -5055,52 +5083,6 @@ impl Worker {
             result,
         });
         self.start_album_type_lookup();
-    }
-
-    fn fetch_lyrics(&self, request: LyricsRequest) {
-        if !crate::lyrics::supports_uri(&request.uri) {
-            let _ = self.events.send(Event::Lyrics {
-                uri: request.uri,
-                result: Ok(None),
-            });
-            self.waker.wake();
-            return;
-        }
-        let http = self.http.client();
-        let events = self.events.clone();
-        let waker = self.waker.clone();
-        let cache_dir = self.dirs.lyrics_cache_dir();
-        let engine = self.engine.clone();
-        tokio::spawn(async move {
-            // A local file's own words go first, then Spotify's: they
-            // follow the recording exactly. Everything else, a signed-out
-            // session included, falls back to LRCLIB.
-            let own = match request.local_file {
-                Some(file) => tokio::task::spawn_blocking(move || crate::local_tags::lyrics(&file))
-                    .await
-                    .ok()
-                    .flatten(),
-                None => None,
-            };
-            let exact = match own {
-                Some(found) => Some(found),
-                None => spotify_lyrics(engine, &request.uri, &cache_dir).await,
-            };
-            let result = match exact {
-                Some(found) => Ok(Some(found)),
-                None => match http {
-                    Ok(http) => crate::lyrics::fetch(&http, &cache_dir, &request.query)
-                        .await
-                        .map_err(|error| format!("{error:#}")),
-                    Err(error) => Err(error),
-                },
-            };
-            let _ = events.send(Event::Lyrics {
-                uri: request.uri,
-                result,
-            });
-            waker.wake();
-        });
     }
 
     /// Loads cached playlist items. The UI compares the cached snapshot with
@@ -6669,8 +6651,8 @@ fn settle<T>(result: Result<T, session_reads::Failure>) -> Option<ApiResult<T>> 
 }
 
 /// Spotify's transcription of the track, when the local session can ask for
-/// one. Answers are cached like LRCLIB's, "none" included; `None` falls
-/// back to LRCLIB.
+/// one. Positive answers are cached like LRCLIB's; `None` falls back to LRCLIB
+/// and can be retried after a session or metadata change.
 async fn spotify_lyrics(
     engine: Option<Arc<Engine>>,
     uri: &str,
@@ -6678,8 +6660,8 @@ async fn spotify_lyrics(
 ) -> Option<crate::lyrics::Lyrics> {
     let id = uri.strip_prefix("spotify:track:")?;
     let path = cache_dir.join(format!("spotify-{id}.json"));
-    if let Some(cached) = crate::lyrics::cached(&path) {
-        return cached;
+    if let Some(Some(cached)) = crate::lyrics::cached(&path) {
+        return Some(cached);
     }
     match engine?.lyrics_json(uri).await {
         Ok(json) => {

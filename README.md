@@ -57,8 +57,12 @@ Tokens stay in protected storage. Expired sessions offer a reconnect prompt
 while public browsing remains available. The
 [SoundCloud reference](docs/_reference/soundcloud.md) describes connections
 and playback limits. SoundCloud items use their real SoundCloud links;
-Spotify saves, radio, album navigation, lyrics and remote Spotify outputs
+Spotify saves, radio, album navigation and remote Spotify outputs
 are unavailable for them.
+SoundCloud lyrics use an exact ISRC recording match when available, then a
+strict artist/title/duration match. Source-provided credits and cancellable
+per-track requests are documented in the
+[track-details reference](docs/_reference/track-details.md).
 SoundCloud search offers **Retry** when it fails, keeps successful results
 visible, and shows short recovery messages instead of HTTP or network details.
 Known previews are marked **Preview only** in song rows, the queue and the
