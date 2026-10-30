@@ -844,7 +844,10 @@ impl Client {
             authenticated
                 .query_pairs_mut()
                 .append_pair("client_id", &id);
-            let oauth = self.oauth_token.is_some() && !self.access.expired.load(Ordering::SeqCst);
+            // A session-only request must never become anonymous if another
+            // request expires the account between this check and dispatch.
+            let oauth = self.oauth_token.is_some()
+                && (requires_session || !self.access.expired.load(Ordering::SeqCst));
             let response = match self.send(authenticated, oauth).await {
                 Err(error @ Error::Status(401 | 403)) if oauth => {
                     // A rejected public client ID can look like a rejected
@@ -961,10 +964,7 @@ impl Client {
                 .map_err(Error::Network)?
                 .get(url.clone())
                 .timeout(Duration::from_secs(30));
-            if oauth
-                && !self.access.expired.load(Ordering::SeqCst)
-                && let Some(token) = &self.oauth_token
-            {
+            if oauth && let Some(token) = &self.oauth_token {
                 let mut value = header::HeaderValue::from_str(&format!("OAuth {token}"))
                     .map_err(|_| Error::NotSignedIn)?;
                 value.set_sensitive(true);
