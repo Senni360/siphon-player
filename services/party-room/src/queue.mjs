@@ -133,6 +133,29 @@ export class RoomQueue {
         pending: JSON.parse(row.pending).map(id => this.entry(id)), self: this.cursor(actor), timeline: this.timeline() };
     });
   }
+  // Timestamp-only exchange for a future authenticated transport. Does not
+  // consume a queue command ID or change the room revision.
+  async sampleClock(actor, request) {
+    fields(request, ["epoch", "probe_id"]);
+    requireThat(uuid(request.epoch) && integer(request.probe_id, 1), "invalid_clock_probe");
+    const sample = await this.commit(now => {
+      requireThat(this.member(actor, "clock"), "unavailable");
+      const room = this.active(now);
+      requireThat(request.epoch === room.epoch, "stale_epoch");
+      return { room_id: room.room_id, epoch: room.epoch, probe_id: request.probe_id, received_at: now };
+    });
+    // Include durable-storage time in server processing, and recheck expiry
+    // and membership after the await. No participant grants enter the reply.
+    try {
+      requireThat(this.member(actor, "clock"), "unavailable");
+      const room = this.active();
+      requireThat(room.observed_at >= sample.received_at, "invalid_clock");
+      return { ...sample, sent_at: room.observed_at };
+    } catch (error) {
+      if (error instanceof RoomError) throw error;
+      throw new RoomError("state_unavailable");
+    }
+  }
   // command_id is a monotonically increasing integer scoped to (epoch, actor).
   // A retained receipt returns exactly the original outcome. The high-water
   // mark permanently rejects replay after the bounded receipt window expires.

@@ -80,6 +80,9 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   Its headless client model retains pending intent across stale snapshots and
   lost acknowledgements, with bounded retries and explicit uncertain outcomes.
   This model is in memory only and is not a native connection or crash journal.
+  A separate [clock model](https://github.com/Senni360/siphon-player/blob/main/services/party-room/CLOCK.md)
+  bounds server-time uncertainty using timestamp samples, rejects stale replies
+  and invalidates after suspension. It is not wired to native playback.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -397,9 +400,9 @@ code milestone is durable reconciliation of unknown multipart creation and
 completion, including an explicit recovery path for a lost provider handle.
 The tested cleanup executor intentionally withholds those unresolved tasks.
 The independent room queue, headless snapshot/receipt recovery and durable
-timeline anchors are now tested. The next bounded room milestone is readiness
-coordination with stale-load fencing and a deterministic timeout, or bounded
-clock-offset estimation. Owner-departure pause, native pending-intent journaling,
+timeline anchors and bounded clock estimation are now tested. The next bounded
+room milestone is readiness coordination with stale-load fencing and a
+deterministic timeout, or owner-presence grace/pause. Native pending-intent journaling,
 optimistic transport and authenticated transport remain separate gates; none of
 these components enables a remote party by itself.
 Upload admission and native preparation remain separate components; neither
@@ -534,3 +537,18 @@ All 60 media-service tests and required Windows Rust checks, formatting and
 policy checks passed again. Launcher checks still reported three failures and
 five errors; Jekyll remained blocked by missing Bundler. No Linux or macOS
 coverage is claimed for the timeline checkpoint.
+
+The clock checkpoint adds 23 deterministic tests, bringing the room suite to 84,
+plus eight local Durable Object cases. A timestamp-only authority exchange
+preserves queue revisions/command IDs and rechecks membership/expiry after
+storage waits. The in-memory estimator bounds samples, latency and uncertainty,
+rejects stale replies and invalidates after incompatible clocks or suspension.
+Synthetic asymmetric-delay and relative-drift scenarios remain within their
+reported uncertainty, including monotonic refinements. This is a model check,
+not real network or audible synchronization measurement. The 100 ms clock limit
+and 200 ppm drift allowance need validation on supported hardware; native
+sampling, readiness coordination and playback correction remain unimplemented.
+The 60 media-service tests, full required Windows Rust checks, formatting and
+policy checks passed for this checkpoint. Launcher tests again reported three
+failures and five errors, and Jekyll could not run without Bundler. These remain
+contribution gates rather than passing platform coverage.

@@ -32,7 +32,8 @@ The additional `room_timeline` table stores one anchor and the greatest observed
 authority time. Reopening a current store preserves both; upgrading a queue-only
 store creates a paused anchor at its selected occurrence and retains prior queue
 receipts. A backward server clock fails closed until it catches up. There is no
-wall-clock correction or clock-offset estimation in this module.
+wall-clock correction in this module. The separate [clock model](CLOCK.md)
+estimates server time with bounded uncertainty; native sampling is still absent.
 
 This is an unreleased schema change: snapshot consumers must understand the
 new field. The headless queue client validates it, rejects conflicting anchors
@@ -109,7 +110,7 @@ The 750 ms lead is a testable protocol default, not a measured device guarantee.
 
 Owner-presence grace and departure pause, handover, authenticated WebSockets,
 durable client journaling, optimistic transport controls, readiness coordination,
-clock estimation, receiver commands and drift correction remain absent. No
+native clock integration, receiver commands and drift correction remain absent. No
 two-computer or Chromecast run has been performed and synchronization remains
 unmeasured. Cloud and hardware acceptance for milestone 1 is still open.
 

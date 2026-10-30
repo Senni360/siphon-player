@@ -21,8 +21,8 @@ try {
   const response = await runtime.dispatchFetch("http://localhost/run");
   assert.equal(response.status, 200, await response.clone().text());
   const result = await response.json();
-  assert.equal(result.cases, 7); assert.equal(result.revision, 12); assert.equal(result.pending, 1);
-  console.log("Seven local Durable Object cases passed: duplicate commands, ownership/stale state, upload eligibility/cancellation, media revisions, gated starts, timeline reconstruction and media-loss pause.");
+  assert.equal(result.cases, 8); assert.equal(result.revision, 12); assert.equal(result.pending, 1);
+  console.log("Eight local Durable Object cases passed: duplicate commands, ownership/stale state, upload eligibility/cancellation, media revisions, gated starts, timeline reconstruction, media-loss pause and clock sampling.");
 } finally {
   await runtime.dispose();
 }

@@ -45,6 +45,8 @@ closed. A real session authenticator must supply the actor argument. Actor IDs
 never come from command JSON.
 The optional trusted `canStart` callback defaults to refusing playback starts.
 The [timeline contract](TIMELINE.md) defines its readiness gate and limitations.
+The [clock contract](CLOCK.md) documents authenticated timestamp sampling and
+bounded in-memory estimation, without adding an endpoint or a native adapter.
 
 Commands have exactly this shape:
 
@@ -211,7 +213,7 @@ and rate limits must be implemented before deployment.
 
 This core has run in the local Durable Object emulator, but not a deployed
 service. Production runtime wiring, authentication, WebSocket recovery, native
-client overlays, readiness coordination, clock-offset estimation, buffering,
+client overlays, readiness coordination, native clock sampling, buffering,
 owner departure/handover and playback
 integration remain unimplemented. No two-computer party or Chromecast test has
 run, and no synchronization behavior has been measured. The hosted/hardware
@@ -241,3 +243,8 @@ The durable timeline adds twenty-three deterministic tests, for 61 room tests in
 total. Seven local Durable Object cases cover the original queue checks plus
 gated starts, persisted timeline reconstruction and media-loss pause. See
 [TIMELINE.md](TIMELINE.md) for the command schema, validation and remaining gates.
+
+The clock model adds 23 deterministic tests, bringing the room suite to 84. Eight
+local Durable Object cases now include timestamp sampling that preserves queue
+revisions and command cursors. The estimator is not connected to native playback;
+its modeled uncertainty does not establish audible synchronization.

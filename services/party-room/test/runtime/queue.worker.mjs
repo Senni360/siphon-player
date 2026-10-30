@@ -71,7 +71,11 @@ export class QueueProbe {
     await queue.publishMedia(recording, { owner_id: owner, revision: 5, state: "ready", duration_ms: 12000 });
     final = await queue.snapshot(owner);
     check(!final.timeline.playing && final.timeline.position_ms === 1500, "ready never resumes on its own");
-    return Response.json({ cases: 7, revision: final.revision, current: final.current.id, pending: final.pending.length });
+    const sample = await queue.sampleClock(owner, { epoch, probe_id: 7 });
+    check(sample.room_id === roomId && sample.epoch === epoch && sample.probe_id === 7, "clock sample is room scoped");
+    check(sample.received_at === now && sample.sent_at === now, "clock sample uses injected authority time");
+    check(JSON.stringify(await queue.snapshot(owner)) === JSON.stringify(final), "clock sample leaves queue/revision/cursor unchanged");
+    return Response.json({ cases: 8, revision: final.revision, current: final.current.id, pending: final.pending.length });
   }
 }
 
