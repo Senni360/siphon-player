@@ -1,6 +1,8 @@
-//! The now-playing bar along the bottom of the window.
+//! The player island: a floating card at the foot of the window with the
+//! song, the next few songs of the queue, the transport and the extras.
+//! A new song slides the old one off the island (`ui::kit::motion::Swipe`).
 
-use egui::{Align, Color32, Frame, Layout, Margin, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Color32, Frame, Layout, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
 
 use crate::api::models::PlayableItem;
 use crate::app::{App, NowPlaying};
@@ -9,6 +11,8 @@ use crate::model::{Action, DragTrack, Page};
 use crate::player::RepeatMode;
 use crate::theme::{self, Icon};
 use crate::util;
+
+use super::kit::motion::{self as kit_motion, Swipe, Transition};
 
 use super::widgets::{SliderEvent, thin_slider};
 
@@ -38,6 +42,19 @@ const WAVE_ECHO_ALPHA: f32 = 0.18;
 const LIGHT_STRENGTH: f32 = 1.5;
 /// The gap between spectrum bars.
 const SPECTRUM_GAP: f32 = 2.0;
+/// The island floats this far inside the strip at the window's foot, and
+/// grows no wider than this on a wide window.
+const ISLAND_MARGIN: f32 = 12.0;
+const ISLAND_MAX_WIDTH: f32 = 1120.0;
+const ISLAND_RADIUS: f32 = 22.0;
+/// The next songs shown as small covers beside the playing one.
+const TILE_SIZE: f32 = 26.0;
+const TILE_STEP: f32 = 14.0;
+const TILE_STEP_SPREAD: f32 = 22.0;
+const TILES: usize = 3;
+const TILES_WIDTH: f32 = TILE_SIZE + TILE_STEP_SPREAD * (TILES as f32 - 1.0) + 12.0;
+/// The narrowest song area that still shows the queue's covers.
+const TILES_MIN_REGION: f32 = 320.0;
 
 /// Forget this bar's animation session while the sign-in screen is shown.
 pub(crate) fn end_tint_session(ctx: &egui::Context) {
@@ -51,16 +68,21 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .exact_size(theme::PLAYER_BAR_HEIGHT)
         .resizable(false)
         .show_separator_line(false)
-        .frame(
-            Frame::new()
-                .fill(fill)
-                .inner_margin(Margin::symmetric(16, 0)),
-        )
+        .frame(Frame::new().fill(palette.window))
         .show(ui, |ui| {
-            let rect = ui.max_rect();
+            let island = island_rect(ui.max_rect());
+            super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
+            ui.painter().rect_filled(island, ISLAND_RADIUS, fill);
+            ui.painter().rect_stroke(
+                island,
+                ISLAND_RADIUS,
+                egui::Stroke::new(1.0, palette.outline),
+                egui::StrokeKind::Inside,
+            );
+            let rect = island.shrink2(vec2(14.0, 0.0));
             let now = app.now_playing();
-            // The whole bar, margins included, behind everything else.
-            let behind = rect.expand2(vec2(16.0, 0.0));
+            // The whole island, behind everything else.
+            let behind = island;
             if visualizer(app, ui, behind, now.as_ref()) {
                 theme::visualiser_frame(ui.ctx(), app.visualiser_fps());
             }
@@ -88,11 +110,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     app.actions.push(Action::CyclePlayerBarVis);
                 }
             }
-            ui.painter().hline(
-                rect.x_range(),
-                rect.top() + 0.5,
-                egui::Stroke::new(1.0, palette.outline),
-            );
             let width = rect.width();
             let side = (width * 0.3).clamp(200.0, 420.0);
             let cy = rect.center().y;
@@ -105,7 +122,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             // egui's cross-axis centring is unreliable across nested layouts of
             // mixed heights, so each region is placed in an explicit band that
             // is sized to its content and centred on the bar's midline.
-            now_playing_block(app, ui, left, now.as_ref());
+            song_with_queue(app, ui, left, now.as_ref());
 
             transport(app, ui, now.as_ref(), center);
 
@@ -413,10 +430,264 @@ fn eased_fill(ctx: &egui::Context, panel: Color32, tint: Option<Color32>) -> Col
     }
 }
 
+/// The island inside the strip the bottom panel gives the player.
+fn island_rect(strip: Rect) -> Rect {
+    let height = theme::PLAYER_BAR_HEIGHT - ISLAND_MARGIN * 2.0;
+    let width = (strip.width() - ISLAND_MARGIN * 2.0).clamp(0.0, ISLAND_MAX_WIDTH);
+    Rect::from_center_size(
+        pos2(
+            strip.center().x,
+            strip.bottom() - ISLAND_MARGIN - height / 2.0,
+        ),
+        vec2(width, height),
+    )
+}
+
+/// What the island showed, kept so the next song can push it off.
+#[derive(Clone, Debug, PartialEq)]
+struct Shown {
+    uri: String,
+    title: String,
+    subtitle: String,
+    art: Option<String>,
+    /// The first song of the queue at the time.
+    next: Option<String>,
+}
+
+/// A song leaving the island, and how.
+#[derive(Clone, Debug)]
+struct Leaving {
+    shown: Shown,
+    swipe: Swipe,
+    transition: Transition,
+}
+
+/// How a change from `before` to the song now playing reads: the queue's
+/// first song moving up is Next, the old song coming back as the first of
+/// the queue is Previous, anything else replaced what was playing.
+fn swipe_for(before: &Shown, uri: &str, next: Option<&str>) -> Swipe {
+    if before.next.as_deref() == Some(uri) {
+        Swipe::Next
+    } else if next == Some(before.uri.as_str()) {
+        Swipe::Previous
+    } else {
+        Swipe::Replace
+    }
+}
+
+/// The playing song with the next songs of the queue, sliding when the
+/// song changes. A swipe starts the frame a new song appears and both
+/// songs are drawn until it ends; then only the song, asking for no frames.
+fn song_with_queue(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option<&NowPlaying>) {
+    let ctx = ui.ctx().clone();
+    let mut upcoming: Vec<PlayableItem> = app
+        .queue
+        .get()
+        .map(|queue| queue.queue.iter().take(TILES).cloned().collect())
+        .unwrap_or_default();
+    let next_uri = upcoming.first().map(|item| item.uri().to_string());
+    let shown_id = egui::Id::new("island-shown");
+    let leaving_id = egui::Id::new("island-leaving");
+    if let Some(now) = now {
+        let shown = Shown {
+            uri: now.uri.clone(),
+            title: now.title.clone(),
+            subtitle: now.subtitle.clone(),
+            art: app.small_art(now, 56.0).map(str::to_string),
+            next: next_uri.clone(),
+        };
+        let before = ctx.data(|data| data.get_temp::<Shown>(shown_id));
+        if let Some(before) = before.filter(|before| before.uri != shown.uri) {
+            let swipe = swipe_for(&before, &shown.uri, next_uri.as_deref());
+            let leaving = Leaving {
+                shown: before,
+                swipe,
+                transition: Transition::start(&ctx, kit_motion::ENTER),
+            };
+            ctx.data_mut(|data| data.insert_temp(leaving_id, leaving));
+        }
+        ctx.data_mut(|data| data.insert_temp(shown_id, shown));
+    }
+
+    // A narrow island keeps its room for the song's own title.
+    if region.width() < TILES_MIN_REGION {
+        upcoming.clear();
+    }
+    let tiles_width = if upcoming.is_empty() {
+        0.0
+    } else {
+        TILES_WIDTH
+    };
+    let song_region = Rect::from_min_max(
+        region.min,
+        pos2(region.right() - tiles_width, region.bottom()),
+    );
+    let tile_dx = song_region.width() - 40.0;
+    let now_time = ctx.input(|input| input.time);
+    let leaving = ctx
+        .data(|data| data.get_temp::<Leaving>(leaving_id))
+        .filter(|leaving| !leaving.transition.finished_at(now_time));
+    let Some(leaving) = leaving else {
+        ctx.data_mut(|data| data.remove::<Leaving>(leaving_id));
+        now_playing_block(app, ui, song_region, now);
+        queue_tiles(app, ui, region, &upcoming, 1.0);
+        return;
+    };
+
+    let t = leaving.transition.progress(&ctx);
+    let clip = song_region
+        .expand2(vec2(0.0, 8.0))
+        .intersect(ui.clip_rect());
+    // The song leaving, drawn from its snapshot.
+    let out = leaving.swipe.outgoing(t, tile_dx);
+    if out.alpha > 0.0 {
+        let mut gone = ui.new_child(UiBuilder::new().max_rect(song_region));
+        gone.set_clip_rect(clip);
+        gone.multiply_opacity(out.alpha);
+        paint_snapshot(
+            &gone,
+            app,
+            &leaving.shown,
+            song_region.translate(vec2(out.dx, 0.0)),
+            out.scale,
+        );
+    }
+    // The song arriving, fully interactive while it moves.
+    let arrive = leaving.swipe.incoming(t, tile_dx);
+    let mut arriving = ui.new_child(UiBuilder::new().max_rect(song_region));
+    arriving.set_clip_rect(clip);
+    arriving.multiply_opacity(arrive.alpha);
+    now_playing_block(
+        app,
+        &mut arriving,
+        song_region.translate(vec2(arrive.dx, 0.0)),
+        now,
+    );
+    // The queue moves with the song: in from the right on Replace, one place
+    // along on Next and Previous.
+    let shift = match leaving.swipe {
+        Swipe::Replace => (1.0 - t) * 28.0,
+        Swipe::Next => (1.0 - t) * TILE_STEP,
+        Swipe::Previous => -(1.0 - t) * TILE_STEP,
+    };
+    let mut tiles = ui.new_child(UiBuilder::new().max_rect(region));
+    if leaving.swipe == Swipe::Replace {
+        tiles.multiply_opacity(t);
+    }
+    queue_tiles(
+        app,
+        &mut tiles,
+        region.translate(vec2(shift, 0.0)),
+        &upcoming,
+        t,
+    );
+}
+
+/// A song that has left, as its cover and two lines, at `scale` about the
+/// cover's left edge.
+fn paint_snapshot(ui: &egui::Ui, app: &App, shown: &Shown, region: Rect, scale: f32) {
+    let palette = app.palette;
+    let cy = region.center().y;
+    let size = 52.0 * scale;
+    let cover = Rect::from_min_size(
+        pos2(region.left() + 4.0, cy - size / 2.0),
+        Vec2::splat(size),
+    );
+    super::widgets::paint_cover(
+        ui,
+        &palette,
+        shown.art.as_deref(),
+        cover,
+        8.0 * scale,
+        Icon::Music,
+        None,
+    );
+    let left = cover.right() + 12.0;
+    let painter = ui.painter();
+    painter.text(
+        pos2(left, cy - 9.0),
+        egui::Align2::LEFT_CENTER,
+        &shown.title,
+        theme::medium(14.0),
+        super::kit::Source::of(&shown.uri).color(&palette),
+    );
+    painter.text(
+        pos2(left, cy + 10.0),
+        egui::Align2::LEFT_CENTER,
+        &shown.subtitle,
+        theme::regular(12.0),
+        palette.secondary,
+    );
+}
+
+/// The next songs of the queue as small overlapping covers at the right of
+/// `region`, the next song on top. They spread apart under the pointer; a
+/// click opens the queue, where songs can be reordered or played.
+/// `settled` runs from 0 to 1 as a song change ends.
+fn queue_tiles(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    region: Rect,
+    upcoming: &[PlayableItem],
+    settled: f32,
+) {
+    let Some(first) = upcoming.first() else {
+        return;
+    };
+    let palette = app.palette;
+    let area = Rect::from_min_max(
+        pos2(
+            region.right() - TILES_WIDTH + 6.0,
+            region.center().y - TILE_SIZE / 2.0 - 4.0,
+        ),
+        pos2(region.right(), region.center().y + TILE_SIZE / 2.0 + 4.0),
+    );
+    let response = ui.interact(area, egui::Id::new("island-queue-tiles"), Sense::click());
+    let spread = ui.ctx().animate_bool_with_time(
+        egui::Id::new("island-queue-spread"),
+        response.hovered(),
+        crate::motion::seconds(ui.ctx(), kit_motion::FEEDBACK * 2.0),
+    );
+    let step = TILE_STEP + (TILE_STEP_SPREAD - TILE_STEP) * spread;
+    for (index, item) in upcoming.iter().enumerate().rev() {
+        let lift = if index == 0 {
+            (1.0 - settled) * 4.0
+        } else {
+            0.0
+        };
+        let rect = Rect::from_min_size(
+            pos2(
+                area.left() + index as f32 * step,
+                area.center().y - TILE_SIZE / 2.0 + lift,
+            ),
+            Vec2::splat(TILE_SIZE),
+        );
+        // A ring in the island's own colour separates overlapping covers.
+        ui.painter()
+            .rect_filled(rect.expand(2.0), 9.0, ui.visuals().panel_fill);
+        super::widgets::paint_cover(
+            ui,
+            &palette,
+            app.item_image(item, 64).as_deref(),
+            rect,
+            7.0,
+            Icon::Music,
+            None,
+        );
+    }
+    let tip = gettext(app.locale, "Next: {title}. Click to see the queue")
+        .replace("{title}", first.name());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &tip));
+    let response = response.on_hover_text(tip);
+    if response.clicked() && !app.show_queue_panel {
+        app.actions.push(Action::ToggleQueuePanel);
+    }
+}
+
 fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option<&NowPlaying>) {
     let palette = app.palette;
     let cy = region.center().y;
-    let cover_rect = Rect::from_min_size(pos2(region.left() + 4.0, cy - 28.0), Vec2::splat(56.0));
+    let cover_rect = Rect::from_min_size(pos2(region.left() + 4.0, cy - 26.0), Vec2::splat(52.0));
 
     let Some(now) = now else {
         super::widgets::paint_cover(ui, &palette, None, cover_rect, 6.0, Icon::Music, None);
@@ -516,17 +787,7 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
             theme::regular(12.0),
             palette.secondary,
         );
-        let source_width =
-            if crate::soundcloud::Source::of(&now.uri) == crate::soundcloud::Source::SoundCloud {
-                super::widgets::SOURCE_BADGE_SIZE.x + 6.0
-            } else {
-                0.0
-            };
-        title
-            .size()
-            .x
-            .max(subtitle.size().x + source_width)
-            .min(text_width)
+        title.size().x.max(subtitle.size().x).min(text_width)
     };
     let info_rect = Rect::from_min_size(pos2(text_left, cy - 18.0), vec2(text_width, 36.0));
 
@@ -537,7 +798,8 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     );
     text_ui.set_clip_rect(info_rect.intersect(ui.clip_rect()));
     text_ui.spacing_mut().item_spacing.y = 2.0;
-    let title_response = theme::link(&mut text_ui, &now.title, theme::medium(14.0), palette.text)
+    let title_color = super::kit::Source::of(&now.uri).color(&palette);
+    let title_response = theme::link(&mut text_ui, &now.title, theme::medium(14.0), title_color)
         .interact(drag_sense);
     if title_response.clicked()
         && let Some(page) = app.now_playing_collection_page(now)
@@ -547,16 +809,15 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     let mut responses = vec![cover_response, title_response];
     text_ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        if super::widgets::source_badge(ui, &palette, app.locale, &now.uri).is_some() {
-            ui.add_space(6.0);
-            if app.now_playing_item().is_some_and(|item| {
+        if super::kit::Source::of(&now.uri) == super::kit::Source::SoundCloud
+            && app.now_playing_item().is_some_and(|item| {
                 matches!(item, PlayableItem::Track(track) if track.preview_only
                     || (now.duration_ms > 0
                         && crate::soundcloud::models::shortened(now.duration_ms, track.duration_ms)))
-            }) {
-                super::widgets::preview_badge(ui, &palette, app.locale);
-                ui.add_space(6.0);
-            }
+            })
+        {
+            super::widgets::preview_badge(ui, &palette, app.locale);
+            ui.add_space(6.0);
         }
         if now.artists.is_empty() {
             let response = theme::link(ui, &now.subtitle, theme::regular(12.0), palette.secondary)
@@ -1306,5 +1567,53 @@ mod player_bar_tint_tests {
 
         let accent = Color32::from_rgb(30, 215, 96);
         assert_eq!(vis_colours(None, accent, true).len(), 2);
+    }
+}
+
+#[cfg(test)]
+mod island_tests {
+    use super::*;
+
+    fn shown(uri: &str, next: Option<&str>) -> Shown {
+        Shown {
+            uri: uri.into(),
+            title: uri.into(),
+            subtitle: String::new(),
+            art: None,
+            next: next.map(str::to_string),
+        }
+    }
+
+    /// The queue's first song moving up is Next, the old song coming back at
+    /// the head of the queue is Previous, and a song from anywhere else
+    /// replaced what was playing.
+    #[test]
+    fn a_song_change_reads_as_next_previous_or_replace() {
+        let before = shown("spotify:track:a", Some("spotify:track:b"));
+        assert_eq!(
+            swipe_for(&before, "spotify:track:b", Some("spotify:track:c")),
+            Swipe::Next
+        );
+        assert_eq!(
+            swipe_for(&before, "spotify:track:z", Some("spotify:track:a")),
+            Swipe::Previous
+        );
+        assert_eq!(
+            swipe_for(&before, "soundcloud:track:9", None),
+            Swipe::Replace
+        );
+        let alone = shown("spotify:track:a", None);
+        assert_eq!(swipe_for(&alone, "spotify:track:b", None), Swipe::Replace);
+    }
+
+    #[test]
+    fn the_island_floats_inside_its_strip() {
+        let strip = Rect::from_min_size(pos2(0.0, 700.0), vec2(1280.0, theme::PLAYER_BAR_HEIGHT));
+        let island = island_rect(strip);
+        assert_eq!(island.width(), ISLAND_MAX_WIDTH);
+        assert_eq!(island.bottom(), strip.bottom() - ISLAND_MARGIN);
+        assert_eq!(island.top(), strip.top() + ISLAND_MARGIN);
+        let narrow = island_rect(Rect::from_min_size(strip.min, vec2(600.0, strip.height())));
+        assert_eq!(narrow.width(), 600.0 - ISLAND_MARGIN * 2.0);
     }
 }

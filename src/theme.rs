@@ -241,7 +241,8 @@ pub const ROW_HEIGHT: f32 = 56.0;
 pub const COMPACT_ROW_HEIGHT: f32 = 48.0;
 /// The compact track list: one line, no cover.
 pub const THIN_ROW_HEIGHT: f32 = 36.0;
-pub const PLAYER_BAR_HEIGHT: f32 = 88.0;
+/// The strip at the window's foot that holds the floating player island.
+pub const PLAYER_BAR_HEIGHT: f32 = 100.0;
 /// The narrowest either right-hand panel goes. The queue and the lyrics
 /// take the same edge and swap places there, so a width that suits one
 /// has to suit the other, or the window would jump on the swap.

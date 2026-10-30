@@ -373,12 +373,6 @@ fn soundcloud_cards(
                         playing: false,
                     },
                 );
-                card_source_badge(
-                    ui,
-                    app,
-                    &card.response.rect,
-                    &crate::soundcloud::user_uri(user.id),
-                );
                 if card.response.clicked() {
                     app.actions
                         .push(Action::OpenSoundCloud(crate::soundcloud::user_uri(user.id)));
@@ -397,12 +391,6 @@ fn soundcloud_cards(
                         playable: false,
                         playing: false,
                     },
-                );
-                card_source_badge(
-                    ui,
-                    app,
-                    &card.response.rect,
-                    &crate::soundcloud::playlist_uri(playlist.id),
                 );
                 if card.response.clicked() {
                     app.actions
@@ -429,19 +417,6 @@ fn soundcloud_cards(
         theme::section_title(ui, &palette, &title);
         widgets::grid(ui, &mut cards);
     }
-}
-
-fn card_source_badge(ui: &mut egui::Ui, app: &App, rect: &Rect, uri: &str) {
-    let badge = Rect::from_min_size(
-        rect.right_top() + vec2(-widgets::SOURCE_BADGE_SIZE.x - 16.0, 16.0),
-        widgets::SOURCE_BADGE_SIZE,
-    );
-    let mut child = ui.new_child(
-        egui::UiBuilder::new()
-            .id_salt(("search-source", uri))
-            .max_rect(badge),
-    );
-    widgets::source_badge(&mut child, &app.palette, app.locale, uri);
 }
 
 fn recent(app: &mut App, ui: &mut egui::Ui) {
