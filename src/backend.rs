@@ -3920,9 +3920,29 @@ impl Worker {
         });
     }
 
+    /// Disable old-account measurements before the actor accepts new loads.
+    /// The disk phase runs separately and can only enable its own generation.
+    fn invalidate_loudness_cache(&self) {
+        let invalidation =
+            crate::loudness::prepare_invalidation(&self.engine_config.volume_dir.join("loudness"));
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Err(error) = invalidation.finish() {
+                log::warn!("could not clear cached loudness measurements: {error}");
+                let _ = events.send(Event::Error(
+                    "Could not clear cached loudness measurements. The cache is disabled; disconnect again to retry."
+                        .into(),
+                ));
+                waker.wake();
+            }
+        });
+    }
+
     /// Cancels in-flight account work and drops cached Home data on sign-out.
     fn sign_out(&mut self) {
         self.track_details.clear();
+        self.invalidate_loudness_cache();
         self.hybrid.engine = None;
         self.spotify_restore_started = true;
         self.cancel_search();

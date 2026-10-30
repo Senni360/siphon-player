@@ -62,16 +62,20 @@ Seeks and decoder rebuilds of the current track retain its in-memory gain and
 pending checkpoint, so a delayed atomic write cannot cause a sudden return to
 the conservative starting level.
 
-An account transition must call `ExternalOutput::invalidate_loudness_cache()`
-on a backend worker before admitting new-account loads. The operation clears
-the active identity and measurement, removes the cache directory, and advances
-a generation shared by all live processors for that directory. Atomic writes
-hold the same barrier; an old queued write cannot recreate a cleared record.
-A continuing decoder retains its audible gain but cannot cache under the old
-identity. Deletion failures are returned and disable cache reads/writes for
-that generation; the coordinator must report/retry them. The method waits for
-disk and never belongs on the UI thread. It does not authorize or cancel any
-account request; those remain the backend's responsibility.
+SoundCloud account/permission changes and Spotify sign-out call
+`loudness::prepare_invalidation(directory)` before the backend accepts new
+loads. This immediately disables cache reads/writes and advances a generation,
+without waiting for disk or requiring an active sink. The returned
+`Invalidation::finish()` job runs on `spawn_blocking`, removes the directory
+under the atomic writer's barrier, and enables only its own generation. Old
+queued writes cannot recreate cleared records; an older clear cannot enable or
+delete a newer account's cache. Each processor drops old identity/measurement
+on its next use, retaining audible gain for a continuing decoder. Failed or
+abandoned clears stay disabled even after all sinks are dropped. The backend
+reports deletion errors; another disconnect retries. Initial saved-account
+restoration, same-account token/name changes and audio-engine restarts retain
+measurements. These cache hooks do not authorize or cancel track requests;
+the backend's account generations still reject stale requests.
 
 ## External source API
 
@@ -94,7 +98,8 @@ thread. The redesign only needs to surface the existing normalisation toggle.
 
 Synthetic tests cover R128 reference tones, silence, capped gain, per-frame
 ramps, a quiet intro followed by loud audio through the final limiter,
-lookahead replay, cache generations, seek continuity and exact normalisation
+lookahead replay, cache generations (including no active sink, failed clears,
+concurrent/superseded clears, and nonblocking PCM), seek continuity and exact normalisation
 bypass. Decoder fixtures check buffered PCM is emitted once. These checks do
 not listen to an output device or verify Spotify's gain metadata for a live
 recording. Windows validation still needs source transitions, seeking,
