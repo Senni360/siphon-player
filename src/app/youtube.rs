@@ -11,7 +11,7 @@ pub(super) struct State {
 
 impl App {
     /// Install explicitly invented library states without disk or helper work.
-    #[cfg(feature = "demo")]
+    #[cfg(any(test, feature = "demo"))]
     pub fn set_demo_youtube_likes(&mut self, likes: Loadable<Likes>) {
         self.youtube.generation = self.youtube.generation.wrapping_add(1);
         self.youtube.account = self.user_id().map(str::to_owned);
@@ -140,6 +140,15 @@ impl App {
         if generation != self.youtube.generation {
             return;
         }
+        if !self.youtube_playlist_link_pending(uri)
+            && !self
+                .pending_pastes
+                .iter()
+                .any(|paste| paste.uris.iter().any(|pasted| pasted == uri))
+        {
+            return;
+        }
+        self.youtube_playlist_link_received(uri, &result);
         match result {
             Ok(track) => {
                 self.cache_soundcloud_tracks(std::slice::from_ref(track.as_ref()));

@@ -158,3 +158,33 @@ fn youtube_copy_link_accepts_both_menu_urls_and_canonical_uris() {
     }
     app.backend.shutdown();
 }
+
+#[test]
+fn youtube_playlist_link_uses_metadata_and_discards_a_closed_dialog_result() {
+    let mut app = hybrid_fixture();
+    let track = youtube_fixture_track();
+    app.open_playlist_link("https://youtu.be/aB9_-012xyz");
+    assert!(
+        matches!(&app.dialog, Some(Dialog::AddToPlaylist { name, loading: true, .. }) if name == "YouTube")
+    );
+    app.youtube_track_received(
+        app.youtube.generation,
+        &track.uri,
+        Ok(Box::new(track.clone())),
+    );
+    assert!(
+        matches!(&app.dialog, Some(Dialog::AddToPlaylist { items, loading: false, .. }) if items == &vec![PlayableItem::Track(track.clone())])
+    );
+    app.cancel_playlist_link();
+    app.track_cache.clear();
+    app.open_playlist_link("https://youtu.be/aB9_-012xyz");
+    app.cancel_playlist_link();
+    app.youtube_track_received(
+        app.youtube.generation,
+        &track.uri,
+        Ok(Box::new(track.clone())),
+    );
+    assert!(app.dialog.is_none());
+    assert!(!app.track_cache.contains_key(&track.uri));
+    app.backend.shutdown();
+}

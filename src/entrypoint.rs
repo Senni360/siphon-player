@@ -11,13 +11,13 @@ struct Cli {
     #[command(subcommand)]
     control: Option<Control>,
 
-    /// A Spotify link to open: spotify:track:…, or an open.spotify.com
-    /// address. The running Siphon opens it when there is one, which
+    /// A Spotify, SoundCloud or YouTube link to open.
+    /// The running Siphon opens it when there is one, which
     /// is how the desktop hands links over.
     #[arg(value_name = "LINK")]
     link: Option<String>,
 
-    /// Open Add to playlist for a SoundCloud or Spotify track or collection.
+    /// Open Add to playlist for a Spotify/SoundCloud collection or a source track.
     #[arg(long, value_name = "URL", conflicts_with = "link")]
     add_to_playlist: Option<String>,
 

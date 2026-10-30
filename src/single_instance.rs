@@ -439,7 +439,11 @@ fn parse(line: &str) -> Option<Request> {
             ControlCommand::SetRepeat(crate::player::RepeatMode::Track)
         }
         ("save-toggle", None) => ControlCommand::ToggleSaved,
-        ("play-uri", Some(uri)) => ControlCommand::PlayUri(spotify_uri(uri)?),
+        ("play-uri", Some(uri)) => ControlCommand::PlayUri(if crate::youtube::is_track_uri(uri) {
+            uri.to_owned()
+        } else {
+            spotify_uri(uri)?
+        }),
         ("play-search", Some(argument)) => {
             let (kind, query) = argument.split_once(' ')?;
             if !matches!(kind, "track" | "album" | "artist" | "playlist") {
@@ -631,6 +635,11 @@ mod tests {
             command("transfer a1b2c3d4e5"),
             Some(ControlCommand::Transfer("a1b2c3d4e5".to_owned()))
         );
+        assert_eq!(
+            command("play-uri youtube:video:aB9_-012xyz"),
+            Some(ControlCommand::PlayUri("youtube:video:aB9_-012xyz".into()))
+        );
+        assert!(command("play-uri youtube:video:--exec=bad").is_none());
         // A link arrives in whatever shape the desktop had it and leaves
         // as the one URI the app navigates by.
         assert_eq!(
