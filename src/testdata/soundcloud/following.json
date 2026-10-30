@@ -1,0 +1,11 @@
+{
+  "collection": [
+    {"type":"track","created_at":"2026-10-30T12:00:00Z","user":{"id":10,"username":"Uploader"},"track":{"id":1,"title":"New track"}},
+    {"type":"track-repost","created_at":"2026-10-30T11:00:00Z","user":{"id":20,"username":"Friend"},"track":{"id":1,"title":"New track"}},
+    {"type":"playlist","created_at":"2026-10-30T10:00:00Z","user":{"id":10,"username":"Uploader"},"playlist":{"id":1,"title":"New set","tracks":[{"id":1}]}},
+    {"type":"playlist-repost","created_at":"2026-10-30T09:00:00Z","user":{"id":20,"username":"Friend"},"playlist":{"id":1,"title":"New set"}},
+    {"type":"recommendation","created_at":"2026-10-30T08:00:00Z"},
+    {"type":"track-repost","created_at":"2026-10-30T07:00:00Z","user":{"id":20,"username":"Friend"},"track":null}
+  ],
+  "next_href":"stream?cursor=older&limit=50"
+}

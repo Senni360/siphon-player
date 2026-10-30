@@ -5,8 +5,208 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 const OLD_ID: &str = "00000000000000000000000000000000";
 const NEW_ID: &str = "11111111111111111111111111111111";
 
+#[tokio::test]
+async fn expired_social_reads_never_fall_back_to_public_requests() {
+    for feed in [true, false] {
+        let (client, task) = server(vec![
+            (401, String::new(), ""),
+            ok("<html>Discovery unavailable</html>"),
+            (401, String::new(), ""),
+        ]).await;
+        let result = if feed { client.following_feed(None).await.map(|_| ()) }
+            else { client.reposted_ids().await.map(|_| ()) };
+        assert!(matches!(result, Err(Error::SessionExpired)));
+        assert!(matches!(client.following_feed(None).await, Err(Error::SessionExpired)));
+        assert!(matches!(client.reposted_ids().await, Err(Error::SessionExpired)));
+        let requests = task.await.unwrap();
+        assert_eq!(requests.len(), 3);
+        assert!(requests[2].starts_with("GET /me?"));
+    }
+}
+
+#[tokio::test]
+async fn following_refresh_catches_up_to_cached_prefix_and_rejects_cursor_loops() {
+    let (client, task) = server(vec![
+        ok(include_str!("../testdata/soundcloud/following.json")),
+        ok(r#"{"collection":[{"type":"track","created_at":"2026-10-29T00:00:00Z","user":{"id":10},"track":{"id":2,"title":"Older"}}],"next_href":null}"#),
+    ]).await;
+    let page = crate::backend::soundcloud_library::following(&client, None, 5).await.unwrap();
+    assert_eq!(page.collection.len(), 5);
+    assert!(page.next_href.is_none());
+    assert_eq!(task.await.unwrap().len(), 2);
+    let (client, task) = server(vec![ok(r#"{"collection":[],"next_href":"stream?cursor=loop"}"#)]).await;
+    assert!(matches!(client.following_feed(Some("stream?cursor=loop")).await, Err(Error::Decode)));
+    task.await.unwrap();
+}
+
+#[tokio::test]
+async fn reposts_read_all_ids_at_two_hundred_and_write_both_resource_kinds() {
+    use crate::soundcloud::reposts::Target;
+    let (client, task) = server(vec![
+        ok(include_str!("../testdata/soundcloud/repost_ids.json")),
+        ok(r#"{"collection":[3],"next_href":null}"#),
+        ok(r#"{"collection":[1],"next_href":null}"#),
+        (204, String::new(), ""),
+        (204, String::new(), ""),
+        (204, String::new(), ""),
+        (204, String::new(), ""),
+    ])
+    .await;
+    let snapshot = client.reposted_ids().await.unwrap();
+    assert_eq!(snapshot.tracks, [1, 2, 3].into());
+    assert_eq!(snapshot.playlists, [1].into());
+    assert!(snapshot.loaded);
+    let http = crate::http::build_collection_client(&Default::default()).unwrap();
+    for target in [Target::Track(42), Target::Playlist(42)] {
+        client.set_reposted(&http, target, true).await.unwrap();
+        client.set_reposted(&http, target, false).await.unwrap();
+    }
+    let requests = task.await.unwrap();
+    assert!(requests[0].starts_with("GET /me/track_reposts/ids?limit=200&"));
+    assert!(requests[1].contains("cursor=older"));
+    assert!(requests[2].starts_with("GET /me/playlist_reposts/ids?limit=200&"));
+    for (request, prefix) in requests[3..].iter().zip([
+        "PUT /me/track_reposts/42?",
+        "DELETE /me/track_reposts/42?",
+        "PUT /me/playlist_reposts/42?",
+        "DELETE /me/playlist_reposts/42?",
+    ]) {
+        assert!(request.starts_with(prefix));
+    }
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.contains("authorization: OAuth fixture-oauth-token"))
+    );
+}
+
+#[tokio::test]
+async fn following_feed_preserves_post_identity_and_pages_without_requesting_notifications() {
+    use crate::soundcloud::following::{Content, Kind, Snapshot};
+    let (client, task) = server(vec![
+        ok(include_str!("../testdata/soundcloud/following.json")),
+        ok(r#"{"collection":[{"type":"track-repost","created_at":"2026-10-30T11:00:00Z","user":{"id":20,"username":"Friend"},"track":{"id":1,"title":"New track"}},{"type":"track-repost","created_at":"2026-10-30T06:00:00Z","user":{"id":30,"username":"Another friend"},"track":{"id":1,"title":"New track"}}],"next_href":null}"#),
+    ]).await;
+    let page = client.following_feed(None).await.unwrap();
+    assert_eq!(page.collection.len(), 4);
+    assert_eq!(page.collection[0].kind, Kind::Posted);
+    assert_eq!(page.collection[1].kind, Kind::Reposted);
+    assert_eq!(page.collection[1].by.name, "Friend");
+    assert_eq!(page.collection[1].created_at, "2026-10-30T11:00:00Z");
+    assert!(matches!(page.collection[2].content, Content::Playlist(_)));
+    assert_eq!(page.collection[3].kind, Kind::Reposted);
+    let next = page.next_href.clone().unwrap();
+    let mut snapshot = Snapshot::default();
+    snapshot.absorb(page, false);
+    snapshot.absorb(client.following_feed(Some(&next)).await.unwrap(), true);
+    assert_eq!(snapshot.items.len(), 5);
+    assert!(snapshot.next.is_none());
+    let requests = task.await.unwrap();
+    assert!(requests[0].starts_with("GET /stream?limit=50&linked_partitioning=1&"));
+    assert!(requests[1].starts_with("GET /stream?cursor=older&limit=50&"));
+    assert!(
+        requests
+            .iter()
+            .all(|request| request.contains("authorization: OAuth fixture-oauth-token"))
+    );
+}
+
+#[tokio::test]
+async fn social_reads_require_sessions_and_reject_foreign_or_wrong_endpoint_cursors() {
+    use crate::soundcloud::reposts::Target;
+    let client = Client::new(Http::default(), Some(OLD_ID.into()), None);
+    let http = crate::http::build_collection_client(&Default::default()).unwrap();
+    assert!(matches!(
+        client.reposted_ids().await,
+        Err(Error::NotSignedIn)
+    ));
+    assert!(matches!(
+        client.following_feed(None).await,
+        Err(Error::NotSignedIn)
+    ));
+    assert!(matches!(
+        client.set_reposted(&http, Target::Track(1), true).await,
+        Err(Error::NotSignedIn)
+    ));
+    let (client, task) = server(vec![ok(
+        r#"{"collection":[1],"next_href":"https://attacker.invalid/ids"}"#,
+    )])
+    .await;
+    for cursor in [
+        "https://attacker.invalid/stream",
+        "activities",
+        "users/1/tracks",
+        "stream/notifications",
+    ] {
+        assert!(matches!(
+            client.following_feed(Some(cursor)).await,
+            Err(Error::InvalidUrl)
+        ));
+    }
+    assert!(matches!(
+        client.reposted_ids().await,
+        Err(Error::InvalidUrl)
+    ));
+    assert_eq!(task.await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn repost_failures_do_not_retry_mutations_or_follow_redirects() {
+    use crate::soundcloud::reposts::Target;
+    for status in [302, 404, 429, 500] {
+        let (client, task) = server(vec![(
+            status,
+            String::new(),
+            "Location: https://attacker.invalid/\r\nRetry-After: 0\r\n",
+        )])
+        .await;
+        let http = crate::http::build_collection_client(&Default::default()).unwrap();
+        assert!(
+            client
+                .set_reposted(&http, Target::Playlist(1), true)
+                .await
+                .is_err()
+        );
+        assert_eq!(task.await.unwrap().len(), 1);
+    }
+}
+
 fn fixture_track() -> Track {
     serde_json::from_str(include_str!("../testdata/soundcloud/track.json")).unwrap()
+}
+
+#[test]
+fn richer_metadata_preserves_optional_values_and_release_date_precedence() {
+    let mut track: Track =
+        serde_json::from_str(include_str!("../testdata/soundcloud/metadata.json")).unwrap();
+    let converted = track.to_track(None);
+    assert_eq!(converted.release_date, track.release_date);
+    assert_eq!(converted.play_count, Some(4_294_967_296));
+    assert_eq!(
+        converted.image(500),
+        Some("https://i1.sndcdn.com/artworks-fixture-t500x500.jpg")
+    );
+    assert_eq!(track.label_name.as_deref(), Some("Fixture label"));
+    let publisher = track.publisher_metadata.as_ref().unwrap();
+    assert_eq!(publisher.isrc.as_deref(), Some("USAAA2500001"));
+    assert_eq!(publisher.album_title.as_deref(), Some("Fixture album"));
+    assert_eq!(publisher.release_title.as_deref(), Some("Fixture release"));
+    assert_eq!(publisher.writer_composer.as_deref(), Some("Fixture writer"));
+    assert_eq!(publisher.publisher.as_deref(), Some("Fixture publisher"));
+    assert_eq!(publisher.p_line.as_deref(), Some("2025 Fixture"));
+    assert_eq!(publisher.upc_or_ean.as_deref(), Some("0123456789012"));
+    track.release_date = None;
+    assert_eq!(track.to_track(None).release_date, track.display_date);
+    track.display_date = Some(" ".into());
+    assert_eq!(track.to_track(None).release_date, track.created_at);
+    track.created_at = None;
+    track.playback_count = None;
+    assert_eq!(track.to_track(None).release_date, None);
+    assert_eq!(track.to_track(None).play_count, None);
+    let old: crate::api::models::Track =
+        serde_json::from_str(r#"{"uri":"spotify:track:old"}"#).unwrap();
+    assert_eq!(old.release_date, None);
+    assert_eq!(old.play_count, None);
 }
 
 #[tokio::test]

@@ -8,6 +8,8 @@ use crate::api::models::{Artist, Playlist, Track};
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Snapshot {
+    pub following: super::following::Snapshot,
+    pub reposts: super::reposts::Snapshot,
     pub likes: Vec<Track>,
     pub next_likes: Option<String>,
     pub likes_loaded: bool,
@@ -17,6 +19,8 @@ pub struct Snapshot {
 
 #[derive(Default)]
 pub struct Library {
+    pub following: super::following::State,
+    pub repost_edits: super::reposts::Edits,
     pub snapshot: Snapshot,
     pub generation: u64,
     pub revision: u64,
@@ -150,6 +154,21 @@ mod tests {
             .join(format!("sc-library-{}", std::process::id()));
         let path = root.join("library.json");
         let snapshot = Snapshot {
+            reposts: super::super::reposts::Snapshot {
+                tracks: [1].into(),
+                playlists: [2].into(),
+                loaded: true,
+            },
+            following: super::super::following::Snapshot {
+                items: vec![super::super::following::Item {
+                    kind: super::super::following::Kind::Reposted,
+                    by: Artist { uri: "soundcloud:user:42".into(), ..Default::default() },
+                    created_at: "2026-10-30T12:00:00Z".into(),
+                    content: super::super::following::Content::Track(track(1)),
+                }],
+                next: Some("stream?cursor=next".into()),
+                loaded: true,
+            },
             likes: vec![track(1)],
             likes_loaded: true,
             playlists: vec![Playlist {
@@ -174,5 +193,12 @@ mod tests {
                 .is_none()
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn old_library_snapshots_default_to_unloaded_social_data() {
+        let snapshot: Snapshot = serde_json::from_str(r#"{"likes":[],"likes_loaded":true}"#).unwrap();
+        assert!(!snapshot.reposts.loaded);
+        assert!(!snapshot.following.loaded);
     }
 }

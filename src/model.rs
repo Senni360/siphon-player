@@ -1278,6 +1278,10 @@ pub enum Action {
     CancelDownload(u64),
     ConnectSoundCloud,
     ToggleSoundCloudLike(String),
+    ToggleSoundCloudRepost(String),
+    LoadSoundCloudFollowing {
+        more: bool,
+    },
     DisconnectSoundCloud,
     Open(Page),
     /// Opens the radio of a song shown in a list, after caching the row's
