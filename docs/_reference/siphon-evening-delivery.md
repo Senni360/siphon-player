@@ -342,23 +342,31 @@ preparing a bounded Linux-to-Windows MSVC cross-build in the existing cloud. Thi
 does not use a paid runner or deploy a service. The Windows dependency graph has
 no MilkDrop/CMake/ASIO requirement; `ring` is its only native C dependency. The
 Windows Rust standard library and checksum-verified cross tools are installed
-under task scratch; x64 SDK/CRT caching is in progress. Available disk space is
+under task scratch; x64 SDK/CRT caching completed successfully. Available disk space is
 being checked, and the warm Linux target is preserved.
 
 The isolated checkout is `/workspace/work/windows-cross-candidate`, branch
 `siphon/windows-cross-probe`, starting at `784e08f`. Its own `target/` is separate
 from every other checkout. Tool setup is `/workspace/work/windows-cross-env.sh`;
-SDK status is `/workspace/work/windows-cross-tools/cache.log`. Inspect live
-processes and logs before reusing this checkout. The initial build only tests
+SDK status is `/workspace/work/windows-cross-tools/cache.log`. The application
+cross-build is running at exact source `c2e5e1396ea7f8e0188f70d1eee02d7eb3e2b210`;
+its log and source/status record are `/workspace/work/logs/windows-cross-probe.log`
+and `windows-cross-probe.json`. Inspect live processes and logs before reusing
+this checkout. The initial build only tests
 toolchain compatibility and warms dependencies. Its source predates the final
 frontend and must never be labeled the final combined app. A later combined
 source must be rebuilt and identified by its exact manifest.
 
 A cross-built executable would remain unsigned and unverified on native Windows.
 It cannot establish credential-store, device/audio, installed-helper or account
-behavior. Current `build.rs` also skips Windows icon/version resources when its
-host is Linux; resolving that packaging difference is needed before presenting
-an equivalent final candidate. No executable is claimed by this setup note.
+behavior. The original `build.rs` skipped Windows icon/version resources on a Linux
+host. Correction `698b8fd` makes the existing resource build dependency available
+to every host and selects embedding by target OS, preserving native Windows
+behavior. Linux all-feature/all-target clippy, formatting and dependency-policy
+checks pass. A separate minimal linker probe produced an x64 PE importing only
+Windows system DLLs. That probe is not Siphon; the application cross-build is
+still pending and has not been executed on Windows. Missing SDK PDB warnings
+affect debugger symbols, not a runtime DLL dependency.
 
 ## Extra AI model
 
