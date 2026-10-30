@@ -14,6 +14,57 @@ private-media gateway are independently reviewable parts of milestone 1.
 The hosted and hardware acceptance gate remains open. Listening parties are
 not yet supported.
 
+### Current handoff
+
+The latest implementation checkpoint is
+[`2bb8ce7`](https://github.com/Senni360/siphon-player/commit/2bb8ce73b56ecc77d672802613426e0be1ac457f).
+The validation record below is chronological; its older test counts and "next"
+steps describe those earlier checkpoints. Use this summary and the component
+contracts for current work.
+
+| Milestone | Verified now | Still required for acceptance |
+| --- | --- | --- |
+| 1. Design and technical spike | Offline selected-MP3 preparation; local private-media HTTPS ranges, desktop submission, revocation and cleanup; separate Cast diagnostic code | Approved hosted configuration and test clip; real Chromecast format, seeking, position, expiry and reachability checks |
+| 2. Local sharing | Isolated admission/cancellation ledger and settled multipart cleanup, with local R2 tests | Authenticated direct-upload signer/executor, unknown-outcome reconciliation, trusted media verification, unified quotas, deduplication, lifecycle and native upload flow |
+| 3. Local-file parties | SQLite queue/timeline/session authority; bounded readiness, clock estimation, optimistic intent, journal and connection-fence models; simulated reconnect faults | Authenticated transport, heartbeat/alarm delivery, native journal/decoder/output adapters, two remote computers and measured synchronization |
+| 4. Cast in parties | No end-to-end acceptance | Milestones 1 and 3, receiver handoff/recovery and a desktop-plus-Cast run |
+| 5. Mixed-provider parties | Provider boundaries documented | Validate each provider's authorized playback path separately, with the same source for every participant on each entry |
+| 6. Cross-provider matching | Separate future proposal | Recording/version matching, uncertain-match confirmation and measured cross-provider synchronization |
+
+From the repository root, these commands need Node 24, no credentials and no
+dependency installation:
+
+```sh
+npm --prefix services/party-room run check
+npm --prefix services/party-room test
+npm --prefix services/media-gateway run check
+npm --prefix services/media-gateway test
+```
+
+Current Windows results are 243 room tests and 60 media-service tests. The
+separate local Durable Object runner passes 25 cases; its invocation and
+separately installed Miniflare requirement are in the
+[room runbook](https://github.com/Senni360/siphon-player/tree/main/services/party-room).
+Required Rust and policy checks passed on Windows at this implementation
+checkpoint. Launcher checks retain three failures/five errors, and local Jekyll
+lacks Bundler. GitHub's `2bb8ce7` jobs failed; the media job's annotation confirms
+it was refused before any steps because of account billing/spending restrictions.
+No new Linux/macOS or physical-device coverage follows from these results.
+
+No infrastructure or secret is needed for these regression suites. The proposed
+services, cost estimates and required server-side secrets below remain subject
+to deployment approval. The small implementation spikes use a 16 MiB MP3 limit,
+not the proposed 512 MiB sharing limit. Their independent registries do not form
+a unified quota or cleanup lifecycle. No library upload is enabled, and no real
+audible synchronization has been measured.
+
+The next bounded room increment is readiness-report sequencing through the
+headless connection boundary, retaining the server's report cursor and fencing
+selected-output changes. Session/output authority already exists; do not
+implement a second authority. The independent storage gap remains reconciliation
+of unknown multipart creation/completion, especially a lost provider handle.
+Neither path removes the hosted/hardware acceptance gate.
+
 The explicit fork exception is to CONTRIBUTING's Spotify-only scope, prohibition
 on another backend or operated service, and AGENTS' hosted-backend boundary, for
 user-selected local recordings and room coordination only. It does not permit
@@ -434,12 +485,14 @@ The independent room queue, headless snapshot/receipt recovery and durable
 timeline anchors, bounded clock estimation and startup readiness are now tested.
 The headless client now retains queue and transport intent in one command
 sequence. Its isolated journal now persists exact packets before dispatch and
-restores uncertain outcomes without allocating a new command ID. The next
-bounded room milestone can bind readiness reports to the active participant
-output/session and reject superseded sessions without enabling a live endpoint.
+restores uncertain outcomes without allocating a new command ID. SessionRoom
+now binds readiness to a selected live output and rejects superseded sessions.
+The connection boundary fences callbacks and durable command dispatch. The next
+bounded room increment is client readiness-report sequencing through that
+boundary, using the authoritative report cursor and captured output binding.
 Owner-presence grace/pause is now modeled and persisted;
 session detection and alarm wiring remain gates. Native pending-intent journaling,
-optimistic transport and authenticated transport remain separate gates; none of
+native optimistic controls and authenticated transport remain separate gates; none of
 these components enables a remote party by itself.
 Upload admission and native preparation remain separate components; neither
 enables a public upload endpoint. The M1 gateway needs only an operator
