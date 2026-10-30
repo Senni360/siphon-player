@@ -10,7 +10,9 @@ An optional [client journal](JOURNAL.md) now adds validated checkpoints and a
 local SQLite spike adapter; it is not wired into the native application.
 The optional [session coordinator](SESSIONS.md) binds readiness to the selected
 output and derives owner presence from bounded connection leases. Authentication
-and actual connection handling remain external and unimplemented.
+and actual socket handling remain external and unimplemented. The optional
+[headless connection boundary](CONNECTION.md) now binds journaled dispatch and
+clock callbacks to a host-owned transport without opening one.
 
 Run with Node 24 or later, without installing dependencies:
 
@@ -309,3 +311,9 @@ reopening, session/output fencing and fresh clock sampling together. It also
 demonstrates two required host checks: fence inbound replies by the active
 connection before consulting recreated cores, and recheck that connection at
 actual send time after durable packet release. Production adapters remain absent.
+
+The headless connection boundary implements those fences with bounded JSON
+frames, synchronous queue acceptance and serialized durable dispatch. Twenty-one
+new tests bring the suite to 239, including same-connection clock resynchronization
+without probe-ID reuse. It still needs a real authenticated transport, scheduling
+and native integration; it does not enable room playback in the app.

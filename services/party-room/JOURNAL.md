@@ -79,6 +79,9 @@ connections nor implements exclusive native-process ownership of a journal.
 Recheck that captured connection at the actual send boundary, including after
 any await following `outbound()`. The [reconnect harness](RECONNECT.md) tests a
 disconnect in that gap and requires the original packet to remain journaled.
+The optional [RoomConnection boundary](CONNECTION.md) now performs that check
+and serializes dispatch through a synchronous bounded host enqueue callback.
+It does not provide the socket, authenticator or native journal ownership.
 
 ## Local SQLite adapter
 

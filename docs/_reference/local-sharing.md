@@ -111,6 +111,9 @@ the provider feasibility gates in this plan remain in force.
   now combines two journaled clients, their clocks and the session authority
   through a bounded simulated JSON wire. It tests fault recovery, not a real
   transport, two computers or audio synchronization.
+  The optional [connection boundary](https://github.com/Senni360/siphon-player/blob/main/services/party-room/CONNECTION.md)
+  now fences host callbacks, bounds frames and releases commands only after
+  journal persistence. It still has no socket, authentication or native adapter.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -708,3 +711,25 @@ policy checks pass. All 218 room tests, 23 local Durable Object scenarios and
 Jekyll remains unavailable without Bundler. The preceding `4a3127e` gateway run
 was refused before steps by the confirmed GitHub billing/spending restriction.
 No new Linux/macOS, cloud, hardware or native-interface acceptance is claimed.
+
+The headless connection checkpoint adds 21 deterministic Windows tests, bringing
+the room suite to 239. Dispatch is serialized and journaled before synchronous
+enqueue to the exact host connection. Backpressure and uncertain sender results
+retain the original packet; old callbacks are refused before decoding. Incoming
+JSON has a 64 KiB UTF-8 limit and fixed error schemas. A regression caught clock
+probe-ID reuse during same-connection resynchronization; samples now reset while
+the probe high-water mark survives. The adapter also passes a lost-advance-reply
+scenario through the local fault harness and real SQLite authority.
+The component opens no socket, starts no timer and adds no provider capability,
+infrastructure, secret, upload quota or media-retention change. Authentication,
+heartbeat/readiness scheduling, native integration and M1 cloud/hardware gates
+remain open. No real audible synchronization has been measured.
+
+All 239 room tests, 23 local Durable Object scenarios and 60 media-service tests
+pass on Windows. Required default/all-feature Clippy and all-target suites
+(library 1865/1908 passing, eight ignored each), doctests, warning-strict rustdoc,
+formatting and policy checks pass. Launcher checks retain three failures/five
+errors, and local Jekyll still lacks Bundler. GitHub's preceding `2d6c90b` media
+job was refused before steps by its confirmed billing/spending restriction.
+No new Linux/macOS or deployed-platform coverage is claimed. The local runtime
+was disposed and all test/build processes completed before handoff.

@@ -55,6 +55,9 @@ instance. The transport must reject replies from old connection objects before
 calling `accept`, even if their numeric counters match. The
 [reconnect harness](RECONNECT.md) covers this collision and the required host
 fence. No socket-level fence is implemented by the clock model itself.
+The optional [connection boundary](CONNECTION.md) now supplies the host fence
+and retains clock probe high-water marks during resynchronization on the same
+transport. The actual socket and authentication remain external.
 
 ## Bounds and calculation
 

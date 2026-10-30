@@ -85,7 +85,8 @@ reports one readiness update at a time per actor; it does not implement a native
 decoder event queue. Output readiness and temporary media access remain separate
 from participant claims and clock readiness.
 
-The next bounded increment can implement the headless connection adapter with
-these fences and run it through this fault harness before connecting it to real
-WebSockets. Production auth, native playback, cloud/hardware milestone-1
-acceptance and real two-computer/Cast validation remain open.
+The [headless connection boundary](CONNECTION.md) now implements these fences,
+including same-transport clock resynchronization without probe-ID reuse, and
+runs through this fault harness. It still opens no socket. Production auth,
+native playback, cloud/hardware milestone-1 acceptance and real two-computer/Cast
+validation remain open.
