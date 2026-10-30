@@ -176,7 +176,7 @@ today, on `claude/focused-rubin-pxfk32`; the handoff in
 | Home | The group's newest shares first, with join, error, loading and empty lines; Spotify's shelves after. New releases and blended For you need backend data first. |
 | Group feed and composer | The backend's friends panel; not restyled. |
 | Toasts, banners | Existing ones in the new palette; not rebuilt. |
-| Motion built | Island swipes, Now playing grow and title wipe, tab selection slide, row tool reveal, sidebar slide and handle, group shares arriving in turn, group heart pop, a band of light crossing the row that starts playing, and an unplayable song shaking its title when asked to play. All respect reduced motion. |
+| Motion built | Island swipes, Now playing grow and title wipe, tab selection slide, row tool reveal, sidebar slide and handle, group shares arriving in turn, hearts popping when given (rows and group cards), a band of light crossing the row that starts playing, and an unplayable song shaking its title when asked to play. All respect reduced motion. |
 | Motion not built | Flying thumbnail, download burst, BPM copy float, nudge, search link unfold. |
 | Glass and grain | Not built: panels are flat fills. |
 | Geist | Not bundled; Inter remains. |

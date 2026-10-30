@@ -248,10 +248,10 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
     let pop = ui.ctx().animate_bool_with_time(
         egui::Id::new(("group-share-heart-pop", &post.id)),
         liked,
-        crate::motion::seconds(ui.ctx(), 0.3),
+        crate::motion::seconds(ui.ctx(), super::kit::motion::POP),
     );
     let swell = if liked {
-        1.0 + (pop * std::f32::consts::PI).sin() * 0.3
+        super::kit::motion::pop(pop)
     } else {
         1.0
     };
