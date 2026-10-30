@@ -1,0 +1,177 @@
+src/backend.rs:797:mod hybrid;
+src/backend.rs:2853:                        if *source == ApiSource::Shared {
+src/backend.rs:2864:                            ApiSource::Personal => Event::WebApp { client_id: None },
+src/backend.rs:2865:                            ApiSource::Shared => Event::SharedGrant(false),
+src/backend.rs:2870:                            ApiSource::Shared => self.api.personal_ready(),
+src/backend.rs:2871:                            ApiSource::Personal => matches!(
+src/backend.rs:2872:                                self.api.state(ApiSource::Shared),
+src/backend.rs:2879:                                ApiSource::Shared => SignInProblem::SharedRetired,
+src/backend.rs:2880:                                ApiSource::Personal => SignInProblem::Expired,
+src/backend.rs:3006:                            && self.api.state(ApiSource::Personal) == SessionState::Unavailable
+src/backend.rs:3007:                            && self.api.state(ApiSource::Shared) == SessionState::Unavailable
+src/backend.rs:3345:            .set_state(ApiSource::Shared, SessionState::Authorizing);
+src/backend.rs:3348:                .set_state(ApiSource::Personal, SessionState::Authorizing);
+src/backend.rs:3396:                    ApiSource::Shared
+src/backend.rs:3398:                    ApiSource::Personal
+src/backend.rs:3400:                if source == ApiSource::Shared
+src/backend.rs:3413:                        let message = if source == ApiSource::Shared {
+src/backend.rs:3430:                ApiSource::Shared
+src/backend.rs:3432:                ApiSource::Personal
+src/backend.rs:3535:        if source == ApiSource::Shared {
+src/backend.rs:3539:            ApiSource::Shared => format!("Shared Spotify sign-in failed: {error}"),
+src/backend.rs:3540:            ApiSource::Personal => format!("Personal app authorization failed: {error}"),
+src/backend.rs:3543:            ApiSource::Shared => self.api.personal_ready(),
+src/backend.rs:3544:            ApiSource::Personal => matches!(
+src/backend.rs:3545:                self.api.state(ApiSource::Shared),
+src/backend.rs:3550:            (ApiSource::Shared, ApiError::SignInExpired { .. }) => {
+src/backend.rs:3555:            (ApiSource::Personal, error) if error.status() == Some(403) => {
+src/backend.rs:3558:            (ApiSource::Personal, ApiError::SignInExpired { .. }) => Some(SignInProblem::Expired),
+src/backend.rs:3576:            || source == ApiSource::Personal
+src/backend.rs:3583:            if source == ApiSource::Shared {
+src/backend.rs:3600:            ApiSource::Shared => {
+src/backend.rs:3612:            ApiSource::Personal => {
+src/backend.rs:3670:            self.sign_in_source(ApiSource::Personal);
+src/backend.rs:3689:        if source == ApiSource::Shared {
+src/backend.rs:3807:        self.api.clear(ApiSource::Personal);
+src/backend.rs:3811:                self.pending_authorization = Some(ApiSource::Personal);
+src/backend.rs:3813:                self.sign_in_source(ApiSource::Personal);
+src/backend.rs:7888:            .install(ApiSource::Shared, AccountId::new("alice"))
+src/backend.rs:7943:            .install(ApiSource::Shared, AccountId::new("alice"))
+src/backend.rs:7998:            .install(ApiSource::Shared, AccountId::new("alice"))
+src/backend.rs:8041:        api.install(ApiSource::Shared, AccountId::new("carol"))
+src/backend.rs:8078:            .install(ApiSource::Shared, AccountId::new("alice"))
+src/backend.rs:8419:            verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8429:                ApiSource::Shared,
+src/backend.rs:8431:                    api_source: ApiSource::Shared,
+src/backend.rs:8447:            verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8464:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8465:        verify(&mut worker, ApiSource::Personal, "alice");
+src/backend.rs:8478:        commands.send(finished(&worker, ApiSource::Shared)).unwrap();
+src/backend.rs:8492:            .send(finished(&worker, ApiSource::Personal))
+src/backend.rs:8528:        worker.sign_in_source(ApiSource::Shared);
+src/backend.rs:8531:            worker.api.state(ApiSource::Shared),
+src/backend.rs:8548:            worker.api.state(ApiSource::Shared),
+src/backend.rs:8560:        verify(&mut worker, ApiSource::Personal, "alice");
+src/backend.rs:8561:        worker.api.clear(ApiSource::Personal);
+src/backend.rs:8562:        worker.authorizing_source = Some(ApiSource::Personal);
+src/backend.rs:8567:                source: ApiSource::Personal,
+src/backend.rs:8588:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8590:            ApiSource::Shared,
+src/backend.rs:8592:                api_source: ApiSource::Shared,
+src/backend.rs:8613:            .set_state(ApiSource::Personal, SessionState::Authorizing);
+src/backend.rs:8615:            ApiSource::Personal,
+src/backend.rs:8631:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8636:        verify(&mut worker, ApiSource::Shared, "bob");
+src/backend.rs:8644:                    api_source: ApiSource::Shared,
+src/backend.rs:8646:                expired: vec![ApiSource::Shared],
+src/backend.rs:8653:                source: ApiSource::Shared,
+src/backend.rs:8657:                    api_source: ApiSource::Shared,
+src/backend.rs:8700:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8738:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8757:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8776:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:8800:        for source in [ApiSource::Shared, ApiSource::Personal] {
+src/backend.rs:8815:                expired: vec![ApiSource::Personal],
+src/backend.rs:8839:                .install(ApiSource::Shared, AccountId::new("alice"))
+src/backend.rs:8844:                worker.api.clear(ApiSource::Shared);
+src/backend.rs:8847:                    .install(ApiSource::Shared, AccountId::new("bob"))
+src/backend.rs:8888:            .install(ApiSource::Shared, AccountId::new("alice"))
+src/backend.rs:8982:            worker.sign_in_source(ApiSource::Personal);
+src/backend.rs:9018:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9058:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9090:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9140:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9166:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9382:                source: ApiSource::Shared,
+src/backend.rs:9390:                source: ApiSource::Shared,
+src/backend.rs:9441:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9479:                ApiSource::Personal,
+src/backend.rs:9528:                    .set_state(ApiSource::Shared, SessionState::Authorizing);
+src/backend.rs:9550:                client_id: if source == ApiSource::Personal {
+src/backend.rs:9573:            .set_state(ApiSource::Shared, SessionState::Authorizing);
+src/backend.rs:9574:        verify(&mut worker, ApiSource::Personal, "alice");
+src/backend.rs:9578:            worker.api.state(ApiSource::Shared),
+src/backend.rs:9592:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9725:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9748:        verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:9750:        verify(&mut worker, ApiSource::Personal, "bob");
+src/backend.rs:9753:            worker.api.state(ApiSource::Personal),
+src/backend.rs:9781:        ApiSource::Shared => CredentialSlot::Shared,
+src/backend.rs:9782:        ApiSource::Personal => CredentialSlot::Personal,
+src/backend.rs:9802:        api.set_state(ApiSource::Shared, SessionState::Authorizing);
+src/backend.rs:9870:        for source in [ApiSource::Shared, ApiSource::Personal] {
+src/backend.rs:10138:        api.install(ApiSource::Shared, AccountId::new("me"))
+src/backend.rs:10210:        for fallback_error in [None, Some(ApiSource::Shared), Some(ApiSource::Personal)] {
+src/backend.rs:10213:                    api_source: ApiSource::Personal,
+src/backend.rs:10227:                if fallback_error == Some(ApiSource::Shared) {
+src/backend.rs:10228:                    vec![ApiSource::Personal, ApiSource::Shared]
+src/backend.rs:10230:                    vec![ApiSource::Personal]
+src/backend.rs:10363:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10381:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10405:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10424:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10445:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10467:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10506:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10535:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10573:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10600:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10621:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/backend.rs:10669:        super::authorization_tests::verify(&mut worker, ApiSource::Shared, "alice");
+src/app.rs:5:mod hybrid;
+src/app.rs:1370:            update_source: crate::updates::Source::default(),
+src/app.rs:4850:                ControlCommand::OpenLink(uri) => Some(Action::OpenLink(uri)),
+src/app.rs:4892:                        crate::link::parse(&uri).map(Action::OpenLink)
+src/app.rs:6873:            if self.search.source == SearchSource::Spotify {
+src/app.rs:6874:                self.search.source = SearchSource::SoundCloud;
+src/app.rs:6882:            && (self.search.source == SearchSource::Spotify
+src/app.rs:6898:            !query.is_empty() && self.search.source != SearchSource::SoundCloud;
+src/app.rs:6918:        if !query.is_empty() && self.search.source != SearchSource::Spotify {
+src/app.rs:6926:            query: if self.search.source == SearchSource::SoundCloud {
+src/app.rs:6938:            || self.search.source == SearchSource::Spotify
+src/app.rs:6978:            || self.search.source == SearchSource::Spotify
+src/app.rs:7436:                            api_source: crate::api::ApiSource::Shared
+src/app.rs:8760:                    || self.search.source == SearchSource::SoundCloud
+src/app.rs:8781:                    || self.search.source == SearchSource::SoundCloud
+src/app.rs:9175:        self.actions.push(Action::OpenLink(uri));
+src/app.rs:11638:                | Action::OpenLink(_)
+src/app.rs:11691:            Action::OpenLink(uri) => {
+src/app.rs:12484:                if source == SearchSource::Spotify {
+src/app.rs:12499:                if previous == SearchSource::SoundCloud
+src/app.rs:12509:                if source == SearchSource::SoundCloud {
+src/app.rs:12520:                if source != SearchSource::Spotify
+src/app.rs:12533:                    && self.search.source != SearchSource::Spotify
+src/app.rs:21246:            .push(Action::SetSearchSource(SearchSource::SoundCloud));
+src/app.rs:21248:        assert_eq!(app.search.source, SearchSource::SoundCloud);
+src/app.rs:21254:            .push(Action::SetSearchSource(SearchSource::Spotify));
+src/app.rs:21273:        app.search.source = SearchSource::Spotify;
+src/app.rs:21277:            Action::SetSearchSource(SearchSource::All),
+src/app.rs:21324:            Action::SetSearchSource(SearchSource::Spotify),
+src/app.rs:21328:            Action::SetSearchSource(SearchSource::All),
+src/app.rs:21408:        app.search.source = SearchSource::SoundCloud;
+src/app.rs:21422:            Action::SetSearchSource(SearchSource::All),
+src/app.rs:21506:        app.search.source = SearchSource::Spotify;
+src/app.rs:21510:        assert_eq!(app.search.source, SearchSource::SoundCloud);
+src/app.rs:32462:            .push(Action::OpenLink("spotify:playlist:pl1".into()));
+src/app.rs:32494:            .push(Action::OpenLink("spotify:track:t1".into()));
+src/app.rs:32503:            .push(Action::OpenLink("spotify:track:t2".into()));
+src/app.rs:32543:            .push(Action::OpenLink("spotify:station:track:t1".into()));
+src/app.rs:32668:        assert!(matches!(app.actions.as_slice(), [Action::OpenLink(_)]));
+src/app.rs:34963:            Action::OpenLink("https://soundcloud.com/u/sets/unloaded".into()),
+src/ui\search.rs:24:        for source in SearchSource::ALL {
+src/ui\search.rs:64:    let resolved = (app.search.source != SearchSource::Spotify)
+src/ui\search.rs:77:        if app.search.source == SearchSource::All {
+src/ui\search.rs:86:    if app.search.source == SearchSource::All
+src/ui\search.rs:87:        && SearchSource::SoundCloud.supports(app.search.filter)
+src/ui\search.rs:104:    if app.search.source != SearchSource::SoundCloud {
+src/ui\search.rs:105:        if app.search.source == SearchSource::All {
+src/ui\search.rs:111:    if app.search.source != SearchSource::Spotify
+src/ui\search.rs:112:        && SearchSource::SoundCloud.supports(app.search.filter)
+src/ui\search.rs:150:        if app.search.source == SearchSource::All {
+src/ui\search.rs:469:                SearchSource::All => gettext(app.locale, "Search music"),
+src/ui\search.rs:470:                SearchSource::Spotify => gettext(app.locale, "Search Spotify"),
+src/ui\search.rs:471:                SearchSource::SoundCloud => gettext(app.locale, "Search SoundCloud"),
+src/ui\search.rs:473:            &if app.search.source == SearchSource::SoundCloud {
+src/ui\player_bar.rs:519:            if crate::soundcloud::Source::of(&now.uri) == crate::soundcloud::Source::SoundCloud {
+src/ui\widgets.rs:30:    if crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
+src/ui\prerelease.rs:243:            app.actions.push(Action::OpenLink(data.uri.clone()));

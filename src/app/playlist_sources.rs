@@ -384,7 +384,7 @@ impl App {
         if !target.starts_with(OVERLAY_TARGET)
             && !items
                 .iter()
-                .any(|item| item.uri().starts_with("soundcloud:track:"))
+                .any(|item| crate::youtube::is_external(item.uri()))
         {
             return false;
         }
@@ -431,7 +431,7 @@ impl App {
         };
         let spotify: Vec<_> = items
             .iter()
-            .filter(|item| !item.uri().starts_with("soundcloud:track:"))
+            .filter(|item| !crate::youtube::is_external(item.uri()))
             .cloned()
             .collect();
         let spotify_count = spotify.len();
@@ -459,7 +459,7 @@ impl App {
             let mut next = raw_at as usize;
             let inserted = items.iter().map(|item| {
                 if let PlayableItem::Track(track) = item
-                    && crate::soundcloud::is_track_uri(&track.uri)
+                    && crate::youtube::is_external(&track.uri)
                 {
                     MergedRow::Overlay {
                         entry: crate::mixed_playlists::Entry::new(track),
@@ -487,7 +487,7 @@ impl App {
             let mut boundary = raw_at as usize;
             for item in items {
                 if let PlayableItem::Track(track) = item
-                    && crate::soundcloud::is_track_uri(&track.uri)
+                    && crate::youtube::is_external(&track.uri)
                 {
                     self.playlist_overlay
                         .get_mut(id)

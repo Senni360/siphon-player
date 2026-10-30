@@ -27,10 +27,11 @@ pub fn source_badge(
     locale: Locale,
     uri: &str,
 ) -> Option<egui::Response> {
-    if crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
+    let youtube = crate::youtube::is_track_uri(uri);
+    if !youtube && crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
         return None;
     }
-    let label = gettext(locale, "SoundCloud");
+    let label = if youtube { std::borrow::Cow::Borrowed("YouTube") } else { gettext(locale, "SoundCloud") };
     let (rect, response) = ui.allocate_exact_size(SOURCE_BADGE_SIZE, Sense::hover());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label.as_ref())
@@ -41,7 +42,7 @@ pub fn source_badge(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         // Translators: short source badge for SoundCloud; keep it compact.
-        gettext(locale, "SC"),
+        if youtube { std::borrow::Cow::Borrowed("YT") } else { gettext(locale, "SC") },
         theme::semibold(9.5),
         palette.secondary,
     );
