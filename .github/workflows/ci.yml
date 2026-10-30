@@ -149,11 +149,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libpipewire-0.3-dev libxkbcommon-dev \
             libwayland-dev libgl1-mesa-dev cmake libclang-dev
-      # libprojectM reads OpenGL through GLEW on Windows; projectm-sys builds
-      # against vcpkg's static-CRT triplet, matching .cargo/config.toml.
-      - name: GLEW for libprojectM
-        if: runner.os == 'Windows'
-        run: vcpkg install glew:${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}-windows-static
       # projectm-sys asks CMake for the Visual Studio generator, which the
       # runner image no longer satisfies; Ninja inside the MSVC environment
       # builds the same thing without caring which Visual Studio is on. The
@@ -161,11 +156,6 @@ jobs:
       # the build script.
       # Native tools on each runner: the action's default is x64, which on
       # the arm64 runner would compile under emulation.
-      - name: MSVC environment for libprojectM
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
       - uses: jdx/mr-boxington-action@v1
         with:
           cache-generation: test-v1

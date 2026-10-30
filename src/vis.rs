@@ -51,13 +51,8 @@ const SPEC_SCALE: f32 = 0.5;
 
 /// The last half second of sound, shared between the player's thread and
 /// the visualiser. The mono mix stays in this process for the skin's
-/// analyser; the stereo sound goes to a shared-memory ring for the MilkDrop
-/// child process, when one is running.
 pub struct AudioTap {
     samples: Mutex<VecDeque<f32>>,
-    /// The ring the MilkDrop child reads, attached while its window is open.
-    #[cfg(feature = "milkdrop")]
-    shm: Mutex<Option<std::sync::Arc<crate::milkdrop::shm::Ring>>>,
 }
 
 impl std::fmt::Debug for AudioTap {
@@ -70,8 +65,6 @@ impl Default for AudioTap {
     fn default() -> Self {
         Self {
             samples: Mutex::new(VecDeque::with_capacity(KEPT)),
-            #[cfg(feature = "milkdrop")]
-            shm: Mutex::new(None),
         }
     }
 }
@@ -81,40 +74,16 @@ impl AudioTap {
         Arc::new(Self::default())
     }
 
-    /// Connects the tap to MilkDrop's shared-memory ring. `None` detaches it.
-    #[cfg(feature = "milkdrop")]
-    pub fn set_shm(&self, ring: Option<std::sync::Arc<crate::milkdrop::shm::Ring>>) {
-        *self.shm.lock().unwrap_or_else(|p| p.into_inner()) = ring;
-    }
-
     /// Adds scaled stereo samples to the mono analyser buffer and, when
-    /// attached, MilkDrop's stereo shared-memory ring.
     pub fn push(&self, interleaved: &[f64], gain: f32) {
         let mut samples = self.samples.lock().unwrap_or_else(|p| p.into_inner());
         let (frames, _) = interleaved.as_chunks::<{ NUM_CHANNELS as usize }>();
-        #[cfg(feature = "milkdrop")]
-        let shm = self.shm.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        #[cfg(feature = "milkdrop")]
-        let mut stereo: Vec<f32> = if shm.is_some() {
-            Vec::with_capacity(frames.len() * 2)
-        } else {
-            Vec::new()
-        };
         for frame in frames {
             let mono = frame.iter().sum::<f64>() as f32 / frame.len() as f32 * gain;
             if samples.len() == KEPT {
                 samples.pop_front();
             }
             samples.push_back(mono);
-            #[cfg(feature = "milkdrop")]
-            if shm.is_some() {
-                stereo.push(frame[0] as f32 * gain);
-                stereo.push(frame[1] as f32 * gain);
-            }
-        }
-        #[cfg(feature = "milkdrop")]
-        if let Some(ring) = &shm {
-            ring.push(&stereo);
         }
     }
 
@@ -1045,4 +1014,50 @@ mod tests {
         }
         assert!(analyser.peaks()[band] < top - 0.2);
     }
+}
+
+/// How many frames a second the window draws by default.
+pub const DEFAULT_FPS: u32 = 60;
+/// Configurable frame-rate range. Zero is handled separately as uncapped.
+pub const FPS_RANGE: std::ops::RangeInclusive<u32> = 10..=360;
+/// Whether a refresh rate a screen reports is a rate at all: Windows reports
+/// 0 or 1 Hz for "the hardware's default", which says nothing. Screens
+/// faster than the dial goes still count.
+pub fn is_screen_rate(hz: u32) -> bool {
+    hz >= *FPS_RANGE.start()
+}
+/// Frame-rate slider stops: 30, 60, screen rate, current rate, and uncapped.
+pub fn fps_stops(screen: u32, current: u32) -> Vec<u32> {
+    let mut rates = vec![30, 60];
+    let screen = if is_screen_rate(screen) { screen } else { 0 };
+    for extra in [screen, current] {
+        if extra > 0 && !rates.contains(&extra) {
+            rates.push(extra);
+        }
+    }
+    rates.sort_unstable();
+    rates.push(0);
+    rates
+}
+
+/// Label for a frame-rate stop, marking the screen's refresh rate.
+pub fn fps_label(locale: crate::i18n::Locale, rate: u32, screen: u32) -> String {
+    use crate::i18n::gettext;
+    match rate {
+        0 => gettext(locale, "Uncapped").into_owned(),
+        rate if rate == screen => gettext(
+            locale,
+            // Translators: A frame rate that matches the display. Keep {rate}.
+            "{rate} fps, your screen",
+        )
+        .replace("{rate}", &rate.to_string()),
+        rate => format!("{rate} fps"),
+    }
+}
+
+/// A screen's refresh rate in whole hertz, from the millihertz a monitor
+/// reports, when it is a rate at all (see [`is_screen_rate`]).
+pub fn screen_hz(millihertz: u32) -> Option<u32> {
+    let hz = (f64::from(millihertz) / 1000.0).round() as u32;
+    is_screen_rate(hz).then_some(hz)
 }

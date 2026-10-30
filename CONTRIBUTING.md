@@ -237,17 +237,7 @@ RUSTDOCFLAGS='-D warnings' cargo doc --locked --all-features --no-deps
 (cd docs && bundle exec jekyll build)
 ```
 
-Linux needs the development packages listed under
-[Build from source](https://spotifast.rocks/getting-started/#build-from-source); `nix develop`
-provides the complete development environment. The command compatibility test
-also needs `dbus-run-session`, to use a private bus instead of the desktop's.
-MilkDrop builds libprojectM
-from source, so every platform also needs CMake, a C++ compiler, and
-libclang (on Windows, vcpkg with `glew:x64-windows-static` installed and
-`VCPKG_INSTALLATION_ROOT` pointing at it); `--no-default-features` leaves
-MilkDrop out and needs none of that. CI repeats the test suite on Linux,
-macOS, and Windows. Passing CI is required, but does not replace review
-for correctness, product fit, maintainability, or security.
+
 
 Credential-storage changes also need a native store round trip. With the
 desktop keyring unlocked, run

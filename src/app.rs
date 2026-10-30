@@ -663,12 +663,6 @@ pub struct App {
     /// Where the open dialog drew itself, so its own layout can be held
     /// to the window it has to fit inside.
     pub dialog_rect: Option<egui::Rect>,
-    /// Where the MilkDrop window last was, as it reported, for restoring it.
-    pub milkdrop_pos: Option<[f32; 2]>,
-    /// The MilkDrop child process; `None` until it is first opened. Its
-    /// `Drop` stops the child when the app does.
-    #[cfg(feature = "milkdrop")]
-    milkdrop_host: Option<crate::milkdrop::host::Host>,
     last_eviction: Instant,
     /// Playback snapshot for the current frame, built once per redraw.
     frame_now: Option<NowPlaying>,
@@ -1301,9 +1295,6 @@ impl App {
             },
             session_lyrics_fullscreen_from: session.lyrics_fullscreen_from,
             dialog_rect: None,
-            milkdrop_pos: session.milkdrop_pos,
-            #[cfg(feature = "milkdrop")]
-            milkdrop_host: None,
             last_eviction: Instant::now(),
             frame_now: None,
             sign_in_url: None,
@@ -4486,97 +4477,6 @@ impl App {
         if let Some(loaded) = self.winamp.poll() {
             self.skin_loaded(loaded);
         }
-        let fetched = self.winamp.presets.poll();
-        if let Some(fetched) = fetched {
-            match fetched {
-                Ok(count) => {
-                    self.toast(
-                        ngettext(
-                            self.locale,
-                            // Translators: {count} is the number of visualizer presets added.
-                            "Added {count} MilkDrop preset",
-                            "Added {count} MilkDrop presets",
-                            count as u32,
-                        )
-                        .replace("{count}", &count.to_string()),
-                    );
-                    // Restart the child so it loads the new preset list.
-                    #[cfg(feature = "milkdrop")]
-                    if let Some(host) = self.milkdrop_host.as_mut()
-                        && host.is_running()
-                    {
-                        host.close();
-                    }
-                }
-                Err(error) => self.toast_error(
-                    // Translators: {error} is an error message.
-                    gettext(self.locale, "Couldn't fetch presets: {error}")
-                        .replace("{error}", &error.to_string()),
-                ),
-            }
-        }
-    }
-
-    /// Syncs MilkDrop settings and receives window state and commands.
-    #[cfg(feature = "milkdrop")]
-    fn sync_milkdrop(&mut self, ctx: &egui::Context) {
-        let presets = self.dirs.milkdrop_dir();
-        let open = self.settings.milkdrop_open;
-        let size = self.settings.milkdrop_size;
-        let pos = self.milkdrop_pos;
-        let fullscreen = self.settings.milkdrop_fullscreen;
-        let fps = crate::power::milkdrop_fps(self.power.conditions(), self.settings.milkdrop_fps);
-        let seconds = self.settings.milkdrop_seconds;
-        let scale = self.settings.milkdrop_scale.max(1);
-        // Track metadata shown when the song changes.
-        let song = self.now_playing().filter(|now| !now.resuming).map(|now| {
-            // Title, artist, and album.
-            vec![
-                now.title.clone(),
-                now.subtitle.clone(),
-                now.album_name.clone(),
-            ]
-        });
-        if self.milkdrop_host.is_none() {
-            let tap = std::sync::Arc::clone(&self.winamp.tap);
-            self.milkdrop_host = Some(crate::milkdrop::host::Host::new(tap));
-        }
-        let poll = {
-            let host = self.milkdrop_host.as_mut().expect("the host was just made");
-            if open {
-                if !host.is_running() {
-                    host.open(&presets, size, pos, fullscreen, fps, seconds, scale);
-                }
-                host.update(fps, seconds, scale);
-                host.song(song);
-            } else if host.is_running() {
-                host.close();
-            }
-            host.poll()
-        };
-        if poll.closed {
-            self.settings.milkdrop_open = false;
-            self.mark_settings_dirty();
-        }
-        if let Some(size) = poll.size
-            && self.settings.milkdrop_size != size
-        {
-            self.settings.milkdrop_size = size;
-            self.mark_settings_dirty();
-        }
-        if let Some(pos) = poll.pos {
-            self.milkdrop_pos = Some(pos);
-        }
-        for command in poll.commands {
-            self.milkdrop_command(&command);
-        }
-        if let Some(hz) = poll.screen_hz {
-            self.learn_screen_hz(hz);
-        }
-        // Poll the child while the main window is otherwise idle.
-        if self.settings.milkdrop_open {
-            ctx.request_repaint_after(std::time::Duration::from_millis(300));
-        }
     }
 
     /// How many frames a second the player bar's and mini player's
@@ -4591,49 +4491,10 @@ impl App {
     }
 
     /// The screen rate the visualizers' frame-rate dial offers: the one
-    /// showing the main window, or the one MilkDrop last saw until that
-    /// has said; 0 while neither is known.
     pub fn visualiser_screen_hz(&self) -> u32 {
         match self.screen_hz {
-            0 => self.settings.milkdrop_screen_hz,
+            0 => 0,
             hz => hz,
-        }
-    }
-
-    /// Records the MilkDrop screen refresh rate and uses it as the initial FPS.
-    /// Later screen changes do not override a configured FPS, and an answer
-    /// that is no rate, such as Windows's "hardware default", is ignored.
-    #[cfg(feature = "milkdrop")]
-    fn learn_screen_hz(&mut self, hz: u32) {
-        if !crate::milkdrop::is_screen_rate(hz) || self.settings.milkdrop_screen_hz == hz {
-            return;
-        }
-        let first = self.settings.milkdrop_screen_hz == 0
-            && self.settings.milkdrop_fps == crate::milkdrop::DEFAULT_FPS;
-        self.settings.milkdrop_screen_hz = hz;
-        if first {
-            self.settings.milkdrop_fps = hz;
-        }
-        self.mark_settings_dirty();
-    }
-
-    /// Applies playback commands received from the MilkDrop window.
-    #[cfg(feature = "milkdrop")]
-    fn milkdrop_command(&mut self, command: &str) {
-        match command {
-            "previous" => self.actions.push(Action::Previous),
-            "next" => self.actions.push(Action::Next),
-            "play-pause" => self.actions.push(Action::TogglePlay),
-            "mute" => self.actions.push(Action::ToggleMute),
-            "save-toggle" => {
-                if let Some(now) = self.now_playing().filter(|now| !now.is_episode) {
-                    self.actions.push(Action::ToggleSaved(now.uri));
-                }
-            }
-            "shuffle" => self.actions.push(Action::ToggleShuffle),
-            "volume-up" => self.actions.push(Action::VolumeBy(5)),
-            "volume-down" => self.actions.push(Action::VolumeBy(-5)),
-            _ => {}
         }
     }
 
@@ -13451,62 +13312,6 @@ impl App {
                     self.open_folder(folder);
                 }
             }
-            Action::ToggleWinampMilkdrop => {
-                self.settings.milkdrop_open = !self.settings.milkdrop_open;
-                self.settings_dirty = true;
-                #[cfg(feature = "milkdrop")]
-                if self.settings.milkdrop_open {
-                    // A first open has nothing to draw but the idle preset,
-                    // which hardly answers the music; fetch the packs in the
-                    // background and the window fills up on its own.
-                    let folder = self.dirs.milkdrop_dir();
-                    if self.winamp.presets.downloading().is_none()
-                        && !crate::milkdrop::has_presets(&folder)
-                    {
-                        self.winamp.presets.download_missing(
-                            folder,
-                            ctx.clone(),
-                            self.applied_proxy.clone(),
-                        );
-                        self.toast(gettext(self.locale, "Downloading MilkDrop preset packs"));
-                    }
-                }
-            }
-            Action::SetMilkdropSeconds(seconds) => {
-                self.settings.milkdrop_seconds = seconds.clamp(1, 3600);
-                self.settings_dirty = true;
-            }
-            Action::SetMilkdropFps(fps) => {
-                self.settings.milkdrop_fps = if fps == 0 {
-                    0
-                } else {
-                    fps.clamp(
-                        *crate::milkdrop::FPS_RANGE.start(),
-                        *crate::milkdrop::FPS_RANGE.end(),
-                    )
-                };
-                self.settings_dirty = true;
-            }
-            Action::SetMilkdropScale(scale) => {
-                self.settings.milkdrop_scale = scale.clamp(1, 4);
-                self.settings_dirty = true;
-            }
-            Action::OpenMilkdropFolder => self.open_folder(self.dirs.milkdrop_dir()),
-            Action::DownloadMilkdropPack(index) => {
-                if let Some(pack) = crate::milkdrop::PACKS.get(index) {
-                    self.winamp.presets.download(
-                        pack,
-                        self.dirs.milkdrop_dir(),
-                        ctx.clone(),
-                        self.applied_proxy.clone(),
-                    );
-                    self.toast(
-                        // Translators: {name} is the name of a visualizer preset pack.
-                        gettext(self.locale, "Downloading {name} presets")
-                            .replace("{name}", pack.name),
-                    );
-                }
-            }
             Action::Quit => {
                 self.quit_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -13834,8 +13639,6 @@ impl App {
         self.note_listening();
         // MilkDrop runs in a child process and can outlive the main window.
         // Poll it before applying actions because its keys produce actions.
-        #[cfg(feature = "milkdrop")]
-        self.sync_milkdrop(ctx);
         self.apply_actions(ctx);
         self.sync_media_controls(ctx);
         self.sync_window_title(ctx);
@@ -13999,14 +13802,8 @@ impl App {
 
     /// How long the headless loop may sleep after this tick: until the next
     /// pass is due, and never longer than `HEADLESS_SLEEP`, which keeps the
-    /// timers in `tick` (saving, eviction, update checks) running. MilkDrop's
-    /// window outlives the main one and is polled every tick. Tray clicks,
-    /// media keys and backend events wake the loop at once.
     fn headless_wait(&self) -> fastframe_shell::Headless {
         use fastframe_shell::{HEADLESS_TICK, Headless};
-        if self.settings.milkdrop_open {
-            return Headless::Wait;
-        }
         let wait = self
             .next_pass()
             .map_or(HEADLESS_SLEEP, |due| due.min(HEADLESS_SLEEP));
@@ -14375,7 +14172,6 @@ impl App {
                 queue_open: Some(self.show_queue_panel),
                 queue_tab: Some(self.queue_tab.encode().to_string()),
                 winamp_pos: self.winamp.geometry.position,
-                milkdrop_pos: self.milkdrop_pos,
                 lyrics_fullscreen_from: self.lyrics_fullscreen.map(|fullscreen| {
                     crate::settings::WindowMode {
                         fullscreen,
@@ -23424,7 +23220,6 @@ mod tests {
 
     /// In the tray the app sleeps as long as nothing is due: until the next
     /// progress update while music plays, and a short tick while a play is
-    /// pending or MilkDrop's window is open.
     #[test]
     fn the_tray_sleeps_until_something_is_due() {
         use fastframe_shell::Headless;
@@ -23440,9 +23235,6 @@ mod tests {
             app.headless_wait(),
             Headless::WaitFor(Duration::from_millis(250))
         );
-
-        app.settings.milkdrop_open = true;
-        assert_eq!(app.headless_wait(), Headless::Wait);
     }
 
     /// Quit wins over everything, a switch between the main window and the
@@ -25417,98 +25209,16 @@ mod tests {
         app.backend.shutdown();
     }
 
-    /// MilkDrop playback keys produce the same actions as the main window.
-    #[cfg(feature = "milkdrop")]
-    #[test]
-    fn the_milkdrop_window_drives_playback() {
-        let mut app = headless_app();
-        app.local.track = Some(crate::player::LocalTrack {
-            uri: "spotify:track:a".into(),
-            ..Default::default()
-        });
-        app.local.playback = Playback::Playing;
-
-        for command in [
-            "play-pause",
-            "next",
-            "previous",
-            "mute",
-            "save-toggle",
-            "shuffle",
-            "volume-up",
-            "volume-down",
-        ] {
-            app.actions.clear();
-            app.milkdrop_command(command);
-            assert_eq!(
-                app.actions.len(),
-                1,
-                "{command} asks the player for one thing"
-            );
-        }
-
-        app.actions.clear();
-        app.milkdrop_command("save-toggle");
-        assert!(matches!(
-            app.actions.first(),
-            Some(Action::ToggleSaved(uri)) if uri == "spotify:track:a"
-        ));
-        app.actions.clear();
-        app.milkdrop_command("next");
-        assert!(matches!(app.actions.first(), Some(Action::Next)));
-        app.actions.clear();
-        app.milkdrop_command("volume-down");
-        assert!(matches!(app.actions.first(), Some(Action::VolumeBy(-5))));
-
-        // Ignore unknown commands.
-        app.actions.clear();
-        app.milkdrop_command("teleport");
-        assert!(app.actions.is_empty());
-    }
-
-    /// The first reported screen rate sets the default FPS, but later reports
-    /// do not override a configured value.
-    #[cfg(feature = "milkdrop")]
-    #[test]
-    fn the_frame_rate_matches_the_screen_the_first_time_it_is_known() {
-        let mut app = headless_app();
-        assert_eq!(app.settings.milkdrop_screen_hz, 0, "no screen has spoken");
-        assert_eq!(app.settings.milkdrop_fps, crate::milkdrop::DEFAULT_FPS);
-
-        app.learn_screen_hz(1);
-        assert_eq!(
-            app.settings.milkdrop_screen_hz, 0,
-            "Windows's hardware default is no rate"
-        );
-        assert_eq!(app.settings.milkdrop_fps, crate::milkdrop::DEFAULT_FPS);
-
-        app.learn_screen_hz(144);
-        assert_eq!(app.settings.milkdrop_screen_hz, 144);
-        assert_eq!(app.settings.milkdrop_fps, 144, "smooth without being asked");
-
-        // Keep the configured FPS when the screen changes.
-        app.settings.milkdrop_fps = 30;
-        app.learn_screen_hz(60);
-        assert_eq!(
-            app.settings.milkdrop_screen_hz, 60,
-            "the new screen is noted"
-        );
-        assert_eq!(app.settings.milkdrop_fps, 30, "their number stands");
-    }
-
     /// The visualizers' dial offers the rate of the screen showing the main
-    /// window, MilkDrop's until that screen has said, and none before
-    /// either has.
     #[test]
     fn the_visualizer_dial_offers_the_main_windows_screen() {
         let mut app = headless_app();
         assert_eq!(app.visualiser_screen_hz(), 0, "no screen has said");
-        app.settings.milkdrop_screen_hz = 144;
-        assert_eq!(app.visualiser_screen_hz(), 144, "MilkDrop's meanwhile");
+        assert_eq!(app.visualiser_screen_hz(), 0, "no screen yet");
         app.screen_hz = 165;
         assert_eq!(app.visualiser_screen_hz(), 165, "the window's own");
         app.screen_hz = 0;
-        assert_eq!(app.visualiser_screen_hz(), 144, "an unusable answer");
+        assert_eq!(app.visualiser_screen_hz(), 0, "an unusable answer");
     }
 
     /// A window in the Dock is drawn no frames, so the one frame a Show

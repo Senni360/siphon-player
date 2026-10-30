@@ -97,7 +97,7 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 
 </details>
 
-[Features](#your-music-on-your-desktop) · [Install](#install) · [First playback](#start-listening) · [Mini player](#the-winamp-mini-player) · [MilkDrop](#music-in-motion) · [Help](#guides-and-help)
+[Features](#your-music-on-your-desktop) · [Install](#install) · [First playback](#start-listening) · [Mini player](#the-winamp-mini-player) · [Help](#guides-and-help)
 
 ## Your music, on your desktop
 
@@ -110,7 +110,6 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 | **Themes** | Choose light, dark, system appearance, or custom colours, with one theme for light mode and one for dark mode that switch with the system. On Omarchy, follow your desktop theme. |
 | **Desktop controls** | Use keyboard shortcuts and media keys. Keep music playing from the tray when supported by your desktop and settings, and start Siphon with your computer, with its window or in the tray. |
 | **Winamp mini player** | Use classic skins with an equalizer, playlist, and animated sound displays. |
-| **MilkDrop** | Watch music-reactive visuals in a separate window or full screen. See platform availability below. |
 
 ## Save audio with the Siphon helper
 
@@ -190,16 +189,11 @@ window sizes, controls, and the return to the main player.
 
 ## Music in motion
 
-MilkDrop reacts to music playing on this computer, with more than 10,000
-presets downloaded on first use. Open it from the visualiser button,
-Settings, or the mini player's **V** menu.
 
-![MilkDrop visualiser displaying coloured concentric patterns in Siphon](docs/assets/images/milkdrop-poster.jpg)
 
-Included on **Linux**, **macOS**, and **Windows Intel/AMD** builds.
-It is not included in the Windows on ARM download.
-[Read the MilkDrop guide](https://spotifast.rocks/milkdrop/) for presets,
-controls, and fullscreen mode.
+
+
+
 
 ## Guides and help
 

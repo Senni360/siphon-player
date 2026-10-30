@@ -317,7 +317,6 @@ pub struct Settings {
     /// Allow clicks on the player bar background to cycle visualizer modes.
     pub player_bar_vis_click: bool,
     /// How many frames a second the player bar's visualizer and the mini
-    /// player's analyser draw; 0 is uncapped. MilkDrop has its own.
     pub visualizer_fps: u32,
     /// Last local volume, 0..=65535.
     pub volume: u16,
@@ -422,22 +421,6 @@ pub struct Settings {
     pub eq_shaded: bool,
     /// The main window is rolled up to its title bar.
     pub winamp_shaded: bool,
-    /// The MilkDrop window is open (its own window, not part of the skin).
-    pub milkdrop_open: bool,
-    /// How long each preset plays before the next, in seconds.
-    pub milkdrop_seconds: u32,
-    /// How many frames a second the MilkDrop window draws; 0 is uncapped.
-    pub milkdrop_fps: u32,
-    /// Last reported MilkDrop screen refresh rate. The first value sets the
-    /// default frame rate; this field is not directly configurable.
-    pub milkdrop_screen_hz: u32,
-    /// The picture's inner resolution: 1 full, 2 half, 4 quarter.
-    pub milkdrop_scale: u32,
-    /// The MilkDrop window fills the screen.
-    pub milkdrop_fullscreen: bool,
-    /// The MilkDrop window's size in logical points, when not full-screen.
-    pub milkdrop_size: [f32; 2],
-    /// Which proxy to use. Older files without this field stay on `system`.
     #[serde(default, skip_serializing_if = "proxy_mode_is_system")]
     pub proxy_mode: ProxyMode,
     /// Combined address from older settings files. Split into host and port
@@ -503,7 +486,7 @@ impl Default for Settings {
             accent_from_art: true,
             player_bar_vis: PlayerBarVis::Off,
             player_bar_vis_click: true,
-            visualizer_fps: crate::milkdrop::DEFAULT_FPS,
+            visualizer_fps: crate::vis::DEFAULT_FPS,
             volume: (u16::MAX as u32 * 70 / 100) as u16,
             sidebar_visible: true,
             art_expanded: false,
@@ -553,13 +536,6 @@ impl Default for Settings {
             playlist_shaded: false,
             eq_shaded: false,
             winamp_shaded: false,
-            milkdrop_open: false,
-            milkdrop_seconds: crate::milkdrop::DEFAULT_SECONDS,
-            milkdrop_fps: crate::milkdrop::DEFAULT_FPS,
-            milkdrop_screen_hz: 0,
-            milkdrop_scale: 1,
-            milkdrop_fullscreen: false,
-            milkdrop_size: crate::milkdrop::DEFAULT_SIZE,
             proxy_mode: ProxyMode::System,
             proxy: String::new(),
             proxy_host: String::new(),
@@ -677,7 +653,6 @@ impl Settings {
                 // The Connect device ID hashes this name. Even the previous
                 // factory name must survive an upgrade as the same device.
                 settings.migrate_proxy(text);
-                settings.forget_unusable_screen_rate();
                 settings.proxy_password_legacy = !settings.proxy_password.is_empty();
                 settings
             }
@@ -709,21 +684,6 @@ impl Settings {
         self.search_history.retain(|entry| entry != query);
         self.search_history.insert(0, query.to_string());
         self.search_history.truncate(12);
-    }
-
-    /// Forgets the frame rate an earlier version set from Windows's 1 Hz
-    /// "hardware default", taken then as MilkDrop's first screen rate, and
-    /// that screen rate with it, so MilkDrop's next real report is learned
-    /// as the first. A frame rate chosen since, or learned from a real
-    /// screen before, stays, and so does the 1 Hz beside it, which no dial
-    /// shows and the next real report replaces.
-    pub(crate) fn forget_unusable_screen_rate(&mut self) {
-        let hz = self.milkdrop_screen_hz;
-        if hz == 0 || crate::milkdrop::is_screen_rate(hz) || self.milkdrop_fps != hz {
-            return;
-        }
-        self.milkdrop_fps = crate::milkdrop::DEFAULT_FPS;
-        self.milkdrop_screen_hz = 0;
     }
 
     pub(crate) fn migrate_proxy(&mut self, text: &str) {
@@ -1281,35 +1241,6 @@ mod tests {
         assert!(!settings.home.made_for_you.visible);
     }
 
-    /// Earlier versions kept Windows's 1 Hz "hardware default" as MilkDrop's
-    /// screen rate and, the first time, as its frame rate. Loading forgets
-    /// both, and leaves a frame rate chosen since, and a real rate, alone.
-    #[test]
-    fn a_saved_hardware_default_screen_rate_is_forgotten() {
-        let dir =
-            std::env::temp_dir().join(format!("spotifast-screen-default-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("settings.json");
-        let load = |text: &str| {
-            std::fs::write(&path, text).unwrap();
-            let settings = Settings::load(&path);
-            (settings.milkdrop_screen_hz, settings.milkdrop_fps)
-        };
-        let learned = load(r#"{"milkdrop_screen_hz":1,"milkdrop_fps":1}"#);
-        let chosen = load(r#"{"milkdrop_screen_hz":1,"milkdrop_fps":30}"#);
-        let sixty = load(r#"{"milkdrop_screen_hz":1,"milkdrop_fps":60}"#);
-        let real = load(r#"{"milkdrop_screen_hz":144,"milkdrop_fps":144}"#);
-        let _ = std::fs::remove_dir_all(&dir);
-        assert_eq!(learned, (0, crate::milkdrop::DEFAULT_FPS));
-        assert_eq!(chosen, (1, 30), "their rate stands");
-        assert_eq!(
-            sixty,
-            (1, 60),
-            "a chosen 60 is not taken for the default, which a real report would replace"
-        );
-        assert_eq!(real, (144, 144), "a real rate stays");
-    }
-
     #[test]
     fn older_settings_keep_the_sidebar_visible() {
         let settings: Settings = serde_json::from_str("{}").unwrap();
@@ -1446,32 +1377,6 @@ mod tests {
         let json = serde_json::to_string(&settings).unwrap();
         let restored: Settings = serde_json::from_str(&json).unwrap();
         assert!(restored.tracklist_compact);
-    }
-
-    /// The main window's visualizers draw 60 frames a second until the user
-    /// picks another rate, and the rate they pick, uncapped included, is
-    /// the rate they get back, without touching MilkDrop's.
-    #[test]
-    fn the_visualizer_frame_rate_defaults_to_60_and_round_trips() {
-        let settings: Settings = serde_json::from_str("{}").unwrap();
-        assert_eq!(settings.visualizer_fps, 60);
-        assert_eq!(Settings::default().visualizer_fps, 60);
-        for rate in [30, 144, 0] {
-            let chosen = Settings {
-                visualizer_fps: rate,
-                ..Settings::default()
-            };
-            let json = serde_json::to_string(&chosen).unwrap();
-            let restored: Settings = serde_json::from_str(&json).unwrap();
-            assert_eq!(restored.visualizer_fps, rate);
-            assert_eq!(restored.milkdrop_fps, Settings::default().milkdrop_fps);
-        }
-        let milkdrop_only: Settings =
-            serde_json::from_value(serde_json::json!({"milkdrop_fps": 30})).unwrap();
-        assert_eq!(
-            milkdrop_only.visualizer_fps, 60,
-            "MilkDrop's rate is its own"
-        );
     }
 
     /// Older files keep today's colour icon, and the choice round-trips as
@@ -1889,11 +1794,6 @@ pub struct SessionState {
     pub queue_tab: Option<String>,
     /// Last outer position of the Winamp window.
     pub winamp_pos: Option<[f32; 2]>,
-    /// Last outer position of the MilkDrop window.
-    pub milkdrop_pos: Option<[f32; 2]>,
-    /// The window mode fullscreen lyrics left, when the app closed while
-    /// showing them. eframe restores the window full screen, so the next
-    /// start returns it to this mode instead.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lyrics_fullscreen_from: Option<WindowMode>,
 }

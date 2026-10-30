@@ -740,14 +740,6 @@ fn options_menu(app: &mut App, ui: &mut Ui, unit: f32) {
             app.actions.push(Action::SetWinampTaskbar(visible));
         }
     }
-    let mut milkdrop = app.settings.milkdrop_open;
-    if ui
-        .checkbox(&mut milkdrop, "MilkDrop")
-        .on_hover_text(super::keys::MILKDROP_SHORTCUT)
-        .clicked()
-    {
-        app.actions.push(Action::ToggleWinampMilkdrop);
-    }
     if ui
         .button(gettext(locale, "Choose a skin").as_ref())
         .clicked()
@@ -964,7 +956,7 @@ fn clutter_bar(app: &mut App, view: &mut View, now: Option<&NowPlaying>) {
         .lamp_button(
             layout::CLUTTER_V,
             sprites::CLUTTER_V_LIT,
-            app.settings.milkdrop_open,
+            false,
             "clutter-v",
         )
         .on_hover_text(gettext(app.locale, "Visualisation").as_ref());
@@ -982,15 +974,6 @@ fn clutter_bar(app: &mut App, view: &mut View, now: Option<&NowPlaying>) {
             {
                 app.actions.push(Action::SetVisualiser(mode));
             }
-        }
-        ui.separator();
-        let mut milkdrop = app.settings.milkdrop_open;
-        if ui
-            .checkbox(&mut milkdrop, "MilkDrop")
-            .on_hover_text(super::keys::MILKDROP_SHORTCUT)
-            .clicked()
-        {
-            app.actions.push(Action::ToggleWinampMilkdrop);
         }
     });
 }

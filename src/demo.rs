@@ -1855,7 +1855,6 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.settings.eq_open = true;
                 app.settings.eq_shaded = true;
             }
-            "milkdrop" => app.settings.milkdrop_open = true,
             "pins" => {
                 app.settings.pinned_contexts =
                     vec!["spotify:playlist:pl2".into(), "spotify:playlist:pl4".into()];
@@ -4266,7 +4265,6 @@ mod tests {
             ("Normalize volume", Role::CheckBox),
             ("Dark", Role::Button),
             ("Switch to it", Role::Button),
-            ("MilkDrop window", Role::CheckBox),
             ("Equalizer", Role::CheckBox),
             ("Clear artwork", Role::Button),
             ("Check for updates", Role::Button),
@@ -8456,175 +8454,6 @@ mod tests {
             minus < percent.1 && percent.1 < plus,
             "zoom control should read minus, percent, plus; got - at {minus}, 100% at {}, + at {plus}",
             percent.1
-        );
-        app.backend.shutdown();
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// The frame rate is a dial with detents: it stops at the rates
-    /// worth having, names the one it is on, and moving it one notch
-    /// lands on the next of them rather than somewhere in between.
-    #[cfg(feature = "milkdrop")]
-    #[test]
-    fn the_frame_rate_dial_steps_between_its_stops() {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-fps-dial-test-{}", std::process::id()));
-        let dirs = AppDirs {
-            config: root.join("config"),
-            state: root.join("state"),
-            cache: root.join("cache"),
-        };
-        let ctx = egui::Context::default();
-        let waker = crate::backend::Waker::default();
-        waker.attach(&ctx);
-        let mut app = App::new(
-            &waker,
-            dirs,
-            Settings::default(),
-            AppOptions {
-                media_controls: false,
-                restore_sign_in: false,
-                tray: false,
-                autostart: false,
-            },
-        );
-        app.attach(&ctx);
-        populate(&mut app);
-        app.settings.milkdrop_screen_hz = 144;
-        app.settings.milkdrop_fps = 60;
-        // The main window's screen is not MilkDrop's: its dial keeps
-        // the rate MilkDrop reported.
-        app.screen_hz = 60;
-        app.open(Page::Settings);
-
-        // Read labels from the real Settings page.
-        let drawn = |app: &mut App, ctx: &egui::Context| -> Vec<String> {
-            let input = egui::RawInput {
-                // Draw the full Settings page, including MilkDrop.
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1280.0, 4000.0),
-                )),
-                ..Default::default()
-            };
-            let mut output = ctx.run_ui(input, |ui| app.frame_ui(ui));
-            output.textures_delta.clear();
-            let mut said = Vec::new();
-            fn walk(shape: &egui::epaint::Shape, said: &mut Vec<String>) {
-                match shape {
-                    egui::epaint::Shape::Text(text) => said.push(text.galley.job.text.clone()),
-                    egui::epaint::Shape::Vec(shapes) => {
-                        shapes.iter().for_each(|shape| walk(shape, said))
-                    }
-                    _ => {}
-                }
-            }
-            for clipped in &output.shapes {
-                walk(&clipped.shape, &mut said);
-            }
-            said
-        };
-
-        for _ in 0..3 {
-            let said = drawn(&mut app, &ctx);
-            assert!(
-                said.iter().any(|text| text.contains("60 fps")),
-                "the dial names the rate it is on: {said:?}"
-            );
-        }
-
-        // Every stop can be reached, and each names itself.
-        for (rate, expected) in [
-            (144, "144 fps, your screen"),
-            (0, "Uncapped"),
-            (30, "30 fps"),
-        ] {
-            app.settings.milkdrop_fps = rate;
-            let said = drawn(&mut app, &ctx);
-            assert!(
-                said.iter().any(|text| text == expected),
-                "the dial on {rate} should read {expected}: {said:?}"
-            );
-        }
-        app.backend.shutdown();
-    }
-
-    /// The visualizers' frame-rate dial names the rate of the screen showing
-    /// the main window as the screen's with MilkDrop never opened, and
-    /// MilkDrop's until the window's screen has said.
-    #[test]
-    fn the_visualizer_dial_knows_the_screen_without_milkdrop() {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-screen-dial-test-{}", std::process::id()));
-        let dirs = AppDirs {
-            config: root.join("config"),
-            state: root.join("state"),
-            cache: root.join("cache"),
-        };
-        let ctx = egui::Context::default();
-        let waker = crate::backend::Waker::default();
-        waker.attach(&ctx);
-        let mut app = App::new(
-            &waker,
-            dirs,
-            Settings::default(),
-            AppOptions {
-                media_controls: false,
-                restore_sign_in: false,
-                tray: false,
-                autostart: false,
-            },
-        );
-        app.attach(&ctx);
-        populate(&mut app);
-        app.open(Page::Settings);
-
-        // Read labels from the real Settings page.
-        let drawn = |app: &mut App, ctx: &egui::Context| -> Vec<String> {
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1280.0, 4000.0),
-                )),
-                ..Default::default()
-            };
-            let mut output = ctx.run_ui(input, |ui| app.frame_ui(ui));
-            output.textures_delta.clear();
-            let mut said = Vec::new();
-            fn walk(shape: &egui::epaint::Shape, said: &mut Vec<String>) {
-                match shape {
-                    egui::epaint::Shape::Text(text) => said.push(text.galley.job.text.clone()),
-                    egui::epaint::Shape::Vec(shapes) => {
-                        shapes.iter().for_each(|shape| walk(shape, said))
-                    }
-                    _ => {}
-                }
-            }
-            for clipped in &output.shapes {
-                walk(&clipped.shape, &mut said);
-            }
-            said
-        };
-
-        assert_eq!(app.settings.milkdrop_screen_hz, 0, "MilkDrop never opened");
-        app.screen_hz = 165;
-        app.settings.visualizer_fps = 165;
-        let mut said = Vec::new();
-        for _ in 0..3 {
-            said = drawn(&mut app, &ctx);
-        }
-        assert!(
-            said.iter().any(|text| text == "165 fps, your screen"),
-            "the dial names the window's screen: {said:?}"
-        );
-
-        app.screen_hz = 0;
-        app.settings.milkdrop_screen_hz = 144;
-        app.settings.visualizer_fps = 144;
-        let said = drawn(&mut app, &ctx);
-        assert!(
-            said.iter().any(|text| text == "144 fps, your screen"),
-            "MilkDrop's screen until the window's has said: {said:?}"
         );
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
