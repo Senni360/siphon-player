@@ -32,7 +32,7 @@ use librespot_metadata::{
 };
 use librespot_playback::{
     audio_backend::Sink,
-    config::{Bitrate, NormalisationType, PlayerConfig, VolumeCtrl},
+    config::{Bitrate, NormalisationMethod, NormalisationType, PlayerConfig, VolumeCtrl},
     mixer::{self, Mixer, MixerConfig, NoOpVolume, VolumeGetter},
     player::{Player, PlayerEvent},
 };
@@ -580,6 +580,7 @@ impl Engine {
             normalisation: config.normalisation,
             // Track gain matches external R128 track loudness in mixed queues.
             normalisation_type: NormalisationType::Track,
+            normalisation_method: NormalisationMethod::Dynamic,
             normalisation_pregain_db: crate::loudness::PREGAIN_DB,
             position_update_interval: Some(Duration::from_secs(1)),
             // The fork reports each track's normalisation factor here, so

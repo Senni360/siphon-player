@@ -436,6 +436,18 @@ impl Sink for SharedSink {
 }
 
 impl ExternalOutput {
+    /// Clear account-private loudness state, including pending old writes.
+    /// Backend workers may call this without claiming audio ownership.
+    /// It waits for disk IO; never call it on the UI thread.
+    pub fn invalidate_loudness_cache(&self) -> std::io::Result<()> {
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .loudness
+            .invalidate_cache()
+    }
+
     /// Identify any external source by its stable URI, never a signed stream
     /// URL. Call after claim and on every Load/seek/refresh. Off the UI thread.
     pub fn begin_track(&self, uri: &str, from_start: bool) {

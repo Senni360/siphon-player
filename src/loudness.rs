@@ -3,7 +3,10 @@
 //! Feed raw decoded audio, before EQ, volume and limiting. Spotify retains
 //! its supplied track gain; its zero-pregain reference is -14 LUFS too.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use ebur128::{EbuR128, Mode};
 use serde::{Deserialize, Serialize};
@@ -49,10 +52,87 @@ impl Measurement {
 
 struct Cache {
     directory: Option<PathBuf>,
+    generation: Arc<CacheGeneration>,
     writer: fastframe_file::Writer,
 }
 
+struct CacheGeneration {
+    epoch: AtomicU64,
+    available: AtomicBool,
+    write_barrier: Mutex<()>,
+}
+
+impl Default for CacheGeneration {
+    fn default() -> Self {
+        Self {
+            epoch: AtomicU64::new(0),
+            available: AtomicBool::new(true),
+            write_barrier: Mutex::new(()),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+struct PendingMeasurement {
+    generation: u64,
+    measurement: Measurement,
+}
+
+// Old sinks can still have queued writes when a replacement sink starts.
+// Share the invalidation barrier across processors using the same directory.
+fn cache_generation(directory: Option<&Path>) -> Arc<CacheGeneration> {
+    type Generations = HashMap<PathBuf, Weak<CacheGeneration>>;
+    static GENERATIONS: OnceLock<Mutex<Generations>> = OnceLock::new();
+    let Some(directory) = directory else {
+        return Arc::default();
+    };
+    let mut generations = GENERATIONS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner);
+    generations.retain(|_, generation| generation.strong_count() > 0);
+    if let Some(generation) = generations.get(directory).and_then(Weak::upgrade) {
+        return generation;
+    }
+    let generation = Arc::new(CacheGeneration::default());
+    generations.insert(directory.to_owned(), Arc::downgrade(&generation));
+    generation
+}
+
 impl Cache {
+    fn new(directory: Option<&Path>) -> Self {
+        let generation = cache_generation(directory);
+        let writes = Arc::clone(&generation);
+        let writer = fastframe_file::Writer::with_write(move |path, bytes, access| {
+            let pending: PendingMeasurement =
+                serde_json::from_slice(bytes).map_err(std::io::Error::other)?;
+            let _guard = writes
+                .write_barrier
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if writes.epoch.load(Ordering::Acquire) != pending.generation
+                || !writes.available.load(Ordering::Acquire)
+            {
+                return Ok(());
+            }
+            // Keep the barrier through atomic replacement: invalidation waits
+            // for an in-flight write, removes it, then rejects queued old jobs.
+            fastframe_file::write_with(path, access, |file| {
+                serde_json::to_writer_pretty(file, &pending.measurement)
+                    .map_err(std::io::Error::other)
+            })
+        });
+        Self {
+            directory: directory.map(Path::to_owned),
+            generation,
+            writer,
+        }
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.epoch.load(Ordering::Acquire)
+    }
+
     fn path(&self, uri: &str) -> Option<PathBuf> {
         Some(
             self.directory
@@ -62,24 +142,59 @@ impl Cache {
     }
 
     fn load(&self, uri: &str) -> Option<Measurement> {
-        let bytes = std::fs::read(self.path(uri)?).ok()?;
+        let _guard = self
+            .generation
+            .write_barrier
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if !self.generation.available.load(Ordering::Acquire) {
+            return None;
+        }
+        let path = self.path(uri)?;
+        if std::fs::metadata(&path).ok()?.len() > 4096 {
+            return None;
+        }
+        let bytes = std::fs::read(path).ok()?;
         let value: Measurement = serde_json::from_slice(&bytes).ok()?;
         value.valid(uri).then_some(value)
     }
 
-    fn save(&self, measurement: &Measurement) {
+    fn save(&self, measurement: &Measurement, generation: u64) {
         if let Some(path) = self.path(&measurement.uri)
-            && let Ok(bytes) = serde_json::to_vec_pretty(measurement)
+            && let Ok(bytes) = serde_json::to_vec(&PendingMeasurement {
+                generation,
+                measurement: measurement.clone(),
+            })
         {
             self.writer
                 .write(&path, bytes, fastframe_file::Access::Private);
         }
+    }
+
+    fn invalidate(&self) -> std::io::Result<()> {
+        let _guard = self
+            .generation
+            .write_barrier
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        self.generation.epoch.fetch_add(1, Ordering::AcqRel);
+        // A failed deletion must not let the next account reuse old data.
+        self.generation.available.store(false, Ordering::Release);
+        if let Some(directory) = &self.directory {
+            match std::fs::remove_dir_all(directory) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                result => result?,
+            }
+        }
+        self.generation.available.store(true, Ordering::Release);
+        Ok(())
     }
 }
 
 /// Slew in dB, once per stereo frame. Slow upward correction preserves
 /// dynamics; downward correction settles sooner, with no packet boundary
 /// steps. The final peak limiter remains downstream.
+#[derive(Clone, Copy)]
 struct Ramp {
     db: f64,
     target: f64,
@@ -197,17 +312,18 @@ impl Track {
 pub struct Processor {
     enabled: bool,
     cache: Cache,
+    generation: u64,
     track: Track,
 }
 
 impl Processor {
     pub fn new(enabled: bool, directory: Option<&Path>) -> Self {
+        let cache = Cache::new(directory);
+        let generation = cache.generation();
         Self {
             enabled,
-            cache: Cache {
-                directory: directory.map(Path::to_owned),
-                writer: fastframe_file::Writer::new(),
-            },
+            cache,
+            generation,
             // Unlabelled producers still get protection and measurement.
             track: Track::new("", false, None),
         }
@@ -216,9 +332,50 @@ impl Processor {
     /// Begin a new track, or restart measurement after a seek. Only a
     /// contiguous decode from zero may populate the persistent cache.
     pub fn begin_track(&mut self, uri: &str, from_start: bool) {
+        self.sync_generation();
         self.finish_track(false);
-        let cached = self.enabled.then(|| self.cache.load(uri)).flatten();
+        let same_track = self.track.uri == uri && !uri.is_empty();
+        let cached = self
+            .enabled
+            .then(|| {
+                // A seek can precede the Writer's checkpoint reaching disk.
+                same_track
+                    .then(|| self.track.cached.clone())
+                    .flatten()
+                    .or_else(|| self.cache.load(uri))
+            })
+            .flatten();
+        let continued_ramp =
+            (same_track && !from_start && self.track.started).then_some(self.track.ramp);
         self.track = Track::new(uri, from_start, cached);
+        if let Some(ramp) = continued_ramp {
+            self.track.ramp = ramp;
+            self.track.lookahead = false;
+            self.track.started = true;
+        }
+    }
+
+    /// Clear account-private measurements and invalidate old queued writes.
+    /// This waits for disk IO and must run on a backend/playback worker.
+    /// A decoder that keeps playing loses its cache identity until its next
+    /// explicit begin_track; its audible gain is preserved.
+    pub fn invalidate_cache(&mut self) -> std::io::Result<()> {
+        let result = self.cache.invalidate();
+        self.sync_generation();
+        result
+    }
+
+    fn sync_generation(&mut self) {
+        let generation = self.cache.generation();
+        if self.generation != generation {
+            let ramp = self.track.ramp;
+            let started = self.track.started;
+            self.track = Track::new("", false, None);
+            self.track.ramp = ramp;
+            self.track.started = started;
+            self.track.lookahead = !started;
+            self.generation = generation;
+        }
     }
 
     pub fn needs_lookahead(&self) -> bool {
@@ -229,6 +386,7 @@ impl Processor {
     /// samples through process afterwards, in order. No extra gain ramp is
     /// necessary before any samples have reached the device.
     pub fn prime(&mut self, samples: &[f64]) {
+        self.sync_generation();
         if !self.needs_lookahead() {
             return;
         }
@@ -241,6 +399,7 @@ impl Processor {
 
     /// Measure and apply one gain to both channels, before EQ and limiting.
     pub fn process(&mut self, samples: &mut [f64]) {
+        self.sync_generation();
         if !self.enabled {
             return;
         }
@@ -248,7 +407,7 @@ impl Processor {
         self.track.primed_samples -= skip;
         self.track.measure(&samples[skip..]);
         self.track.started = true;
-        for frame in samples.chunks_exact_mut(2) {
+        for frame in samples.as_chunks_mut::<2>().0 {
             let gain = self.track.ramp.next();
             frame[0] *= gain;
             frame[1] *= gain;
@@ -262,10 +421,11 @@ impl Processor {
     /// `complete` means actual decoder EOF, never Stop, seek or URL refresh.
     /// Saving partial progress makes interrupted first plays useful too.
     pub fn finish_track(&mut self, complete: bool) {
+        self.sync_generation();
         if self.enabled
             && let Some(value) = self.track.snapshot(complete)
         {
-            self.cache.save(&value);
+            self.cache.save(&value, self.generation);
             self.track.cached = Some(value);
         }
     }
@@ -280,6 +440,30 @@ impl Drop for Processor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "siphon-loudness-{}-{:016x}",
+                std::process::id(),
+                rand::random::<u64>()
+            ));
+            std::fs::create_dir(&directory).unwrap();
+            Self(directory)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn sine(amplitude: f64, seconds: usize) -> Vec<f64> {
         (0..SAMPLE_RATE as usize * seconds)
@@ -329,7 +513,12 @@ mod tests {
         let mut processor = Processor::new(true, None);
         let mut pcm = vec![0.5; 2_048];
         processor.process(&mut pcm);
-        assert!(pcm.chunks_exact(2).all(|frame| frame[0] == frame[1]));
+        assert!(
+            pcm.as_chunks::<2>()
+                .0
+                .iter()
+                .all(|frame| frame[0] == frame[1])
+        );
         assert!(pcm.iter().all(|v| *v < 0.11));
     }
 
@@ -349,7 +538,7 @@ mod tests {
 
     #[test]
     fn cache_round_trip_is_atomic_and_completed_gain_stays_fixed() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = TestDirectory::new();
         let uri = "youtube:video:example";
         let mut processor = Processor::new(true, Some(directory.path()));
         processor.begin_track(uri, true);
@@ -411,7 +600,7 @@ mod tests {
 
     #[test]
     fn partial_cache_is_replaced_by_a_longer_or_completed_measurement() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = TestDirectory::new();
         let mut processor = Processor::new(true, Some(directory.path()));
         processor.begin_track("test:1", true);
         processor.process(&mut sine(0.5, 10));
@@ -441,7 +630,7 @@ mod tests {
 
     #[test]
     fn setting_off_is_exact_unity_with_no_measurement_or_files() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = TestDirectory::new();
         let mut processor = Processor::new(false, Some(directory.path()));
         processor.begin_track("soundcloud:tracks:1", true);
         let mut pcm = sine(0.8, 3);
@@ -453,5 +642,133 @@ mod tests {
         assert_eq!(processor.track.frames, 0);
         assert!(!processor.needs_lookahead());
         assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_seek_keeps_the_current_gain_before_the_checkpoint_reaches_disk() {
+        let mut processor = Processor::new(true, None);
+        processor.begin_track("soundcloud:track:1", true);
+        let mut pcm = sine(0.5, 3);
+        processor.prime(&pcm);
+        processor.process(&mut pcm);
+        let prior_gain = processor.track.ramp.db;
+        let prior_target = processor.track.ramp.target;
+        processor.begin_track("soundcloud:track:1", false);
+        assert_eq!(processor.track.ramp.db, prior_gain);
+        assert_eq!(processor.track.ramp.target, prior_target);
+        assert!(!processor.needs_lookahead());
+        assert_eq!(
+            processor.track.cached.as_ref().unwrap().frames,
+            3 * u64::from(SAMPLE_RATE)
+        );
+        processor.process(&mut sine(0.01, 1));
+        assert!((processor.track.ramp.db - prior_gain).abs() < 1e-10);
+        assert!(processor.track.snapshot(true).is_none());
+        processor.begin_track("youtube:video:other", true);
+        assert_eq!(processor.track.ramp.db, INITIAL_DB);
+        assert!(processor.needs_lookahead());
+    }
+
+    #[test]
+    fn account_invalidation_rejects_queued_writes_and_other_sinks_old_state() {
+        let directory = TestDirectory::new();
+        let mut old = Processor::new(true, Some(directory.path()));
+        old.begin_track("soundcloud:track:1", true);
+        old.process(&mut sine(0.5, 4));
+        old.finish_track(true);
+        assert!(old.cache.writer.flush(std::time::Duration::from_secs(5)));
+        let measurement = old.cache.load("soundcloud:track:1").unwrap();
+        let old_generation = old.generation;
+        let mut replacement = Processor::new(true, Some(directory.path()));
+        replacement.invalidate_cache().unwrap();
+        // A delayed job from an old sink must not resurrect deleted data.
+        old.cache.save(&measurement, old_generation);
+        assert!(old.cache.writer.flush(std::time::Duration::from_secs(5)));
+        old.finish_track(true);
+        assert!(old.track.uri.is_empty());
+        assert!(old.track.cached.is_none());
+        assert!(!directory.path().exists());
+        replacement.begin_track("youtube:video:new", true);
+        replacement.process(&mut sine(0.3, 4));
+        replacement.finish_track(true);
+        assert!(
+            replacement
+                .cache
+                .writer
+                .flush(std::time::Duration::from_secs(5))
+        );
+        assert!(replacement.cache.load("youtube:video:new").is_some());
+        assert!(replacement.cache.load("soundcloud:track:1").is_none());
+    }
+
+    #[test]
+    fn failed_invalidation_disables_old_cache_reads_until_a_successful_retry() {
+        let directory = TestDirectory::new();
+        let path = directory.path().join("cache");
+        let backup = directory.path().join("saved");
+        let mut processor = Processor::new(true, Some(&path));
+        processor.begin_track("soundcloud:track:1", true);
+        processor.process(&mut sine(0.5, 4));
+        processor.finish_track(true);
+        assert!(
+            processor
+                .cache
+                .writer
+                .flush(std::time::Duration::from_secs(5))
+        );
+        std::fs::rename(&path, &backup).unwrap();
+        std::fs::write(&path, b"not a directory").unwrap();
+        assert!(processor.invalidate_cache().is_err());
+        std::fs::remove_file(&path).unwrap();
+        std::fs::rename(&backup, &path).unwrap();
+        assert!(processor.cache.load("soundcloud:track:1").is_none());
+        assert!(processor.track.uri.is_empty());
+        processor.invalidate_cache().unwrap();
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn processing_does_not_wait_for_a_pending_durable_cache_write() {
+        let directory = TestDirectory::new();
+        let mut processor = Processor::new(true, Some(directory.path()));
+        processor.begin_track("soundcloud:track:1", true);
+        let generation = Arc::clone(&processor.cache.generation);
+        let barrier = generation.write_barrier.lock().unwrap();
+        let (sent, received) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            processor.process(&mut [0.0; 256]);
+            sent.send(()).unwrap();
+            processor
+        });
+        // Hold the disk writer's barrier while PCM runs. Only account
+        // invalidation and cache loads may wait for this barrier.
+        received
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        drop(barrier);
+        drop(worker.join().unwrap());
+    }
+
+    #[test]
+    fn a_late_loud_section_stays_finite_and_bounded_by_the_final_limiter() {
+        let mut processor = Processor::new(true, None);
+        processor.begin_track("soundcloud:track:1", true);
+        let mut intro = sine(0.01, 3);
+        processor.prime(&intro);
+        processor.process(&mut intro);
+        let mut limiter = crate::limiter::Limiter::new(f64::from(SAMPLE_RATE));
+        limiter.process(&mut intro, 1.0);
+        for _ in 0..4 {
+            let mut chorus = sine(4.0, 1);
+            let previous_db = processor.track.ramp.db;
+            processor.process(&mut chorus);
+            assert!(processor.track.ramp.db >= previous_db - 3.0 - 1e-8);
+            limiter.process(&mut chorus, 1.0);
+            assert!(
+                chorus
+                    .iter()
+                    .all(|sample| sample.is_finite() && sample.abs() <= 1.0)
+            );
+        }
     }
 }
