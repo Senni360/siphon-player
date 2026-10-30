@@ -1153,14 +1153,42 @@ mod tests {
                 occurrence: crate::hybrid_queue::EntryId(1),
             };
             worker.hybrid.tag = Some(tag);
-            worker.resolve_soundcloud_stream(tag, "soundcloud:track:10".into(), None, false, None);
+            worker.resolve_soundcloud_stream(
+                tag,
+                "soundcloud:track:10".into(),
+                None,
+                None,
+                false,
+                None,
+            );
             assert_eq!(server.request().await, "/tracks/10");
-            worker.resolve_soundcloud_stream(tag, "soundcloud:track:11".into(), None, false, None);
+            worker.resolve_soundcloud_stream(
+                tag,
+                "soundcloud:track:11".into(),
+                None,
+                None,
+                false,
+                None,
+            );
             assert_eq!(server.request().await, "/tracks/11");
             assert_eq!(server.closed().await, "/tracks/10");
-            worker.resolve_soundcloud_stream(tag, "soundcloud:track:20".into(), None, true, None);
+            worker.resolve_soundcloud_stream(
+                tag,
+                "soundcloud:track:20".into(),
+                None,
+                None,
+                true,
+                None,
+            );
             assert_eq!(server.request().await, "/tracks/20");
-            worker.resolve_soundcloud_stream(tag, "soundcloud:track:21".into(), None, true, None);
+            worker.resolve_soundcloud_stream(
+                tag,
+                "soundcloud:track:21".into(),
+                None,
+                None,
+                true,
+                None,
+            );
             assert_eq!(server.request().await, "/tracks/21");
             assert_eq!(server.closed().await, "/tracks/20");
             worker
@@ -1239,7 +1267,14 @@ mod tests {
                 generation: 1,
                 occurrence: crate::hybrid_queue::EntryId(1),
             };
-            worker.resolve_soundcloud_stream(tag, "soundcloud:track:50".into(), None, false, None);
+            worker.resolve_soundcloud_stream(
+                tag,
+                "soundcloud:track:50".into(),
+                None,
+                None,
+                false,
+                None,
+            );
             assert_eq!(server.request().await, "/tracks/50");
             worker.resolve_hybrid_context(1, "soundcloud:track:51".into());
             assert_eq!(server.request().await, "/tracks/51");
