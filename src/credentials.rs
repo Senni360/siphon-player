@@ -31,16 +31,18 @@ pub enum Slot {
     Playback,
     Proxy,
     SoundCloud,
+    Friends,
 }
 
 impl Slot {
     pub const SPOTIFY: [Self; 3] = [Self::Shared, Self::Personal, Self::Playback];
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Shared,
         Self::Personal,
         Self::Playback,
         Self::Proxy,
         Self::SoundCloud,
+        Self::Friends,
     ];
     pub(crate) fn index(self) -> usize {
         self as usize
@@ -52,6 +54,7 @@ impl Slot {
             Self::Playback => "playback",
             Self::Proxy => "proxy-password",
             Self::SoundCloud => "soundcloud-session",
+            Self::Friends => "friends-session",
         }
     }
 }
@@ -874,7 +877,7 @@ impl Store {
     }
 
     fn legacy_paths(&self, slot: Slot) -> Vec<PathBuf> {
-        if slot == Slot::SoundCloud {
+        if matches!(slot, Slot::SoundCloud | Slot::Friends) {
             return Vec::new();
         }
         if slot == Slot::Proxy {
@@ -888,6 +891,7 @@ impl Store {
             Slot::Playback => dirs.credentials_dir().join("credentials.json"),
             Slot::Proxy => unreachable!("proxy legacy paths handled above"),
             Slot::SoundCloud => unreachable!("SoundCloud has no legacy plaintext grant"),
+            Slot::Friends => unreachable!("Friends has no legacy plaintext grant"),
         };
         let mut paths = vec![path.clone(), path.with_extension("json.tmp")];
         if slot != Slot::Playback {
@@ -1140,10 +1144,10 @@ impl Lease {
 
     /// Opaque service secrets use the same protected store, write verification,
     /// generations and revocation markers as Spotify, without a Spotify Grant.
-    /// Only SoundCloud currently uses this format. Its caller validates bytes.
+    /// SoundCloud and Friends use this format. Their callers validate bytes.
     pub(crate) async fn load_secret(&self) -> Result<Option<Vec<u8>>, Error> {
         self.request(true, |lease, backend| {
-            if lease.slot != Slot::SoundCloud {
+            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends) {
                 return Err(Error::Invalid);
             }
             if lease.store.marker(lease.slot)?.is_some_and(|m| m.revoked) {
@@ -1156,7 +1160,7 @@ impl Lease {
 
     pub(crate) async fn save_secret(&self, secret: Vec<u8>) -> Result<(), Error> {
         self.request(true, move |lease, backend| {
-            if lease.slot != Slot::SoundCloud || secret.is_empty() {
+            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends) || secret.is_empty() {
                 return Err(Error::Invalid);
             }
             lease.save_bytes(backend, &secret)
@@ -1174,7 +1178,7 @@ impl Lease {
         guard_generation: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send>> {
         self.request(guard_generation, move |lease, backend| {
-            if lease.slot != Slot::SoundCloud {
+            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends) {
                 return Err(Error::Invalid);
             }
             {
@@ -1471,6 +1475,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn friends_identity_is_protected_and_revoked_independently() {
+        let f = Fixture::new();
+        let lease = f.store.lease(Slot::Friends);
+        lease.save_secret(b"dummy-friends-identity".to_vec()).await.unwrap();
+        f.store.lease(Slot::Shared).save(web(SHARED_CLIENT)).await.unwrap();
+        f.store.revoke_spotify().unwrap();
+        assert_eq!(f.restart().lease(Slot::Friends).load_secret().await.unwrap(), Some(b"dummy-friends-identity".to_vec()));
+        f.store.invalidate(Slot::Friends);
+        assert_eq!(lease.save_secret(b"stale-identity".to_vec()).await, Err(Error::Stale));
+        f.fake.lock().unwrap().delete_error = Some(Error::Locked);
+        assert_eq!(f.store.lease(Slot::Friends).clear_secret(false).await, Err(Error::Locked));
+        assert_eq!(f.restart().lease(Slot::Friends).load_secret().await.unwrap(), None);
+    }
+
+    #[tokio::test]
     async fn renamed_profile_restores_every_grant_including_the_soundcloud_token() {
         let old = Fixture::new();
         let grants = [
@@ -1485,6 +1504,11 @@ mod tests {
         old.store
             .lease(Slot::SoundCloud)
             .save_secret(b"dummy-soundcloud-token".to_vec())
+            .await
+            .unwrap();
+        old.store
+            .lease(Slot::Friends)
+            .save_secret(b"dummy-friends-identity".to_vec())
             .await
             .unwrap();
         let new: AppDirs =
@@ -1504,6 +1528,10 @@ mod tests {
         assert_eq!(
             store.lease(Slot::SoundCloud).load_secret().await.unwrap(),
             Some(b"dummy-soundcloud-token".to_vec())
+        );
+        assert_eq!(
+            store.lease(Slot::Friends).load_secret().await.unwrap(),
+            Some(b"dummy-friends-identity".to_vec())
         );
         for slot in Slot::ALL {
             let key = old.store.lease(slot).key();

@@ -1,7 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
-mod extension_bridge;
 mod download_actions;
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
@@ -603,6 +603,7 @@ pub struct App {
     pub show_friends_panel: bool,
     /// What friends last played. A refresh keeps the last answer on screen.
     pub friends: Loadable<Vec<crate::session_reads::FriendActivity>>,
+    pub friends_feed: crate::friends::Model,
     friends_in_flight: bool,
     friends_fetched_at: Option<Instant>,
     /// Bumped when the account changes, so an answer for the last one is
@@ -1255,6 +1256,7 @@ impl App {
             show_lyrics_panel: false,
             show_friends_panel: false,
             friends: Loadable::NotLoaded,
+            friends_feed: crate::friends::Model::default(),
             friends_in_flight: false,
             friends_fetched_at: None,
             friends_generation: 0,
@@ -2744,6 +2746,7 @@ impl App {
                 continue;
             }
             match event {
+                Event::Friends(event) => self.friends_feed.receive(event),
                 Event::PlaylistLinkResolved { request, result } => {
                     self.playlist_link_resolved(request, result);
                 }
@@ -4107,6 +4110,17 @@ impl App {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
+        let feed_visible = self.show_friends_panel
+            && !self.offline
+            && self.budget != crate::power::Budget::Background
+            && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        if self.friends_feed.poll_due(feed_visible) {
+            self.actions
+                .push(Action::Friends(crate::friends::Action::Refresh));
+        }
+        if feed_visible && self.friends_feed.profile.is_some() {
+            ctx.request_repaint_after(Duration::from_secs(60));
+        }
         self.poll_custom_themes(ctx);
         if let Some(wait) = self.window_focus(ctx.input(|input| {
             // A minimised window is away even where it keeps focus.
@@ -11669,6 +11683,13 @@ impl App {
                 unreachable!("local playlist actions are applied by the source adapter")
             }
             Action::Open(page) => self.open(page),
+            Action::Friends(action) => {
+                if !self.offline
+                    && let Some(request) = self.friends_feed.begin(action)
+                {
+                    self.backend.send(Command::Friends(request));
+                }
+            }
             Action::Download(items) => self.download_items(items),
             Action::DownloadAll { uri, name } => self.download_all(uri, name),
             Action::CancelDownload(id) => {
@@ -12665,6 +12686,8 @@ impl App {
                     self.show_queue_panel = false;
                     self.show_lyrics_panel = false;
                     self.refresh_friends();
+                    self.actions
+                        .push(Action::Friends(crate::friends::Action::Open));
                 }
             }
             Action::SetLyricsFullscreen(fullscreen) => {
