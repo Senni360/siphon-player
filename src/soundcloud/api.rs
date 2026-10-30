@@ -315,6 +315,52 @@ impl Client {
         self.get(&format!("tracks/{id}"), &[]).await
     }
 
+    /// Rehydrate a saved private share on a fresh connection before resolving
+    /// audio. Public permalinks and already known secrets keep the numeric read.
+    pub(crate) async fn track_for_playback(
+        &self,
+        uri: &str,
+        share_url: Option<&str>,
+    ) -> Result<Track> {
+        let id = super::track_id(uri).ok_or(Error::InvalidUrl)?;
+        let share = share_url.map(soundcloud_share_url).transpose()?;
+        let has_secret = self
+            .access
+            .secrets
+            .read()
+            .unwrap_or_else(|lock| lock.into_inner())
+            .contains_key(uri);
+        let private_share = share.as_ref().filter(|url| {
+            !has_secret
+                && (url.host_str() == Some("on.soundcloud.com")
+                    || url.path_segments().is_some_and(|mut parts| {
+                        parts
+                            .nth(2)
+                            .is_some_and(|part| part.starts_with("s-") && part.len() > 2)
+                    })
+                    || url
+                        .query_pairs()
+                        .any(|(key, value)| key == "secret_token" && !value.is_empty()))
+        });
+        let track = if let Some(url) = private_share {
+            // Do not hydrate a set if a stale/mismatched link resolves to one.
+            let resolved: Resolved = self.get("resolve", &[("url", url.to_string())]).await?;
+            match resolved {
+                Resolved::Track(mut track) => {
+                    track.permalink_url = Some(url.to_string());
+                    track
+                }
+                _ => return Err(Error::MissingTrack(id)),
+            }
+        } else {
+            self.track(id).await?
+        };
+        if track.id != id {
+            return Err(Error::MissingTrack(id));
+        }
+        Ok(track)
+    }
+
     /// Ordered like ids, including duplicates. Missing tracks are errors,
     /// never silently dropped, so playlist positions remain trustworthy.
     pub async fn tracks(&self, ids: &[u64]) -> Result<Vec<Track>> {
@@ -384,23 +430,7 @@ impl Client {
     }
 
     pub async fn resolve(&self, url: &str) -> Result<Resolved> {
-        let url = Url::parse(url).map_err(|_| Error::InvalidUrl)?;
-        if !matches!(url.scheme(), "https" | "http")
-            || !matches!(
-                url.host_str(),
-                Some(
-                    "soundcloud.com"
-                        | "www.soundcloud.com"
-                        | "m.soundcloud.com"
-                        | "on.soundcloud.com"
-                )
-            )
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.port().is_some()
-        {
-            return Err(Error::InvalidUrl);
-        }
+        let url = soundcloud_share_url(url)?;
         let mut resolved = self.get("resolve", &[("url", url.to_string())]).await?;
         match &mut resolved {
             Resolved::Track(track) => {
@@ -996,6 +1026,24 @@ impl Client {
         }
         unreachable!("the last attempt always returns")
     }
+}
+
+fn soundcloud_share_url(url: &str) -> Result<Url> {
+    let url = Url::parse(url).map_err(|_| Error::InvalidUrl)?;
+    if !matches!(url.scheme(), "https" | "http")
+        || !matches!(
+            url.host_str(),
+            Some(
+                "soundcloud.com" | "www.soundcloud.com" | "m.soundcloud.com" | "on.soundcloud.com"
+            )
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return Err(Error::InvalidUrl);
+    }
+    Ok(url)
 }
 
 fn remember_secrets(

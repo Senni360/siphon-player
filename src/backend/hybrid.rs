@@ -420,7 +420,13 @@ impl Worker {
                 } else if let Some(stream) = self.hybrid.streams.get(&track.uri).cloned() {
                     self.load_soundcloud(tag, stream).await;
                 } else {
-                    self.resolve_soundcloud_stream(tag, track.uri, false, None);
+                    self.resolve_soundcloud_stream(
+                        tag,
+                        track.uri,
+                        track.external_urls.spotify,
+                        false,
+                        None,
+                    );
                 }
             }
             HybridCommand::Preload { tag, track } => {
@@ -434,7 +440,13 @@ impl Worker {
                             engine.command(sc::Command::Preload(stream));
                         }
                     } else {
-                        self.resolve_soundcloud_stream(tag, track.uri, true, None);
+                        self.resolve_soundcloud_stream(
+                            tag,
+                            track.uri,
+                            track.external_urls.spotify,
+                            true,
+                            None,
+                        );
                     }
                 } else if let Some(engine) = &self.engine {
                     let _ = engine.preload(&track.uri);
@@ -612,6 +624,7 @@ impl Worker {
         &self,
         tag: PlaybackTag,
         uri: String,
+        share_url: Option<String>,
         preload: bool,
         refresh: Option<u64>,
     ) {
@@ -628,7 +641,10 @@ impl Worker {
             let result = async {
                 let id = crate::soundcloud::track_id(&uri)
                     .ok_or_else(|| "Invalid SoundCloud track".to_owned())?;
-                let track = client.track(id).await.map_err(|e| e.to_string())?;
+                let track = client
+                    .track_for_playback(&uri, share_url.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let info = client
                     .resolve_stream(&track)
                     .await
@@ -743,7 +759,17 @@ impl Worker {
             sc::Event::RefreshRequired {
                 request_id, uri, ..
             } => {
-                self.resolve_soundcloud_stream(tag, uri, false, Some(request_id));
+                let Some(track) = self.hybrid.track.as_ref().filter(|track| track.uri == uri)
+                else {
+                    return;
+                };
+                self.resolve_soundcloud_stream(
+                    tag,
+                    uri,
+                    track.external_urls.spotify.clone(),
+                    false,
+                    Some(request_id),
+                );
                 return;
             }
             _ => return,

@@ -102,9 +102,14 @@ Cache accounting includes the boxed records and their strings.
 Resolving a submitted track or set URL retains that accepted URL in its shared
 metadata, including secret path/query and private short links; the server's
 canonical permalink may omit the secret. Saved track rows retain the URL.
-Restoring private playback access from saved rows and extension handoff still
-needs the local integration check; this metadata guarantee alone is not proof
-of a complete restart flow.
+Load and preload pass that snapshot URL to playback resolution; expired-stream
+refreshes use the current snapshot. On a fresh connection, a private path/query
+or short link is resolved again to restore its secret access before requesting
+audio. The returned track ID must match the queued URI. Public track permalinks
+and secrets already known to this connection keep the direct numeric read.
+Local fixtures cover fresh anonymous clients, secret paths/queries, short links,
+stream refresh and mismatched IDs. Actual private links and extension handoff
+still need local native validation.
 
 Endpoint names and the repost-ID pagination envelope were verified against the
 public web bundles. Authenticated reads and writes are tested with local

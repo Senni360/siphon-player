@@ -1252,6 +1252,119 @@ async fn user_endpoints_preserve_like_cursors_and_unwrap_playlists() {
 }
 
 #[tokio::test]
+async fn saved_private_track_links_rehydrate_fresh_client_stream_access() {
+    for url in [
+        "https://soundcloud.com/artist/track/s-fixture-secret",
+        "https://soundcloud.com/artist/track?secret_token=s-fixture-secret",
+        "https://on.soundcloud.com/fixture-private-shortlink",
+    ] {
+        let mut raw = fixture_formats();
+        raw.id = 7;
+        raw.track_authorization = Some("fixture-track-authorization".into());
+        let mut encoding = raw
+            .media
+            .as_ref()
+            .unwrap()
+            .transcodings
+            .iter()
+            .find(|item| item.preference().is_some())
+            .unwrap()
+            .clone();
+        encoding.url = "media/private-track".into();
+        raw.media = Some(super::super::models::Media {
+            transcodings: vec![encoding],
+        });
+        let mut value = serde_json::to_value(&raw).unwrap();
+        value["kind"] = json!("track");
+        value["secret_token"] = json!("s-fixture-secret");
+        let audio = r#"{"url":"https://cdn.soundcloud.invalid/private.mp3"}"#;
+        let (mut client, task) = server(vec![
+            ok(value.to_string()),
+            ok(audio),
+            ok(value.to_string()),
+            ok(audio),
+        ])
+        .await;
+        client.oauth_token = None;
+        for _ in 0..2 {
+            let track = client
+                .track_for_playback("soundcloud:track:7", Some(url))
+                .await
+                .unwrap();
+            let stream = client.resolve_stream(&track).await.unwrap();
+            assert_eq!(stream.url, "https://cdn.soundcloud.invalid/private.mp3");
+        }
+        let requests = task.await.unwrap();
+        assert!(requests[0].starts_with("GET /resolve?url="));
+        assert!(requests[2].starts_with("GET /tracks/7?secret_token=s-fixture-secret&"));
+        for index in [1, 3] {
+            assert!(requests[index].starts_with("GET /media/private-track?"));
+            assert!(requests[index].contains("secret_token=s-fixture-secret"));
+        }
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.contains("authorization:"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn playback_metadata_rejects_mismatched_tracks_and_keeps_public_reads_direct() {
+    let body = r#"{"kind":"track","id":8,"title":"Different recording"}"#;
+    for share in [
+        "https://soundcloud.com/artist/s-track",
+        "https://soundcloud.com/artist/track/s-fixture-secret",
+    ] {
+        let (client, task) = server(vec![ok(body)]).await;
+        assert!(matches!(
+            client
+                .track_for_playback("soundcloud:track:7", Some(share))
+                .await,
+            Err(Error::MissingTrack(7))
+        ));
+        let requests = task.await.unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(
+            requests[0].starts_with("GET /resolve?"),
+            share.ends_with("s-fixture-secret")
+        );
+        assert_eq!(
+            requests[0].starts_with("GET /tracks/7?"),
+            share.ends_with("s-track")
+        );
+    }
+    let (client, task) = server(vec![ok(
+        r#"{"kind":"playlist","id":7,"title":"Wrong kind","tracks":[{"id":99}]}"#,
+    )])
+    .await;
+    assert!(matches!(
+        client
+            .track_for_playback(
+                "soundcloud:track:7",
+                Some("https://on.soundcloud.com/fixture-shortlink")
+            )
+            .await,
+        Err(Error::MissingTrack(7))
+    ));
+    assert_eq!(task.await.unwrap().len(), 1);
+    let (client, task) = server(Vec::new()).await;
+    for share in [
+        "https://attacker.invalid/artist/track/s-fixture-secret",
+        "https://soundcloud.com@attacker.invalid/track",
+        "file:///private/track",
+    ] {
+        assert!(matches!(
+            client
+                .track_for_playback("soundcloud:track:7", Some(share))
+                .await,
+            Err(Error::InvalidUrl)
+        ));
+    }
+    assert!(task.await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn resolved_private_share_links_survive_native_conversion_and_saved_rows() {
     for url in [
         "https://soundcloud.com/artist/track/s-fixture-secret",
