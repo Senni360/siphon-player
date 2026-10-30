@@ -95,7 +95,6 @@ every action changes the display immediately.
 | macOS app menu / Dock menu | App menu adapter `src/entrypoint.rs:1338`; `handle_dock_menu`, `src/app.rs:4432`; native producers `src/mac_menu.rs:157` | Same transport, seek, shuffle, repeat and volume actions |
 | macOS notch / Touch Bar | `src/notch.rs:18`; `handle_notch_commands`, `src/app.rs:4446` | NotchCommand converted to shared Action |
 | Winamp mini player and its playlist | `src/ui/winamp/mod.rs:576`, `1409`, `1470`, `1547`; `src/ui/winamp/playlist.rs:104`, `444`, `781` | Shared transport actions, queue-row PlayFromRow, PlayContext |
-| MilkDrop child controls | `milkdrop_command`, `src/app.rs:4087` | Previous, Next, TogglePlay, mute, saved, shuffle |
 | CLI / Stream Deck / single-instance control socket | `handle_control_commands`, `src/app.rs:4452` | Shared actions including PlayUri, PlaySearch, Transfer, explicit shuffle/repeat and seeks |
 | Play-search completion | `ApiResponse::PlaySearch`, `src/app.rs:8083` | PlaySearchMatch -> play_request, guarded by serial `10970` |
 | Resume and reconnect replay | `resume_last`, `src/app.rs:9561`; `replay_queued_play:9101` | play_request or start_play, not necessarily a new UI Action |

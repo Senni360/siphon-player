@@ -11,13 +11,13 @@ struct Cli {
     #[command(subcommand)]
     control: Option<Control>,
 
-    /// A Spotify link to open: spotify:track:…, or an open.spotify.com
-    /// address. The running Siphon opens it when there is one, which
+    /// A Spotify, SoundCloud or YouTube link to open.
+    /// The running Siphon opens it when there is one, which
     /// is how the desktop hands links over.
     #[arg(value_name = "LINK")]
     link: Option<String>,
 
-    /// Open Add to playlist for a SoundCloud or Spotify track or collection.
+    /// Open Add to playlist for a Spotify/SoundCloud collection or a source track.
     #[arg(long, value_name = "URL", conflicts_with = "link")]
     add_to_playlist: Option<String>,
 
@@ -372,15 +372,6 @@ pub(crate) fn run() -> eframe::Result<()> {
     let launch = fastframe_update::intercept(&spotifast::updates::CONFIG);
     // Before any output is listed or opened.
     spotifast::sink::name_in_mixers();
-    // A MilkDrop child launch is a bare visualiser window, not the app: it has
-    // its own event loop and OpenGL context, reads the sound from a shared
-    // buffer, and never touches the app's state. Handle it before anything
-    // else, including the argument parser, which does not know its flags.
-    #[cfg(feature = "milkdrop")]
-    if let Some(args) = spotifast::milkdrop::child::Args::parse() {
-        std::process::exit(spotifast::milkdrop::child::run(args));
-    }
-
     let cli = Cli::from_arg_matches(&Cli::command().get_matches_from(&launch.arguments))
         .unwrap_or_else(|error| error.exit());
     spotifast::extension_bridge::register_player();
@@ -1361,7 +1352,7 @@ impl Shell {
             .winit_window()
             .and_then(|window| window.current_monitor())
             .and_then(|monitor| monitor.refresh_rate_millihertz())
-            .and_then(spotifast::milkdrop::screen_hz)
+            .and_then(spotifast::vis::screen_hz)
             .unwrap_or(0);
     }
 

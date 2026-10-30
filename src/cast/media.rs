@@ -247,10 +247,39 @@ mod tests {
 
     #[test]
     fn errors_and_statuses_cannot_expose_signed_urls() {
-        let message = json!({"type": "LOAD_FAILED", "requestId": 2,
-            "reason": "https://media.example/song?secret=private"});
-        let error = media_reply(&message, 2, None).unwrap().unwrap_err();
-        assert!(!format!("{error:?}").contains("private"));
+        let signed_url = "https://media.example/song?secret=siphon-fixture-grant-7294";
+        let assert_redacted = |diagnostic: &str| {
+            // Debug may include anyhow::__private backtrace frames. Check the
+            // actual fixture data, not a word that also occurs in Rust symbols.
+            for sensitive in ["media.example", "siphon-fixture-grant-7294"] {
+                assert!(!diagnostic.contains(sensitive), "{diagnostic}");
+            }
+        };
+        for kind in [
+            "LOAD_FAILED",
+            "LOAD_CANCELLED",
+            "INVALID_REQUEST",
+            "INVALID_PLAYER_STATE",
+        ] {
+            let message = json!({"type": kind, "requestId": 2, "reason": signed_url});
+            let error = media_reply(&message, 2, None).unwrap().unwrap_err();
+            assert_redacted(&format!("{error:#}"));
+            assert_redacted(&format!("{error:?}"));
+        }
+
+        let mut message = json!({"type": "MEDIA_STATUS", "requestId": 2, "status": [{
+            "mediaSessionId": 9, "currentTime": 12.5, "playerState": "PLAYING",
+            "media": {"contentId": signed_url, "metadata": {"title": signed_url}}
+        }]});
+        let status = media_reply(&message, 2, Some(9)).unwrap().unwrap();
+        assert_eq!(status.state, "PLAYING");
+        assert_eq!(status.position_seconds, 12.5);
+        assert_redacted(&format!("{status:?}"));
+
+        message["status"][0]["idleReason"] = "ERROR".into();
+        let error = media_reply(&message, 2, Some(9)).unwrap().unwrap_err();
+        assert_redacted(&format!("{error:#}"));
+        assert_redacted(&format!("{error:?}"));
     }
 
     #[test]

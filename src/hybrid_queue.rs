@@ -1,4 +1,4 @@
-//! The app-owned play order for contexts containing Spotify and SoundCloud.
+//! The app-owned play order for contexts containing Spotify, SoundCloud, and YouTube.
 //!
 //! No engine reports are applied here: each command changes the authoritative
 //! queue immediately. The caller dispatches the returned [`Transition`] to the

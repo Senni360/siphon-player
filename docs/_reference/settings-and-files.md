@@ -59,7 +59,6 @@ Siphon follows each platform's conventions. On Linux:
 | --- | --- | --- |
 | Settings | `~/.config/siphonplayer/settings.json` | Yes, you lose preferences |
 | Winamp skins | `~/.config/siphonplayer/skins/` | Yes, you add them again |
-| MilkDrop presets | `~/.config/siphonplayer/milkdrop/` | Yes, you fetch them again |
 | Spotify grants (available since 0.8.0) | System credential store | Use Sign out in Settings |
 | Credential revocation markers (available since 0.8.0) | `~/.local/state/siphonplayer/credential-storage/` | Keep after a failed sign-out deletion |
 | Legacy shared Web API grant | `~/.local/state/siphonplayer/shared_web_api_token.json` | Removed after migration or sign-out |
@@ -257,6 +256,11 @@ restart even if Spotify's next read still reports the old state. This cache
 contains metadata, not offline audio, and can be deleted without signing out.
 Signing out deletes it.
 
+Applying retained edits to a large Liked Songs library uses one indexed pass
+instead of scanning and shifting the full list for each edit. Refreshes retain
+the same ordering, duplicate-occurrence and stale-response rules. This changes
+neither the cache file format nor when Spotify is contacted.
+
 Device-picker choices are kept in `session.json` as the last 32 selected
 preference keys and their Spotify account ID. Signed-in outputs use device IDs;
 waiting Cast receivers use an opaque hash of their transfer ID, address and port
@@ -412,7 +416,6 @@ it.
 
 | What | Where |
 | --- | --- |
-| Settings, skins, MilkDrop presets, themes | `siphon-data\config\` |
 | State, history, logs, credential markers and the encrypted grant copies | `siphon-data\state\` |
 | Caches | `siphon-data\cache\` |
 
@@ -485,7 +488,6 @@ main fields are:
 | `accent_from_art` | `true` | Tint pages with album art, and colour the player bar visualizer with the cover's colours |
 | `player_bar_vis` | `off` | Since 0.11.0: what moves behind the player bar while a song plays on this computer: `off`, `spectrum` or `waveform` |
 | `player_bar_vis_click` | `true` | Allow clicks on empty player bar space to cycle visualizer modes |
-| `visualizer_fps` | `60` | Frame rate of the player bar and mini player visualizers; `0` is uncapped. Half that out of focus, at most 30 while the system saves energy, none while the window is hidden. MilkDrop uses `milkdrop_fps` |
 | `library_sort` | `{}` | Per-section Library order overrides, since 0.8.0: `library`, `recently_played`, `name`, `recently_added`, `local`, or `spotify`, where supported |
 | `library_by_you` | `false` | Show only playlists owned by the signed-in account, alongside Liked Songs; applies only to the Playlists shelf |
 | `sidebar_order` | `[]` | Saved local playlist arrangement, including an unpinned Liked Songs, retained when another sort is selected |
@@ -514,12 +516,6 @@ main fields are:
 | `mono` | `false` | Play both channels the same |
 | `playlist_shaded` | `false` | The playlist window is rolled up to its title bar |
 | `winamp_shaded` | `false` | The main window is rolled up to its title bar |
-| `milkdrop_open` | `false` | The MilkDrop window is open |
-| `milkdrop_seconds` | `30` | How long each MilkDrop preset plays |
-| `milkdrop_fps` | `60` | MilkDrop frame rate; `0` is uncapped. At most 30 while the system saves energy |
-| `milkdrop_screen_hz` | `0` | Last refresh rate reported by MilkDrop's window |
-| `milkdrop_fullscreen` | `false` | The MilkDrop window fills the screen |
-| `milkdrop_size` | `640, 480` | The MilkDrop window's size in points |
 | `keep_playing_in_background` | `true` | Close to tray |
 | `tray_icon` | `colour` | Linux and Windows: the tray icon in `colour`, or in `white` or `black` to match the panel or taskbar. macOS ignores it: the menu bar draws its icon black or white to match itself |
 | `mac_notch_widget` | `false` | Show interactive Now Playing widget when hovering over the MacBook notch (macOS only) |

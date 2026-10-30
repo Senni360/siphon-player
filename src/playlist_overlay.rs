@@ -151,7 +151,7 @@ impl Overlay {
     /// Record a new local insertion against an unloaded absolute Spotify
     /// boundary without checkpointing (and damaging) existing stable anchors.
     pub fn insert_at_position(&mut self, position: usize, track: &Track) -> Option<String> {
-        if !crate::soundcloud::is_track_uri(&track.uri) {
+        if !crate::youtube::is_external(&track.uri) {
             return None;
         }
         let entry = Entry::new(track);
@@ -191,7 +191,7 @@ impl Overlay {
         index: usize,
         track: &Track,
     ) -> Option<String> {
-        if !crate::soundcloud::is_track_uri(&track.uri) {
+        if !crate::youtube::is_external(&track.uri) {
             return None;
         }
         let mut rows = merge(spotify_tracks, self);

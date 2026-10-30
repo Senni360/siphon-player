@@ -48,12 +48,7 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
             ui,
             |ui| {
                 ui.add_space(4.0);
-                theme::text(
-                    ui,
-                    gettext(locale, "Listening activity"),
-                    theme::bold(16.0),
-                    palette.text,
-                );
+                theme::text(ui, "Friends", theme::bold(16.0), palette.text);
             },
             |ui| {
                 close = theme::icon_button(
@@ -88,6 +83,13 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn contents(app: &mut App, ui: &mut egui::Ui) {
+    let actions = crate::friends::ui::draw(ui, &app.friends_feed);
+    app.actions.extend(actions);
+    ui.separator();
+    ui.collapsing("Spotify listening activity", |ui| spotify_contents(app, ui));
+}
+
+fn spotify_contents(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let locale = app.locale;
     match &app.friends {

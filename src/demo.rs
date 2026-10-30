@@ -5,6 +5,8 @@
 //! content. Cover art comes from a public placeholder service so the artwork
 //! pipeline (download, disk cache, accent colour) is exercised too.
 
+pub mod siphon;
+
 use std::time::Instant;
 
 use jiff::{SignedDuration, Timestamp};
@@ -1294,6 +1296,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            name if siphon::Scenario::from_flag(name).is_some() => {
+                siphon::apply(app, siphon::Scenario::from_flag(name).unwrap());
+            }
             "downloads-ready" => app.downloads.available = true,
             "downloads" => {
                 app.downloads.available = true;
@@ -1562,9 +1567,8 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             | "lyrics-instrumental"
             | "lyrics-no-playback" => {
                 app.show_lyrics_panel = true;
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 app.lyrics_following = false;
-                app.lyrics = match surface {
+                let lyrics = match surface {
                     "lyrics-empty" => Loadable::Loaded(None),
                     "lyrics-loading" => Loadable::Loading,
                     "lyrics-error" => Loadable::Failed("Connection interrupted".into()),
@@ -1574,6 +1578,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                         Loadable::Loaded(Some(lyrics))
                     }
                 };
+                app.install_demo_lyrics(lyrics);
                 if surface == "lyrics-no-playback" {
                     app.remote = None;
                 }
@@ -1850,7 +1855,6 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.settings.eq_open = true;
                 app.settings.eq_shaded = true;
             }
-            "milkdrop" => app.settings.milkdrop_open = true,
             "pins" => {
                 app.settings.pinned_contexts =
                     vec!["spotify:playlist:pl2".into(), "spotify:playlist:pl4".into()];
@@ -1865,8 +1869,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 );
             }
             "lyrics" | "lyrics-fullscreen" => {
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
-                app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+                app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 if surface == "lyrics-fullscreen" {
@@ -1876,10 +1879,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             // Full-screen lyrics drawn in the window as it is, for shots at
             // a chosen size, which a real full screen would override.
             "lyrics-fullscreen-view" | "lyrics-fullscreen-instrumental" => {
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 let mut lyrics = sample_lyrics();
                 lyrics.instrumental = surface == "lyrics-fullscreen-instrumental";
-                app.lyrics = Loadable::Loaded(Some(lyrics));
+                app.install_demo_lyrics(Loadable::Loaded(Some(lyrics)));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 app.lyrics_fullscreen = Some(false);
@@ -3017,8 +3019,7 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("translated-lyrics-{locale:?}"));
             app.locale = locale;
             app.show_lyrics_panel = true;
-            app.lyrics_uri = app.now_playing().map(|now| now.uri);
-            app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+            app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
             app.lyrics_following = false;
             accessible_frame(&ctx, &mut app, vec![]);
             let tree = accessible_frame(&ctx, &mut app, vec![]);
@@ -3063,7 +3064,7 @@ mod tests {
             assert!(app.lyrics_fullscreen.is_none());
             for fullscreen in [false, true] {
                 app.lyrics_fullscreen = fullscreen.then_some(false);
-                app.lyrics = Loadable::Failed("fixture failure".into());
+                app.install_demo_lyrics(Loadable::Failed("fixture failure".into()));
                 let tree = accessible_frame(&ctx, &mut app, vec![]);
                 let retry = accessible_node(&tree, &gettext(locale, "Try again"), Role::Button);
                 accessible_frame(
@@ -3095,7 +3096,6 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("translated-panel-states-{locale:?}"));
             app.locale = locale;
             app.show_lyrics_panel = true;
-            app.lyrics_uri = app.now_playing().map(|now| now.uri);
             for fullscreen in [false, true] {
                 app.lyrics_fullscreen = fullscreen.then_some(false);
                 let view = |app: &mut App, ui: &mut egui::Ui| app.frame_ui(ui);
@@ -3132,7 +3132,7 @@ mod tests {
                         vec![sample_lyrics().lines[0].text.clone()],
                     ),
                 ] {
-                    app.lyrics = state;
+                    app.install_demo_lyrics(state);
                     app.lyrics_following = false;
                     view_frame(&ctx, &mut app, vec![], view);
                     let painted = view_frame(&ctx, &mut app, vec![], view);
@@ -4265,7 +4265,6 @@ mod tests {
             ("Normalize volume", Role::CheckBox),
             ("Dark", Role::Button),
             ("Switch to it", Role::Button),
-            ("MilkDrop window", Role::CheckBox),
             ("Equalizer", Role::CheckBox),
             ("Clear artwork", Role::Button),
             ("Check for updates", Role::Button),
@@ -5679,14 +5678,31 @@ mod tests {
         for source in SearchSource::ALL {
             app.search.source = source;
             search_frame(&ctx, &mut app, vec![]);
-            let text = search_frame(&ctx, &mut app, vec![]);
-            let contains = |name: &str| text.iter().any(|(label, _)| label == name);
+            let text = view_text_shapes(
+                &ctx,
+                &mut app,
+                vec![],
+                crate::ui::search::show,
+                egui::vec2(1280.0, 2200.0),
+            );
+            let contains = |name: &str| text.iter().any(|shape| shape.galley.job.text == name);
             assert_eq!(contains("Rosewood"), source != SearchSource::SoundCloud);
             assert_eq!(
                 contains("Bonobo - Studio Sketch"),
                 source != SearchSource::Spotify
             );
-            assert_eq!(contains("SC"), source != SearchSource::Spotify);
+            assert!(
+                !contains("SC"),
+                "song rows indicate their source on the title"
+            );
+            for (title, source) in [
+                ("Rosewood", crate::ui::kit::Source::Spotify),
+                ("Bonobo - Studio Sketch", crate::ui::kit::Source::SoundCloud),
+            ] {
+                if contains(title) {
+                    source_title_rects(&text, title, source, &app.palette);
+                }
+            }
             assert_eq!(app.search.committed, "Bonobo");
             if source == SearchSource::SoundCloud {
                 assert!(!contains("Albums"));
@@ -5710,7 +5726,7 @@ mod tests {
                 crate::theme::apply(&ctx, &app.palette);
                 app.search.filter = SearchFilter::Songs;
                 let draw = |app: &mut App| {
-                    view_frame_sized(
+                    view_text_shapes(
                         &ctx,
                         app,
                         vec![],
@@ -5720,24 +5736,47 @@ mod tests {
                 };
                 draw(&mut app);
                 let text = draw(&mut app);
-                let heading =
-                    |label: &str| text.iter().rev().find(|(text, _)| text == label).unwrap().1;
+                let heading = |label: &str| {
+                    let shape = text
+                        .iter()
+                        .rev()
+                        .find(|shape| shape.galley.job.text == label)
+                        .unwrap();
+                    shape.galley.rect.translate(shape.pos.to_vec2())
+                };
                 let spotify = heading("Spotify");
                 let soundcloud = heading("SoundCloud");
+                let spotify_title = source_title_rects(
+                    &text,
+                    "Rosewood",
+                    crate::ui::kit::Source::Spotify,
+                    &app.palette,
+                )[0];
+                let soundcloud_title = source_title_rects(
+                    &text,
+                    "Bonobo - Studio Sketch",
+                    crate::ui::kit::Source::SoundCloud,
+                    &app.palette,
+                )[0];
+                assert!(spotify_title.top() >= spotify.bottom());
+                assert!(soundcloud_title.top() >= soundcloud.bottom());
                 if width >= 800.0 {
                     assert_eq!(spotify.top(), soundcloud.top());
                     assert!(soundcloud.left() > spotify.right());
+                    assert!(spotify_title.right() <= soundcloud.left());
+                    assert!(soundcloud_title.left() >= soundcloud.left());
                 } else {
                     assert!(soundcloud.top() > spotify.bottom());
+                    assert!(soundcloud_title.top() > spotify_title.bottom());
                 }
-                assert!(text.iter().any(|(label, _)| label == "SC"));
+                assert!(!text.iter().any(|shape| shape.galley.job.text == "SC"));
                 app.backend.shutdown();
             }
         }
     }
 
     #[test]
-    fn soundcloud_badges_follow_tracks_into_the_queue_and_player_bar() {
+    fn soundcloud_source_indicators_follow_tracks_into_the_queue_and_player_bar() {
         let (ctx, mut app) = accessible_app("soundcloud-queue-player-badges");
         let upload = soundcloud_search_results().tracks.remove(0);
         app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload.clone()));
@@ -5745,15 +5784,62 @@ mod tests {
             currently_playing: Some(PlayableItem::Track(upload.clone())),
             queue: vec![PlayableItem::Track(upload)],
         });
-        for view in [
-            crate::ui::queue::page as fn(&mut App, &mut egui::Ui),
-            crate::ui::player_bar::show,
-        ] {
-            view_frame(&ctx, &mut app, vec![], view);
-            let text = view_frame(&ctx, &mut app, vec![], view);
-            assert!(text.iter().any(|(label, _)| label == "SC"));
-        }
+        view_frame(&ctx, &mut app, vec![], crate::ui::queue::page);
+        let text = view_text_shapes(
+            &ctx,
+            &mut app,
+            vec![],
+            crate::ui::queue::page,
+            egui::vec2(1280.0, 2200.0),
+        );
+        let titles = source_title_rects(
+            &text,
+            "Bonobo - Studio Sketch",
+            crate::ui::kit::Source::SoundCloud,
+            &app.palette,
+        );
+        assert_eq!(
+            titles.len(),
+            2,
+            "both the current and upcoming row carry the source"
+        );
+        assert!(!text.iter().any(|shape| shape.galley.job.text == "SC"));
+
+        // The player bar keeps its source badge until that view is redesigned.
+        view_frame(&ctx, &mut app, vec![], crate::ui::player_bar::show);
+        let text = view_frame(&ctx, &mut app, vec![], crate::ui::player_bar::show);
+        assert!(text.iter().any(|(label, _)| label == "SC"));
         app.backend.shutdown();
+    }
+
+    fn source_title_rects(
+        text: &[egui::epaint::TextShape],
+        title: &str,
+        source: crate::ui::kit::Source,
+        palette: &crate::theme::Palette,
+    ) -> Vec<egui::Rect> {
+        let titles: Vec<_> = text
+            .iter()
+            .filter(|shape| shape.galley.job.text == title)
+            .collect();
+        assert!(!titles.is_empty(), "missing source-colored title {title:?}");
+        titles
+            .into_iter()
+            .map(|shape| {
+                assert!(!shape.galley.job.sections.is_empty());
+                for section in &shape.galley.job.sections {
+                    let color = shape.override_text_color.unwrap_or(
+                        if section.format.color == egui::Color32::PLACEHOLDER {
+                            shape.fallback_color
+                        } else {
+                            section.format.color
+                        },
+                    );
+                    assert_eq!(color, source.color(palette), "source color of {title:?}");
+                }
+                shape.galley.rect.translate(shape.pos.to_vec2())
+            })
+            .collect()
     }
 
     #[test]
@@ -6457,6 +6543,24 @@ mod tests {
         view: fn(&mut App, &mut egui::Ui),
         size: egui::Vec2,
     ) -> Vec<(String, egui::Rect)> {
+        view_text_shapes(ctx, app, events, view, size)
+            .into_iter()
+            .map(|shape| {
+                (
+                    shape.galley.job.text.clone(),
+                    shape.galley.rect.translate(shape.pos.to_vec2()),
+                )
+            })
+            .collect()
+    }
+
+    fn view_text_shapes(
+        ctx: &egui::Context,
+        app: &mut App,
+        events: Vec<egui::Event>,
+        view: fn(&mut App, &mut egui::Ui),
+        size: egui::Vec2,
+    ) -> Vec<egui::epaint::TextShape> {
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -6466,12 +6570,9 @@ mod tests {
             |ui| view(app, ui),
         );
         output.textures_delta.clear();
-        fn walk(shape: &egui::epaint::Shape, text: &mut Vec<(String, egui::Rect)>) {
+        fn walk(shape: &egui::epaint::Shape, text: &mut Vec<egui::epaint::TextShape>) {
             match shape {
-                egui::epaint::Shape::Text(shape) => text.push((
-                    shape.galley.job.text.clone(),
-                    shape.galley.rect.translate(shape.pos.to_vec2()),
-                )),
+                egui::epaint::Shape::Text(shape) => text.push(shape.clone()),
                 egui::epaint::Shape::Vec(shapes) => {
                     shapes.iter().for_each(|shape| walk(shape, text));
                 }
@@ -8460,175 +8561,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
-    /// The frame rate is a dial with detents: it stops at the rates
-    /// worth having, names the one it is on, and moving it one notch
-    /// lands on the next of them rather than somewhere in between.
-    #[cfg(feature = "milkdrop")]
-    #[test]
-    fn the_frame_rate_dial_steps_between_its_stops() {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-fps-dial-test-{}", std::process::id()));
-        let dirs = AppDirs {
-            config: root.join("config"),
-            state: root.join("state"),
-            cache: root.join("cache"),
-        };
-        let ctx = egui::Context::default();
-        let waker = crate::backend::Waker::default();
-        waker.attach(&ctx);
-        let mut app = App::new(
-            &waker,
-            dirs,
-            Settings::default(),
-            AppOptions {
-                media_controls: false,
-                restore_sign_in: false,
-                tray: false,
-                autostart: false,
-            },
-        );
-        app.attach(&ctx);
-        populate(&mut app);
-        app.settings.milkdrop_screen_hz = 144;
-        app.settings.milkdrop_fps = 60;
-        // The main window's screen is not MilkDrop's: its dial keeps
-        // the rate MilkDrop reported.
-        app.screen_hz = 60;
-        app.open(Page::Settings);
-
-        // Read labels from the real Settings page.
-        let drawn = |app: &mut App, ctx: &egui::Context| -> Vec<String> {
-            let input = egui::RawInput {
-                // Draw the full Settings page, including MilkDrop.
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1280.0, 4000.0),
-                )),
-                ..Default::default()
-            };
-            let mut output = ctx.run_ui(input, |ui| app.frame_ui(ui));
-            output.textures_delta.clear();
-            let mut said = Vec::new();
-            fn walk(shape: &egui::epaint::Shape, said: &mut Vec<String>) {
-                match shape {
-                    egui::epaint::Shape::Text(text) => said.push(text.galley.job.text.clone()),
-                    egui::epaint::Shape::Vec(shapes) => {
-                        shapes.iter().for_each(|shape| walk(shape, said))
-                    }
-                    _ => {}
-                }
-            }
-            for clipped in &output.shapes {
-                walk(&clipped.shape, &mut said);
-            }
-            said
-        };
-
-        for _ in 0..3 {
-            let said = drawn(&mut app, &ctx);
-            assert!(
-                said.iter().any(|text| text.contains("60 fps")),
-                "the dial names the rate it is on: {said:?}"
-            );
-        }
-
-        // Every stop can be reached, and each names itself.
-        for (rate, expected) in [
-            (144, "144 fps, your screen"),
-            (0, "Uncapped"),
-            (30, "30 fps"),
-        ] {
-            app.settings.milkdrop_fps = rate;
-            let said = drawn(&mut app, &ctx);
-            assert!(
-                said.iter().any(|text| text == expected),
-                "the dial on {rate} should read {expected}: {said:?}"
-            );
-        }
-        app.backend.shutdown();
-    }
-
-    /// The visualizers' frame-rate dial names the rate of the screen showing
-    /// the main window as the screen's with MilkDrop never opened, and
-    /// MilkDrop's until the window's screen has said.
-    #[test]
-    fn the_visualizer_dial_knows_the_screen_without_milkdrop() {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-screen-dial-test-{}", std::process::id()));
-        let dirs = AppDirs {
-            config: root.join("config"),
-            state: root.join("state"),
-            cache: root.join("cache"),
-        };
-        let ctx = egui::Context::default();
-        let waker = crate::backend::Waker::default();
-        waker.attach(&ctx);
-        let mut app = App::new(
-            &waker,
-            dirs,
-            Settings::default(),
-            AppOptions {
-                media_controls: false,
-                restore_sign_in: false,
-                tray: false,
-                autostart: false,
-            },
-        );
-        app.attach(&ctx);
-        populate(&mut app);
-        app.open(Page::Settings);
-
-        // Read labels from the real Settings page.
-        let drawn = |app: &mut App, ctx: &egui::Context| -> Vec<String> {
-            let input = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1280.0, 4000.0),
-                )),
-                ..Default::default()
-            };
-            let mut output = ctx.run_ui(input, |ui| app.frame_ui(ui));
-            output.textures_delta.clear();
-            let mut said = Vec::new();
-            fn walk(shape: &egui::epaint::Shape, said: &mut Vec<String>) {
-                match shape {
-                    egui::epaint::Shape::Text(text) => said.push(text.galley.job.text.clone()),
-                    egui::epaint::Shape::Vec(shapes) => {
-                        shapes.iter().for_each(|shape| walk(shape, said))
-                    }
-                    _ => {}
-                }
-            }
-            for clipped in &output.shapes {
-                walk(&clipped.shape, &mut said);
-            }
-            said
-        };
-
-        assert_eq!(app.settings.milkdrop_screen_hz, 0, "MilkDrop never opened");
-        app.screen_hz = 165;
-        app.settings.visualizer_fps = 165;
-        let mut said = Vec::new();
-        for _ in 0..3 {
-            said = drawn(&mut app, &ctx);
-        }
-        assert!(
-            said.iter().any(|text| text == "165 fps, your screen"),
-            "the dial names the window's screen: {said:?}"
-        );
-
-        app.screen_hz = 0;
-        app.settings.milkdrop_screen_hz = 144;
-        app.settings.visualizer_fps = 144;
-        let said = drawn(&mut app, &ctx);
-        assert!(
-            said.iter().any(|text| text == "144 fps, your screen"),
-            "MilkDrop's screen until the window's has said: {said:?}"
-        );
-        app.backend.shutdown();
-        let _ = std::fs::remove_dir_all(root);
-    }
-
     /// Rule: side-panel headers stay on one line at their narrowest width.
     #[test]
     fn the_narrowest_panels_keep_their_headers_on_one_row() {
@@ -8659,7 +8591,7 @@ mod tests {
         populate(&mut app);
         app.settings.queue_width = crate::theme::SIDE_PANEL_MIN_WIDTH;
         app.settings.lyrics_width = crate::theme::SIDE_PANEL_MIN_WIDTH;
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.lyrics_following = false;
 
         let input = egui::RawInput {
@@ -8866,7 +8798,7 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("sung-line-{fullscreen}"));
             app.show_lyrics_panel = true;
             app.lyrics_fullscreen = Some(fullscreen);
-            app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+            app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
             app.lyrics_following = true;
             let remote = app.remote.as_mut().unwrap();
             remote.state.is_playing = false;
@@ -8979,7 +8911,7 @@ mod tests {
         ] {
             let (ctx, mut app) = accessible_app("lyrics-centred-while-loading");
             apply_flags(&mut app, None, Some("lyrics-fullscreen-view"));
-            app.lyrics = state;
+            app.install_demo_lyrics(state);
             let mut shapes = Vec::new();
             for frame in 0..10 {
                 let mut output = ctx.run_ui(
@@ -9030,7 +8962,7 @@ mod tests {
         populate(&mut app);
         app.show_lyrics_panel = true;
         app.lyrics_fullscreen = Some(false);
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.lyrics_following = false;
         let mut sizes = Vec::new();
         for (step, position) in [0, 41_000].into_iter().enumerate() {
@@ -9144,8 +9076,7 @@ mod tests {
         }
         frame(&ctx, &mut app);
         app.manual_queue.clear();
-        app.lyrics_uri = app.now_playing().map(|now| now.uri);
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.show_lyrics_panel = true;
         frame(&ctx, &mut app);
         app.lyrics_fullscreen = Some(false);

@@ -10,6 +10,7 @@ mod downloads;
 pub(crate) mod friends;
 pub mod home;
 mod keys;
+pub mod kit;
 pub mod library;
 pub mod login;
 mod lyrics;

@@ -1,6 +1,6 @@
 //! Account-scoped Liked Songs metadata and optimistic edits.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -153,8 +153,9 @@ impl LikedSongs {
             } else {
                 None
             };
+            let changed_rows = first_changed_rows(&self.server.items, &self.changes);
             self.changes.retain(|uri, change| {
-                let server_item = self.server.items.iter().find(|item| &item.track.uri == uri);
+                let server_item = changed_rows.get(uri.as_str()).map(|(_, item)| *item);
                 let change_ts = track_timestamp(&change.item);
                 let retired = change.confirmed
                     && change.confirmed_generation < self.generation
@@ -314,18 +315,19 @@ impl LikedSongs {
     }
 
     fn rebuild_view(&mut self, view: &mut PagedList<SavedTrack>) {
-        let mut items = self.server.items.clone();
+        let changed_rows = first_changed_rows(&self.server.items, &self.changes);
+        let mut removed = HashSet::new();
         let mut additions = Vec::new();
         let mut counted = Vec::new();
         for (uri, change) in &self.changes {
-            let index = items.iter().position(|item| &item.track.uri == uri);
+            let index = changed_rows.get(uri.as_str()).map(|(index, _)| *index);
             match (change.saved, index) {
                 (true, None) => {
                     additions.push(change.item.clone());
                     counted.push(true);
                 }
                 (false, Some(index)) => {
-                    items.remove(index);
+                    removed.insert(index);
                     counted.push(false);
                 }
                 _ => {}
@@ -333,7 +335,24 @@ impl LikedSongs {
         }
         let total = count(self.server.total.unwrap_or(0), &counted);
         additions.sort_by(|a, b| b.added_at.cmp(&a.added_at));
-        items.splice(0..0, additions);
+        // Clone each retained row once, without moving the entire tail for
+        // every unlike or growing a second allocation to prepend new likes.
+        let items = if additions.is_empty() && removed.is_empty() {
+            self.server.items.clone()
+        } else {
+            let mut items =
+                Vec::with_capacity(self.server.items.len() - removed.len() + additions.len());
+            items.extend(additions);
+            items.extend(
+                self.server
+                    .items
+                    .iter()
+                    .enumerate()
+                    .filter(|(index, _)| !removed.contains(index))
+                    .map(|(_, item)| item.clone()),
+            );
+            items
+        };
         if view.items != items || view.total != Some(total) {
             view.revision = view.revision.wrapping_add(1);
             view.items = items;
@@ -391,6 +410,30 @@ impl LikedSongs {
     }
 }
 
+/// Only changed URIs need an index. Borrow rows instead of cloning their
+/// metadata, and retain the first occurrence just like the old linear lookup.
+/// One pass costs expected O(rows + edits), with O(edits) temporary storage.
+fn first_changed_rows<'a>(
+    items: &'a [SavedTrack],
+    changes: &BTreeMap<String, Change>,
+) -> HashMap<&'a str, (usize, &'a SavedTrack)> {
+    let mut wanted: HashSet<_> = changes.keys().map(String::as_str).collect();
+    let mut found = HashMap::with_capacity(wanted.len().min(items.len()));
+    if wanted.is_empty() {
+        return found;
+    }
+    for (index, item) in items.iter().enumerate() {
+        let uri = item.track.uri.as_str();
+        if wanted.remove(uri) {
+            found.insert(uri, (index, item));
+            if wanted.is_empty() {
+                break;
+            }
+        }
+    }
+    found
+}
+
 /// The server total with each change's row added or removed, in order.
 fn count(total: u32, counted: &[bool]) -> u32 {
     counted.iter().fold(total, |total, &added| {
@@ -419,6 +462,113 @@ pub async fn write(path: &std::path::Path, cache: &Cache) -> std::io::Result<()>
     tokio::task::spawn_blocking(move || fastframe_file::write(&path, bytes))
         .await
         .map_err(std::io::Error::other)?
+}
+
+#[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use crate::api::models::{Album, ArtistRef, Image};
+    use std::time::{Duration, Instant};
+
+    fn library_track(index: usize) -> SavedTrack {
+        SavedTrack {
+            added_at: Some("2026-10-01T12:00:00Z".into()),
+            track: Track {
+                id: Some(format!("fixture{index:015}")),
+                uri: format!("spotify:track:fixture{index:015}"),
+                name: format!("Library recording {index:05} (Studio Version)"),
+                duration_ms: 210_000,
+                artists: vec![ArtistRef {
+                    name: format!("Fixture artist {}", index % 800),
+                    ..Default::default()
+                }],
+                album: Some(Album {
+                    name: format!("Fixture album {}", index / 12),
+                    images: vec![Image {
+                        url: format!("https://i.scdn.co/image/fixture-artwork-{:032}", index / 12),
+                        width: Some(300),
+                        height: Some(300),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn workload(rows: usize, edits: usize) -> LikedSongs {
+        let mut songs = LikedSongs {
+            generation: 1,
+            ..Default::default()
+        };
+        songs
+            .server
+            .restore_cached((0..rows).map(library_track).collect(), rows as u32, None);
+        for index in 0..edits {
+            let saved = index % 2 != 0;
+            let item = if saved {
+                library_track(rows + index)
+            } else {
+                songs.server.items[index * rows / edits].clone()
+            };
+            songs.changes.insert(
+                item.track.uri.clone(),
+                Change {
+                    saved,
+                    item,
+                    confirmed: true,
+                    confirmed_generation: 0,
+                    server_origin: !saved,
+                },
+            );
+        }
+        songs
+    }
+
+    fn median(samples: &mut [Duration]) -> Duration {
+        samples.sort_unstable();
+        samples[samples.len() / 2]
+    }
+
+    /// Run the same test profile on baseline and candidate commits.
+    /// Timing is evidence only: this test has no machine-dependent thresholds.
+    #[test]
+    #[ignore = "deterministic large-library timing workload; run explicitly"]
+    fn large_library_optimistic_edits() {
+        for (rows, edits) in [(10_000, 0), (10_000, 100), (50_000, 1_000)] {
+            let mut songs = workload(rows, edits);
+            let mut rebuilds = Vec::new();
+            let mut refreshes = Vec::new();
+            for _ in 0..3 {
+                let mut view = PagedList::default();
+                songs.synced = None;
+                let started = Instant::now();
+                songs.sync_view(std::hint::black_box(&mut view));
+                rebuilds.push(started.elapsed());
+                assert_eq!(view.items.len(), rows);
+                std::hint::black_box(&view.items);
+                drop(view);
+
+                let page = Page {
+                    items: songs.server.items.clone(),
+                    offset: 0,
+                    limit: rows as u32,
+                    total: rows as u32,
+                    next: None,
+                };
+                songs.start_refresh(songs.generation + 1);
+                let started = Instant::now();
+                assert!(!songs.absorb(0, std::hint::black_box(page), 20_000));
+                refreshes.push(started.elapsed());
+                assert_eq!(songs.changes.len(), edits, "lagging reads retain edits");
+            }
+            eprintln!(
+                "liked-library rows={rows} edits={edits} samples=3 rebuild_median_us={} refresh_median_us={}",
+                median(&mut rebuilds).as_micros(),
+                median(&mut refreshes).as_micros(),
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -454,6 +604,91 @@ mod tests {
         songs.start_refresh(1);
         songs.absorb(0, page(0, count, total), 10_000);
         songs
+    }
+
+    #[test]
+    fn rebuilding_edits_keeps_duplicate_occurrences_and_equal_date_addition_order() {
+        let mut songs = LikedSongs::default();
+        let mut duplicate = item(1);
+        duplicate.track.name = "Second occurrence".into();
+        songs
+            .server
+            .restore_cached(vec![item(1), duplicate.clone(), item(2), item(3)], 4, None);
+        for (id, saved) in [(1, false), (2, true), (4, true), (5, true), (6, false)] {
+            let mut row = item(id);
+            row.added_at = Some("2026-10-01T12:00:00Z".into());
+            songs.changes.insert(
+                row.track.uri.clone(),
+                Change {
+                    saved,
+                    item: row,
+                    confirmed: false,
+                    confirmed_generation: 0,
+                    server_origin: false,
+                },
+            );
+        }
+        let mut view = PagedList::default();
+        songs.sync_view(&mut view);
+        assert_eq!(
+            view.items
+                .iter()
+                .map(|row| row.track.uri.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "spotify:track:4",
+                "spotify:track:5",
+                "spotify:track:1",
+                "spotify:track:2",
+                "spotify:track:3"
+            ]
+        );
+        assert_eq!(
+            view.items[2], duplicate,
+            "only the first occurrence is removed"
+        );
+        assert_eq!(view.total, Some(5));
+        let revision = view.revision;
+        songs.synced = None;
+        songs.sync_view(&mut view);
+        assert_eq!(
+            view.revision, revision,
+            "an unchanged rebuild keeps its revision"
+        );
+    }
+
+    #[test]
+    fn refresh_retirement_uses_the_first_duplicate_server_occurrence() {
+        for latest_first in [false, true] {
+            let mut old = item(1);
+            old.added_at = Some("2026-10-01T12:00:00Z".into());
+            let mut latest = item(1);
+            latest.added_at = Some("2026-10-03T12:00:00Z".into());
+            let rows = if latest_first {
+                vec![latest, old]
+            } else {
+                vec![old, latest]
+            };
+            let mut songs = loaded(2, 2);
+            let mut changed = item(1);
+            changed.added_at = Some("2026-10-02T12:00:00Z".into());
+            songs.changes.insert(
+                changed.track.uri.clone(),
+                Change {
+                    saved: false,
+                    item: changed,
+                    confirmed: true,
+                    confirmed_generation: 1,
+                    server_origin: true,
+                },
+            );
+            songs.start_refresh(2);
+            assert!(!songs.absorb(0, Page::whole(rows), 20_000));
+            assert_eq!(
+                songs.intent("spotify:track:1"),
+                (!latest_first).then_some(false)
+            );
+        }
     }
 
     #[test]

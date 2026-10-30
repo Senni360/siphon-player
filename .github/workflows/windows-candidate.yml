@@ -1,0 +1,63 @@
+name: Windows candidate
+
+# Private, runnable review builds. Pushing this branch deliberately starts a
+# candidate; ordinary backend/frontend pushes do not consume Windows runners.
+on:
+  push:
+    branches: [siphon/windows-candidate]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64 executable and native tests
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      CMAKE_GENERATOR: Ninja
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Optional legacy visualizer dependency
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($metadata.packages[0].features.PSObject.Properties.Name -contains 'milkdrop') {
+            vcpkg install glew:x64-windows-static
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-candidate-x64-v1
+          cache-on-failure: true
+      - name: Tests with default features
+        run: cargo test --locked --all-targets
+      - name: Tests with all features
+        run: cargo test --locked --all-targets --all-features
+      - name: Native credential storage with temporary dummy grants
+        # Compilation has its own budget. Only the launched native test has a
+        # two-minute timeout, so a cold compile cannot masquerade as a hang.
+        timeout-minutes: 20
+        shell: pwsh
+        run: ./packaging/windows/test-native-store.ps1 -TimeoutSeconds 120
+      - name: Build and package the runnable app
+        shell: pwsh
+        run: ./packaging/windows/package-candidate.ps1 -ActionsUrl "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      - name: Upload the runnable private candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: Siphon-Windows-x64-${{ github.sha }}
+          path: dist/Siphon/
+          if-no-files-found: error
+          retention-days: 14

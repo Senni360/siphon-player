@@ -6,7 +6,7 @@ edition = "2024"
 rust-version = "1.98"
 license = "MIT"
 description = "A native Spotify client"
-repository = "https://github.com/crmne/spotifast"
+repository = "https://github.com/Senni360/siphon-player"
 keywords = ["spotify", "music", "egui", "librespot", "player"]
 categories = ["multimedia::audio"]
 
@@ -112,17 +112,6 @@ flate2 = "1"
 # text (src/ui/winamp/pixel_text.rs). Already compiled for the SVG icons
 # through egui_extras and resvg, so this adds no code to the build.
 tiny-skia = "0.11"
-# MilkDrop, as libprojectM reimplements it, for the MilkDrop window
-# (src/milkdrop.rs). Built into the binary, so it stays one file.
-projectm-sys = { version = "1.2.2", default-features = false, features = ["static"], optional = true }
-# The MilkDrop window runs as a child process with its own winit event loop
-# and OpenGL context (src/milkdrop/child.rs), because winit allows one event
-# loop per process and eframe owns the app's. These are the same versions
-# eframe already pulls in, so they add no build. Only compiled with the
-# milkdrop feature.
-winit = { version = "0.30", optional = true }
-glutin = { version = "0.32", optional = true }
-glutin-winit = { version = "0.5", optional = true }
 # Detect the live window backend, including when MilkDrop is disabled.
 # eframe already compiles this crate.
 raw-window-handle = "0.6"
@@ -145,6 +134,8 @@ protobuf = "3"
 # already plays local files with. AAC and ISO MP4 also decode SoundCloud's
 # ADTS and fragmented MP4 HLS streams without a second decoder stack.
 symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "aac", "isomp4"] }
+# Pure Rust EBU R128 integrated loudness for every external PCM source.
+ebur128 = "0.1.10"
 # Local playback's audio sink is this crate's own (src/sink.rs): librespot's
 # rodio backend unwraps the device open on the player thread, and a release
 # build aborts on panic, so it is left out. rodio supplies the mixer and the
@@ -228,6 +219,9 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 x11rb = { version = "0.13", default-features = false }
 
 [build-dependencies]
+# The icon and version information also need a host-side resource compiler when
+# cross-building Windows from Linux. Used only when the target OS is Windows.
+winresource = "0.1"
 # Drops unfinished PO entries and compiles catalog text and gettext plural
 # expressions to Rust. Ordinary builds do not need gettext tools.
 fastframe-i18n = { git = "https://github.com/crmne/fastframe", tag = "v0.15.2", features = ["build"] }
@@ -240,19 +234,10 @@ tokio = { version = "1", features = ["test-util"] }
 # Pins that installed copies keep the folders they had before fastframe-dirs.
 directories = "6"
 
-# The icon and version information Windows shows for the executable.
-[target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"
-
 [features]
-default = ["milkdrop"]
+default = []
 # Sample data and screenshot flags; never part of a release build.
 demo = []
-# MilkDrop, through libprojectM: a C++ library that CMake builds into the
-# binary at compile time, so building needs cmake, a C++ compiler, and
-# libclang. `--no-default-features` leaves it out.
-milkdrop = ["dep:projectm-sys", "dep:winit", "dep:glutin", "dep:glutin-winit"]
-
 [profile.release]
 lto = "thin"
 codegen-units = 1
@@ -264,13 +249,6 @@ panic = "abort"
 # application crate itself stays incremental.
 [profile.dev.package."*"]
 opt-level = 2
-
-# projectm-sys names the library it links after Rust's profile (a `d` suffix
-# for dev) but CMake names what it builds after the optimisation level, so an
-# optimised dev build would look for a library that was never made. A debug
-# build of libprojectM is fine to develop against; releases are optimised.
-[profile.dev.package.projectm-sys]
-opt-level = 0
 
 [patch.crates-io]
 # crmne/egui apps-0.36.2, shared with ZapFast, RekordFlash and TonePush: egui
@@ -316,13 +294,6 @@ winit = { git = "https://github.com/crmne/winit", rev = "0bed9dc0a7db02590a279fb
 # Spotifast in volume mixers. rodio 0.21 gets cpal from crates.io; patching
 # it to the same fork builds one cpal. Drop this when a cpal release has it.
 cpal = { git = "https://github.com/crmne/cpal", rev = "fcd8b6ebee9d822426fa8d6839cdd89af6e0d491" }
-# projectm-sys 1.2.2 hardcodes the Visual Studio 17 2022 CMake generator,
-# which GitHub's windows-latest images no longer carry; the fork lets an
-# explicit CMAKE_GENERATOR win, and asks vcpkg for the target's architecture
-# so libprojectM links for Windows on ARM. Its libprojectM comes from
-# crmne/projectm's spotifast branch, which adds a length check on HLSL
-# identifiers. Drop each when upstream releases it.
-projectm-sys = { git = "https://github.com/crmne/projectm-rs", rev = "93852ff7299e5a63ed1315437593fc70915c0863" }
 # hyper-proxy2's unreleased rustls 0.23 update plus our upstream provider
 # compatibility fix. Drop this fork when a release includes both changes.
 hyper-proxy2 = { git = "https://github.com/crmne/hyper-proxy2", rev = "efca4811371ddae81c06be168de54194938d70b1" }
