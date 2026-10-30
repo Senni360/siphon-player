@@ -5765,6 +5765,58 @@ mod tests {
         app.backend.shutdown();
     }
 
+    /// The island names its source by colour alone: the playing title takes
+    /// its service's colour in both themes, with no chip beside it.
+    #[test]
+    fn the_island_title_takes_its_source_colour() {
+        let upload = soundcloud_search_results().tracks.remove(0);
+        let spotify = super::track(0);
+        for palette in [
+            crate::theme::Palette::dark(),
+            crate::theme::Palette::light(),
+        ] {
+            for item in [
+                PlayableItem::Track(spotify.clone()),
+                PlayableItem::Track(upload.clone()),
+            ] {
+                let (ctx, mut app) = accessible_app("island-title-colour");
+                app.palette = palette;
+                crate::theme::apply(&ctx, &app.palette);
+                let (title, uri) = (item.name().to_string(), item.uri().to_string());
+                app.remote.as_mut().unwrap().state.item = Some(item);
+                let mut colours = Vec::new();
+                for _ in 0..2 {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1280.0, 800.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| crate::ui::player_bar::show(&mut app, ui),
+                    );
+                    output.textures_delta.clear();
+                    colours = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::epaint::Shape::Text(text) if text.galley.job.text == title => {
+                                text.override_text_color.or_else(|| {
+                                    text.galley.job.sections.first().map(|s| s.format.color)
+                                })
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                }
+                let wanted = crate::ui::kit::Source::of(&uri).color(&app.palette);
+                assert_eq!(colours, vec![wanted], "{uri}");
+                app.backend.shutdown();
+            }
+        }
+    }
+
     #[test]
     fn soundcloud_previews_are_marked_in_search_queue_and_player_in_both_themes() {
         for palette in [

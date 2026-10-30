@@ -19,9 +19,12 @@ use super::kit::tools::{self, Pick, State, Tool};
 pub const WIDTH: f32 = tools::ROW_WIDTH + 12.0;
 
 /// The playlist a song was last added to this session: the destination of
-/// Add to last-used playlist. Nothing stores it between launches yet.
+/// Add to last-used playlist. Nothing stores it between launches yet. It
+/// belongs to the account that added the song, so another account never
+/// sees its name or adds to it.
 #[derive(Clone, Debug, PartialEq)]
 struct LastPlaylist {
+    owner: String,
     id: String,
     name: String,
 }
@@ -30,16 +33,20 @@ fn last_id() -> Id {
     Id::new("row-tools-last-playlist")
 }
 
-/// Remembers the destination of any song added to a playlist this frame,
-/// from a menu, a drag or a tool, so Add to last-used playlist follows it.
-/// Call once per frame after the views have drawn.
-pub fn remember_last_playlist(ctx: &egui::Context, actions: &[Action]) {
+/// Remembers the destination of any song `owner` added to a playlist this
+/// frame, from a menu, a drag or a tool, so Add to last-used playlist
+/// follows it. Call once per frame after the views have drawn.
+pub fn remember_last_playlist(ctx: &egui::Context, owner: Option<&str>, actions: &[Action]) {
+    let Some(owner) = owner else {
+        return;
+    };
     let last = actions.iter().rev().find_map(|action| match action {
         Action::AddToPlaylist {
             playlist_id,
             playlist_name,
             ..
         } => Some(LastPlaylist {
+            owner: owner.to_owned(),
             id: playlist_id.clone(),
             name: playlist_name.clone(),
         }),
@@ -48,6 +55,17 @@ pub fn remember_last_playlist(ctx: &egui::Context, actions: &[Action]) {
     if let Some(last) = last {
         ctx.data_mut(|data| data.insert_temp(last_id(), last));
     }
+}
+
+/// The last playlist `owner` added to, if any.
+fn last_playlist(ctx: &egui::Context, owner: Option<&str>) -> Option<LastPlaylist> {
+    ctx.data(|data| data.get_temp::<LastPlaylist>(last_id()))
+        .filter(|last| Some(last.owner.as_str()) == owner)
+}
+
+/// Forgets the last-used playlist, for sign-out.
+pub fn forget(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.remove::<LastPlaylist>(last_id()));
 }
 
 /// Draws the tools for `item` in `cell`. `shown` is whether the row asks for
@@ -89,6 +107,11 @@ pub fn show(
     }
 }
 
+/// The signed-in account, which owns the remembered playlist.
+fn owner(app: &App) -> Option<&str> {
+    app.user.as_ref().map(|user| user.id.as_str())
+}
+
 fn states(app: &App, ctx: &egui::Context, item: &PlayableItem, unavailable: bool) -> [State; 4] {
     let locale = app.locale;
     let off_here = || State::Off(gettext(locale, "This song isn't available here").into_owned());
@@ -96,7 +119,7 @@ fn states(app: &App, ctx: &egui::Context, item: &PlayableItem, unavailable: bool
         off_here()
     } else if !app.downloads.available {
         State::Off(gettext(locale, "Download needs the Siphon helper").into_owned())
-    } else if crate::downloads::Source::from_item(item).is_none() {
+    } else if app.download_source(item).is_none() {
         State::Off(gettext(locale, "This song can't be downloaded").into_owned())
     } else {
         State::Ready(gettext(locale, "Download").into_owned())
@@ -119,7 +142,7 @@ fn states(app: &App, ctx: &egui::Context, item: &PlayableItem, unavailable: bool
             _ => State::Ready(gettext(locale, "Credits").into_owned()),
         }
     };
-    let last = ctx.data(|data| data.get_temp::<LastPlaylist>(last_id()));
+    let last = last_playlist(ctx, owner(app));
     let add = if unavailable || !item.is_track() {
         off_here()
     } else if let Some(last) = last {
@@ -167,7 +190,7 @@ fn apply(
             }
         }
         Tool::AddToLast => {
-            let last = ctx.data(|data| data.get_temp::<LastPlaylist>(last_id()));
+            let last = last_playlist(ctx, owner(app));
             match last.filter(|_| !pick.secondary) {
                 Some(last) => app.actions.push(Action::AddToPlaylist {
                     playlist_id: last.id,
@@ -361,14 +384,29 @@ mod tests {
     #[test]
     fn the_last_playlist_follows_the_latest_add() {
         let ctx = egui::Context::default();
-        let last = || ctx.data(|data| data.get_temp::<LastPlaylist>(last_id()));
+        let last = || last_playlist(&ctx, Some("alice"));
         assert_eq!(last(), None);
         remember_last_playlist(
             &ctx,
+            Some("alice"),
             &[added("a", "Night drive"), added("b", "Beats to flip")],
         );
         assert_eq!(last().unwrap().name, "Beats to flip");
-        remember_last_playlist(&ctx, &[Action::ToggleSidebar]);
+        remember_last_playlist(&ctx, Some("alice"), &[Action::ToggleSidebar]);
         assert_eq!(last().unwrap().id, "b");
+    }
+
+    /// Account A's destination is never offered to account B, whether B
+    /// arrives after a sign-out (which forgets it) or directly.
+    #[test]
+    fn another_account_never_sees_the_last_playlist() {
+        let ctx = egui::Context::default();
+        remember_last_playlist(&ctx, Some("alice"), &[added("a", "Night drive")]);
+        assert_eq!(last_playlist(&ctx, Some("bob")), None);
+        assert_eq!(last_playlist(&ctx, None), None);
+        forget(&ctx);
+        assert_eq!(last_playlist(&ctx, Some("alice")), None);
+        remember_last_playlist(&ctx, None, &[added("a", "Night drive")]);
+        assert_eq!(last_playlist(&ctx, Some("alice")), None, "nobody signed in");
     }
 }

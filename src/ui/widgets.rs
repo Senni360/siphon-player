@@ -1665,13 +1665,23 @@ struct Columns {
     more: f32,
 }
 
-/// The row tools' column, in rows and in the header alike: only where a list
-/// is wide enough to keep the title readable beside them.
-fn tools_width(width: f32) -> f32 {
-    if width > 560.0 {
-        super::row_tools::WIDTH
+/// The narrowest a title gets before a row gives up the album column, and
+/// then the tools, to keep it readable.
+const TITLE_MIN: f32 = 220.0;
+
+/// The tools' and album's widths in a list `width` wide, in rows and in the
+/// header alike. `fixed` is everything else the row always shows and
+/// `optional` the date, adder and plays columns. The album gives way first,
+/// then the tools; the title never drops below [`TITLE_MIN`] for them.
+fn fit_tools(width: f32, fixed: f32, album: f32, optional: f32) -> (f32, f32) {
+    let tools = super::row_tools::WIDTH;
+    let title = |album: f32, tools: f32| width - fixed - optional - album - tools;
+    if title(album, tools) >= TITLE_MIN {
+        (tools, album)
+    } else if album > 0.0 && title(0.0, tools) >= TITLE_MIN {
+        (tools, 0.0)
     } else {
-        0.0
+        (0.0, album)
     }
 }
 
@@ -1687,7 +1697,7 @@ fn columns(width: f32, row: &TrackRow<'_>) -> Columns {
     let extra_wide = width > 920.0;
     let wide = width > 760.0;
     let medium = width > 560.0;
-    Columns {
+    let mut cols = Columns {
         number: if row.compact { 0.0 } else { 44.0 },
         cover: if row.show_cover {
             if row.compact { 44.0 } else { 52.0 }
@@ -1714,11 +1724,18 @@ fn columns(width: f32, row: &TrackRow<'_>) -> Columns {
         } else {
             0.0
         },
-        tools: if row.compact { 0.0 } else { tools_width(width) },
+        tools: 0.0,
         heart: if row.compact { 0.0 } else { 36.0 },
         duration: if row.compact { 44.0 } else { 56.0 },
         more: if row.compact { 0.0 } else { 36.0 },
+    };
+    if !row.compact {
+        let fixed =
+            8.0 + cols.number + cols.cover + cols.heart + cols.duration + cols.more + 8.0 + 12.0;
+        let optional = cols.added + cols.added_by + cols.plays;
+        (cols.tools, cols.album) = fit_tools(width, fixed, cols.album, optional);
     }
+    cols
 }
 
 /// Draws one song in a list.
@@ -2755,7 +2772,14 @@ pub fn table_header(
     } else {
         0.0
     };
-    let right_fixed = tools_width(width) + 36.0 + 56.0 + 36.0 + 8.0;
+    let fixed = 8.0 + 44.0 + if show_cover { 52.0 } else { 0.0 } + 36.0 + 56.0 + 36.0 + 8.0 + 12.0;
+    let (tools_width, album_width) = fit_tools(
+        width,
+        fixed,
+        album_width,
+        added_width + added_by_width + plays_width,
+    );
+    let right_fixed = tools_width + 36.0 + 56.0 + 36.0 + 8.0;
     let mut cx =
         rect.right() - right_fixed - plays_width - added_width - added_by_width - album_width;
     if album_width > 0.0 {
@@ -4937,6 +4961,92 @@ mod tests {
             uri: uri.to_string(),
             ..Default::default()
         })
+    }
+
+    /// The row tools take room only where the title keeps at least
+    /// [`TITLE_MIN`] beside them, at and around each breakpoint, on a
+    /// playlist, an album and an artist's popular songs; the album column is
+    /// the first to give way to them.
+    #[test]
+    fn row_tools_never_squeeze_the_title_below_its_minimum() {
+        let item = song("spotify:track:fit");
+        let context = RowContext::Queue;
+        // (cover, album, added, added by, plays): a playlist, an album page,
+        // an artist's popular songs.
+        let lists = [
+            (true, true, true, true, false),
+            (false, false, false, false, true),
+            (true, false, false, false, true),
+        ];
+        for (cover, album, added, added_by, plays) in lists {
+            for width in [560.0, 561.0, 760.0, 761.0, 920.0, 921.0, 1280.0] {
+                let row = TrackRow {
+                    index: 0,
+                    number: Some(1),
+                    item: &item,
+                    context: &context,
+                    show_cover: cover,
+                    show_album: album,
+                    added_at: added.then_some("2026-10-30T12:00:00Z"),
+                    added_by: None,
+                    show_added_by: added_by,
+                    show_plays: plays,
+                    compact: false,
+                    thin: false,
+                    shift: 0.0,
+                    picked: false,
+                    picked_songs: &[],
+                    picked_positions: &[],
+                    position: None,
+                };
+                let cols = columns(width, &row);
+                let left = 8.0 + cols.number + cols.cover;
+                let right = cols.tools + cols.heart + cols.duration + cols.more + 8.0;
+                let title = width
+                    - left
+                    - right
+                    - cols.plays
+                    - cols.added
+                    - cols.added_by
+                    - cols.album
+                    - 12.0;
+                if cols.tools > 0.0 {
+                    assert!(
+                        title >= TITLE_MIN,
+                        "{width}: title {title} beside the tools, {lists:?}"
+                    );
+                } else {
+                    assert!(
+                        title - super::super::row_tools::WIDTH < TITLE_MIN,
+                        "{width}: the tools fit but were left out"
+                    );
+                }
+            }
+        }
+        // Wide enough for every column, tools and album stay together.
+        let wide = columns(
+            1280.0,
+            &TrackRow {
+                index: 0,
+                number: Some(1),
+                item: &item,
+                context: &context,
+                show_cover: true,
+                show_album: true,
+                added_at: Some("2026-10-30T12:00:00Z"),
+                added_by: None,
+                show_added_by: false,
+                show_plays: false,
+                compact: false,
+                thin: false,
+                shift: 0.0,
+                picked: false,
+                picked_songs: &[],
+                picked_positions: &[],
+                position: None,
+            },
+        );
+        assert!(wide.tools > 0.0 && wide.album > 0.0);
     }
 
     #[test]
