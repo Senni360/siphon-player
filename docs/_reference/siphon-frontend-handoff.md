@@ -13,7 +13,7 @@ report and its interface requirements. It does not replace the backend's
 `docs/_reference/siphon-integration-contract.md`; where the two disagree, the
 backend contract wins on behaviour and this file is updated to match.
 
-## Status (2026-10-30, 19:25 Amsterdam)
+## Status (2026-10-30, 20:00 Amsterdam): final frontend head for tonight
 
 - Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`, which
   ends with a table of what is built tonight against the target.
@@ -23,8 +23,9 @@ backend contract wins on behaviour and this file is updated to match.
 - **For `siphon/evening-candidate`:** it already carries the frontend through
   `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
   `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. Rehearsed
-  on `264f3d2` with the frontend at `e8e3097`: two conflicts, both in
-  `src/demo.rs`; every other commit applies cleanly.
+  on `264f3d2` with the frontend at `37fbbd8` (the last code commit; later
+  commits only touch this file): two conflicts, both in `src/demo.rs`;
+  every other commit applies cleanly.
   1. At `f5341e4` (player island): four hunks in the SoundCloud source
      tests the evening branch already rewrote. Keep the evening side of
      every hunk, then make one change: the player-bar part of
@@ -36,10 +37,11 @@ backend contract wins on behaviour and this file is updated to match.
      `the_island_title_takes_its_source_colour` at the same place. Keep
      both, the helper first.
 
-  The rehearsed result: clippy (`--no-default-features --features demo
-  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,903
-  library tests passed with `RUST_BACKTRACE=1` (the Cast test is fixed on
-  the evening branch by `ef26777`).
+  The rehearsed result, all with `RUST_BACKTRACE=1` (the Cast test is fixed
+  on the evening branch by `ef26777`): clippy `--all-targets -D warnings`
+  clean with default features and with `--all-features`; `cargo fmt
+  --check` clean; library tests 1,861 passed with default features and
+  1,904 with `--all-features`.
 - **Against `main`:** `main` through `a84f9b1` (shared media, upload and
   room work) touches none of the frontend's files; `git merge-tree` of it and
   the frontend head reports no conflict.
@@ -54,8 +56,10 @@ backend contract wins on behaviour and this file is updated to match.
   the tools do; the title keeps 220 px), tested at 560/561, 760/761 and
   920/921. The island
   title's source colour is tested in both themes.
-- The final frontend head for tonight is published here by 20:30 Amsterdam,
-  with this section updated.
+- **Tonight's frontend is complete at this branch's tip.** Anything after
+  it is a fix the coordinator asks for. What is not built, and why, is the
+  last table in `DESIGN.md`. Not verified anywhere: Windows, a real
+  account, the installed helper.
 
 ## Decisions carried into D
 
@@ -271,6 +275,12 @@ Also: Home's group notice wraps beside its button on narrow pages.
 Known and left alone: with the friends and queue panels both open at
 1280 wide, the existing top bar squeezes its search field into the
 device pill. The top bar is Spotifast's, not yet rebuilt.
+
+### 11. Builds without the demo feature (`37fbbd8`)
+
+One test point was used only by demo-feature tests, so clippy failed on
+dead code in a build without that feature (the evening candidate's
+default). It is now gated like its tests.
 
 ### Windows preview of the demo (`76d2805`)
 
