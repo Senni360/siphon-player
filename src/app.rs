@@ -35500,4 +35500,5 @@ mod tests {
         app.backend.shutdown();
     }
     include!("app/youtube_tests.rs");
+    include!("app/hybrid_reliability_tests.rs");
 }

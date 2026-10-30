@@ -48,7 +48,7 @@ pub(super) struct HybridPlayback {
     tag: Option<PlaybackTag>,
     state: LocalState,
     loaded: bool,
-    seek_pending: Option<(u32, u64)>,
+    seek_pending: Option<PendingSeek>,
     // Child snapshots report observations, never the user's transport intent.
     play_intent: bool,
     transport_sequence: u64,
@@ -56,6 +56,15 @@ pub(super) struct HybridPlayback {
     audible: bool,
     failed_occurrences: HashSet<crate::hybrid_queue::EntryId>,
     last_added: HashMap<String, Instant>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingSeek {
+    position_ms: u32,
+    sequence: u64,
+    // While loading, the backend or librespot may fold the requested
+    // position into Load rather than issue a numbered seek to a decoder.
+    allow_load_position_ack: bool,
 }
 
 impl Default for HybridPlayback {
@@ -1306,11 +1315,12 @@ impl App {
                 }) {
                     return;
                 }
-                if let Some((position, sequence)) = self.hybrid.seek_pending {
-                    if state.seek_sequence < sequence
-                        && (state.loading || state.position_ms.abs_diff(position) > 1_000)
-                    {
-                        state.position_ms = position;
+                if let Some(pending) = self.hybrid.seek_pending {
+                    let load_position_ack = pending.allow_load_position_ack
+                        && !state.loading
+                        && state.position_ms.abs_diff(pending.position_ms) <= 1_000;
+                    if state.seek_sequence < pending.sequence && !load_position_ack {
+                        state.position_ms = pending.position_ms;
                         state.position_at = None;
                     } else {
                         self.hybrid.seek_pending = None;
@@ -1344,8 +1354,12 @@ impl App {
             }
             HybridEvent::EndOfTrack => {
                 let play = self.hybrid.play_intent;
-                if let Some((position, _)) = self.hybrid.seek_pending {
-                    self.hybrid_transition(Transition::Restart(tag.occurrence), position, play);
+                if let Some(pending) = self.hybrid.seek_pending {
+                    self.hybrid_transition(
+                        Transition::Restart(tag.occurrence),
+                        pending.position_ms,
+                        play,
+                    );
                     return;
                 }
                 self.hybrid.tag = None;
@@ -1504,9 +1518,17 @@ impl App {
         let sequence = self
             .hybrid
             .seek_pending
-            .map_or(self.hybrid.state.seek_sequence, |(_, sequence)| sequence)
+            .map_or(self.hybrid.state.seek_sequence, |pending| pending.sequence)
             .wrapping_add(1);
-        self.hybrid.seek_pending = Some((position_ms, sequence));
+        let allow_load_position_ack = self.hybrid.seek_pending.map_or(
+            !self.hybrid.loaded || self.hybrid.state.loading,
+            |pending| pending.allow_load_position_ack,
+        );
+        self.hybrid.seek_pending = Some(PendingSeek {
+            position_ms,
+            sequence,
+            allow_load_position_ack,
+        });
         if let Some(tag) = self.hybrid.tag {
             self.backend
                 .send(Command::Hybrid(HybridCommand::Seek { tag, position_ms }));
