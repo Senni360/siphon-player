@@ -1744,6 +1744,12 @@ fn columns(width: f32, row: &TrackRow<'_>) -> Columns {
     cols
 }
 
+/// Shakes the title of the song row `row` once: the answer to playing a
+/// song that cannot play, instead of a dialog.
+fn refuse(ctx: &egui::Context, row: egui::Id) {
+    super::kit::motion::begin(ctx, row.with("refused"), super::kit::motion::REFUSE);
+}
+
 /// Draws one song in a list.
 ///
 /// Returns the selection behavior for a row-body click. The caller supplies
@@ -1997,10 +2003,14 @@ fn track_row_contents(
     let right_fixed = cols.tools + cols.heart + cols.duration + cols.more + 8.0;
     let text_right =
         rect.right() - right_fixed - cols.plays - cols.added - cols.added_by - cols.album;
+    // A song that cannot play shakes its title when asked to.
+    let refused = super::kit::motion::running(ui.ctx(), response.id.with("refused"))
+        .map_or(0.0, super::kit::motion::refuse);
     let title_rect = Rect::from_min_max(
         pos2(x, rect.top()),
         pos2((text_right - 12.0).max(x), rect.bottom()),
-    );
+    )
+    .translate(vec2(refused, 0.0));
 
     // Title and artists. The title carries its source's colour; the playing
     // row is marked by its cover, not by a different title colour.
@@ -2414,6 +2424,8 @@ fn track_row_contents(
             uri: row.item.uri().to_string(),
             index: row.index as u32,
         });
+    } else if ui.is_enabled() && response.double_clicked() {
+        refuse(ui.ctx(), response.id);
     } else if ui.is_enabled() && response.clicked() {
         // The cell that holds the play control: the number column when
         // there is one, the cover when there is not.
@@ -2440,7 +2452,9 @@ fn track_row_contents(
                     index: row.index as u32,
                 });
             }
-        } else if !on_control {
+        } else if on_control {
+            refuse(ui.ctx(), response.id);
+        } else {
             // The body of the row, which plays nothing on a single click.
             response.request_focus();
             let modifiers = ui.input(|input| input.modifiers);
@@ -4967,6 +4981,96 @@ mod tests {
             uri: uri.to_string(),
             ..Default::default()
         })
+    }
+
+    /// A song that cannot play answers a double click on its body, or a
+    /// click on its play control, with a shake of its title, and plays
+    /// nothing.
+    #[test]
+    fn an_unplayable_song_shakes_instead_of_playing() {
+        let click = |pos: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            vec![egui::Event::PointerMoved(pos), button(true), button(false)]
+        };
+        for target in ["body", "control"] {
+            let mut app = test_app();
+            app.backend.shutdown();
+            let ctx = egui::Context::default();
+            theme::install(&ctx);
+            let item = PlayableItem::Track(Track {
+                uri: "spotify:track:gone".into(),
+                name: "Gone".into(),
+                is_playable: Some(false),
+                ..Default::default()
+            });
+            let context = RowContext::Queue;
+            let mut frame = |events: Vec<egui::Event>| {
+                let mut row = (Rect::NOTHING, egui::Id::NULL);
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(900.0, 400.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let (response, _) = track_row_response(
+                            ui,
+                            &mut app,
+                            TrackRow {
+                                index: 0,
+                                number: Some(1),
+                                item: &item,
+                                context: &context,
+                                show_cover: false,
+                                show_album: false,
+                                added_at: None,
+                                added_by: None,
+                                show_added_by: false,
+                                show_plays: false,
+                                compact: false,
+                                thin: false,
+                                shift: 0.0,
+                                picked: false,
+                                picked_songs: &[],
+                                picked_positions: &[],
+                                position: None,
+                            },
+                        );
+                        row = (response.rect, response.id);
+                    },
+                );
+                output.textures_delta.clear();
+                row
+            };
+            let (rect, id) = frame(vec![]);
+            let at = if target == "body" {
+                rect.center()
+            } else {
+                pos2(rect.left() + 30.0, rect.center().y)
+            };
+            frame(click(at));
+            if target == "body" {
+                frame(click(at));
+            }
+            assert!(
+                !app.actions
+                    .iter()
+                    .any(|action| matches!(action, Action::PlayFromRow { .. })),
+                "{target}"
+            );
+            assert!(
+                super::super::kit::motion::running(&ctx, id.with("refused")).is_some(),
+                "{target}: the title should be shaking"
+            );
+        }
     }
 
     /// The row tools take room only where the title keeps at least

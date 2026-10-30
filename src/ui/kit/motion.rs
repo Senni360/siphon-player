@@ -107,6 +107,16 @@ pub fn running(ctx: &Context, id: Id) -> Option<f32> {
     Some(transition.progress(ctx))
 }
 
+/// How long a refused action shakes.
+pub const REFUSE: f32 = 0.36;
+
+/// The sideways offset, in points, of something refusing at progress `t`:
+/// three swings that die away, never more than 4 points.
+pub fn refuse(t: f32) -> f32 {
+    let t = t.clamp(0.0, 1.0);
+    4.0 * (1.0 - t) * (t * std::f32::consts::PI * 6.0).sin()
+}
+
 /// How a song change moves on the player island.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Swipe {
@@ -199,6 +209,18 @@ impl Swipe {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A refusal swings both ways, stays within 4 points and comes to rest
+    /// where it started.
+    #[test]
+    fn a_refusal_shakes_and_settles() {
+        let samples: Vec<f32> = (0..=100).map(|i| refuse(i as f32 / 100.0)).collect();
+        assert_eq!(refuse(0.0), 0.0);
+        assert!(refuse(1.0).abs() < 1e-4);
+        assert!(samples.iter().all(|dx| dx.abs() <= 4.0));
+        assert!(samples.iter().any(|dx| *dx > 1.0));
+        assert!(samples.iter().any(|dx| *dx < -1.0));
+    }
 
     #[test]
     fn the_curve_starts_fast_and_settles() {
