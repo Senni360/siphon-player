@@ -1,0 +1,65 @@
+name: Windows preview
+
+# A Windows build of the demo, for looking at the redesign without compiling
+# it locally. It runs only when asked: by hand (Actions, Windows preview,
+# Run workflow, once this file is on main), or from a push to a work branch
+# whose head commit says [preview]. Every other push skips the job. The
+# download is a zip with siphon.exe and a launcher per demo state. Demo mode
+# is offline and uses invented data, so it needs no account.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**", "siphon/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    name: preview (windows x64)
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[preview]')
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      # An optimised build that skips the release profile's slow whole-program
+      # passes: fast enough to judge motion, quicker to build.
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      # MilkDrop is out of scope for Siphon and its C++ build needs CMake and
+      # GLEW, so the preview leaves the default feature out.
+      - name: Build the demo
+        run: cargo build --locked --release --no-default-features --features demo
+      - name: Package
+        shell: pwsh
+        run: |
+          $out = "$env:RUNNER_TEMP\siphon-preview"
+          New-Item -ItemType Directory -Force $out | Out-Null
+          Copy-Item target\release\siphon.exe $out
+          $states = @{
+            'Ready (dark)' = 'siphon-ready,dark'
+            'Ready (light)' = 'siphon-ready,light'
+            'Long titles' = 'siphon-long-titles'
+            'Empty' = 'siphon-empty'
+            'Loading' = 'siphon-loading'
+            'Error' = 'siphon-error'
+            'Unavailable' = 'siphon-unavailable'
+          }
+          foreach ($name in $states.Keys) {
+            $show = $states[$name]
+            Set-Content -Path "$out\$name.bat" -Value "@start `"`" `"%~dp0siphon.exe`" --demo --demo-data `"%TEMP%\siphon-preview-data`" --demo-show $show"
+          }
+          Set-Content -Path "$out\README.txt" -Value @"
+          Siphon preview, built from $env:GITHUB_SHA.
+          Double-click one of the .bat files to open the demo in that state.
+          Demo mode is offline, uses invented songs and keeps its own data in
+          %TEMP%\siphon-preview-data, away from a real Siphon profile.
+          "@
+      - uses: actions/upload-artifact@v7
+        with:
+          name: siphon-windows-preview
+          path: ${{ runner.temp }}/siphon-preview
+          retention-days: 7
