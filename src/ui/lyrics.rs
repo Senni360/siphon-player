@@ -180,7 +180,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
             ui.add_space(8.0);
             if theme::pill_button(ui, &palette, &gettext(app.locale, "Try again"), false).clicked()
             {
-                app.request_lyrics();
+                app.actions.push(Action::RetryLyrics);
             }
             return;
         }
