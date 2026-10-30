@@ -229,48 +229,7 @@ out, or a reconnection that gives up stops it.
 
 ## What the client stores
 
-- Since 0.8.0, shared and personal Web API grants
-  and the reusable playback credential use the platform credential store:
-  Secret Service on Linux, Keychain on macOS, and Credential Manager on
-  Windows, where a copy encrypted for the Windows account with the Data
-  Protection API also stays in the data folder for when Credential Manager
-  refuses or loses a grant. Since 0.13.4, a portable Windows copy keeps
-  that data folder next to its executable, and the first time it makes
-  one from the installed copy's state it saves those grants again under
-  entries of its own, never moving or deleting the installed copy's
-  ([portable copies](/settings-and-files/#portable-copies)). Librespot retains its reusable credential in
-  memory; Siphon owns persistence. Flatpak can talk to
-  `org.freedesktop.secrets` for this.
-  Version 0.7.1 still uses the older unencrypted files.
-  See [migration, sign-out, and storage protection](/settings-and-files/).
-- Downloaded audio and artwork, in the cache directory, within the budget
-  you set.
-- The first time MilkDrop opens with an empty preset folder, the two projectM
-  preset packs are downloaded from GitHub (about 26 MB) and stored in the
-  config directory.
-- On Windows and macOS, desktop media controls load the cover themselves and
-  are given a file, so the full-size artwork is downloaded into that cache
-  when a song starts, even when no view on screen is showing it. Linux MPRIS
-  carries the Spotify artwork URL for the desktop to resolve and asks for
-  nothing extra.
-- Lyrics, in the cache directory, for a month.
-- Liked Songs metadata, scoped to the verified account, in the cache directory.
-  This behavior is available since 0.8.0.
-  Cached pages less than 15 minutes old need no repeat request. Older cached
-  prefixes refresh through the existing Web API grant, one page at a time,
-  while the saved rows remain visible. Manual refresh starts immediately.
-  Like and Unlike are kept over lagging reads until Spotify confirms them.
-- Siphon has no telemetry, analytics, or hosted service. When the lyrics
-  panel is open and neither Spotify nor a local file has lyrics, it sends
-  the track's artist, title, album, and length to
-  [lrclib.net](https://lrclib.net). It also checks
-  api.github.com once a day for updates. You can turn off automatic checks in
-  Settings, or request one there at any time. On macOS, **Check for Updates**
-  is also in the application menu. On a connection the system reports as
-  metered (Windows), the daily check, automatic downloads, and the large cover
-  the media controls show wait for one that is not; a check by hand still
-  runs. On macOS, the daily check and automatic downloads also wait while the
-  system reports no internet connection.
+
 
   On Windows, macOS, and Linux, downloading an update fetches release metadata and
   `checksums.txt` and `checksums.txt.sig` from the project's GitHub release. It
@@ -738,9 +697,7 @@ The mode selects the protocol. Host and port are separate fields.
 These settings apply to Siphon's requests. The external browser used
 for Spotify approval keeps its own network and proxy settings.
 
-The Web API, artwork, lyrics, update checks and downloads, and MilkDrop preset
-downloads follow that mode. Update downloads retain their release-host redirect
-restrictions and checksum verification. Local receivers on the LAN are never sent through a proxy.
+
 
 Local playback can only use an unauthenticated, plaintext HTTP proxy: that is
 what librespot's CONNECT client supports. Proxy login still covers catalogue

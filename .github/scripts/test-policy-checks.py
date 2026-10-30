@@ -98,10 +98,10 @@ def asset_files(**extra):
     files = {
         "docs/_config.yml": b"logo: /assets/images/logo.svg\nimage: /screenshot.png\n",
         "docs/_guide/winamp.md": b"![The mini player](/assets/images/winamp.png)\n",
-        "README.md": b'<img src="docs/assets/images/milkdrop-poster.jpg">\n',
+        "README.md": b'<img src="docs/assets/images/cover.jpg">\n',
         "docs/assets/images/logo.svg": b"<svg/>",
         "docs/assets/images/winamp.png": b"\x89PNG\0",
-        "docs/assets/images/milkdrop-poster.jpg": b"\xff\xd8\0",
+        "docs/assets/images/cover.jpg": b"\xff\xd8\0",
         "docs/screenshot.png": b"\x89PNG\0",
         "src/app.rs": b"// Before the queue moves, the cursor stays put.\n",
         "packaging/release-notes/v1.0.0/icon.png": b"\x89PNG\0",

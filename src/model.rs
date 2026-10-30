@@ -1637,17 +1637,6 @@ pub enum Action {
     CloseWindow,
     /// Roll the main window up to its title bar, or down again.
     ToggleWinampShade,
-    /// Open or close the MilkDrop window.
-    ToggleWinampMilkdrop,
-    /// How long each MilkDrop preset plays, in seconds.
-    SetMilkdropSeconds(u32),
-    SetMilkdropScale(u32),
-    /// How many frames a second the MilkDrop window draws; 0 is uncapped.
-    SetMilkdropFps(u32),
-    OpenMilkdropFolder,
-    /// Fetch one of projectM's preset packs into the folder, by its place
-    /// in the list.
-    DownloadMilkdropPack(usize),
     Quit,
 }
 
