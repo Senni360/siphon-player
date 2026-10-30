@@ -209,6 +209,99 @@ fn hybrid_seek_decoder_reopen_does_not_restore_initial_load_exception() {
     app.backend.shutdown();
 }
 
+#[test]
+fn hybrid_unresolved_context_survives_manual_exhaustion_and_waiting_navigation() {
+    use crate::{backend::HybridCommand, player::HybridEvent};
+
+    let mut app = hybrid_fixture();
+    let ctx = egui::Context::default();
+    app.apply(
+        Action::PlayContext {
+            uri: "soundcloud:playlist:91".into(),
+            offset_uri: None,
+            offset_index: None,
+        },
+        &ctx,
+    );
+    let generation = app
+        .backend
+        .take_hybrid_commands()
+        .into_iter()
+        .find_map(|command| match command {
+            HybridCommand::Resolve { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .unwrap();
+    app.apply(
+        Action::QueueMany {
+            songs: vec![
+                ("spotify:track:manual".into(), "Manual Spotify".into()),
+                ("youtube:video:dQw4w9WgXcQ".into(), "Manual YouTube".into()),
+            ],
+        },
+        &ctx,
+    );
+    app.apply(Action::Next, &ctx);
+    assert_eq!(
+        app.current_track_uri().as_deref(),
+        Some("spotify:track:manual")
+    );
+    app.apply(Action::Next, &ctx);
+    assert_eq!(
+        app.current_track_uri().as_deref(),
+        Some("youtube:video:dQw4w9WgXcQ")
+    );
+    let old_manual = app.hybrid_tag().unwrap();
+    app.backend.take_hybrid_commands();
+    app.apply(Action::Next, &ctx);
+    assert!(app.hybrid_tag().is_none());
+    assert!(matches!(
+        app.backend.take_hybrid_commands().as_slice(),
+        [HybridCommand::Stop]
+    ));
+    app.apply(Action::Previous, &ctx);
+    app.apply(Action::Next, &ctx);
+    app.apply(Action::TogglePlay, &ctx);
+    assert!(
+        !app.backend
+            .take_hybrid_commands()
+            .iter()
+            .any(|command| matches!(command, HybridCommand::Resolve { .. }))
+    );
+    app.handle_hybrid_context(
+        generation,
+        Ok(crate::hybrid_queue::Context {
+            uri: "soundcloud:playlist:91".into(),
+            name: "Delayed mixed set".into(),
+            tracks: vec![
+                song("soundcloud:track:91"),
+                song("spotify:track:context"),
+                song("youtube:video:abcdefghijk"),
+            ],
+        }),
+    );
+    assert_eq!(
+        app.current_track_uri().as_deref(),
+        Some("spotify:track:context")
+    );
+    assert!(!app.now_playing().unwrap().playing);
+    assert!(app.manual_queue.is_empty());
+    assert_eq!(queue_uris(&app).1, ["youtube:video:abcdefghijk"]);
+    let resolved = app.hybrid_tag();
+    app.handle_hybrid_event(old_manual, HybridEvent::EndOfTrack);
+    assert_eq!(app.hybrid_tag(), resolved);
+    app.apply(Action::Previous, &ctx);
+    assert_eq!(
+        app.current_track_uri().as_deref(),
+        Some("youtube:video:dQw4w9WgXcQ")
+    );
+    assert_eq!(
+        queue_uris(&app).1,
+        ["spotify:track:context", "youtube:video:abcdefghijk"]
+    );
+    app.backend.shutdown();
+}
+
 mod hybrid_action_model {
     use super::*;
     use crate::hybrid_queue::{Entry, EntryId, HybridQueue, Origin, Repeat};
