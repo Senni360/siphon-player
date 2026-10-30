@@ -604,7 +604,8 @@ pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
         crate::motion::seconds(&ctx, super::kit::motion::FEEDBACK * 1.6),
     );
 
-    // The handle grows as the pointer nears it, so the edge reads as a door.
+    // The handle grows as the pointer nears it, so the edge reads as a door,
+    // and fades as the sidebar it opens slides over it.
     let handle = Rect::from_center_size(
         pos2(area.left() + 5.5, area.center().y),
         vec2(3.0, 36.0 + 60.0 * reach),
@@ -612,7 +613,9 @@ pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
     ui.painter().rect_filled(
         handle,
         2.0,
-        palette.secondary.gamma_multiply(0.35 + 0.45 * reach),
+        palette
+            .secondary
+            .gamma_multiply((0.35 + 0.45 * reach) * (1.0 - open)),
     );
 
     if open <= 0.0 {
