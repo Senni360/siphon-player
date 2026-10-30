@@ -54,7 +54,7 @@ impl State {
         {
             return None;
         }
-        self.next_request += 1;
+        self.next_request = self.next_request.wrapping_add(1);
         self.entries
             .insert(uri.to_owned(), (self.next_request, Loadable::Loading));
         Some(self.next_request)
@@ -73,6 +73,12 @@ impl State {
 
     pub fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    /// Remove a request before cancelling its runtime task. Late answers are
+    /// ignored, and opening the same row again starts a fresh request.
+    pub fn cancel(&mut self, uri: &str) -> Option<u64> {
+        self.entries.remove(uri).map(|(request, _)| request)
     }
 }
 
@@ -101,20 +107,23 @@ fn text(value: Option<&Value>) -> Option<String> {
 /// Fields checked against the public contributor renderer (module 78297).
 /// Schema failures are distinct from a successful empty credits list.
 pub(crate) fn spotify_page(body: &Value) -> Result<Option<Page>> {
+    anyhow::ensure!(
+        body.get("errors")
+            .is_none_or(|errors| errors.as_array().is_some_and(Vec::is_empty)),
+        "Spotify credits are unavailable"
+    );
     let track = body
         .pointer("/data/trackUnion")
         .context("Spotify credits are unavailable")?;
     if track.get("__typename").and_then(Value::as_str) != Some("Track") {
         anyhow::bail!("Spotify credits are unavailable");
     }
-    let Some(credits) = track.get("creditsTrait").filter(|value| !value.is_null()) else {
-        // A GraphQL failure can be accompanied by a null field. Do not cache it.
-        anyhow::ensure!(
-            body.get("errors").is_none(),
-            "Spotify credits are unavailable"
-        );
+    let credits = track
+        .get("creditsTrait")
+        .context("Spotify credits are unavailable")?;
+    if credits.is_null() {
         return Ok(None);
-    };
+    }
     let rows = credits
         .pointer("/contributors/items")
         .and_then(Value::as_array)
@@ -301,5 +310,34 @@ mod tests {
         assert!(matches!(state.get("a"), Some(Loadable::Loading)));
         state.finish("a", next, Err("Unavailable".into()));
         assert!(state.begin("a").is_some());
+    }
+
+    #[test]
+    fn cancel_then_retry_rejects_the_cancelled_answer() {
+        let mut state = State::default();
+        let old = state.begin("soundcloud:track:1").unwrap();
+        assert_eq!(state.cancel("soundcloud:track:1"), Some(old));
+        let fresh = state.begin("soundcloud:track:1").unwrap();
+        state.finish("soundcloud:track:1", old, Ok(None));
+        assert!(matches!(
+            state.get("soundcloud:track:1"),
+            Some(Loadable::Loading)
+        ));
+        state.finish("soundcloud:track:1", fresh, Ok(None));
+        assert!(matches!(
+            state.get("soundcloud:track:1"),
+            Some(Loadable::Loaded(None))
+        ));
+    }
+
+    #[test]
+    fn partial_graphql_failures_are_retryable_not_cached_as_complete_credits() {
+        let body = json!({
+            "errors": [{"message": "A contributor page failed"}],
+            "data": {"trackUnion": {"__typename": "Track", "creditsTrait": {
+                "contributors": {"items": [{"name": "Only one of the contributors"}]}
+            }}}
+        });
+        assert!(spotify_page(&body).is_err());
     }
 }

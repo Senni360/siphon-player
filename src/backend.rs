@@ -999,6 +999,11 @@ pub enum Command {
     },
     /// The words of a track, from LRCLIB.
     Lyrics(Box<LyricsRequest>),
+    CancelLyrics,
+    CancelCredits {
+        uri: String,
+        request: u64,
+    },
     Credits {
         uri: String,
         request: u64,
@@ -1118,6 +1123,8 @@ pub enum Command {
 }
 
 pub struct LyricsRequest {
+    /// Monotonic UI request identity, including retries of the same track.
+    pub request: u64,
     /// The track the answer is for, so a stale one is ignored.
     pub uri: String,
     pub query: crate::lyrics::Query,
@@ -1249,6 +1256,7 @@ pub enum Event {
     },
     /// Track lyrics, or `None` when unavailable.
     Lyrics {
+        request: u64,
         uri: String,
         result: Result<Option<crate::lyrics::Lyrics>, String>,
     },
@@ -2042,6 +2050,7 @@ impl PlaylistHeaderLookup {
 
 struct Worker {
     download_jobs: download_jobs::Jobs,
+    track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
     dirs: AppDirs,
     credentials: CredentialStore,
@@ -2171,6 +2180,7 @@ impl Worker {
         Self {
             hybrid: hybrid::HybridRuntime::default(),
             download_jobs: download_jobs::Jobs::default(),
+            track_details: track_details::Jobs::default(),
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2600,6 +2610,7 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    self.track_details.clear();
                     self.download_jobs.cancel_all();
                     if self.hybrid.holds_output() {
                         self.hybrid.shutdown_pending = true;
@@ -3084,6 +3095,10 @@ impl Worker {
                     });
                 }
                 Command::Lyrics(request) => self.fetch_lyrics(*request),
+                Command::CancelLyrics => self.track_details.cancel_lyrics(),
+                Command::CancelCredits { uri, request } => {
+                    self.track_details.cancel_credits(&uri, request)
+                }
                 Command::Credits { uri, request } => self.fetch_credits(uri, request),
                 Command::Rootlist => self.fetch_rootlist(),
                 Command::RootlistFinished { generation, result } => {
@@ -3841,6 +3856,7 @@ impl Worker {
 
     /// Cancels in-flight account work and drops cached Home data on sign-out.
     fn sign_out(&mut self) {
+        self.track_details.clear();
         self.hybrid.engine = None;
         self.spotify_restore_started = true;
         self.cancel_search();
@@ -6634,8 +6650,8 @@ fn settle<T>(result: Result<T, session_reads::Failure>) -> Option<ApiResult<T>> 
 }
 
 /// Spotify's transcription of the track, when the local session can ask for
-/// one. Answers are cached like LRCLIB's, "none" included; `None` falls
-/// back to LRCLIB.
+/// one. Positive answers are cached like LRCLIB's; `None` falls back to LRCLIB
+/// and can be retried after a session or metadata change.
 async fn spotify_lyrics(
     engine: Option<Arc<Engine>>,
     uri: &str,
@@ -6643,8 +6659,8 @@ async fn spotify_lyrics(
 ) -> Option<crate::lyrics::Lyrics> {
     let id = uri.strip_prefix("spotify:track:")?;
     let path = cache_dir.join(format!("spotify-{id}.json"));
-    if let Some(cached) = crate::lyrics::cached(&path) {
-        return cached;
+    if let Some(Some(cached)) = crate::lyrics::cached(&path) {
+        return Some(cached);
     }
     match engine?.lyrics_json(uri).await {
         Ok(json) => {
