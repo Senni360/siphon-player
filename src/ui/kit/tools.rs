@@ -129,9 +129,17 @@ pub fn button(ui: &mut Ui, palette: &Palette, tool: Tool, state: &State, reveal:
     response.on_hover_text(state.tip())
 }
 
-/// The four tools, in order. Returns the one used this frame.
-pub fn row(ui: &mut Ui, palette: &Palette, states: &[State; 4], reveal: f32) -> Option<Pick> {
+/// What a row of tools reports: the tool used this frame, if any, and where
+/// each square is, so a tool's popover can open beside it.
+pub struct RowOutput {
+    pub pick: Option<Pick>,
+    pub rects: [egui::Rect; 4],
+}
+
+/// The four tools, in order.
+pub fn row(ui: &mut Ui, palette: &Palette, states: &[State; 4], reveal: f32) -> RowOutput {
     let mut pick = None;
+    let mut rects = [egui::Rect::NOTHING; 4];
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = GAP;
         for (index, (tool, state)) in Tool::ALL.iter().zip(states).enumerate() {
@@ -140,6 +148,7 @@ pub fn row(ui: &mut Ui, palette: &Palette, states: &[State; 4], reveal: f32) -> 
             let delay = index as f32 * 0.15;
             let reveal = ((reveal - delay) / (1.0 - delay)).clamp(0.0, 1.0);
             let response = button(ui, palette, *tool, state, reveal);
+            rects[index] = response.rect;
             if response.clicked() {
                 pick = Some(Pick {
                     tool: *tool,
@@ -153,7 +162,7 @@ pub fn row(ui: &mut Ui, palette: &Palette, states: &[State; 4], reveal: f32) -> 
             }
         }
     });
-    pick
+    RowOutput { pick, rects }
 }
 
 /// A progress ring: the track in the outline colour and the share done in
@@ -204,7 +213,7 @@ mod tests {
         let mut output = ctx.run_ui(input, |ui| {
             let palette = Palette::dark();
             let response = ui.scope(|ui| row(ui, &palette, states, 1.0));
-            pick = response.inner;
+            pick = response.inner.pick;
             rect = response.response.rect;
         });
         output.textures_delta.clear();

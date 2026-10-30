@@ -1659,9 +1659,20 @@ struct Columns {
     added_by: f32,
     added: f32,
     plays: f32,
+    tools: f32,
     heart: f32,
     duration: f32,
     more: f32,
+}
+
+/// The row tools' column, in rows and in the header alike: only where a list
+/// is wide enough to keep the title readable beside them.
+fn tools_width(width: f32) -> f32 {
+    if width > 560.0 {
+        super::row_tools::WIDTH
+    } else {
+        0.0
+    }
 }
 
 /// The play count column's width, in rows and in the header alike.
@@ -1703,6 +1714,7 @@ fn columns(width: f32, row: &TrackRow<'_>) -> Columns {
         } else {
             0.0
         },
+        tools: if row.compact { 0.0 } else { tools_width(width) },
         heart: if row.compact { 0.0 } else { 36.0 },
         duration: if row.compact { 44.0 } else { 56.0 },
         more: if row.compact { 0.0 } else { 36.0 },
@@ -1959,7 +1971,7 @@ fn track_row_contents(
         }
         x += cols.cover;
     }
-    let right_fixed = cols.heart + cols.duration + cols.more + 8.0;
+    let right_fixed = cols.tools + cols.heart + cols.duration + cols.more + 8.0;
     let text_right =
         rect.right() - right_fixed - cols.plays - cols.added - cols.added_by - cols.album;
     let title_rect = Rect::from_min_max(
@@ -2252,6 +2264,16 @@ fn track_row_contents(
             );
         }
         x += cols.plays;
+    }
+
+    // Tools: Download, BPM/key, Credits, Add to the last-used playlist.
+    if cols.tools > 0.0 {
+        let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.tools, row_height));
+        let shown = hovered
+            || is_current
+            || egui::Popup::is_id_open(ui.ctx(), ui.id().with(("row-menu", row.index)));
+        super::row_tools::show(ui, app, row.item, cell, shown, unavailable);
+        x += cols.tools;
     }
 
     // Heart.
@@ -2733,7 +2755,7 @@ pub fn table_header(
     } else {
         0.0
     };
-    let right_fixed = 36.0 + 56.0 + 36.0 + 8.0;
+    let right_fixed = tools_width(width) + 36.0 + 56.0 + 36.0 + 8.0;
     let mut cx =
         rect.right() - right_fixed - plays_width - added_width - added_by_width - album_width;
     if album_width > 0.0 {
