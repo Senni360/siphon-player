@@ -1546,6 +1546,8 @@ pub enum Action {
     FollowLyrics,
     PauseLyricsFollow,
     RetryLyrics,
+    /// Credits for any track row, independent of current playback.
+    RequestCredits(String),
     ToggleDevicesPopup,
     /// Ask GitHub for the latest release and report the result to the user.
     CheckForUpdates,

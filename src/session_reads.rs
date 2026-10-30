@@ -30,6 +30,46 @@ use crate::api::models::{
 
 const IMAGE_HOST: &str = "https://i.scdn.co/image/";
 
+/// Read-only credits from the same Pathfinder transport as artist pages.
+pub async fn track_credits(
+    session: &Session,
+    web: &crate::api::ApiClient,
+    uri: &str,
+) -> anyhow::Result<Option<crate::credits::Credits>> {
+    anyhow::ensure!(
+        matches!(SpotifyUri::from_uri(uri), Ok(SpotifyUri::Track { .. })),
+        "Credits need a Spotify track"
+    );
+    let login = session.login5().auth_token().await?;
+    let client_token = session.spclient().client_token().await?;
+    let mut found = crate::credits::Credits::default();
+    let mut offset = 0;
+    loop {
+        let query = crate::credits::query(uri, offset);
+        let body = web
+            .partner_request(&login.access_token, &client_token, &query)
+            .await?;
+        let Some(page) = crate::credits::spotify_page(&body)? else {
+            return Ok(crate::credits::finish(found));
+        };
+        found.contributors.extend(page.credits.contributors);
+        for source in page.credits.sources {
+            if !found.sources.contains(&source) {
+                found.sources.push(source);
+            }
+        }
+        offset += page.rows;
+        if page.rows < crate::credits::PAGE_SIZE || page.total.is_some_and(|total| offset >= total)
+        {
+            return Ok(crate::credits::finish(found));
+        }
+        anyhow::ensure!(
+            offset < 1_000,
+            "Spotify credits exceed the supported page limit"
+        );
+    }
+}
+
 /// Related artist cards from Spotify's session-backed Pathfinder request.
 pub async fn related_artists(
     session: &Session,

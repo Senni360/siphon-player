@@ -796,6 +796,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 mod download_jobs;
 mod hybrid;
 pub(crate) mod soundcloud_library;
+mod track_details;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
@@ -999,6 +1000,10 @@ pub enum Command {
     },
     /// The words of a track, from LRCLIB.
     Lyrics(Box<LyricsRequest>),
+    Credits {
+        uri: String,
+        request: u64,
+    },
     /// The account's playlist tree, folders and all, from the session.
     Rootlist,
     /// Internal: a rootlist read completed for this signed-in session.
@@ -1124,6 +1129,11 @@ pub struct LyricsRequest {
 
 pub enum Event {
     Friends(crate::friends::Event),
+    Credits {
+        uri: String,
+        request: u64,
+        result: Result<Option<crate::credits::Credits>, String>,
+    },
     PlaylistLinkResolved {
         request: u64,
         result: Result<crate::extension_bridge::ResolvedItem, String>,
@@ -3092,6 +3102,7 @@ impl Worker {
                     });
                 }
                 Command::Lyrics(request) => self.fetch_lyrics(*request),
+                Command::Credits { uri, request } => self.fetch_credits(uri, request),
                 Command::Rootlist => self.fetch_rootlist(),
                 Command::RootlistFinished { generation, result } => {
                     self.on_rootlist_finished(generation, result);
@@ -5073,52 +5084,6 @@ impl Worker {
             result,
         });
         self.start_album_type_lookup();
-    }
-
-    fn fetch_lyrics(&self, request: LyricsRequest) {
-        if !crate::lyrics::supports_uri(&request.uri) {
-            let _ = self.events.send(Event::Lyrics {
-                uri: request.uri,
-                result: Ok(None),
-            });
-            self.waker.wake();
-            return;
-        }
-        let http = self.http.client();
-        let events = self.events.clone();
-        let waker = self.waker.clone();
-        let cache_dir = self.dirs.lyrics_cache_dir();
-        let engine = self.engine.clone();
-        tokio::spawn(async move {
-            // A local file's own words go first, then Spotify's: they
-            // follow the recording exactly. Everything else, a signed-out
-            // session included, falls back to LRCLIB.
-            let own = match request.local_file {
-                Some(file) => tokio::task::spawn_blocking(move || crate::local_tags::lyrics(&file))
-                    .await
-                    .ok()
-                    .flatten(),
-                None => None,
-            };
-            let exact = match own {
-                Some(found) => Some(found),
-                None => spotify_lyrics(engine, &request.uri, &cache_dir).await,
-            };
-            let result = match exact {
-                Some(found) => Ok(Some(found)),
-                None => match http {
-                    Ok(http) => crate::lyrics::fetch(&http, &cache_dir, &request.query)
-                        .await
-                        .map_err(|error| format!("{error:#}")),
-                    Err(error) => Err(error),
-                },
-            };
-            let _ = events.send(Event::Lyrics {
-                uri: request.uri,
-                result,
-            });
-            waker.wake();
-        });
     }
 
     /// Loads cached playlist items. The UI compares the cached snapshot with

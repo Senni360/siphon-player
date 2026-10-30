@@ -12,6 +12,7 @@ pub mod bidi;
 pub mod brand;
 pub mod cast;
 pub mod credentials;
+pub mod credits;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod device_history;
@@ -25,6 +26,7 @@ pub mod http;
 pub mod hybrid_queue;
 pub mod i18n;
 pub mod images;
+pub mod isrc;
 pub mod liked;
 pub mod limiter;
 pub mod link;
