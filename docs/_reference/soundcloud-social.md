@@ -47,7 +47,9 @@ The existing `soundcloud-library/<user-id>-session.json` cache now contains
 repost IDs and loaded feed pages as optional, backward-compatible fields.
 Public-profile caches remain separate. Files use the existing private,
 atomic background writer. Pending repost writes are not saved. Account
-changes clear in-memory social state and reject late responses. A failed
+changes clear in-memory social state and reject late responses. The previous
+connection's learned track metadata and recency entries are also cleared;
+explicitly user-saved mixed playlists remain local data. A failed
 feed page keeps the existing items and cursor; a refresh replaces a cached
 prefix only after reading enough pages to catch up. Feed reads happen only
 when requested, without background polling.
@@ -90,6 +92,19 @@ These fields survive mixed-playlist and account-cache round trips. Artist conver
 continues using the publisher artist when available. The existing artwork
 conversion supplies the `-t500x500` variant to the common image selector,
 including large cover views.
+
+The optional publisher record is boxed in both wire and shared `Track`, and
+shared `Track.linked_from` is also boxed when present. Following-feed content
+uses `Content::Track(Box<Track>)` and `Content::Playlist(Box<Playlist>)`. This
+keeps list rows and response enums compact without changing their JSON shape.
+Cache accounting includes the boxed records and their strings.
+
+Resolving a submitted track or set URL retains that accepted URL in its shared
+metadata, including secret path/query and private short links; the server's
+canonical permalink may omit the secret. Saved track rows retain the URL.
+Restoring private playback access from saved rows and extension handoff still
+needs the local integration check; this metadata guarantee alone is not proof
+of a complete restart flow.
 
 Endpoint names and the repost-ID pagination envelope were verified against the
 public web bundles. Authenticated reads and writes are tested with local

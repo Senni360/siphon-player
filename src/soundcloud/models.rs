@@ -75,7 +75,7 @@ pub struct Track {
     pub label_name: Option<String>,
     pub permalink_url: Option<String>,
     pub user: Option<User>,
-    pub publisher_metadata: Option<PublisherMetadata>,
+    pub publisher_metadata: Option<Box<PublisherMetadata>>,
     pub streamable: Option<bool>,
     pub policy: Option<String>,
     pub state: Option<String>,

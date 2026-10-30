@@ -402,8 +402,18 @@ impl Client {
             return Err(Error::InvalidUrl);
         }
         let mut resolved = self.get("resolve", &[("url", url.to_string())]).await?;
-        if let Resolved::Playlist(playlist) = &mut resolved {
-            self.fill_playlist(playlist).await?;
+        match &mut resolved {
+            Resolved::Track(track) => {
+                // The API's canonical permalink can omit a private share
+                // token. Preserve the accepted input for copy/share and saved
+                // metadata, including short links that grant private access.
+                track.permalink_url = Some(url.to_string());
+            }
+            Resolved::Playlist(playlist) => {
+                playlist.permalink_url = Some(url.to_string());
+                self.fill_playlist(playlist).await?;
+            }
+            Resolved::User(_) => {}
         }
         Ok(resolved)
     }

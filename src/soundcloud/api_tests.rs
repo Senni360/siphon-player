@@ -1252,6 +1252,49 @@ async fn user_endpoints_preserve_like_cursors_and_unwrap_playlists() {
 }
 
 #[tokio::test]
+async fn resolved_private_share_links_survive_native_conversion_and_saved_rows() {
+    for url in [
+        "https://soundcloud.com/artist/track/s-fixture-secret",
+        "https://soundcloud.com/artist/track?secret_token=s-fixture-secret",
+        "https://on.soundcloud.com/fixture-private-shortlink",
+    ] {
+        let (client, task) = server(vec![ok(
+            r#"{"kind":"track","id":7,"title":"Private recording","permalink_url":"https://soundcloud.com/artist/track"}"#,
+        )])
+        .await;
+        let crate::extension_bridge::ResolvedItem::Track(track) =
+            crate::extension_bridge::resolve_soundcloud(&client, url)
+                .await
+                .unwrap()
+        else {
+            panic!("expected a track");
+        };
+        assert_eq!(track.external_urls.spotify.as_deref(), Some(url));
+        let saved = crate::mixed_playlists::Entry::new(&track);
+        let restored: crate::mixed_playlists::Entry =
+            serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
+        assert_eq!(
+            restored.to_track().external_urls.spotify.as_deref(),
+            Some(url)
+        );
+        assert_eq!(task.await.unwrap().len(), 1);
+    }
+    let url = "https://soundcloud.com/artist/sets/private/s-fixture-secret";
+    let (client, task) = server(vec![ok(
+        r#"{"kind":"playlist","id":7,"title":"Private set","permalink_url":"https://soundcloud.com/artist/sets/private","tracks":[]}"#,
+    )])
+    .await;
+    let Resolved::Playlist(playlist) = client.resolve(url).await.unwrap() else {
+        panic!("expected a playlist");
+    };
+    assert_eq!(
+        playlist.to_playlist().external_urls.spotify.as_deref(),
+        Some(url)
+    );
+    assert_eq!(task.await.unwrap().len(), 1);
+}
+
+#[tokio::test]
 async fn resolve_returns_each_kind_and_fills_playlist_stubs() {
     let (client, task) = server(vec![
         ok(include_str!("../testdata/soundcloud/track.json")),

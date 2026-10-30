@@ -106,6 +106,12 @@ impl App {
     // Keep generations monotonic so queued answers from the previous session
     // cannot repopulate a private playlist after disconnecting or switching.
     pub(super) fn reset_soundcloud_collections(&mut self) {
+        // Metadata learned from a private library/feed belongs to this
+        // connection. User-saved mixed playlists remain explicit local data.
+        self.track_cache
+            .retain(|uri, _| !crate::soundcloud::is_uri(uri));
+        self.track_used
+            .retain(|uri, _| !crate::soundcloud::is_uri(uri));
         self.reload_soundcloud_hybrid_context();
         for page in self.soundcloud_pages.values_mut() {
             page.generation = page.generation.wrapping_add(1);
@@ -304,7 +310,7 @@ impl App {
                             .iter()
                             .filter_map(|item| match &item.content {
                                 crate::soundcloud::following::Content::Track(track) => {
-                                    Some(track.clone())
+                                    Some(track.as_ref().clone())
                                 }
                                 crate::soundcloud::following::Content::Playlist(_) => None,
                             })
@@ -537,6 +543,37 @@ mod tests {
     }
 
     #[test]
+    fn account_reset_discards_learned_soundcloud_metadata_but_keeps_other_sources() {
+        let mut app = app("account-cache-reset");
+        let private = Track {
+            uri: "soundcloud:track:999".into(),
+            name: "Private feed recording".into(),
+            ..Default::default()
+        };
+        let spotify = "spotify:track:retained".to_owned();
+        app.cache_soundcloud_tracks(std::slice::from_ref(&private));
+        app.track_cache.insert(spotify.clone(), Track::default());
+        app.track_used.insert(spotify.clone(), Instant::now());
+        let saved = crate::mixed_playlists::Entry::new(&private);
+        let playlist = crate::mixed_playlists::Playlist {
+            id: "explicitly-saved".into(),
+            entries: vec![saved.clone()],
+            ..Default::default()
+        };
+        app.mixed_playlists.playlists.push(playlist);
+        app.reset_soundcloud_collections();
+        assert!(!app.track_cache.contains_key(&private.uri));
+        assert!(!app.track_used.contains_key(&private.uri));
+        assert!(app.track_cache.contains_key(&spotify));
+        assert!(app.track_used.contains_key(&spotify));
+        assert_eq!(
+            app.mixed_playlists.get("explicitly-saved").unwrap().entries,
+            vec![saved]
+        );
+        finish(app);
+    }
+
+    #[test]
     fn repost_actions_are_session_only_optimistic_and_account_scoped() {
         use crate::soundcloud::reposts::{Snapshot, Target};
         let mut app = app("reposts");
@@ -616,10 +653,10 @@ mod tests {
                     ..Default::default()
                 },
                 created_at: "2026-10-30T12:00:00Z".into(),
-                content: Content::Track(Track {
+                content: Content::Track(Box::new(Track {
                     uri: "soundcloud:track:1".into(),
                     ..Default::default()
-                }),
+                })),
             }],
             next_href: Some("stream?cursor=next".into()),
             total_results: None,
