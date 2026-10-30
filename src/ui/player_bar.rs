@@ -431,7 +431,7 @@ fn eased_fill(ctx: &egui::Context, panel: Color32, tint: Option<Color32>) -> Col
 }
 
 /// The island inside the strip the bottom panel gives the player.
-fn island_rect(strip: Rect) -> Rect {
+pub(crate) fn island_rect(strip: Rect) -> Rect {
     let height = theme::PLAYER_BAR_HEIGHT - ISLAND_MARGIN * 2.0;
     let width = (strip.width() - ISLAND_MARGIN * 2.0).clamp(0.0, ISLAND_MAX_WIDTH);
     Rect::from_center_size(
@@ -748,11 +748,10 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     );
     let offer_expand = art_available && !app.settings.art_expanded && app.settings.sidebar_visible;
     let over_expand = offer_expand && ui.rect_contains_pointer(expand_rect);
-    if cover_response.clicked()
-        && !over_expand
-        && let Some(page) = app.now_playing_collection_page(now)
-    {
-        app.actions.push(Action::Open(page));
+    // The cover opens Now playing, grown out of the island; the title still
+    // goes to the album or playlist.
+    if cover_response.clicked() && !over_expand {
+        super::now_playing::toggle(ui.ctx());
     }
     if offer_expand && (cover_response.hovered() || over_expand) {
         let expand = ui.interact(
