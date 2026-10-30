@@ -320,6 +320,30 @@ async fn progressive_aac_decodes_to_non_silent_pcm() {
 }
 
 #[tokio::test]
+async fn loudness_lookahead_replays_exactly_the_same_pcm_once() {
+    let server = Server::new().await;
+    let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);
+    let (worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let mut ordinary = Decoder::open(worker.fetch.clone(), &stream, 0).unwrap();
+        let mut expected = Vec::new();
+        while let Some(pcm) = ordinary.next().unwrap() {
+            expected.extend(pcm);
+        }
+        let mut ahead = Decoder::open(worker.fetch.clone(), &stream, 0).unwrap();
+        let primed = ahead.loudness_lookahead().unwrap();
+        assert!(expected.starts_with(&primed));
+        let mut replayed = Vec::new();
+        while let Some(pcm) = ahead.next().unwrap() {
+            replayed.extend(pcm);
+        }
+        assert_eq!(replayed, expected);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn progressive_load_pause_resume_seek_and_end() {
     let server = Server::new().await;
     let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);

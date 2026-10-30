@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::io::Cursor;
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -177,6 +178,8 @@ pub(super) struct Decoder {
     ahead: Option<tokio::task::JoinHandle<Result<Vec<u8>, Error>>>,
     hint: String,
     flushed: bool,
+    held: VecDeque<Vec<f64>>,
+    deferred_error: Option<Error>,
 }
 
 impl Drop for Decoder {
@@ -218,6 +221,8 @@ impl Decoder {
                 ahead: None,
                 hint,
                 flushed: false,
+                held: VecDeque::new(),
+                deferred_error: None,
             });
         }
         let segments = playlist(&fetch, stream)?;
@@ -249,6 +254,8 @@ impl Decoder {
             ahead: None,
             hint,
             flushed: false,
+            held: VecDeque::new(),
+            deferred_error: None,
         })
     }
 
@@ -279,6 +286,44 @@ impl Decoder {
     }
 
     pub fn next(&mut self) -> Result<Option<Vec<f64>>, Error> {
+        if let Some(pcm) = self.held.pop_front() {
+            self.fetch.check()?;
+            return Ok(Some(pcm));
+        }
+        if let Some(error) = self.deferred_error.take() {
+            return Err(error);
+        }
+        self.decode_next()
+    }
+
+    /// Decode ahead without changing the playback position. Limit memory to
+    /// three seconds and stop after 150 ms between packets. An in-flight HTTP
+    /// read retains the normal request deadline and transport cancellation.
+    pub fn loudness_lookahead(&mut self) -> Result<Vec<f64>, Error> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(150);
+        let mut samples = Vec::new();
+        while samples.len() / 2 < crate::loudness::LOOKAHEAD_FRAMES
+            && std::time::Instant::now() < deadline
+        {
+            match self.decode_next() {
+                Ok(Some(pcm)) => {
+                    samples.extend_from_slice(&pcm);
+                    self.held.push_back(pcm);
+                }
+                Ok(None) => break,
+                Err(Error::Cancelled) => return Err(Error::Cancelled),
+                Err(error) => {
+                    // Play successfully buffered audio before asking for a
+                    // refreshed URL, as ordinary packet-by-packet decode does.
+                    self.deferred_error = Some(error);
+                    break;
+                }
+            }
+        }
+        Ok(samples)
+    }
+
+    fn decode_next(&mut self) -> Result<Option<Vec<f64>>, Error> {
         self.fetch.check()?;
         self.prefetch();
         loop {
