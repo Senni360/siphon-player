@@ -500,7 +500,7 @@ mod tests {
 
     #[test]
     fn extension_requests_round_trip_without_opening_or_playing_the_item() {
-        let (slot, dir) = test_slot("playlist-bridge");
+        let (slot, dir) = test_slot();
         let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
         let waker = crate::backend::Waker::default();
         let Outcome::Only(first) =
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn extension_requests_report_a_refusal_instead_of_success() {
-        let (slot, dir) = test_slot("playlist-bridge-refused");
+        let (slot, dir) = test_slot();
         let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
         let fastframe_instance::Claim::First(first) = slot.claim("show", |_| None) else {
             panic!("free test slot");
@@ -701,9 +701,14 @@ mod tests {
 
     /// A slot of its own in a throwaway directory, so a Siphon already
     /// running on this machine is left alone.
-    fn test_slot(name: &str) -> (fastframe_instance::Slot, std::path::PathBuf) {
-        let dir =
-            std::env::temp_dir().join(format!("spotifast-instance-{name}-{}", std::process::id()));
+    fn test_slot() -> (fastframe_instance::Slot, std::path::PathBuf) {
+        // macOS allows only 104 bytes for the complete Unix socket path. Its
+        // private temp directory plus a descriptive test name and the nested
+        // legacy/instance.sock exceeded that limit on CI. Keep each parallel
+        // test isolated with a short process/counter identity instead.
+        static NEXT_SLOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+        let id = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!("si-{:x}-{id:x}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (fastframe_instance::Slot::at(&dir, NAME), dir)
     }
@@ -713,7 +718,7 @@ mod tests {
     #[test]
     fn a_second_launch_hands_its_link_to_the_first() {
         // #given
-        let (slot, dir) = test_slot("second-launch");
+        let (slot, dir) = test_slot();
         let waker = crate::backend::Waker::default();
         let Outcome::Only(first) = claim(&slot, &waker, None, false) else {
             panic!("the first launch runs");
@@ -741,7 +746,7 @@ mod tests {
 
     #[test]
     fn a_running_legacy_player_receives_the_launch_instead_of_a_rival() {
-        let (current, dir) = test_slot("legacy-first");
+        let (current, dir) = test_slot();
         let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
         let waker = crate::backend::Waker::default();
         let Outcome::Only(old) = claim(&legacy, &waker, None, false) else {
@@ -758,7 +763,7 @@ mod tests {
 
     #[test]
     fn a_running_siphon_also_holds_the_legacy_slot_and_accepts_its_links() {
-        let (current, dir) = test_slot("siphon-first");
+        let (current, dir) = test_slot();
         let legacy = fastframe_instance::Slot::at(dir.join("legacy"), "spotifast");
         let waker = crate::backend::Waker::default();
         let Outcome::Only(new) = claim_both(&current, &legacy, &waker, None, false) else {
@@ -781,7 +786,7 @@ mod tests {
     #[test]
     fn a_hidden_second_launch_leaves_the_first_where_it_is() {
         // #given
-        let (slot, dir) = test_slot("hidden-launch");
+        let (slot, dir) = test_slot();
         let waker = crate::backend::Waker::default();
         let Outcome::Only(first) = claim(&slot, &waker, None, false) else {
             panic!("the first launch runs");
@@ -812,7 +817,7 @@ mod tests {
     #[test]
     fn a_client_reaches_the_command_queue_and_the_snapshot() {
         // #given
-        let (slot, dir) = test_slot("round-trip");
+        let (slot, dir) = test_slot();
         let Outcome::Only(guard) = claim(&slot, &crate::backend::Waker::default(), None, false)
         else {
             panic!("the slot is free");

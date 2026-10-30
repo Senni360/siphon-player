@@ -353,6 +353,9 @@ The same GitHub checkpoint passed policy, quality and CI documentation jobs.
 Its Linux test runner exhausted disk space; its macOS default suite reported
 three existing `single_instance` handoff failures. These failures remain open
 and are separate from the passing Windows result.
+The follow-up gives each test a short process/counter socket directory to fit
+macOS's path limit, preserving isolation and assertions. Its twelve focused
+tests pass on Windows; the macOS rerun is still required.
 
 The gateway passed 27 Node tests using SQLite and deterministic clocks. A
 separate Wrangler 4.156.0 local Workers run used real local SQLite/R2 bindings,
