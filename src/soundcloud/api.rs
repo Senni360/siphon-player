@@ -332,31 +332,36 @@ impl Client {
 
     /// Rehydrate a saved private share on a fresh connection before resolving
     /// audio. Public permalinks and already known secrets keep the numeric read.
+    /// A set access pair is its URI and the original user-supplied share URL;
+    /// both its identity and the requested member must match the resolved set.
     pub(crate) async fn track_for_playback(
         &self,
         uri: &str,
         share_url: Option<&str>,
+        playlist_access: Option<(&str, &str)>,
     ) -> Result<Track> {
         let id = super::track_id(uri).ok_or(Error::InvalidUrl)?;
         let share = share_url.map(soundcloud_share_url).transpose()?;
+        let playlist = playlist_access
+            .map(|(uri, url)| -> Result<_> {
+                Ok((
+                    super::playlist_id(uri).ok_or(Error::InvalidUrl)?,
+                    soundcloud_share_url(url)?,
+                ))
+            })
+            .transpose()?;
         let has_secret = self
             .access
             .secrets
             .read()
             .unwrap_or_else(|lock| lock.into_inner())
             .contains_key(uri);
-        let private_share = share.as_ref().filter(|url| {
-            !has_secret
-                && (url.host_str() == Some("on.soundcloud.com")
-                    || url.path_segments().is_some_and(|mut parts| {
-                        parts
-                            .nth(2)
-                            .is_some_and(|part| part.starts_with("s-") && part.len() > 2)
-                    })
-                    || url
-                        .query_pairs()
-                        .any(|(key, value)| key == "secret_token" && !value.is_empty()))
-        });
+        let private_share = share
+            .as_ref()
+            .filter(|url| !has_secret && is_private_share(url));
+        let private_playlist = playlist
+            .as_ref()
+            .filter(|(_, url)| !has_secret && is_private_share(url));
         let track = if let Some(url) = private_share {
             // Do not hydrate a set if a stale/mismatched link resolves to one.
             let resolved: Resolved = self.get("resolve", &[("url", url.to_string())]).await?;
@@ -366,6 +371,26 @@ impl Client {
                     track
                 }
                 _ => return Err(Error::MissingTrack(id)),
+            }
+        } else if let Some((playlist_id, url)) = private_playlist {
+            // Only refresh the requested member. A stale or mismatched set
+            // must not hydrate unrelated tracks or silently substitute one.
+            let resolved: Resolved = self.get("resolve", &[("url", url.to_string())]).await?;
+            let Resolved::Playlist(playlist) = resolved else {
+                return Err(Error::MissingTrack(id));
+            };
+            if playlist.id != *playlist_id {
+                return Err(Error::MissingTrack(id));
+            }
+            let track = playlist
+                .tracks
+                .into_iter()
+                .find(|track| track.id == id)
+                .ok_or(Error::MissingTrack(id))?;
+            if track.is_stub() {
+                self.track(id).await?
+            } else {
+                track
             }
         } else {
             self.track(id).await?
@@ -1059,6 +1084,23 @@ fn soundcloud_share_url(url: &str) -> Result<Url> {
         return Err(Error::InvalidUrl);
     }
     Ok(url)
+}
+
+fn is_private_share(url: &Url) -> bool {
+    url.host_str() == Some("on.soundcloud.com")
+        || url.path_segments().is_some_and(|mut parts| {
+            let index = if parts.clone().nth(1) == Some("sets") {
+                3
+            } else {
+                2
+            };
+            parts
+                .nth(index)
+                .is_some_and(|part| part.starts_with("s-") && part.len() > 2)
+        })
+        || url
+            .query_pairs()
+            .any(|(key, value)| key == "secret_token" && !value.is_empty())
 }
 
 fn remember_secrets(

@@ -4,6 +4,12 @@ use crate::player::{HybridEvent, LoadSpec, PlaybackTag, RepeatMode};
 use crate::soundcloud::{api::Client, engine as sc, models as wire};
 use std::collections::HashMap;
 
+fn soundcloud_playlist_access(track: &Track) -> Option<(String, String)> {
+    let album = track.album.as_ref()?;
+    crate::soundcloud::playlist_id(&album.uri)?;
+    Some((album.uri.clone(), album.external_urls.spotify.clone()?))
+}
+
 #[derive(Clone, Debug)]
 pub enum HybridCommand {
     Claim,
@@ -452,10 +458,12 @@ impl Worker {
                 {
                     self.load_soundcloud(tag, stream).await;
                 } else {
+                    let playlist_access = soundcloud_playlist_access(&track);
                     self.resolve_soundcloud_stream(
                         tag,
                         track.uri,
                         track.external_urls.spotify,
+                        playlist_access,
                         false,
                         None,
                     );
@@ -487,10 +495,12 @@ impl Worker {
                             engine.command(sc::Command::Preload(stream));
                         }
                     } else {
+                        let playlist_access = soundcloud_playlist_access(&track);
                         self.resolve_soundcloud_stream(
                             tag,
                             track.uri,
                             track.external_urls.spotify,
+                            playlist_access,
                             true,
                             None,
                         );
@@ -687,6 +697,7 @@ impl Worker {
         tag: PlaybackTag,
         uri: String,
         share_url: Option<String>,
+        playlist_access: Option<(String, String)>,
         preload: bool,
         refresh: Option<u64>,
     ) {
@@ -708,7 +719,13 @@ impl Worker {
                 let id = crate::soundcloud::track_id(&uri)
                     .ok_or_else(|| "Invalid SoundCloud track".to_owned())?;
                 let track = client
-                    .track_for_playback(&uri, share_url.as_deref())
+                    .track_for_playback(
+                        &uri,
+                        share_url.as_deref(),
+                        playlist_access
+                            .as_ref()
+                            .map(|(uri, url)| (uri.as_str(), url.as_str())),
+                    )
                     .await
                     .map_err(|e| e.to_string())?;
                 let info = client
@@ -841,6 +858,7 @@ impl Worker {
                     tag,
                     uri,
                     track.external_urls.spotify.clone(),
+                    soundcloud_playlist_access(track),
                     false,
                     Some(request_id),
                 );

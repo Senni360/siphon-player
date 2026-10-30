@@ -185,6 +185,11 @@ impl Track {
                     .map(|list| playlist_uri(list.id))
                     .unwrap_or_default(),
                 name: playlist.map_or("SoundCloud", |list| &list.title).to_owned(),
+                // Retain the original set share beside its identity. A fresh
+                // client can use it to recover member access after restart.
+                external_urls: external_urls(
+                    playlist.and_then(|list| list.permalink_url.as_deref()),
+                ),
                 images,
                 artists,
                 ..Default::default()

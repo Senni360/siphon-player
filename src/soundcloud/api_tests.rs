@@ -1288,7 +1288,7 @@ async fn saved_private_track_links_rehydrate_fresh_client_stream_access() {
         client.oauth_token = None;
         for _ in 0..2 {
             let track = client
-                .track_for_playback("soundcloud:track:7", Some(url))
+                .track_for_playback("soundcloud:track:7", Some(url), None)
                 .await
                 .unwrap();
             let stream = client.resolve_stream(&track).await.unwrap();
@@ -1310,6 +1310,195 @@ async fn saved_private_track_links_rehydrate_fresh_client_stream_access() {
 }
 
 #[tokio::test]
+async fn saved_private_set_members_rehydrate_fresh_client_stream_access() {
+    for url in [
+        "https://soundcloud.com/artist/sets/private/s-fixture-set-secret",
+        "https://soundcloud.com/artist/sets/private?secret_token=s-fixture-set-secret",
+        "https://on.soundcloud.com/fixture-private-set-shortlink",
+    ] {
+        let mut raw = fixture_formats();
+        raw.id = 7;
+        raw.permalink_url = Some("https://soundcloud.com/artist/track".into());
+        let mut encoding = raw
+            .media
+            .as_ref()
+            .unwrap()
+            .transcodings
+            .iter()
+            .find(|item| item.preference().is_some())
+            .unwrap()
+            .clone();
+        encoding.url = "media/private-member".into();
+        raw.media = Some(super::super::models::Media {
+            transcodings: vec![encoding],
+        });
+        let mut track = serde_json::to_value(&raw).unwrap();
+        track["secret_token"] = json!("s-fixture-track-secret");
+        let set = json!({
+            "kind":"playlist", "id":9, "title":"Private set",
+            "permalink_url":"https://soundcloud.com/artist/sets/private",
+            "tracks":[track.clone()]
+        });
+        let (client, task) = server(vec![ok(set.to_string())]).await;
+        let crate::extension_bridge::ResolvedItem::Set { tracks, .. } =
+            crate::extension_bridge::resolve_soundcloud(&client, url)
+                .await
+                .unwrap()
+        else {
+            panic!("expected a set");
+        };
+        let saved = crate::mixed_playlists::Entry::new(&tracks[0]);
+        let bytes = serde_json::to_vec(&saved).unwrap();
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("s-fixture-track-secret"),
+            "only the original set share is persisted, never learned member tokens"
+        );
+        let restored: crate::mixed_playlists::Entry = serde_json::from_slice(&bytes).unwrap();
+        let restored = restored.to_track();
+        assert_eq!(restored.external_urls.spotify, raw.permalink_url);
+        let album = restored.album.as_ref().unwrap();
+        assert_eq!(album.uri, "soundcloud:playlist:9");
+        assert_eq!(album.external_urls.spotify.as_deref(), Some(url));
+        assert_eq!(task.await.unwrap().len(), 1);
+        drop(client);
+
+        // A fresh client has no learned tokens. Resolve the retained set once,
+        // hydrate only its selected member, then use numeric refresh normally.
+        let set = json!({
+            "kind":"playlist", "id":9, "title":"Private set",
+            "tracks":[{"id":7,"secret_token":"s-fixture-track-secret"},{"id":99}]
+        });
+        let audio = r#"{"url":"https://cdn.soundcloud.invalid/private-member.mp3"}"#;
+        let (mut client, task) = server(vec![
+            ok(set.to_string()),
+            ok(track.to_string()),
+            ok(audio),
+            ok(track.to_string()),
+            ok(audio),
+        ])
+        .await;
+        client.oauth_token = None;
+        for _ in 0..2 {
+            let track = client
+                .track_for_playback(
+                    &restored.uri,
+                    restored.external_urls.spotify.as_deref(),
+                    Some((&album.uri, album.external_urls.spotify.as_deref().unwrap())),
+                )
+                .await
+                .unwrap();
+            let stream = client.resolve_stream(&track).await.unwrap();
+            assert_eq!(
+                stream.url,
+                "https://cdn.soundcloud.invalid/private-member.mp3"
+            );
+        }
+        let requests = task.await.unwrap();
+        assert!(requests[0].starts_with("GET /resolve?url="));
+        for index in [1, 3] {
+            assert!(
+                requests[index].starts_with("GET /tracks/7?secret_token=s-fixture-track-secret&")
+            );
+        }
+        for index in [2, 4] {
+            assert!(requests[index].starts_with("GET /media/private-member?"));
+            assert!(requests[index].contains("secret_token=s-fixture-track-secret"));
+        }
+        assert!(
+            requests
+                .iter()
+                .all(|request| !request.contains("authorization:"))
+        );
+    }
+}
+
+#[tokio::test]
+async fn private_set_playback_checks_set_identity_membership_and_public_fast_path() {
+    let url = "https://soundcloud.com/artist/sets/private/s-fixture-set-secret";
+    for body in [
+        json!({"kind":"track","id":7,"title":"Wrong kind"}),
+        json!({"kind":"playlist","id":8,"tracks":[{"id":7}]}),
+        json!({"kind":"playlist","id":9,"tracks":[{"id":8}]}),
+    ] {
+        let (client, task) = server(vec![ok(body.to_string())]).await;
+        assert!(matches!(
+            client
+                .track_for_playback(
+                    "soundcloud:track:7",
+                    Some("https://soundcloud.com/artist/track"),
+                    Some(("soundcloud:playlist:9", url)),
+                )
+                .await,
+            Err(Error::MissingTrack(7))
+        ));
+        assert_eq!(
+            task.await.unwrap().len(),
+            1,
+            "reject before member hydration"
+        );
+    }
+    let (client, task) = server(Vec::new()).await;
+    for access in [
+        (
+            "soundcloud:playlist:9",
+            "https://attacker.invalid/private-set",
+        ),
+        ("spotify:album:9", url),
+    ] {
+        assert!(matches!(
+            client
+                .track_for_playback("soundcloud:track:7", None, Some(access))
+                .await,
+            Err(Error::InvalidUrl)
+        ));
+    }
+    assert!(task.await.unwrap().is_empty());
+
+    let (client, task) = server(vec![ok(
+        json!({"kind":"playlist","id":9,"tracks":[{"id":7,"title":"Complete member"},{"id":99}]})
+            .to_string(),
+    )])
+    .await;
+    assert_eq!(
+        client
+            .track_for_playback(
+                "soundcloud:track:7",
+                None,
+                Some(("soundcloud:playlist:9", url))
+            )
+            .await
+            .unwrap()
+            .id,
+        7
+    );
+    assert_eq!(
+        task.await.unwrap().len(),
+        1,
+        "complete members need no hydration"
+    );
+
+    let (client, task) = server(vec![ok(r#"{"id":7,"title":"Public track"}"#)]).await;
+    assert_eq!(
+        client
+            .track_for_playback(
+                "soundcloud:track:7",
+                Some("https://soundcloud.com/artist/track"),
+                Some((
+                    "soundcloud:playlist:9",
+                    "https://soundcloud.com/artist/sets/public"
+                )),
+            )
+            .await
+            .unwrap()
+            .id,
+        7
+    );
+    let requests = task.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("GET /tracks/7?"));
+}
+
+#[tokio::test]
 async fn playback_metadata_rejects_mismatched_tracks_and_keeps_public_reads_direct() {
     let body = r#"{"kind":"track","id":8,"title":"Different recording"}"#;
     for share in [
@@ -1319,7 +1508,7 @@ async fn playback_metadata_rejects_mismatched_tracks_and_keeps_public_reads_dire
         let (client, task) = server(vec![ok(body)]).await;
         assert!(matches!(
             client
-                .track_for_playback("soundcloud:track:7", Some(share))
+                .track_for_playback("soundcloud:track:7", Some(share), None)
                 .await,
             Err(Error::MissingTrack(7))
         ));
@@ -1342,7 +1531,8 @@ async fn playback_metadata_rejects_mismatched_tracks_and_keeps_public_reads_dire
         client
             .track_for_playback(
                 "soundcloud:track:7",
-                Some("https://on.soundcloud.com/fixture-shortlink")
+                Some("https://on.soundcloud.com/fixture-shortlink"),
+                None,
             )
             .await,
         Err(Error::MissingTrack(7))
@@ -1356,7 +1546,7 @@ async fn playback_metadata_rejects_mismatched_tracks_and_keeps_public_reads_dire
     ] {
         assert!(matches!(
             client
-                .track_for_playback("soundcloud:track:7", Some(share))
+                .track_for_playback("soundcloud:track:7", Some(share), None)
                 .await,
             Err(Error::InvalidUrl)
         ));

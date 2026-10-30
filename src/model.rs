@@ -75,6 +75,7 @@ fn album_retained_bytes(album: &Album) -> usize {
         + album.uri.len()
         + album.album_type.as_ref().map(String::len).unwrap_or(0)
         + album.release_date.as_ref().map(String::len).unwrap_or(0)
+        + album.external_urls.spotify.as_ref().map_or(0, String::len)
         + image_retained_bytes(&album.images)
         + album
             .artists
@@ -1854,6 +1855,15 @@ mod source_guard_tests {
         assert!(metadata_bytes > baseline + std::mem::size_of::<PublisherMetadata>());
         track.publisher_metadata.as_mut().unwrap().publisher = Some("x".repeat(4096));
         assert!(track_retained_bytes(&track) >= metadata_bytes + 4096 - "Publisher".len());
+        let without_set = track_retained_bytes(&track);
+        let set_url = "https://soundcloud.com/artist/sets/private/s-fixture";
+        track.album = Some(Album {
+            external_urls: crate::api::models::ExternalUrls {
+                spotify: Some(set_url.into()),
+            },
+            ..Default::default()
+        });
+        assert_eq!(track_retained_bytes(&track), without_set + set_url.len());
         let json = serde_json::to_value(&track).unwrap();
         assert_eq!(json["publisher_metadata"]["isrc"], "USAAA2600001");
         assert_eq!(json["linked_from"]["uri"], "spotify:track:original");

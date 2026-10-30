@@ -46,6 +46,14 @@ URL must preserve its secret path/query through the intended group share and
 link-opening flow. Never log a track/share payload or put secret links into a
 public diagnostic report. Signed playback URLs remain internal to the engine.
 
+Rows imported from a SoundCloud set also retain its original share URL in
+`album.external_urls.spotify`, beside `album.uri` (`soundcloud:playlist:<id>`).
+Keep both fields in saved rows and queue snapshots; the track's own share URL
+remains unchanged. On a fresh connection, a retained private/short set link is
+resolved and its set identity and requested member are checked before playback.
+This uses existing optional metadata fields, so older snapshots remain readable.
+Learned per-track secret tokens are never added to the saved row.
+
 `is_playable` preserves available/unavailable/unknown, while `preview_only`
 identifies SoundCloud previews. A row may be available for browsing while a
 required local account/helper/output device is unavailable. Distinguish these
