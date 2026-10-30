@@ -2034,6 +2034,13 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The now-playing cover on the player island, in the 1280 by 800 test
+    /// window: the island is 1120 wide and centred, with the cover at its
+    /// left after 14 points of padding.
+    const NOW_PLAYING_COVER: egui::Pos2 = egui::pos2(124.0, 750.0);
+    /// Empty island beside that cover: the visualizer's click target.
+    const ISLAND_EMPTY: egui::Pos2 = egui::pos2(86.0, 750.0);
     use crate::app::AppOptions;
     use crate::paths::AppDirs;
     use crate::settings::Settings;
@@ -5687,7 +5694,8 @@ mod tests {
                 contains("Bonobo - Studio Sketch"),
                 source != SearchSource::Spotify
             );
-            assert_eq!(contains("SC"), source != SearchSource::Spotify);
+            // Songs say their source with their title's colour, not a chip.
+            assert!(!contains("SC"));
             assert_eq!(app.search.committed, "Bonobo");
             if source == SearchSource::SoundCloud {
                 assert!(!contains("Albums"));
@@ -5731,14 +5739,14 @@ mod tests {
                 } else {
                     assert!(soundcloud.top() > spotify.bottom());
                 }
-                assert!(text.iter().any(|(label, _)| label == "SC"));
+                assert!(!text.iter().any(|(label, _)| label == "SC"));
                 app.backend.shutdown();
             }
         }
     }
 
     #[test]
-    fn soundcloud_badges_follow_tracks_into_the_queue_and_player_bar() {
+    fn soundcloud_tracks_carry_no_source_chip_in_the_queue_or_player() {
         let (ctx, mut app) = accessible_app("soundcloud-queue-player-badges");
         let upload = soundcloud_search_results().tracks.remove(0);
         app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload.clone()));
@@ -5752,7 +5760,7 @@ mod tests {
         ] {
             view_frame(&ctx, &mut app, vec![], view);
             let text = view_frame(&ctx, &mut app, vec![], view);
-            assert!(text.iter().any(|(label, _)| label == "SC"));
+            assert!(!text.iter().any(|(label, _)| label == "SC"));
         }
         app.backend.shutdown();
     }
@@ -5846,7 +5854,7 @@ mod tests {
     }
 
     #[test]
-    fn soundcloud_badges_and_session_hearts_fit_rows_and_player_in_both_themes() {
+    fn soundcloud_session_hearts_fit_rows_and_player_in_both_themes() {
         use egui::accesskit::{Action as AccessibleAction, Role};
         for light in [false, true] {
             for width in [760.0, 1280.0] {
@@ -5908,18 +5916,6 @@ mod tests {
                         })
                         .expect("session heart");
                     let heart_bounds = heart.bounds().unwrap();
-                    let badge = tree
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| {
-                            node.value() == Some("SoundCloud") && node.role() == Role::Label
-                        })
-                        .and_then(|(_, node)| node.bounds())
-                        .expect("source badge");
-                    assert!(
-                        badge.x1 < heart_bounds.x0,
-                        "badge and heart overlap at {width}"
-                    );
                     assert!(heart_bounds.x1 <= f64::from(width));
                     app.actions.clear();
                     draw(
@@ -6695,8 +6691,8 @@ mod tests {
             output.textures_delta.clear();
         };
         draw(&mut app, vec![]);
-        // The margin at the bar's left edge, beside the cover.
-        let empty = egui::pos2(6.0, 796.0);
+        // The island's padding beside the cover.
+        let empty = ISLAND_EMPTY;
         draw(&mut app, pointer_click(empty, egui::PointerButton::Primary));
         assert!(
             app.actions
@@ -6769,8 +6765,8 @@ mod tests {
         };
         let tip = "Click to change the visualizer";
 
-        // #given the tooltip shown over the empty margin beside the cover
-        let empty = egui::pos2(6.0, 796.0);
+        // #given the tooltip shown over the island's padding beside the cover
+        let empty = ISLAND_EMPTY;
         for _ in 0..3 {
             draw(&mut app, empty);
         }
@@ -9801,7 +9797,7 @@ mod tests {
             frame(&ctx, &mut app);
         }
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -9875,7 +9871,7 @@ mod tests {
 
         // Drag the now-playing song from the bottom-left player, same
         // starting point as the equivalent playlist-insert test.
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -9945,7 +9941,7 @@ mod tests {
         // close/save buttons and tab chips.
         let end = egui::pos2(1100.0, 300.0);
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -10569,7 +10565,7 @@ mod tests {
         let button = bounds_of(button);
 
         let drag_to = |app: &mut App, end: egui::Pos2| {
-            let start = egui::pos2(40.0, 755.0);
+            let start = NOW_PLAYING_COVER;
             frame_events(
                 &ctx,
                 app,
@@ -10660,7 +10656,7 @@ mod tests {
         let target_row = row_rect("Queued 1");
         let end = egui::pos2(target_row.left() + 130.0, target_row.top() + 1.0);
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -10738,7 +10734,7 @@ mod tests {
         // still appends at the end, ignoring the row it landed on.
         let end = egui::pos2(bounds.x0 as f32 + 130.0, bounds.y0 as f32 + 2.0);
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -11096,7 +11092,7 @@ mod tests {
             let tree = accessible_frame(&ctx, &mut app, vec![]);
             let target = row(&tree, "Liked Songs").center();
             app.saved.insert("spotify:track:trk0".into(), false);
-            let source = egui::pos2(40.0, 755.0);
+            let source = NOW_PLAYING_COVER;
             accessible_frame(
                 &ctx,
                 &mut app,
@@ -11201,7 +11197,7 @@ mod tests {
                         let row = row_rect(source_item.name());
                         egui::pos2(row.left() + 80.0, row.center().y)
                     } else {
-                        egui::pos2(40.0, 755.0)
+                        NOW_PLAYING_COVER
                     };
                     let row = row_rect(&format!("Destination {}", position.min(3)));
                     let end = egui::pos2(
