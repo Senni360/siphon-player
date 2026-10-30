@@ -56,7 +56,7 @@ backend contract wins on behaviour and this file is updated to match.
   the tools do; the title keeps 220 px), tested at 560/561, 760/761 and
   920/921. The island
   title's source colour is tested in both themes.
-- **Tonight's frontend is complete at this branch's tip.** Anything after
+- **Tonight's frontend work ends at this branch's tip.** Anything after
   it is a fix the coordinator asks for. What is not built, and why, is the
   last table in `DESIGN.md`. Not verified anywhere: Windows, a real
   account, the installed helper.
