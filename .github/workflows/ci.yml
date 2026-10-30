@@ -165,10 +165,13 @@ jobs:
         run: mbx test --locked --all-targets
       - name: Tests (all features)
         run: mbx test --locked --all-targets --all-features
+      - name: Compile native credential test harness
+        if: runner.os == 'Windows' || runner.os == 'macOS'
+        run: mbx test --locked --all-features --lib --no-run
       - name: Native credential store (dummy grants)
         if: runner.os == 'Windows' || runner.os == 'macOS'
         timeout-minutes: 2
-        run: mbx test --locked --lib credentials::tests::native_store_round_trip -- --ignored --exact
+        run: mbx test --locked --all-features --lib credentials::tests::native_store_round_trip -- --ignored --exact
       - name: Documentation tests
         run: mbx test --locked --all-features --doc
       # A build can pass while importing Microsoft's C++ runtime, then fail on

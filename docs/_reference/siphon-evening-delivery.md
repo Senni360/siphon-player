@@ -74,10 +74,9 @@ The cloud coordinator's `siphon/evening-candidate` has tested code at
 - Claude's frontend through `0d2943a`: approved design reference, design kit,
   backend source classification, neutral palettes and source-colored track rows.
 
-The frontend shell, fonts and rebuilt views have not yet been published at this
-checkpoint. The frontend handoff's old "nothing on screen changes" wording lags
-the actual palette/row commits. Treat code and exact heads as evidence of what is
-included. This branch uses linear cherry-picks; because it includes copies of
+This checkpoint does not include the subsequently published player island,
+floating sidebar and row tools described below. Treat code and exact heads as
+evidence of what is included; a published milestone is not final UI acceptance. This branch uses linear cherry-picks; because it includes copies of
 main's newer commits, do not assume it can fast-forward current main. Reconcile
 with the latest published main before any final main update. The owner asked for
 the work combined; no unrelated branch was reset or overwritten.
@@ -121,8 +120,122 @@ artifact's manifest must identify the eventual combined commit. An executable
 from the early `c63163c` build is only an initial Windows compatibility probe.
 The combined checkpoint was submitted as `b58d09c` in
 [Windows candidate run 41086575447](https://github.com/Senni360/siphon-player/actions/runs/41086575447),
-queued behind that initial native build. Later documentation-only commits do
-not change its tested application code.
+which GitHub refused to start because of account billing or spending limits.
+Later documentation-only commits do not change its tested application code.
+Neither that run nor the early compatibility run produced an executable.
+
+## Windows recovery checkpoint, 17:30 Amsterdam
+
+The early compatibility run `41080057491` built source
+`c63163cf11b7079b177159e16e9a3fb04def6439`. Its default and all-feature Windows
+suites passed. The next step timed out after two minutes while Cargo was still
+compiling the default-feature library test harness. The native credential test
+had not started. Release compilation and artifact upload were skipped. This is
+not evidence of a credential-store hang and does not produce a usable old binary.
+
+The combined run `41086575447`, source
+`b58d09c37a0698347cf0cc10bab75330439954ec`, was refused before any runner steps.
+GitHub's check annotation says: "The job was not started because recent account
+payments have failed or your spending limit needs to be increased. Please check
+the 'Billing & plans' section in your settings". Cloud cannot resolve an account
+payment/spending block or confirm access to the owner's PC. Do not retry an
+unchanged blocked run in a loop. No healthy build was cancelled.
+
+The corrected workflow reuses the all-feature harness, selects its executable
+from Cargo's JSON artifacts, and allows compilation outside the native test's
+120-second process limit. Failed runs now retain the Rust cache. Both test
+configurations and the actual native dummy-grant test remain required. The
+ordinary Windows/macOS CI job also precompiles that same all-feature harness
+before its two-minute native check.
+`packaging/windows/package-candidate.ps1` builds before packaging, requires a
+clean checkout (including untracked build inputs) and unchanged exact HEAD, checks architecture/runtime and
+version, and refuses an existing output directory. The manifest therefore cannot
+silently relabel an earlier candidate with the current checkout commit.
+
+Recovery validation: both scripts parse under PowerShell 7.6.9. Linux fixture
+copies exercised Cargo artifact selection, exact test arguments, slow compilation
+outside the test timeout, nonzero build/test exits, rejection of zero matching
+tests, and termination of only the owned timed-out process tree. Packaging
+fixtures covered dirty/mismatched/changing HEAD, wrong build artifact, dynamic
+runtime, existing output and hash/manifest checks. Platform guards and Windows
+path rules were adapted only in scratch copies for those fixtures; these results
+do not establish native credential storage, PE tooling or Windows launch.
+Workflow YAML parses, all 27 policy regressions, 8 release-name and 4 launcher checks pass,
+and `git diff --check` is clean. Application source is unchanged in this recovery.
+
+### Existing Windows agent fallback
+
+These commands are for the already-authorized local Windows agent, not the
+owner. Use an isolated checkout and an existing x64 MSVC developer environment
+with Rust and PowerShell 7. Preserve current uncommitted work, installed app,
+helper and real profiles. Inspect the newest shared handoff first, choose its
+exact accepted combined commit, and record it before building. Do not assume the
+branch name alone proves that the final frontend is included.
+
+```powershell
+# In a clean, isolated checkout of the agreed exact combined commit:
+git rev-parse HEAD
+cargo test --locked --all-targets
+if ($LASTEXITCODE -ne 0) { throw 'Default-feature tests failed.' }
+cargo test --locked --all-targets --all-features
+if ($LASTEXITCODE -ne 0) { throw 'All-feature tests failed.' }
+./packaging/windows/test-native-store.ps1 -TimeoutSeconds 120
+./packaging/windows/package-candidate.ps1
+```
+
+The scripts throw on failure. They do not install anything or modify the helper.
+A successful package is a fresh `dist/Siphon` folder. Deliver that entire folder
+(or its private ZIP) and `build.json`, not an arbitrary `target/release` binary.
+The owner should only extract the folder and open `siphon.exe`. The local agent
+must perform the real launch/account/audio/helper checks before calling it final.
+No acknowledgment or local execution result has been received through PR7 yet.
+
+### New published work awaiting combined validation
+
+As observed at this checkpoint, main is
+`61933a41b6a1c1a8546ece7c5c568f32ba76284c`. After the included `cf4d941`, it adds
+`9713ad3` (private synthetic-media gateway, explicit test CA option and docs) and
+`ab53cbb` (short isolated macOS socket paths in tests), then `61933a4` (isolated
+upload admission/cancellation ledger). The gateway is not deployed
+by the cloud coordinator and is not needed to launch the desktop app.
+
+Claude is at `1c53af2e4bc94475a416ae5aec52466971f91acd`. New commits after the
+included `0d2943a` are `f5341e4` (player island), `cee85fe` (floating sidebar),
+`76d2805` (optional offline Windows demo preview), `d58bbce` (row tools), and
+`1c53af2` (frontend handoff). These are published milestones, not yet combined
+with this candidate. Cleanup remains `adb6157`; no newer helper completion has
+been observed. Keep the stronger source-title regressions when reconciling
+`src/demo.rs`; the new island removes its old SC badge too.
+
+Read-only integration review found two session-scoping issues for Claude to
+resolve: row tools remember the last playlist in global egui temporary data,
+and the island retains its shown/leaving track there. Existing account teardown
+does not clear those entries. A later account can see the previous account's
+playlist destination or outgoing private-track snapshot. Scope or clear these
+caches at the account/session boundary, with an A → signed-out → B regression,
+before accepting that UI for final integration. Two additional findings need
+frontend-owner reconciliation: use `app.download_source(item)` for the row tool
+so cached/private SoundCloud links retain the existing download fallback; and
+check row title widths around the 560/561 and 760/761 pixel breakpoints. Enabling
+tools with optional columns currently reduces ordinary titles to about 14 or
+38 pixels at those boundaries. This static review has not modified Claude's
+branch or claimed the frontend is finished.
+
+### Linear final-main integration
+
+At main `61933a4`, a new branch based on that exact main can apply the cumulative
+candidate delta from `cf4d941` to this evening candidate using a binary diff and
+`git apply --3way --index`. Review the resulting tree before committing the
+integration snapshot and record both source SHAs. This avoids replaying the
+candidate's copies of main's hosted-media patches. Published original commits and
+branches remain intact. Main's added README and single-instance changes must be
+preserved; other current main additions do not overlap this candidate's files.
+
+Then apply only the newer, accepted Claude commits in order, retaining stronger
+source-title tests and resolving the findings above. Do not also apply the
+individual backend feature branches. Re-read main and all ready heads at final
+promotion; if main has advanced, reconcile from its new exact tip. No final-main
+integration or Windows validation is claimed by this recovery checkpoint.
 
 ## Extra AI model
 

@@ -50,9 +50,9 @@ if ($ActionsUrl) {
 
 Push-Location $root
 try {
-    $dirty = & git status --porcelain --untracked-files=no
+    $dirty = & git status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    if ($dirty) { throw 'Tracked source changes must be committed before packaging.' }
+    if ($dirty) { throw 'Source changes and untracked build inputs must be committed before packaging.' }
     $commit = (& git rev-parse --verify HEAD | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     if ($commit -notmatch '^[0-9a-f]{40}$') { throw 'Could not identify the exact source commit.' }
@@ -105,7 +105,7 @@ try {
     if ($version -ne "siphon $($package[0].version)") {
         throw "Unexpected executable version: $version"
     }
-    $dirty = & git status --porcelain --untracked-files=no
+    $dirty = & git status --porcelain --untracked-files=all
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     $current = (& git rev-parse --verify HEAD | Out-String).Trim()
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
