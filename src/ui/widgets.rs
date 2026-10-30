@@ -1139,6 +1139,18 @@ fn item_menu_at(
     ui.set_max_width(300.0);
     let uri = item.uri().to_string();
     let label = item.name().to_string();
+    if let Ok(post) = crate::friends::NewPost::from_item(item)
+        && menu_item_enabled(
+            ui,
+            &palette,
+            Some(Icon::Users),
+            "Share with friends",
+            app.friends_feed.profile.is_some() && !app.friends_feed.busy,
+        )
+    {
+        app.actions
+            .push(Action::Friends(crate::friends::Action::Share(post)));
+    }
     if app.download_source(item).is_some() && download_menu_item(ui, app, "Download") {
         app.actions.push(Action::Download(vec![item.clone()]));
     }

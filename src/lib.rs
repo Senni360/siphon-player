@@ -19,6 +19,7 @@ pub mod downloads;
 pub mod emoji;
 pub mod eq;
 pub mod extension_bridge;
+pub mod friends;
 pub mod history;
 pub mod http;
 pub mod hybrid_queue;
