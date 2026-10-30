@@ -4228,25 +4228,30 @@ impl App {
         if let Some(id) = &track.id {
             self.track_cache.insert(id.clone(), track.clone());
         }
+        self.install_demo_lyrics(lyrics);
+        self.lyrics_following = true;
+        self.lyrics_line_shown = None;
+    }
+
+    /// Seed lyrics for the current demo song without changing its playback or
+    /// follow position. Include the query so opening a panel reuses the fixture.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn install_demo_lyrics(&mut self, lyrics: Loadable<Option<crate::lyrics::Lyrics>>) {
+        self.frame_now = None;
+        let now = self.now_playing();
         self.lyrics_request = self.lyrics_request.wrapping_add(1);
-        self.lyrics_uri = Some(track.uri.clone());
-        self.lyrics_query = Some(crate::lyrics::Query {
-            artist: track
+        self.lyrics_uri = now.as_ref().map(|now| now.uri.clone());
+        self.lyrics_query = now.map(|now| crate::lyrics::Query {
+            artist: now
                 .artists
                 .first()
                 .map(|artist| artist.name.clone())
                 .unwrap_or_default(),
-            title: track.name.clone(),
-            album: track
-                .album
-                .as_ref()
-                .map(|album| album.name.clone())
-                .unwrap_or_default(),
-            duration_ms: track.duration_ms,
+            title: now.title,
+            album: now.album_name,
+            duration_ms: now.duration_ms,
         });
         self.lyrics = lyrics;
-        self.lyrics_following = true;
-        self.lyrics_line_shown = None;
     }
 
     /// Pushes the Winamp window's always-on-top level to the live window.
