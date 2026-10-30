@@ -335,6 +335,31 @@ replacement for re-reading the current main and ready frontend heads at 20:30.
 No service was deployed and no claim of room functionality in the desktop UI is
 made. The Windows build/access and local verification blockers remain unchanged.
 
+### Direct Windows build feasibility attempt
+
+Because no Windows runner or local-agent result is available, the coordinator is
+preparing a bounded Linux-to-Windows MSVC cross-build in the existing cloud. This
+does not use a paid runner or deploy a service. The Windows dependency graph has
+no MilkDrop/CMake/ASIO requirement; `ring` is its only native C dependency. The
+Windows Rust standard library and checksum-verified cross tools are installed
+under task scratch; x64 SDK/CRT caching is in progress. Available disk space is
+being checked, and the warm Linux target is preserved.
+
+The isolated checkout is `/workspace/work/windows-cross-candidate`, branch
+`siphon/windows-cross-probe`, starting at `784e08f`. Its own `target/` is separate
+from every other checkout. Tool setup is `/workspace/work/windows-cross-env.sh`;
+SDK status is `/workspace/work/windows-cross-tools/cache.log`. Inspect live
+processes and logs before reusing this checkout. The initial build only tests
+toolchain compatibility and warms dependencies. Its source predates the final
+frontend and must never be labeled the final combined app. A later combined
+source must be rebuilt and identified by its exact manifest.
+
+A cross-built executable would remain unsigned and unverified on native Windows.
+It cannot establish credential-store, device/audio, installed-helper or account
+behavior. Current `build.rs` also skips Windows icon/version resources when its
+host is Linux; resolving that packaging difference is needed before presenting
+an equivalent final candidate. No executable is claimed by this setup note.
+
 ## Extra AI model
 
 The owner offered access to a model called "Jeff". Its provider/API is still
