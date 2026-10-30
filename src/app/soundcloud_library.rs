@@ -143,6 +143,42 @@ impl App {
         self.soundcloud_account.token().is_some()
     }
 
+    pub fn can_repost_soundcloud(&self, uri: &str) -> bool {
+        self.can_like_soundcloud()
+            && !self.offline
+            && self.network_reachable
+            && self.soundcloud_library.snapshot.reposts.loaded
+            && crate::soundcloud::reposts::Target::from_uri(uri)
+                .is_some_and(|target| !self.soundcloud_library.repost_edits.pending(target))
+    }
+
+    pub fn soundcloud_reposted(&self, uri: &str) -> bool {
+        crate::soundcloud::reposts::Target::from_uri(uri)
+            .is_some_and(|target| self.soundcloud_library.snapshot.reposts.contains(target))
+    }
+
+    pub(super) fn toggle_soundcloud_repost(&mut self, uri: &str) {
+        if !self.can_repost_soundcloud(uri) {
+            return;
+        }
+        let Some(target) = crate::soundcloud::reposts::Target::from_uri(uri) else {
+            return;
+        };
+        let library = &mut self.soundcloud_library;
+        if let Some((serial, reposted)) = library
+            .repost_edits
+            .toggle(&mut library.snapshot.reposts, target)
+        {
+            self.backend
+                .send(Command::SoundCloudLibrary(Request::Repost {
+                    generation: library.generation,
+                    target,
+                    reposted,
+                    serial,
+                }));
+        }
+    }
+
     pub(super) fn refresh_soundcloud_library(&mut self) {
         if self.soundcloud_account.user().is_none()
             || self.soundcloud_library.refreshing
@@ -152,6 +188,12 @@ impl App {
             return;
         }
         self.soundcloud_library.refreshing = true;
+        if self.can_like_soundcloud()
+            && self.soundcloud_library.following.status
+                == crate::soundcloud::following::Status::ConnectSoundCloud
+        {
+            self.soundcloud_library.following.status = crate::soundcloud::following::Status::Idle;
+        }
         self.soundcloud_library.loading = true;
         self.backend
             .send(Command::SoundCloudLibrary(Request::Refresh {
@@ -175,7 +217,10 @@ impl App {
     }
 
     fn save_soundcloud_library(&mut self) {
-        if self.offline || !self.soundcloud_library.pending.is_empty() {
+        if self.offline
+            || !self.soundcloud_library.pending.is_empty()
+            || self.soundcloud_library.repost_edits.is_pending()
+        {
             return;
         }
         let Some(key) = cache_key(&self.soundcloud_account) else {
@@ -203,6 +248,9 @@ impl App {
             | Response::Likes { generation, .. }
             | Response::Playlists { generation, .. }
             | Response::Artists { generation, .. }
+            | Response::Reposts { generation, .. }
+            | Response::Reposted { generation, .. }
+            | Response::Following { generation, .. }
             | Response::Refreshed { generation }
             | Response::Liked { generation, .. } => *generation,
         };
@@ -218,6 +266,15 @@ impl App {
                     && self.soundcloud_library.pending.is_empty()
                 {
                     self.overlay_soundcloud_likes(&mut snapshot.likes);
+                    if self.soundcloud_library.snapshot.following.loaded {
+                        snapshot.following = self.soundcloud_library.snapshot.following.clone();
+                    }
+                    if self.soundcloud_library.snapshot.reposts.loaded {
+                        snapshot.reposts = self.soundcloud_library.snapshot.reposts.clone();
+                    }
+                    self.soundcloud_library
+                        .repost_edits
+                        .overlay(&mut snapshot.reposts);
                     self.cache_soundcloud_tracks(&snapshot.likes);
                     self.soundcloud_library.snapshot = snapshot;
                     self.soundcloud_library.rebuild_membership();
@@ -226,6 +283,72 @@ impl App {
                 }
             }
             Response::Cached { .. } => {}
+            Response::Following {
+                serial,
+                more,
+                result,
+                ..
+            } => {
+                let library = &mut self.soundcloud_library;
+                if serial != library.following.serial {
+                    return;
+                }
+                match result {
+                    Ok(page) => {
+                        library.snapshot.following.absorb(page, more);
+                        library.following.status = crate::soundcloud::following::Status::Ready;
+                        let tracks = library
+                            .snapshot
+                            .following
+                            .items
+                            .iter()
+                            .filter_map(|item| match &item.content {
+                                crate::soundcloud::following::Content::Track(track) => {
+                                    Some(track.clone())
+                                }
+                                crate::soundcloud::following::Content::Playlist(_) => None,
+                            })
+                            .collect::<Vec<_>>();
+                        self.cache_soundcloud_tracks(&tracks);
+                        self.save_soundcloud_library();
+                    }
+                    Err(error) => {
+                        library.following.status =
+                            crate::soundcloud::following::Status::Error(error)
+                    }
+                }
+            }
+            Response::Reposts { result, .. } => match result {
+                Ok(mut snapshot) => {
+                    self.soundcloud_library.repost_edits.overlay(&mut snapshot);
+                    self.soundcloud_library.snapshot.reposts = snapshot;
+                    self.save_soundcloud_library();
+                }
+                Err(error) => {
+                    self.toast_error(format!("Could not load SoundCloud reposts: {error}"))
+                }
+            },
+            Response::Reposted {
+                target,
+                serial,
+                result,
+                ..
+            } => {
+                let library = &mut self.soundcloud_library;
+                if library.repost_edits.finish(
+                    &mut library.snapshot.reposts,
+                    target,
+                    serial,
+                    result.is_ok(),
+                ) {
+                    if let Err(error) = result {
+                        self.toast_error(format!(
+                            "Could not change the SoundCloud repost: {error}"
+                        ));
+                    }
+                    self.save_soundcloud_library();
+                }
+            }
             Response::Likes { more, result, .. } => {
                 self.soundcloud_library.loading = false;
                 match result {
@@ -338,6 +461,35 @@ impl App {
             serial,
         }));
     }
+
+    pub(super) fn load_soundcloud_following(&mut self, more: bool) {
+        use crate::soundcloud::following::Status;
+        if !self.can_like_soundcloud() {
+            self.soundcloud_library.following.status = Status::ConnectSoundCloud;
+            return;
+        }
+        let library = &mut self.soundcloud_library;
+        if self.offline || !self.network_reachable || library.following.status == Status::Loading {
+            return;
+        }
+        let next = if more {
+            let Some(next) = library.snapshot.following.next.clone() else {
+                return;
+            };
+            Some(next)
+        } else {
+            None
+        };
+        library.following.serial = library.following.serial.wrapping_add(1);
+        library.following.status = Status::Loading;
+        self.backend
+            .send(Command::SoundCloudLibrary(Request::Following {
+                generation: library.generation,
+                serial: library.following.serial,
+                next,
+                cached: library.snapshot.following.items.len(),
+            }));
+    }
 }
 
 #[cfg(test)]
@@ -382,6 +534,131 @@ mod tests {
         let root = app.dirs.state.parent().unwrap().to_owned();
         drop(app);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn repost_actions_are_session_only_optimistic_and_account_scoped() {
+        use crate::soundcloud::reposts::{Snapshot, Target};
+        let mut app = app("reposts");
+        let uri = crate::soundcloud::track_uri(42);
+        let target = Target::Track(42);
+        app.soundcloud_library.snapshot.reposts.loaded = true;
+        assert!(!app.can_repost_soundcloud(&uri));
+        app.toggle_soundcloud_repost(&uri);
+        assert!(!app.soundcloud_reposted(&uri));
+        session(&mut app);
+        app.offline = false;
+        app.network_reachable = true;
+        app.toggle_soundcloud_repost(&uri);
+        app.offline = true;
+        assert!(app.soundcloud_reposted(&uri));
+        assert!(!app.can_repost_soundcloud(&uri));
+        let generation = app.soundcloud_library.generation;
+        app.handle_soundcloud_library(Response::Reposts {
+            generation,
+            result: Ok(Snapshot {
+                loaded: true,
+                ..Default::default()
+            }),
+        });
+        assert!(app.soundcloud_reposted(&uri));
+        app.handle_soundcloud_library(Response::Reposted {
+            generation,
+            target,
+            serial: 999,
+            result: Err("Old failure".into()),
+        });
+        assert!(app.soundcloud_reposted(&uri));
+        app.handle_soundcloud_library(Response::Reposted {
+            generation,
+            target,
+            serial: 1,
+            result: Ok(()),
+        });
+        app.handle_soundcloud_library(Response::Reposts {
+            generation,
+            result: Ok(Snapshot {
+                loaded: true,
+                ..Default::default()
+            }),
+        });
+        assert!(app.soundcloud_reposted(&uri));
+        app.soundcloud_library.reset();
+        app.handle_soundcloud_library(Response::Reposts {
+            generation,
+            result: Ok(Snapshot {
+                tracks: [42].into(),
+                loaded: true,
+                ..Default::default()
+            }),
+        });
+        assert!(!app.soundcloud_reposted(&uri));
+        assert!(!app.soundcloud_library.snapshot.reposts.loaded);
+        finish(app);
+    }
+
+    #[test]
+    fn following_feed_requires_a_session_retains_failed_pages_and_ignores_old_accounts() {
+        use crate::soundcloud::following::{Content, Item, Kind, Status};
+        let mut app = app("following");
+        app.load_soundcloud_following(false);
+        assert_eq!(
+            app.soundcloud_library.following.status,
+            Status::ConnectSoundCloud
+        );
+        session(&mut app);
+        let generation = app.soundcloud_library.generation;
+        let page = crate::soundcloud::models::Page {
+            collection: vec![Item {
+                kind: Kind::Reposted,
+                by: Artist {
+                    uri: "soundcloud:user:2".into(),
+                    ..Default::default()
+                },
+                created_at: "2026-10-30T12:00:00Z".into(),
+                content: Content::Track(Track {
+                    uri: "soundcloud:track:1".into(),
+                    ..Default::default()
+                }),
+            }],
+            next_href: Some("stream?cursor=next".into()),
+            total_results: None,
+        };
+        app.handle_soundcloud_library(Response::Following {
+            generation,
+            serial: 0,
+            more: false,
+            result: Ok(page.clone()),
+        });
+        assert_eq!(app.soundcloud_library.snapshot.following.items.len(), 1);
+        app.handle_soundcloud_library(Response::Following {
+            generation,
+            serial: 0,
+            more: true,
+            result: Err("Try again".into()),
+        });
+        assert_eq!(app.soundcloud_library.snapshot.following.items.len(), 1);
+        assert_eq!(
+            app.soundcloud_library.snapshot.following.next.as_deref(),
+            Some("stream?cursor=next")
+        );
+        assert_eq!(
+            app.soundcloud_library.following.status,
+            Status::Error("Try again".into())
+        );
+        app.soundcloud_library.reset();
+        app.handle_soundcloud_library(Response::Following {
+            generation,
+            serial: 0,
+            more: false,
+            result: Ok(page),
+        });
+        assert!(app.soundcloud_library.snapshot.following.items.is_empty());
+        assert_eq!(
+            app.soundcloud_library.following.status,
+            Status::ConnectSoundCloud
+        );
+        finish(app);
     }
 
     #[test]

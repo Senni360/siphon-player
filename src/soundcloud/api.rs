@@ -458,6 +458,36 @@ impl Client {
         self.user_page(id, "followings", limit, offset).await
     }
 
+    /// The web app's Feed, not its activities/notification inbox.
+    /// Cursor validation stays specific to this session-only endpoint.
+    pub async fn following_feed(&self, next: Option<&str>) -> Result<Page<super::following::Item>> {
+        if self.oauth_token.is_none() {
+            return Err(Error::NotSignedIn);
+        }
+        let path = next.unwrap_or("stream");
+        if self.api_url(path)?.path() != "/stream" {
+            return Err(Error::InvalidUrl);
+        }
+        let query = if next.is_none() {
+            vec![("limit", "50".into()), ("linked_partitioning", "1".into())]
+        } else {
+            Vec::new()
+        };
+        let page: Page<super::following::WireItem> = self.get(path, &query).await?;
+        if next.is_some() && page.next_href.as_deref() == next {
+            return Err(Error::Decode);
+        }
+        Ok(Page {
+            collection: page
+                .collection
+                .into_iter()
+                .filter_map(super::following::WireItem::into_item)
+                .collect(),
+            next_href: page.next_href,
+            total_results: page.total_results,
+        })
+    }
+
     /// One explicit mutation. The caller supplies the configured no-redirect,
     /// no-retry collection client so a credential cannot follow a redirect.
     pub async fn set_liked(
@@ -467,12 +497,65 @@ impl Client {
         track: u64,
         liked: bool,
     ) -> Result<()> {
+        self.set_membership(http, &format!("users/{user}/track_likes/{track}"), liked)
+            .await
+    }
+
+    pub async fn set_reposted(
+        &self,
+        http: &reqwest::Client,
+        target: super::reposts::Target,
+        reposted: bool,
+    ) -> Result<()> {
+        self.set_membership(
+            http,
+            &format!("{}/{}", target.path(), target.id()),
+            reposted,
+        )
+        .await
+    }
+
+    pub async fn reposted_ids(&self) -> Result<super::reposts::Snapshot> {
+        if self.oauth_token.is_none() {
+            return Err(Error::NotSignedIn);
+        }
+        let tracks = self.repost_ids("me/track_reposts/ids").await?;
+        let playlists = self.repost_ids("me/playlist_reposts/ids").await?;
+        Ok(super::reposts::Snapshot {
+            tracks,
+            playlists,
+            loaded: true,
+        })
+    }
+
+    async fn repost_ids(&self, path: &str) -> Result<std::collections::HashSet<u64>> {
+        let mut page: Page<u64> = self.get(path, &[("limit", "200".into())]).await?;
+        let mut ids = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            ids.extend(page.collection);
+            let Some(next) = page.next_href else { break };
+            let url = self.api_url(&next)?;
+            if url.path().trim_start_matches('/') != path || !seen.insert(next.clone()) {
+                return Err(Error::InvalidUrl);
+            }
+            page = self.get(&next, &[("limit", "200".into())]).await?;
+        }
+        Ok(ids)
+    }
+
+    async fn set_membership(
+        &self,
+        http: &reqwest::Client,
+        path: &str,
+        enabled: bool,
+    ) -> Result<()> {
         let token = self.oauth_token.as_ref().ok_or(Error::NotSignedIn)?;
         if self.access.expired.load(Ordering::SeqCst) || self.access.revoked.load(Ordering::SeqCst)
         {
             return Err(Error::SessionExpired);
         }
-        let mut url = self.api_url(&format!("users/{user}/track_likes/{track}"))?;
+        let mut url = self.api_url(path)?;
         let client_id = self.ensure_client_id(None).await?;
         url.query_pairs_mut().append_pair("client_id", &client_id);
         let mut authorization = header::HeaderValue::from_str(&format!("OAuth {token}"))
@@ -500,7 +583,7 @@ impl Client {
         {
             return Err(Error::SessionExpired);
         }
-        let method = if liked {
+        let method = if enabled {
             reqwest::Method::PUT
         } else {
             reqwest::Method::DELETE
@@ -667,13 +750,24 @@ impl Client {
             return Err(Error::NotSignedIn);
         }
         let mut url = self.api_url(path)?;
-        let requires_session = url.path() == "/me" || url.path().ends_with("/liked_and_owned");
+        let requires_session = url.path() == "/me"
+            || url.path().starts_with("/me/")
+            || url.path() == "/stream"
+            || url.path().ends_with("/liked_and_owned");
+        if requires_session && self.oauth_token.is_none() {
+            return Err(Error::NotSignedIn);
+        }
         if requires_session && self.access.expired.load(Ordering::SeqCst) {
             return Err(Error::SessionExpired);
         }
         let retained = url
             .query_pairs()
-            .filter(|(key, _)| key != "client_id" && key != "oauth_token" && key != "access_token")
+            .filter(|(key, _)| {
+                key != "client_id"
+                    && key != "oauth_token"
+                    && key != "access_token"
+                    && !query.iter().any(|(name, _)| key.as_ref() == *name)
+            })
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect::<Vec<_>>();
         url.set_query(None);

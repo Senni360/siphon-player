@@ -1183,6 +1183,7 @@ fn item_menu_at(
         });
     }
     if item.is_track() {
+        soundcloud_repost_menu(ui, app, &uri);
         if util::uri_kind(&uri) == Some("track")
             || (crate::soundcloud::is_track_uri(&uri) && app.can_like_soundcloud())
         {
@@ -1429,6 +1430,23 @@ fn soundcloud_link_menu(ui: &mut Ui, app: &mut App, url: Option<&str>) {
     }
 }
 
+fn soundcloud_repost_menu(ui: &mut Ui, app: &mut App, uri: &str) {
+    if crate::soundcloud::reposts::Target::from_uri(uri).is_none() {
+        return;
+    }
+    let text = if !app.can_like_soundcloud() {
+        "Repost (connect a SoundCloud session)"
+    } else if app.soundcloud_reposted(uri) {
+        "Remove SoundCloud repost"
+    } else {
+        "Repost on SoundCloud"
+    };
+    if menu_item_enabled(ui, &app.palette, None, text, app.can_repost_soundcloud(uri)) {
+        app.actions
+            .push(Action::ToggleSoundCloudRepost(uri.to_owned()));
+    }
+}
+
 /// Menu for a context (playlist, album, artist, show).
 pub fn context_menu_items(
     ui: &mut Ui,
@@ -1479,6 +1497,7 @@ pub fn context_menu_items(
     if crate::soundcloud::is_uri(uri) {
         if crate::soundcloud::playlist_id(uri).is_some() {
             soundcloud_playlist_add_menu(ui, app, uri);
+            soundcloud_repost_menu(ui, app, uri);
         }
         let url = app.soundcloud_link(uri);
         soundcloud_link_menu(ui, app, url.as_deref());
@@ -4537,7 +4556,7 @@ mod tests {
             .iter()
             .filter_map(|(_, node)| node.label())
             .collect();
-        for expected in ["Copy SoundCloud link", "Open on SoundCloud", "Go to artist"] {
+        for expected in ["Copy SoundCloud link", "Open on SoundCloud", "Go to artist", "Repost (connect a SoundCloud session)"] {
             assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
         }
         for absent in [
@@ -4573,6 +4592,10 @@ mod tests {
             assert!(labels.contains(&"Open on SoundCloud"));
             assert_eq!(
                 labels.contains(&"Add to playlist"),
+                uri.starts_with("soundcloud:playlist:")
+            );
+            assert_eq!(
+                labels.contains(&"Repost (connect a SoundCloud session)"),
                 uri.starts_with("soundcloud:playlist:")
             );
             for absent in [

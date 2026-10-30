@@ -27,8 +27,10 @@ pub mod api;
 pub mod browse;
 pub mod connect;
 pub mod engine;
+pub mod following;
 pub mod library;
 pub mod models;
+pub mod reposts;
 
 /// The URI scheme prefix of a SoundCloud track.
 pub const TRACK_PREFIX: &str = "soundcloud:track:";

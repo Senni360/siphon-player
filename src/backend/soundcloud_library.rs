@@ -7,6 +7,18 @@ use crate::soundcloud::{
 };
 
 pub enum Request {
+    Following {
+        generation: u64,
+        serial: u64,
+        next: Option<String>,
+        cached: usize,
+    },
+    Repost {
+        generation: u64,
+        target: crate::soundcloud::reposts::Target,
+        reposted: bool,
+        serial: u64,
+    },
     Refresh {
         generation: u64,
     },
@@ -23,6 +35,22 @@ pub enum Request {
 }
 
 pub enum Response {
+    Following {
+        generation: u64,
+        serial: u64,
+        more: bool,
+        result: Result<wire::Page<crate::soundcloud::following::Item>, String>,
+    },
+    Reposts {
+        generation: u64,
+        result: Result<crate::soundcloud::reposts::Snapshot, String>,
+    },
+    Reposted {
+        generation: u64,
+        target: crate::soundcloud::reposts::Target,
+        serial: u64,
+        result: Result<(), String>,
+    },
     Cached {
         generation: u64,
         snapshot: Option<Snapshot>,
@@ -54,6 +82,22 @@ pub enum Response {
 impl Worker {
     pub(super) fn soundcloud_library(&self, request: Request) {
         let Some(user) = self.hybrid.account.user() else {
+            if let Request::Following {
+                generation,
+                serial,
+                next,
+                ..
+            } = request
+            {
+                self.emit(Event::SoundCloudLibrary(Response::Following {
+                    generation,
+                    serial,
+                    more: next.is_some(),
+                    result: Err(
+                        "Connect SoundCloud with a session to see the following feed.".into(),
+                    ),
+                }));
+            }
             return;
         };
         let user_id = user.user_id;
@@ -76,6 +120,26 @@ impl Worker {
                 waker.wake();
             };
             match request {
+                Request::Following {
+                    generation,
+                    serial,
+                    next,
+                    cached,
+                } => {
+                    let result = if session && lease.current() {
+                        following(&client, next.as_deref(), cached)
+                            .await
+                            .map_err(|error| error.to_string())
+                    } else {
+                        Err("Connect SoundCloud with a session to see the following feed.".into())
+                    };
+                    emit(Response::Following {
+                        generation,
+                        serial,
+                        more: next.is_some(),
+                        result,
+                    });
+                }
                 Request::Refresh { generation } => {
                     let snapshot = crate::account_cache::read(&path, &key).await;
                     let cached_likes = snapshot
@@ -107,7 +171,16 @@ impl Worker {
                             .map_err(|error| error.to_string());
                         emit(Response::Artists { generation, result });
                     };
-                    tokio::join!(likes, playlists, artists);
+                    let reposts = async {
+                        if session {
+                            let result = client
+                                .reposted_ids()
+                                .await
+                                .map_err(|error| error.to_string());
+                            emit(Response::Reposts { generation, result });
+                        }
+                    };
+                    tokio::join!(likes, playlists, artists, reposts);
                     emit(Response::Refreshed { generation });
                 }
                 Request::More { generation, next } => {
@@ -146,10 +219,58 @@ impl Worker {
                         result,
                     });
                 }
+                Request::Repost {
+                    generation,
+                    target,
+                    reposted,
+                    serial,
+                } => {
+                    let result = if session && lease.current() {
+                        match write_client {
+                            Ok(http) => client
+                                .set_reposted(&http, target, reposted)
+                                .await
+                                .map_err(|error| error.to_string()),
+                            Err(error) => Err(error),
+                        }
+                    } else {
+                        Err("Connect a SoundCloud session to change reposts.".into())
+                    };
+                    emit(Response::Reposted {
+                        generation,
+                        target,
+                        serial,
+                        result,
+                    });
+                }
             }
             hybrid::persist_client_id(&client, client_path).await;
         });
     }
+}
+
+// Replace a cached prefix only after its refresh catches up, as for likes.
+pub(crate) async fn following(
+    client: &Client,
+    next: Option<&str>,
+    cached: usize,
+) -> crate::soundcloud::api::Result<wire::Page<crate::soundcloud::following::Item>> {
+    let mut page = client.following_feed(next).await?;
+    if next.is_none() {
+        let mut cursors = std::collections::HashSet::new();
+        while page.collection.len() < cached {
+            let Some(next) = page.next_href.take() else {
+                break;
+            };
+            if !cursors.insert(next.clone()) {
+                return Err(crate::soundcloud::api::Error::Decode);
+            }
+            let more = client.following_feed(Some(&next)).await?;
+            page.collection.extend(more.collection);
+            page.next_href = more.next_href;
+        }
+    }
+    Ok(page)
 }
 
 pub(crate) async fn playlists(

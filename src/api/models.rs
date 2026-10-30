@@ -307,6 +307,12 @@ impl Album {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Track {
+    /// Source-supplied release date (ISO date or timestamp), absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    /// Source-supplied plays, never inferred from popularity or social counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_count: Option<u64>,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]

@@ -53,6 +53,11 @@ public URL lookup; SoundCloud search needs no account connection. Connect a
 public profile from the sidebar or account menu to browse cached Likes,
 playlists, uploads and followed artists. Advanced session connections include
 your private playlists and uploads, and allow liking and unliking tracks.
+Session connections also support reposting tracks and sets from their menus.
+The secondary following feed is exposed to the application API for the
+upcoming redesign. SoundCloud track data retains release dates, play counts
+and publisher metadata, with 500px artwork for large covers. See the
+[social and track-data contract](docs/_reference/soundcloud-social.md).
 Tokens stay in protected storage. Expired sessions offer a reconnect prompt
 while public browsing remains available. The
 [SoundCloud reference](docs/_reference/soundcloud.md) describes connections

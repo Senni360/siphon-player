@@ -61,7 +61,14 @@ impl User {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct PublisherMetadata {
+    pub isrc: Option<String>,
     pub artist: Option<String>,
+    pub album_title: Option<String>,
+    pub release_title: Option<String>,
+    pub writer_composer: Option<String>,
+    pub publisher: Option<String>,
+    pub p_line: Option<String>,
+    pub upc_or_ean: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -72,6 +79,11 @@ pub struct Track {
     pub duration: u32,
     pub full_duration: Option<u32>,
     pub artwork_url: Option<String>,
+    pub created_at: Option<String>,
+    pub release_date: Option<String>,
+    pub display_date: Option<String>,
+    pub playback_count: Option<u64>,
+    pub label_name: Option<String>,
     pub permalink_url: Option<String>,
     pub user: Option<User>,
     pub publisher_metadata: Option<PublisherMetadata>,
@@ -153,6 +165,22 @@ impl Track {
             name: self.title.clone().unwrap_or_default(),
             uri: track_uri(self.id),
             duration_ms: self.full_duration.unwrap_or(self.duration),
+            release_date: self
+                .release_date
+                .as_ref()
+                .filter(|date| !date.trim().is_empty())
+                .or_else(|| {
+                    self.display_date
+                        .as_ref()
+                        .filter(|date| !date.trim().is_empty())
+                })
+                .or_else(|| {
+                    self.created_at
+                        .as_ref()
+                        .filter(|date| !date.trim().is_empty())
+                })
+                .cloned(),
+            play_count: self.playback_count,
             artists: artists.clone(),
             album: Some(app::Album {
                 id: playlist.map(|list| list.id.to_string()).unwrap_or_default(),
