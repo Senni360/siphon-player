@@ -17,53 +17,6 @@ pub const CARD_WIDTH: f32 = 172.0;
 pub const CARD_ART: f32 = CARD_WIDTH - 24.0;
 pub const CARD_GAP: f32 = 14.0;
 pub const PAGE_PADDING: f32 = 24.0;
-pub const SOURCE_BADGE_SIZE: Vec2 = vec2(23.0, 15.0);
-
-/// Quiet service marker. Spotify, the native source, consumes no space.
-/// Reusable in rows, search, the queue and the now-playing bar.
-pub fn source_badge(
-    ui: &mut Ui,
-    palette: &Palette,
-    locale: Locale,
-    uri: &str,
-) -> Option<egui::Response> {
-    let youtube = crate::youtube::is_track_uri(uri);
-    if !youtube && crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
-        return None;
-    }
-    let label = if youtube {
-        std::borrow::Cow::Borrowed("YouTube")
-    } else {
-        gettext(locale, "SoundCloud")
-    };
-    let (rect, response) = ui.allocate_exact_size(SOURCE_BADGE_SIZE, Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label.as_ref())
-    });
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(3), palette.surface_active);
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        // Translators: short source badge for SoundCloud; keep it compact.
-        if youtube {
-            std::borrow::Cow::Borrowed("YT")
-        } else {
-            gettext(locale, "SC")
-        },
-        theme::semibold(9.5),
-        palette.secondary,
-    );
-    Some(
-        response.on_hover_text(
-            gettext(
-                locale,
-                "{source}. Playlist additions are stored on this computer only.",
-            )
-            .replace("{source}", &label),
-        ),
-    )
-}
 
 /// Availability belongs next to the source and artist, before playback.
 pub fn preview_badge(ui: &mut Ui, palette: &Palette, locale: Locale) {
@@ -3992,37 +3945,6 @@ mod tests {
     use crate::model::{Action, Page};
     use crate::paths::AppDirs;
     use crate::settings::Settings;
-
-    #[test]
-    fn source_badges_name_soundcloud_and_reserve_no_space_for_spotify() {
-        for palette in [Palette::dark(), Palette::light()] {
-            let ctx = egui::Context::default();
-            ctx.enable_accesskit();
-            theme::install(&ctx);
-            for _ in 0..2 {
-                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    let before = ui.cursor();
-                    assert!(
-                        source_badge(ui, &palette, Locale::English, "spotify:track:abc").is_none()
-                    );
-                    assert_eq!(ui.cursor(), before);
-                    let badge =
-                        source_badge(ui, &palette, Locale::English, "soundcloud:track:1").unwrap();
-                    assert_eq!(badge.rect.size(), SOURCE_BADGE_SIZE);
-                });
-                output.textures_delta.clear();
-                let tree = output.platform_output.accesskit_update.unwrap();
-                assert!(
-                    tree.nodes
-                        .iter()
-                        // egui labels expose their spoken text as the node's value.
-                        .any(|(_, node)| node.value() == Some("SoundCloud")
-                            && node.role() == egui::accesskit::Role::Label),
-                    "{tree:?}"
-                );
-            }
-        }
-    }
 
     #[test]
     fn soundcloud_errors_offer_recovery_without_transport_details() {

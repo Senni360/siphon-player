@@ -2743,7 +2743,6 @@ pub fn soundcloud(app: &mut App, ui: &mut egui::Ui, uri: &str) {
             widgets::context_menu_items(ui, app, uri, &content.title, None);
         });
     }
-    widgets::source_badge(ui, &app.palette, app.locale, uri);
     let items: Vec<TableItem> = content
         .tracks
         .into_iter()
