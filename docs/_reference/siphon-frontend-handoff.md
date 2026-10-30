@@ -23,9 +23,10 @@ backend contract wins on behaviour and this file is updated to match.
 - **For `siphon/evening-candidate`:** it already carries the frontend through
   `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
   `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. Rehearsed
-  on `264f3d2` with the frontend at `37fbbd8` (the last code commit; later
-  commits only touch this file): two conflicts, both in `src/demo.rs`;
-  every other commit applies cleanly.
+  at 20:10 on `873ccea` (the evening head with the Windows cross-build
+  changes) with the frontend at `30eae96`; the last code commit is
+  `37fbbd8`, later commits only touch this file. Two conflicts, both in
+  `src/demo.rs`; every other commit applies cleanly.
   1. At `f5341e4` (player island): four hunks in the SoundCloud source
      tests the evening branch already rewrote. Keep the evening side of
      every hunk, then make one change: the player-bar part of
@@ -42,7 +43,7 @@ backend contract wins on behaviour and this file is updated to match.
   clean with default features and with `--all-features`; `cargo fmt
   --check` clean; library tests 1,861 passed with default features and
   1,904 with `--all-features`.
-- **Against `main`:** `main` through `a84f9b1` (shared media, upload and
+- **Against `main`:** `main` through `b1595f2` (shared media, upload and
   room work) touches none of the frontend's files; `git merge-tree` of it and
   the frontend head reports no conflict.
 - **Review fixes (PR 7 comment and the 18:30 evening note):** the
