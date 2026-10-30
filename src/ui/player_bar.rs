@@ -502,6 +502,7 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     }
     let show_heart = !now.is_episode
         && (crate::util::uri_kind(&now.uri) == Some("track")
+            || (crate::youtube::is_track_uri(&now.uri) && app.is_saved(&now.uri).is_some())
             || (crate::soundcloud::is_track_uri(&now.uri) && app.can_like_soundcloud()));
     let heart_width = if show_heart { 42.0 } else { 0.0 };
     let text_left = cover_rect.right() + 12.0;
@@ -665,7 +666,7 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         // click on a song not yet liked still likes it at once.
         match song
             .as_ref()
-            .filter(|_| saved && !crate::soundcloud::is_track_uri(&now.uri))
+            .filter(|_| saved && !crate::youtube::is_external(&now.uri))
         {
             None => {
                 egui::Popup::close_id(ui.ctx(), popup_id);

@@ -27,10 +27,15 @@ pub fn source_badge(
     locale: Locale,
     uri: &str,
 ) -> Option<egui::Response> {
-    if crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
+    let youtube = crate::youtube::is_track_uri(uri);
+    if !youtube && crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
         return None;
     }
-    let label = gettext(locale, "SoundCloud");
+    let label = if youtube {
+        std::borrow::Cow::Borrowed("YouTube")
+    } else {
+        gettext(locale, "SoundCloud")
+    };
     let (rect, response) = ui.allocate_exact_size(SOURCE_BADGE_SIZE, Sense::hover());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label.as_ref())
@@ -41,7 +46,11 @@ pub fn source_badge(
         rect.center(),
         egui::Align2::CENTER_CENTER,
         // Translators: short source badge for SoundCloud; keep it compact.
-        gettext(locale, "SC"),
+        if youtube {
+            std::borrow::Cow::Borrowed("YT")
+        } else {
+            gettext(locale, "SC")
+        },
         theme::semibold(9.5),
         palette.secondary,
     );
@@ -1184,6 +1193,7 @@ fn item_menu_at(
     }
     if item.is_track() {
         if util::uri_kind(&uri) == Some("track")
+            || (crate::youtube::is_track_uri(&uri) && app.is_saved(&uri).is_some())
             || (crate::soundcloud::is_track_uri(&uri) && app.can_like_soundcloud())
         {
             let saved = app.is_saved(&uri).unwrap_or(false);
@@ -1373,7 +1383,7 @@ fn item_menu_at(
         }
     }
     menu_separator(ui, &palette);
-    if crate::soundcloud::is_uri(&uri) {
+    if crate::youtube::is_external(&uri) {
         soundcloud_link_menu(ui, app, util::item_link(item).as_deref());
         return;
     }
@@ -1398,15 +1408,24 @@ fn item_menu_at(
 /// SoundCloud shares only the permalink returned by its catalogue.
 fn soundcloud_link_menu(ui: &mut Ui, app: &mut App, url: Option<&str>) {
     let palette = app.palette;
+    let youtube = url.and_then(crate::youtube::parse).is_some();
     for (icon, label, open) in [
         (
             Icon::Copy,
-            gettext(app.locale, "Copy SoundCloud link"),
+            if youtube {
+                std::borrow::Cow::Borrowed("Copy YouTube link")
+            } else {
+                gettext(app.locale, "Copy SoundCloud link")
+            },
             false,
         ),
         (
             Icon::ExternalLink,
-            gettext(app.locale, "Open on SoundCloud"),
+            if youtube {
+                std::borrow::Cow::Borrowed("Open on YouTube")
+            } else {
+                gettext(app.locale, "Open on SoundCloud")
+            },
             true,
         ),
     ] {
@@ -2166,7 +2185,7 @@ fn track_row_contents(
                     .layout(Layout::left_to_right(Align::Center)),
             );
             child.set_clip_rect(album_rect.intersect(ui.clip_rect()));
-            let supported = !crate::soundcloud::is_uri(&track.uri);
+            let supported = !crate::youtube::is_external(&track.uri);
             let response = child
                 .add_enabled_ui(supported, |ui| {
                     theme::link(ui, album.name.clone(), theme::regular(13.0), subtitle_color)
@@ -2174,7 +2193,7 @@ fn track_row_contents(
                 .inner
                 .on_disabled_hover_text(gettext(
                     app.locale,
-                    "Spotify album pages are unavailable for SoundCloud tracks",
+                    "Spotify album pages are unavailable for external tracks",
                 ));
             if response.clicked()
                 && !album.id.is_empty()
@@ -2254,6 +2273,7 @@ fn track_row_contents(
         let heart_rect = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.heart, row_height));
         if row.item.is_track()
             && (util::uri_kind(row.item.uri()) == Some("track")
+                || (crate::youtube::is_track_uri(row.item.uri()) && saved.is_some())
                 || (crate::soundcloud::is_track_uri(row.item.uri()) && app.can_like_soundcloud()))
         {
             let mut child = ui.new_child(

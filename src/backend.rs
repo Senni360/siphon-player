@@ -796,9 +796,25 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 mod download_jobs;
 mod hybrid;
 pub(crate) mod soundcloud_library;
+mod youtube;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
+    YouTubeTrack {
+        uri: String,
+        generation: u64,
+    },
+    CancelYouTubeMetadata,
+    YouTubeLikes {
+        account: String,
+        generation: u64,
+    },
+    YouTubeStream {
+        tag: crate::player::PlaybackTag,
+        preload: bool,
+        refresh: Option<u64>,
+        result: Result<crate::soundcloud::engine::Stream, String>,
+    },
     ResolvePlaylistLink {
         url: String,
         request: u64,
@@ -1122,6 +1138,16 @@ pub struct LyricsRequest {
 }
 
 pub enum Event {
+    YouTubeTrack {
+        generation: u64,
+        uri: String,
+        result: Result<Box<Track>, String>,
+    },
+    YouTubeLikes {
+        account: String,
+        generation: u64,
+        result: Result<crate::youtube::likes::Likes, String>,
+    },
     PlaylistLinkResolved {
         request: u64,
         result: Result<crate::extension_bridge::ResolvedItem, String>,
@@ -2432,6 +2458,20 @@ impl Worker {
                 },
                 Command::SoundCloudAccountRestored { .. } => {}
                 Command::SoundCloudEngine(event) => self.soundcloud_event(event).await,
+                Command::YouTubeTrack { uri, generation } => self.youtube_track(uri, generation),
+                Command::CancelYouTubeMetadata => self.cancel_youtube_metadata(),
+                Command::YouTubeLikes {
+                    account,
+                    generation,
+                } => self.youtube_likes(account, generation),
+                Command::YouTubeStream {
+                    tag,
+                    preload,
+                    refresh,
+                    result,
+                } => {
+                    self.soundcloud_stream(tag, preload, refresh, result).await;
+                }
                 Command::HybridContextResolved {
                     account_generation,
                     generation,
@@ -2590,6 +2630,8 @@ impl Worker {
                     });
                 }
                 Command::Shutdown => {
+                    self.cancel_youtube();
+                    self.cancel_youtube_metadata();
                     self.download_jobs.cancel_all();
                     if self.hybrid.holds_output() {
                         self.hybrid.shutdown_pending = true;
@@ -2620,6 +2662,8 @@ impl Worker {
                     self.pending_authorization = None;
                 }
                 Command::SignOut => {
+                    self.cancel_youtube();
+                    self.cancel_youtube_metadata();
                     if self.hybrid.holds_output() {
                         self.hybrid.signout_pending = true;
                         self.hybrid_command(HybridCommand::Release).await;

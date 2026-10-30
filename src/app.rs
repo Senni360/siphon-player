@@ -1,10 +1,11 @@
 //! The application: state, event handling, and the actions views ask for.
 
-mod extension_bridge;
 mod download_actions;
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
+mod youtube;
 pub use hybrid::{PendingHybridSnapshot, PlaybackOwner};
 
 use std::borrow::Cow;
@@ -500,6 +501,7 @@ pub struct App {
     /// What the window's title bar says, as last set.
     window_title: String,
 
+    youtube: youtube::State,
     pub library: Library,
     liked_songs: crate::liked::LikedSongs,
     liked_recheck_at: Option<Instant>,
@@ -1083,6 +1085,7 @@ impl App {
         let playlist_overlay_writable = overlay.is_ok();
         let palette = settings.fixed_palette().unwrap_or_else(Palette::dark);
         let mut app = Self {
+            youtube: Default::default(),
             playback_owner: PlaybackOwner::SpotifyConnect,
             hybrid: hybrid::HybridPlayback::default(),
             soundcloud_account: crate::soundcloud::account::Account::Disconnected,
@@ -1652,6 +1655,7 @@ impl App {
             .get(uri)
             .filter(|track| track.uri == uri)
             .or_else(|| self.track_cache.values().find(|track| track.uri == uri))
+            .or_else(|| self.youtube_likes()?.iter().find(|track| track.uri == uri))
             .or_else(|| {
                 self.search
                     .results
@@ -1721,6 +1725,11 @@ impl App {
     }
 
     pub fn soundcloud_link(&self, uri: &str) -> Option<String> {
+        if let Some(url) =
+            crate::youtube::parse(uri).and_then(|uri| crate::youtube::permalink(&uri))
+        {
+            return Some(url);
+        }
         if !crate::soundcloud::is_uri(uri) {
             return None;
         }
@@ -1790,23 +1799,25 @@ impl App {
         crate::soundcloud::permalink(url).map(str::to_owned)
     }
 
-    /// Spotify Connect, Cast and Sonos cannot receive SoundCloud audio.
+    /// Spotify Connect, Cast and Sonos cannot receive external-source audio.
     pub fn can_use_spotify_outputs(&self) -> bool {
         !self
             .now_playing()
-            .is_some_and(|now| crate::soundcloud::is_uri(&now.uri))
+            .is_some_and(|now| crate::youtube::is_external(&now.uri))
             && !self
                 .manual_queue
                 .iter()
-                .any(|uri| crate::soundcloud::is_uri(uri))
+                .any(|uri| crate::youtube::is_external(uri))
             && !self.queue.get().is_some_and(|queue| {
                 queue
                     .queue
                     .iter()
-                    .any(|item| crate::soundcloud::is_uri(item.uri()))
+                    .any(|item| crate::youtube::is_external(item.uri()))
             })
             && !self.playing_context_uri().is_some_and(|uri| {
-                crate::soundcloud::is_uri(&uri)
+                (crate::youtube::is_external(&uri)
+                    || crate::soundcloud::is_uri(&uri)
+                    || uri == "youtube:likes")
                     || uri.starts_with("spotifast:")
                     || uri
                         .strip_prefix("spotify:playlist:")
@@ -1815,6 +1826,11 @@ impl App {
     }
 
     pub fn is_saved(&self, uri: &str) -> Option<bool> {
+        if crate::youtube::is_track_uri(uri) {
+            return self
+                .youtube_likes()
+                .map(|tracks| tracks.iter().any(|track| track.uri == uri));
+        }
         if let Some(id) = crate::soundcloud::track_id(uri) {
             return self
                 .can_like_soundcloud()
@@ -2748,6 +2764,8 @@ impl App {
                     self.playlist_link_resolved(request, result);
                 }
                 Event::Download(event) => self.handle_download_event(event),
+                Event::YouTubeTrack { generation, uri, result } => self.youtube_track_received(generation, &uri, result),
+                Event::YouTubeLikes { account, generation, result } => self.youtube_likes_received(&account, generation, result),
                 Event::SoundCloudPlaylistAdd {
                     request,
                     complete,
@@ -3361,6 +3379,7 @@ impl App {
 
     /// Clears account data while preserving request serials that reject late answers.
     fn reset_data(&mut self) {
+        self.reset_youtube();
         self.pending_remote_volume = None;
         self.local_transfer_sequence = None;
         self.queue_start_pending = None;
@@ -7017,6 +7036,10 @@ impl App {
     }
 
     fn load_soundcloud_page(&mut self, uri: String, more: bool) {
+        if uri == "youtube:likes" {
+            self.load_youtube_likes_page();
+            return;
+        }
         let page = self.soundcloud_pages.entry(uri.clone()).or_default();
         if page.loading {
             return;
@@ -7423,6 +7446,9 @@ impl App {
                         self.request_account_caches();
                     }
                     self.user = Some(user);
+                    if changed || due {
+                        self.request_youtube_likes();
+                    }
                     let page = self.page().clone();
                     self.ensure_loaded(page);
                     if let Some(now) = self.now_playing() {
@@ -9182,7 +9208,10 @@ impl App {
         let Some(uri) = self.pending_link.clone() else {
             return;
         };
-        if crate::soundcloud::is_uri(&uri) || crate::link::soundcloud_url(&uri).is_some() {
+        if crate::youtube::is_track_uri(&uri)
+            || crate::soundcloud::is_uri(&uri)
+            || crate::link::soundcloud_url(&uri).is_some()
+        {
             self.pending_link = None;
             self.try_hybrid_start(PlayRequest::context(uri), false, None);
             return;
@@ -11466,7 +11495,7 @@ impl App {
                 }
             })
             .filter(|uri| {
-                crate::soundcloud::is_track_uri(uri)
+                crate::youtube::is_external(uri)
                     || matches!(util::uri_kind(uri), Some("track" | "episode"))
             })
             .collect();
@@ -11490,6 +11519,11 @@ impl App {
             }
             if let Some(item) = self.known_song(&uri) {
                 paste.found.insert(uri, item);
+            } else if crate::youtube::is_track_uri(&uri) {
+                self.backend.send(Command::YouTubeTrack {
+                    uri,
+                    generation: self.youtube.generation,
+                });
             } else if let Some(id) = uri.strip_prefix("spotify:track:").map(str::to_string) {
                 if self.track_requests.insert(id.clone()) {
                     self.backend.api(ApiRequest::Track { id });
@@ -11508,7 +11542,7 @@ impl App {
         if let Some(item) = self.copied_songs.iter().find(|item| item.uri() == uri) {
             return Some(item.clone());
         }
-        if crate::soundcloud::is_track_uri(uri) {
+        if crate::youtube::is_external(uri) {
             return self.soundcloud_track(uri).cloned().map(PlayableItem::Track);
         }
         let id = uri.strip_prefix("spotify:track:")?;
@@ -12048,6 +12082,9 @@ impl App {
                 if !uris.is_empty() {
                     self.backend.api(ApiRequest::SetSaved { uris, saved });
                 }
+            }
+            Action::ToggleSaved(uri) if crate::youtube::is_track_uri(&uri) => {
+                self.toggle_youtube_like(&uri)
             }
             Action::ToggleSoundCloudLike(uri) => self.toggle_soundcloud_like(&uri),
             Action::ToggleSaved(uri) if crate::soundcloud::is_track_uri(&uri) => {
@@ -12979,8 +13016,10 @@ impl App {
                 // Open links off the UI thread with the platform-specific
                 // launcher used elsewhere in the app.
                 std::thread::spawn(move || {
-                    if let Err(error) = crate::opener::open(&url) {
-                        log::warn!("unable to open {url}: {error}");
+                    if crate::opener::open(&url).is_err() {
+                        // A shared link may be an unlisted video or carry a
+                        // private SoundCloud secret. Keep it out of logs.
+                        log::warn!("unable to open external link");
                     }
                 });
             }
@@ -35069,4 +35108,5 @@ mod tests {
         assert_eq!(app.queued_rows_len(), 1);
         app.backend.shutdown();
     }
+    include!("app/youtube_tests.rs");
 }

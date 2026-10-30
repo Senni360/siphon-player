@@ -70,4 +70,5 @@ pub mod util;
 pub mod vis;
 pub mod winamp;
 pub mod window;
+pub mod youtube;
 pub mod zeroconf;
