@@ -134,6 +134,12 @@ and monitor its quota. There is no admin UI or token recovery endpoint. Former
 members' retained posts need administrator storage maintenance if they must be
 removed later. Delete your posts before leaving if you want them removed.
 
+Before upgrading an existing deployment or importing a group, check and back up
+the serialized Redis state. An existing document above 8 MiB is rejected on read,
+so API deletion cannot reduce it. The owner must archive or prune that document
+directly in storage before this version can serve it. No data is silently
+discarded or automatically migrated. No live group was accessed during testing.
+
 **Leave group** calls `DELETE /me`, revokes the secret and then removes the
 device credential. Previously shared private SoundCloud links remain visible
 to the group. All mutations recheck membership inside each compare-and-set
