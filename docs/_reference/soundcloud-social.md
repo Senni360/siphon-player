@@ -24,6 +24,10 @@ The SoundCloud web application's endpoint table, fetched from
 `stream` as GET `stream` on api-v2. This is the following feed. The table also
 defines `stream/posts`, `stream/notifications`, `activities` and
 `activities/:filter`; those are not requested here.
+The same site's `https://a-v2.sndcdn.com/assets/56-72ebd57a.js` bundle
+contains the repost-ID collection parser: it reads `collection` and
+`next_href` and follows pages until the cursor is absent. The endpoint-specific
+collections override its request limit to 200.
 
 Reposts use PUT or DELETE `me/track_reposts/:id` and
 `me/playlist_reposts/:id`. Library refresh reads both corresponding `/ids`
@@ -87,7 +91,8 @@ continues using the publisher artist when available. The existing artwork
 conversion supplies the `-t500x500` variant to the common image selector,
 including large cover views.
 
-Endpoint names were verified against the public web bundle. The session-only
-response shapes and writes are tested with local fixtures, not an owner's
-session. These private web endpoints can change independently of the public
-SoundCloud API.
+Endpoint names and the repost-ID pagination envelope were verified against the
+public web bundles. Authenticated reads and writes are tested with local
+fixtures, not an owner's session. The following-feed item shape still needs a
+local authenticated check. These private web endpoints can change independently
+of the public SoundCloud API.
