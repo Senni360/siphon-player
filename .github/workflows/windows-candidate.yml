@@ -1,0 +1,99 @@
+name: Windows candidate
+
+# Private, runnable review builds. Pushing this branch deliberately starts a
+# candidate; ordinary backend/frontend pushes do not consume Windows runners.
+on:
+  push:
+    branches: [siphon/windows-candidate]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-candidate-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows x64 executable and native tests
+    runs-on: windows-latest
+    timeout-minutes: 120
+    env:
+      CARGO_TERM_COLOR: always
+      CMAKE_GENERATOR: Ninja
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Optional legacy visualizer dependency
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($metadata.packages[0].features.PSObject.Properties.Name -contains 'milkdrop') {
+            vcpkg install glew:x64-windows-static
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows-candidate-x64-v1
+      - name: Tests with default features
+        run: cargo test --locked --all-targets
+      - name: Tests with all features
+        run: cargo test --locked --all-targets --all-features
+      - name: Native credential storage with temporary dummy grants
+        timeout-minutes: 2
+        run: cargo test --locked --lib credentials::tests::native_store_round_trip -- --ignored --exact
+      - name: Build the runnable app
+        run: cargo build --locked --release --bin siphon
+      - name: Check and package the executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $binary = 'target\release\siphon.exe'
+          $imports = & dumpbin /dependents $binary | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($imports -match 'MSVCP[0-9_]*\.dll|VCRUNTIME[0-9_]*\.dll') {
+            throw "The executable requires a separately installed MSVC runtime."
+          }
+          $headers = & dumpbin /headers $binary | Out-String
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($headers -notmatch '8664 machine \(x64\)') { throw 'The executable is not Windows x64.' }
+          $version = (& $binary --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($version -ne "siphon $($metadata.packages[0].version)") { throw "Unexpected executable version: $version" }
+          New-Item -ItemType Directory -Force 'dist\Siphon' | Out-Null
+          Copy-Item $binary, LICENSE, packaging\siphon-portable.txt 'dist\Siphon'
+          $sha256 = (Get-FileHash 'dist\Siphon\siphon.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$sha256  siphon.exe" | Set-Content -Encoding ascii 'dist\Siphon\SHA256SUMS.txt'
+          @{
+            commit = $env:GITHUB_SHA
+            version = $version
+            target = 'x86_64-pc-windows-msvc'
+            sha256 = $sha256
+            workflow = "https://github.com/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            signed = $false
+          } | ConvertTo-Json | Set-Content -Encoding utf8 'dist\Siphon\build.json'
+          @'
+          Extract this entire folder, then open siphon.exe. No compiler is needed.
+
+          This is a private, unsigned Windows x64 candidate. build.json records
+          exactly which source commit produced this executable. It is not an
+          installer and does not replace the installed Siphon helper.
+
+          The portable marker keeps this copy's state in siphon-data beside the
+          executable. Keep the folder in a writable location. Spotify/SoundCloud
+          still require your account setup; YouTube uses the installed helper.
+          '@ | Set-Content -Encoding utf8 'dist\Siphon\OPEN-ME.txt'
+      - name: Upload the runnable private candidate
+        uses: actions/upload-artifact@v7
+        with:
+          name: Siphon-Windows-x64-${{ github.sha }}
+          path: dist/Siphon/
+          if-no-files-found: error
+          retention-days: 14
