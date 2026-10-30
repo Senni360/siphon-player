@@ -7,6 +7,13 @@ use std::time::Duration;
 use super::{Event, LyricsRequest, Worker, spotify_lyrics};
 use crate::api::gateway::Operation;
 
+/// The WIP stored source identities in a shared disk cache. New lookups keep
+/// them in a session-owned memory cache, so retire only that obsolete folder.
+pub(super) async fn remove_legacy_isrc_cache(cache_dir: &std::path::Path) {
+    let path = cache_dir.join("isrc-matches-v1");
+    super::log_cache_removal(&path, tokio::fs::remove_dir_all(&path).await);
+}
+
 #[derive(Default)]
 pub(super) struct Jobs {
     credits: HashMap<String, (u64, tokio::task::AbortHandle)>,
@@ -213,6 +220,28 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn legacy_match_cleanup_leaves_other_caches_alone() {
+        let dir =
+            std::env::temp_dir().join(format!("siphon-isrc-migration-{}", rand::random::<u64>()));
+        let old = dir.join("isrc-matches-v1");
+        tokio::fs::create_dir_all(&old).await.unwrap();
+        tokio::fs::write(old.join("fixture.json"), b"invented old mapping")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.join("unrelated-cache"), b"keep")
+            .await
+            .unwrap();
+        remove_legacy_isrc_cache(&dir).await;
+        remove_legacy_isrc_cache(&dir).await;
+        assert!(!old.exists());
+        assert_eq!(
+            tokio::fs::read(dir.join("unrelated-cache")).await.unwrap(),
+            b"keep"
+        );
+        tokio::fs::remove_dir_all(dir).await.unwrap();
+    }
 
     #[tokio::test]
     async fn cancellation_does_not_stop_a_newer_request_for_the_same_track() {

@@ -48,6 +48,8 @@ gateway and never substitutes audio. Only positive mappings are cached, in
 memory for the current account session, keyed by SoundCloud URI, normalized
 ISRC and full duration. Account changes replace the cache; private track
 identities are not written to a shared disk cache. No reverse lookup runs.
+Backend startup removes the obsolete WIP `isrc-matches-v1` cache directory;
+other cache directories are retained.
 
 A verified mapping permits the SoundCloud recording to reuse the exact
 Spotify track's lyrics. Otherwise SoundCloud and YouTube use LRCLIB only when
