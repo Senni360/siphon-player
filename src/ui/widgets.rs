@@ -1669,16 +1669,22 @@ struct Columns {
 /// then the tools, to keep it readable.
 const TITLE_MIN: f32 = 220.0;
 
+/// The narrowest the album column gets before it gives way entirely.
+const ALBUM_MIN: f32 = 140.0;
+
 /// The tools' and album's widths in a list `width` wide, in rows and in the
 /// header alike. `fixed` is everything else the row always shows and
-/// `optional` the date, adder and plays columns. The album gives way first,
-/// then the tools; the title never drops below [`TITLE_MIN`] for them.
+/// `optional` the date, adder and plays columns. The album narrows first,
+/// down to [`ALBUM_MIN`], then gives way, then the tools do; the title never
+/// drops below [`TITLE_MIN`] for them.
 fn fit_tools(width: f32, fixed: f32, album: f32, optional: f32) -> (f32, f32) {
     let tools = super::row_tools::WIDTH;
-    let title = |album: f32, tools: f32| width - fixed - optional - album - tools;
-    if title(album, tools) >= TITLE_MIN {
+    let title = width - fixed - optional - tools;
+    if title - album >= TITLE_MIN {
         (tools, album)
-    } else if album > 0.0 && title(0.0, tools) >= TITLE_MIN {
+    } else if album > 0.0 && title - ALBUM_MIN >= TITLE_MIN {
+        (tools, title - TITLE_MIN)
+    } else if album > 0.0 && title >= TITLE_MIN {
         (tools, 0.0)
     } else {
         (0.0, album)
@@ -5010,6 +5016,11 @@ mod tests {
                     - cols.added_by
                     - cols.album
                     - 12.0;
+                assert!(
+                    cols.album == 0.0 || cols.album >= ALBUM_MIN,
+                    "{width}: album squeezed to {}",
+                    cols.album
+                );
                 if cols.tools > 0.0 {
                     assert!(
                         title >= TITLE_MIN,
@@ -5047,6 +5058,32 @@ mod tests {
             },
         );
         assert!(wide.tools > 0.0 && wide.album > 0.0);
+        // A playlist in a 1280 window beside the docked sidebar keeps its
+        // album, narrowed, with the tools.
+        let docked = columns(
+            960.0,
+            &TrackRow {
+                index: 0,
+                number: Some(1),
+                item: &item,
+                context: &context,
+                show_cover: true,
+                show_album: true,
+                added_at: Some("2026-10-30T12:00:00Z"),
+                added_by: None,
+                show_added_by: false,
+                show_plays: false,
+                compact: false,
+                thin: false,
+                shift: 0.0,
+                picked: false,
+                picked_songs: &[],
+                picked_positions: &[],
+                position: None,
+            },
+        );
+        assert!(docked.tools > 0.0);
+        assert!((ALBUM_MIN..960.0 * 0.28).contains(&docked.album));
     }
 
     #[test]
