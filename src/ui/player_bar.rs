@@ -464,6 +464,15 @@ struct Leaving {
     transition: Transition,
 }
 
+/// The song still leaving the island at `now`, if it belongs to `owner`:
+/// a snapshot from another account is never painted, even when the account
+/// changed in the middle of its swipe.
+fn still_leaving(leaving: Option<Leaving>, owner: Option<&str>, now: f64) -> Option<Leaving> {
+    leaving.filter(|leaving| {
+        leaving.shown.owner.as_deref() == owner && !leaving.transition.finished_at(now)
+    })
+}
+
 const SHOWN_ID: &str = "island-shown";
 const LEAVING_ID: &str = "island-leaving";
 
@@ -502,9 +511,10 @@ fn song_with_queue(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option<&
     let next_uri = upcoming.first().map(|item| item.uri().to_string());
     let shown_id = egui::Id::new(SHOWN_ID);
     let leaving_id = egui::Id::new(LEAVING_ID);
+    let owner = app.user.as_ref().map(|user| user.id.clone());
     if let Some(now) = now {
         let shown = Shown {
-            owner: app.user.as_ref().map(|user| user.id.clone()),
+            owner: owner.clone(),
             uri: now.uri.clone(),
             title: now.title.clone(),
             subtitle: now.subtitle.clone(),
@@ -541,9 +551,11 @@ fn song_with_queue(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option<&
     );
     let tile_dx = song_region.width() - 40.0;
     let now_time = ctx.input(|input| input.time);
-    let leaving = ctx
-        .data(|data| data.get_temp::<Leaving>(leaving_id))
-        .filter(|leaving| !leaving.transition.finished_at(now_time));
+    let leaving = still_leaving(
+        ctx.data(|data| data.get_temp::<Leaving>(leaving_id)),
+        owner.as_deref(),
+        now_time,
+    );
     let Some(leaving) = leaving else {
         ctx.data_mut(|data| data.remove::<Leaving>(leaving_id));
         now_playing_block(app, ui, song_region, now);
@@ -1621,6 +1633,22 @@ mod island_tests {
         );
         let alone = shown("spotify:track:a", None);
         assert_eq!(swipe_for(&alone, "spotify:track:b", None), Swipe::Replace);
+    }
+
+    /// Account A's song caught mid-swipe is dropped the moment B is the
+    /// account, without waiting for a sign-out frame or the swipe's end.
+    #[test]
+    fn another_account_never_sees_a_song_leaving() {
+        let leaving = Leaving {
+            shown: shown("spotify:track:a", None),
+            swipe: Swipe::Replace,
+            transition: Transition::at(10.0, 0.42),
+        };
+        let mid = 10.2;
+        assert!(still_leaving(Some(leaving.clone()), Some("alice"), mid).is_some());
+        assert!(still_leaving(Some(leaving.clone()), Some("bob"), mid).is_none());
+        assert!(still_leaving(Some(leaving.clone()), None, mid).is_none());
+        assert!(still_leaving(Some(leaving), Some("alice"), 11.0).is_none());
     }
 
     #[test]
