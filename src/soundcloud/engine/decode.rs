@@ -378,9 +378,12 @@ impl Decoder {
 
 async fn segment_bytes(fetch: &Fetch, segment: &Segment) -> Result<Vec<u8>, Error> {
     if let Some(init) = &segment.init {
-        let (init, audio) = tokio::join!(fetch.get(init, None), fetch.get(&segment.url, None));
-        let mut bytes = init?.bytes;
-        bytes.extend(audio?.bytes);
+        // An expired initialization URL already makes this segment unusable.
+        // Drop the sibling request immediately instead of waiting out its
+        // deadline before reporting the known error or refreshing the URL.
+        let (init, audio) = tokio::try_join!(fetch.get(init, None), fetch.get(&segment.url, None))?;
+        let mut bytes = init.bytes;
+        bytes.extend(audio.bytes);
         Ok(bytes)
     } else {
         Ok(fetch.get(&segment.url, None).await?.bytes)

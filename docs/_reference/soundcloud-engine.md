@@ -167,6 +167,8 @@ preload work and HLS lookahead. Preload intent is retained, and requests made
 while paused are deferred until Play. Explicit paused loads/seeks may
 prepare their decoder, but a paused engine has no background decoding,
 network lookahead, polling or device callbacks.
+Seeking after EOF prepares the requested position paused; Play resumes that
+suffix without resetting its position or marking it as a full loudness sample.
 
 HTTP 403 or 404 on any range, playlist, initialization object or segment emits
 `RefreshRequired { request_id, uri, position_ms }`. Resolve a fresh stream and
@@ -174,6 +176,8 @@ reply with `Refresh { request_id, stream }`. Matching replies resume at the
 retained position and preserve play/pause intent. Replies for older requests
 or another URI are ignored. Stop or a new Load invalidates the request.
 Other failures emit `Error` and pause with a readable error in state.
+If one parallel initialization/segment request fails, its sibling is cancelled
+immediately so a known expired URL can be refreshed without waiting its deadline.
 
 ## Network and format limits
 

@@ -531,6 +531,13 @@ impl Worker {
                     self.output
                         .begin_track(&self.stream.as_ref().unwrap().uri, self.start_ms == 0);
                     self.submitted = 0;
+                    if self.state.playback == Playback::Stopped {
+                        // A seek after EOF prepares that position, paused.
+                        // Leaving Stopped would make Play reset the position
+                        // and loudness identity while reusing this decoder's
+                        // already-seeked suffix.
+                        self.state.playback = Playback::Paused;
+                    }
                     self.state.seek_sequence += 1;
                     self.state.loading = true;
                     self.anchor();

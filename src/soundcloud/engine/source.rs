@@ -196,7 +196,9 @@ fn content_range_parts(value: &str) -> Option<(u64, u64, Option<u64>)> {
     } else {
         Some(decimal(total)?)
     };
-    (end >= start && total.is_none_or(|total| end < total)).then_some((start, end, total))
+    // The cursor after the final byte must also fit in u64.
+    (end >= start && end < u64::MAX && total.is_none_or(|total| end < total))
+        .then_some((start, end, total))
 }
 
 fn network(error: reqwest::Error) -> Error {
