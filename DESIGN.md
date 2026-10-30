@@ -158,3 +158,25 @@ No blur, no rotated text, no shaders per frame.
   pixels per second, so it repaints a few times per second, not per frame.
 - **Budget**: during an animation a frame should stay under a few
   milliseconds of CPU. The demo build gets frame-time logging to check it.
+
+## What is built (30 October, evening)
+
+The sections above are the target. This is what the native app does
+today, on `claude/focused-rubin-pxfk32`; the handoff in
+`docs/_reference/siphon-frontend-handoff.md` has the commits.
+
+| Piece | State |
+| --- | --- |
+| Palette, source-coloured titles, no chips | Built, dark and light. |
+| Top bar | The existing Spotifast bar in the new palette. The mark, the link-aware search and the helper dot are not built. |
+| Floating sidebar | Built: docked card, or edge handle and slide-out when hidden. The narrow rail is the existing compact sidebar. Group item and badge are not built. |
+| Player island | Built with every existing control, the three queue tiles and the Replace, Next and Previous swipes. It is up to 1,120 px wide (the existing controls need the room), not 760. BPM and key, share and the bottom progress line are not on it. |
+| Row tools | Built in song lists (not the compact queue rows): Download, BPM/key (off, with its reason), Credits popover, Add to last-used playlist (this session and account only; right-click picks another playlist). Download formats, stems and DAW naming on right-click are not built. |
+| Now playing | Built: grows out of the island, title wipe, pills, Up next, Lyrics and Credits tabs with a sliding selection. No grain, no transport of its own (the island stays below it). |
+| Home | The group's newest shares first, with join, error, loading and empty lines; Spotify's shelves after. New releases and blended For you need backend data first. |
+| Group feed and composer | The backend's friends panel; not restyled. |
+| Toasts, banners | Existing ones in the new palette; not rebuilt. |
+| Motion built | Island swipes, Now playing grow and title wipe, tab selection slide, row tool reveal, sidebar slide and handle, group shares arriving in turn, group heart pop. All respect reduced motion. |
+| Motion not built | Flying thumbnail, download burst, BPM copy float, refusal shake, nudge, row play sweep, search link unfold. |
+| Glass and grain | Not built: panels are flat fills. |
+| Geist | Not bundled; Inter remains. |
