@@ -1,5 +1,5 @@
 // Local test fixture only. Fixed fake identities are not authentication.
-import { RoomQueue } from "../../src/queue.mjs";
+import { RoomQueue, ROOM_LIMITS } from "../../src/queue.mjs";
 import { projectTimeline, TIMELINE_LIMITS } from "../../src/timeline.mjs";
 import { UploadLedger } from "../../../media-gateway/src/uploads.mjs";
 
@@ -49,6 +49,7 @@ export class QueueProbe {
     let final = await queue.snapshot(member);
     check(final.current.id === occurrence(2) && final.current.state === "ready", "stale media event ignored");
     check(final.pending.length === 1 && final.pending[0].id === occurrence(3), "only intended occurrence removed");
+    await queue.publishOwnerPresence({ epoch, revision: 1, connected: true });
     check((await send(owner, { type: "play", occurrence_id: occurrence(2) })).error === "readiness_required", "start gate fails closed");
     ready = true;
     const startView = await queue.snapshot(owner);
@@ -75,7 +76,16 @@ export class QueueProbe {
     check(sample.room_id === roomId && sample.epoch === epoch && sample.probe_id === 7, "clock sample is room scoped");
     check(sample.received_at === now && sample.sent_at === now, "clock sample uses injected authority time");
     check(JSON.stringify(await queue.snapshot(owner)) === JSON.stringify(final), "clock sample leaves queue/revision/cursor unchanged");
-    return Response.json({ cases: 8, revision: final.revision, current: final.current.id, pending: final.pending.length });
+    await send(owner, { type: "play", occurrence_id: occurrence(2) });
+    await queue.publishOwnerPresence({ epoch, revision: 2, connected: false });
+    now += ROOM_LIMITS.ownerGraceMs + 1000;
+    queue = new RoomQueue(this.storage, options);
+    check((await queue.tickOwnerPresence()).changed, "overdue owner departure survives reconstruction");
+    check(!(await queue.tickOwnerPresence()).changed, "departure applies once");
+    await queue.publishOwnerPresence({ epoch, revision: 3, connected: true });
+    final = await queue.snapshot(owner);
+    check(!final.timeline.playing && final.timeline.reason === "owner_departed", "owner return never auto-resumes");
+    return Response.json({ cases: 9, revision: final.revision, current: final.current.id, pending: final.pending.length });
   }
 }
 

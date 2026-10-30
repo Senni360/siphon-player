@@ -47,7 +47,8 @@ The plan also documents an offline `prepare_shared_recording` command for
 validating one selected MP3 and checking its identity before future uploads.
 An isolated [room queue core](services/party-room) now tests ownership,
 idempotent commands, bounded upload eligibility, durable timeline anchors,
-clock estimation and pending queue recovery; it is not connected to the app.
+clock estimation, owner-departure handling and pending queue recovery; it is not
+connected to the app.
 
 Siphon is a Spotify client written in Rust with
 [egui](https://www.egui.rs) and [fastframe](https://fastframe.dev), the

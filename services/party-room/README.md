@@ -47,6 +47,8 @@ The optional trusted `canStart` callback defaults to refusing playback starts.
 The [timeline contract](TIMELINE.md) defines its readiness gate and limitations.
 The [clock contract](CLOCK.md) documents authenticated timestamp sampling and
 bounded in-memory estimation, without adding an endpoint or a native adapter.
+The [presence contract](PRESENCE.md) adds a durable owner-departure grace period;
+new starts also require trusted connected-owner presence.
 
 Commands have exactly this shape:
 
@@ -214,7 +216,7 @@ and rate limits must be implemented before deployment.
 This core has run in the local Durable Object emulator, but not a deployed
 service. Production runtime wiring, authentication, WebSocket recovery, native
 client overlays, readiness coordination, native clock sampling, buffering,
-owner departure/handover and playback
+session presence detection, alarm wiring, owner handover and playback
 integration remain unimplemented. No two-computer party or Chromecast test has
 run, and no synchronization behavior has been measured. The hosted/hardware
 milestone-1 gate remains open. This module does not enable milestone 3 in the app.
@@ -248,3 +250,8 @@ The clock model adds 23 deterministic tests, bringing the room suite to 84. Eigh
 local Durable Object cases now include timestamp sampling that preserves queue
 revisions and command cursors. The estimator is not connected to native playback;
 its modeled uncertainty does not establish audible synchronization.
+
+Owner-presence recovery adds twenty deterministic tests, for 104 room tests in
+total, and a ninth local Durable Object case. It persists a 30-second loss
+deadline, pauses once at that deadline and never auto-resumes after a late return.
+The actual session authority, alarm and native pause integrations remain absent.

@@ -280,6 +280,7 @@ test("authority rejects storage failures, clock rollback and expiry during the t
 
 test("real queue samples feed a clocked timeline projection through synthetic delay", async t => {
   const a = authority(t), f = fixture();
+  await a.queue.publishOwnerPresence({ epoch, revision: 1, connected: true });
   for (let n = 0; n < L.minimumSamples; n++) {
     const probe = f.clock.probe(f.generation); f.advance(10); a.advance(10);
     a.storage.sync = async () => { f.advance(20); a.advance(20); };
@@ -287,10 +288,10 @@ test("real queue samples feed a clocked timeline projection through synthetic de
     a.storage.sync = async () => {}; f.advance(30); a.advance(30);
     assert.equal(f.clock.accept(f.generation, response), true);
   }
-  await a.queue.command(owner, { epoch, command_id: 1, expected_revision: 0,
+  await a.queue.command(owner, { epoch, command_id: 1, expected_revision: 1,
     action: { type: "add", occurrence_id: uuid(20), recording_id: uuid(21), explicit_selection: true } });
-  await a.queue.command(owner, { epoch, command_id: 2, expected_revision: 1, action: { type: "advance" } });
-  await a.queue.command(owner, { epoch, command_id: 3, expected_revision: 2,
+  await a.queue.command(owner, { epoch, command_id: 2, expected_revision: 2, action: { type: "advance" } });
+  await a.queue.command(owner, { epoch, command_id: 3, expected_revision: 3,
     action: { type: "play", occurrence_id: uuid(20) } });
   f.advance(2500); a.advance(2500);
   const snapshot = await a.queue.snapshot(owner), clock = f.estimate(); assert.equal(clock.status, "ready");

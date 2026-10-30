@@ -83,6 +83,9 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   A separate [clock model](https://github.com/Senni360/siphon-player/blob/main/services/party-room/CLOCK.md)
   bounds server-time uncertainty using timestamp samples, rejects stale replies
   and invalidates after suspension. It is not wired to native playback.
+  [Owner-presence recovery](https://github.com/Senni360/siphon-player/blob/main/services/party-room/PRESENCE.md)
+  persists a departure deadline and pauses once without auto-resuming after a
+  late return. Session detection, alarms and native output handling remain absent.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -402,7 +405,8 @@ The tested cleanup executor intentionally withholds those unresolved tasks.
 The independent room queue, headless snapshot/receipt recovery and durable
 timeline anchors and bounded clock estimation are now tested. The next bounded
 room milestone is readiness coordination with stale-load fencing and a
-deterministic timeout, or owner-presence grace/pause. Native pending-intent journaling,
+deterministic timeout. Owner-presence grace/pause is now modeled and persisted;
+session detection and alarm wiring remain gates. Native pending-intent journaling,
 optimistic transport and authenticated transport remain separate gates; none of
 these components enables a remote party by itself.
 Upload admission and native preparation remain separate components; neither
@@ -552,3 +556,18 @@ The 60 media-service tests, full required Windows Rust checks, formatting and
 policy checks passed for this checkpoint. Launcher tests again reported three
 failures and five errors, and Jekyll could not run without Bundler. These remain
 contribution gates rather than passing platform coverage.
+
+Owner-presence recovery adds twenty deterministic tests, bringing the room suite
+to 104, plus nine local Durable Object cases. Trusted aggregate presence events
+are ordered and durable. Repeated disconnect reports cannot extend the 30-second
+deadline, late maintenance freezes position at that deadline, and a return at or
+after it requires explicit readiness-approved resume. Tests also cover stale
+commands, rollback, lost acknowledgements, legacy stores and pending client
+intent. Grace starts when the room records the trusted loss report; actual
+disconnect detection and alarm delivery are not implemented or measured. No
+native behavior, infrastructure, secrets, upload quotas or retention changed.
+Real two-computer/Chromecast synchronization remains unmeasured.
+All 60 media-service tests, full required Windows Rust checks, formatting and
+policy checks passed again. Launcher checks still have three failures and five
+errors, and local Jekyll remains blocked by missing Bundler. No Linux/macOS or
+cloud-timer coverage is claimed for this checkpoint.

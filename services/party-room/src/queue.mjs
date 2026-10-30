@@ -2,7 +2,7 @@
 // Membership and media metadata must come from synchronous trusted adapters.
 import { TIMELINE_LIMITS, selectedTimeline, pausedTimeline, projectTimeline, validateTimeline } from "./timeline.mjs";
 export const ROOM_LIMITS = Object.freeze({ pending: 32, occurrences: 256, actors: 8, receipts: 64,
-  lifetimeMs: 24 * 60 * 60 * 1000 });
+  lifetimeMs: 24 * 60 * 60 * 1000, ownerGraceMs: 30_000 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set(["unavailable", "uploading", "ready"]);
 
@@ -78,6 +78,22 @@ export class RoomQueue {
       // Existing queue stores acquire a paused anchor, never an automatic start.
       this.sql.exec("INSERT OR IGNORE INTO room_timeline(singleton,anchor,observed_at) VALUES(1,?,?)",
         JSON.stringify(selectedTimeline(this.entry(row.current_id), created)), created);
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS room_owner_presence (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), event_revision INTEGER NOT NULL,
+        state TEXT NOT NULL, pause_at INTEGER, paused INTEGER NOT NULL)`);
+      if (!this.rows("SELECT singleton FROM room_owner_presence WHERE singleton=1").length) {
+        this.sql.exec("INSERT INTO room_owner_presence VALUES(1,0,'unknown',NULL,0)");
+        const anchor = this.timeline();
+        // A legacy playing anchor has no trusted presence history. Preserve its
+        // position, but require a fresh presence decision and explicit resume.
+        if (anchor.playing) {
+          requireThat(created >= this.clockFloor(), "invalid_clock");
+          const current = this.entry(row.current_id);
+          this.storeTimeline(pausedTimeline(anchor, current, created, "owner_departed"), current);
+          this.sql.exec("UPDATE room_timeline SET observed_at=? WHERE singleton=1", created);
+          this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
+        }
+      }
     });
   }
   rows(query, ...parameters) { return this.sql.exec(query, ...parameters).toArray(); }
@@ -90,6 +106,22 @@ export class RoomQueue {
   }
   clockFloor() { return this.rows("SELECT observed_at FROM room_timeline WHERE singleton=1")[0].observed_at; }
   timeline() { return JSON.parse(this.rows("SELECT anchor FROM room_timeline WHERE singleton=1")[0].anchor); }
+  presence() { return this.rows("SELECT * FROM room_owner_presence WHERE singleton=1")[0]; }
+  publicPresence() {
+    const p = this.presence();
+    return { state: p.state, pause_at: p.pause_at, paused: p.paused === 1 };
+  }
+  nextPresenceAlarm() { const p = this.presence(); return p.state === "disconnected" && !p.paused ? p.pause_at : null; }
+  expireOwner(now) {
+    const p = this.presence(), room = this.room();
+    if (p.state !== "disconnected" || p.paused || now < p.pause_at || now >= room.expires_at) return false;
+    const current = this.entry(room.current_id), anchor = this.timeline();
+    this.storeTimeline(current ? pausedTimeline(anchor, current, p.pause_at,
+      current.state === "ready" ? "owner_departed" : current.state) : selectedTimeline(null, p.pause_at), current);
+    this.sql.exec("UPDATE room_owner_presence SET paused=1 WHERE singleton=1");
+    this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
+    return true;
+  }
   storeTimeline(value, current) {
     validateTimeline(value, current);
     this.sql.exec("UPDATE room_timeline SET anchor=? WHERE singleton=1", JSON.stringify(value));
@@ -103,7 +135,8 @@ export class RoomQueue {
       const now = this.now();
       requireThat(integer(now) && now >= this.clockFloor(), "invalid_clock");
       const result = this.storage.transactionSync(() => {
-        const value = operation(now);
+        const expiredOwner = this.expireOwner(now);
+        const value = operation(now, expiredOwner);
         this.sql.exec("UPDATE room_timeline SET observed_at=? WHERE singleton=1", now);
         return value;
       });
@@ -130,11 +163,12 @@ export class RoomQueue {
       const row = this.active(now);
       return { room_id: row.room_id, owner_id: row.owner_id, epoch: row.epoch, revision: row.revision,
         expires_at: row.expires_at, current: this.entry(row.current_id),
-        pending: JSON.parse(row.pending).map(id => this.entry(id)), self: this.cursor(actor), timeline: this.timeline() };
+        pending: JSON.parse(row.pending).map(id => this.entry(id)), self: this.cursor(actor),
+        timeline: this.timeline(), owner_presence: this.publicPresence() };
     });
   }
-  // Timestamp-only exchange for a future authenticated transport. Does not
-  // consume a queue command ID or change the room revision.
+  // Timestamp-only exchange for a future authenticated transport. Probes consume
+  // no command ID; normal room maintenance may first commit a due owner pause.
   async sampleClock(actor, request) {
     fields(request, ["epoch", "probe_id"]);
     requireThat(uuid(request.epoch) && integer(request.probe_id, 1), "invalid_clock_probe");
@@ -155,6 +189,39 @@ export class RoomQueue {
       if (error instanceof RoomError) throw error;
       throw new RoomError("state_unavailable");
     }
+  }
+  // Trusted aggregate session-authority event only. A socket's own disconnect
+  // is insufficient when the owner has other authenticated sessions connected.
+  async publishOwnerPresence(event) {
+    fields(event, ["epoch", "revision", "connected"]);
+    requireThat(uuid(event.epoch) && integer(event.revision, 1) && typeof event.connected === "boolean", "invalid_presence");
+    return this.commit((now, expiredOwner) => {
+      const room = this.active(now), prior = this.presence();
+      requireThat(event.epoch === room.epoch, "stale_epoch");
+      const state = event.connected ? "connected" : "disconnected";
+      if (event.revision === prior.event_revision) requireThat(state === prior.state, "presence_revision_conflict");
+      let changed = expiredOwner;
+      const applied = event.revision > prior.event_revision;
+      if (applied) {
+        const transition = state !== prior.state;
+        const pauseAt = state === "connected" ? null : prior.state === "disconnected" ? prior.pause_at
+          : now + Math.min(ROOM_LIMITS.ownerGraceMs, room.expires_at - now);
+        const paused = state === "disconnected" && prior.state === "disconnected" ? prior.paused : 0;
+        this.sql.exec("UPDATE room_owner_presence SET event_revision=?,state=?,pause_at=?,paused=? WHERE singleton=1",
+          event.revision, state, pauseAt, paused);
+        if (transition) {
+          this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1"); changed = true;
+        }
+      }
+      return { applied, changed, revision: this.room().revision, next_alarm_at: this.nextPresenceAlarm() };
+    });
+  }
+  // A future alarm/recovery loop must call this even without participant traffic.
+  async tickOwnerPresence() {
+    return this.commit((now, changed) => {
+      const room = this.active(now);
+      return { changed, revision: room.revision, next_alarm_at: this.nextPresenceAlarm() };
+    });
   }
   // command_id is a monotonically increasing integer scoped to (epoch, actor).
   // A retained receipt returns exactly the original outcome. The high-water
@@ -235,6 +302,7 @@ export class RoomQueue {
     const current = this.entry(room.current_id), anchor = this.timeline(), now = room.observed_at;
     requireThat(current && current.id === operation.occurrence_id, "wrong_occurrence");
     if (operation.type === "play") {
+      requireThat(this.presence().state === "connected", "owner_unavailable");
       requireThat(current.state === "ready", "recording_not_ready");
       const position = projectTimeline(anchor, current, now).position_ms;
       requireThat(position < current.duration_ms, "seek_required");

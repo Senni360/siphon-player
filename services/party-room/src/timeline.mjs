@@ -1,7 +1,7 @@
 // Server-time anchors only. This module does not estimate a client's clock,
 // start an audio device, grant media access or choose the next queue occurrence.
 export const TIMELINE_LIMITS = Object.freeze({ startLeadMs: 750 });
-const REASONS = new Set(["empty", "selected", "uploading", "unavailable", "playing", "owner_paused", "seeked"]);
+const REASONS = new Set(["empty", "selected", "uploading", "unavailable", "playing", "owner_paused", "owner_departed", "seeked"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class TimelineError extends Error {

@@ -28,7 +28,7 @@ anchor, revision, command cursor and receipt commit in the same SQLite
 transaction and await `storage.sync()` before acknowledgement. Duplicate
 commands return their original receipt without resetting the clock.
 
-The additional `room_timeline` table stores one anchor and the greatest observed
+The additional `room_timeline` table stores one anchor and the greatest committed
 authority time. Reopening a current store preserves both; upgrading a queue-only
 store creates a paused anchor at its selected occurrence and retains prior queue
 receipts. A backward server clock fails closed until it catches up. There is no
@@ -50,7 +50,7 @@ the exact current `occurrence_id`:
 
 | Action | Effect |
 | --- | --- |
-| `{type: "play", occurrence_id}` | Requires ready media, a position before EOF and the trusted readiness gate. Schedules a start 750 ms after the command's server time. A new start cannot fall at or after room expiry. |
+| `{type: "play", occurrence_id}` | Requires trusted connected-owner presence, ready media, a position before EOF and the readiness gate. Schedules a start 750 ms after the command's server time. A new start cannot fall at or after room expiry. |
 | `{type: "pause", occurrence_id}` | Freezes the projected position immediately, including before a scheduled start. |
 | `{type: "seek", occurrence_id, position_ms}` | Accepts an integer from zero through the duration. Cancels the previous start and pauses at that position. Explicit Play must pass readiness again. |
 
@@ -108,7 +108,8 @@ durability or transport can deliver the anchor after its scheduled start;
 participants must join at the projected position, not move the shared anchor.
 The 750 ms lead is a testable protocol default, not a measured device guarantee.
 
-Owner-presence grace and departure pause, handover, authenticated WebSockets,
+The [presence contract](PRESENCE.md) now persists grace and departure pauses.
+Actual session detection, alarms, handover, authenticated WebSockets,
 durable client journaling, optimistic transport controls, readiness coordination,
 native clock integration, receiver commands and drift correction remain absent. No
 two-computer or Chromecast run has been performed and synchronization remains

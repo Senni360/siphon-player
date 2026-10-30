@@ -28,7 +28,7 @@ function entry(value) {
     state: value.state, duration_ms: value.duration_ms, media_revision: value.media_revision, source: value.source };
 }
 function snapshot(value) {
-  fields(value, ["room_id", "owner_id", "epoch", "revision", "expires_at", "current", "pending", "self", "timeline"]);
+  fields(value, ["room_id", "owner_id", "epoch", "revision", "expires_at", "current", "pending", "self", "timeline", "owner_presence"]);
   fields(value.self, ["next_command_id", "receipt_floor"]);
   requireThat([value.room_id, value.owner_id, value.epoch].every(uuid) && integer(value.revision)
     && integer(value.expires_at, 1) && integer(value.self.next_command_id, 1)
@@ -38,10 +38,15 @@ function snapshot(value) {
   const ids = [current, ...pending].filter(Boolean).map(row => row.id);
   requireThat(new Set(ids).size === ids.length, "invalid_message");
   try { validateTimeline(value.timeline, current); } catch { throw new ClientError("invalid_message"); }
+  const p = value.owner_presence;
+  fields(p, ["state", "pause_at", "paused"]);
+  requireThat(["unknown", "connected", "disconnected"].includes(p.state) && typeof p.paused === "boolean"
+    && (p.state === "disconnected" ? integer(p.pause_at, 1) && p.pause_at <= value.expires_at : p.pause_at === null && !p.paused)
+    && (!(p.paused || p.state === "unknown") || !value.timeline.playing), "invalid_message");
   return { room_id: value.room_id, owner_id: value.owner_id, epoch: value.epoch,
     revision: value.revision, expires_at: value.expires_at, current, pending,
     self: { next_command_id: value.self.next_command_id, receipt_floor: value.self.receipt_floor },
-    timeline: structuredClone(value.timeline) };
+    timeline: structuredClone(value.timeline), owner_presence: { state: p.state, pause_at: p.pause_at, paused: p.paused } };
 }
 function receipt(value) {
   fields(value, ["epoch", "command_id", "revision", "accepted", "error"]);
@@ -54,7 +59,7 @@ function receipt(value) {
 function queueIdentity(value) {
   const t = value.timeline;
   return JSON.stringify([value.owner_id, value.expires_at, value.current, value.pending,
-    t.occurrence_id, t.position_ms, t.anchor_at, t.playing, t.reason]);
+    t.occurrence_id, t.position_ms, t.anchor_at, t.playing, t.reason, value.owner_presence]);
 }
 function rows(value) { return value ? [value.current, ...value.pending].filter(Boolean) : []; }
 function sameRecording(left, right) {
@@ -262,6 +267,7 @@ export class RoomClient {
     return structuredClone({ mode: this.#blocked ? "blocked" : this.#connected ? "ready" : this.#awaiting ? "syncing" : "offline",
       blocked: this.#blocked, epoch: this.#base?.epoch ?? null, revision: this.#base?.revision ?? null,
       confirmed_timeline: this.#base?.timeline ?? null,
+      confirmed_owner_presence: this.#base?.owner_presence ?? null,
       ...this.#project(), intents: this.#intents.map(item => ({ intent_id: item.id, action: item.action,
         state: item.state, error: item.error })) });
   }

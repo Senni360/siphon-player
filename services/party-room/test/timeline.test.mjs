@@ -36,6 +36,7 @@ async function fixture(t, { state = "ready", canStart = () => true } = {}) {
   const f = { db, storage, options, members, now: () => now, advance: ms => { now += ms; } };
   f.restart = () => { f.queue = new RoomQueue(storage, options); };
   f.restart();
+  await f.queue.publishOwnerPresence({ epoch, revision: 1, connected: true });
   f.view = () => f.queue.snapshot(owner);
   f.packet = async (action, actor = owner) => {
     const view = await f.queue.snapshot(actor);

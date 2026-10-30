@@ -20,8 +20,10 @@ room expiry are checked again after that wait. Clock rollback and storage
 failures refuse the exchange with static error codes. No queue state, recording
 identity, credentials or arbitrary metadata is returned.
 
-Sampling uses the existing persisted clock floor, but does not increment the
-room revision or consume a queue/transport command ID. Probe IDs are a separate
+Sampling uses the existing persisted clock floor. A probe itself does not
+increment the room revision or consume a queue/transport command ID, but room
+operations can recover an overdue [owner-departure pause](PRESENCE.md), advancing
+the shared revision in that transaction. Probe IDs are a separate
 correlation namespace. There is no deployed endpoint or server request-rate limit
 yet. The future adapter must authenticate, bound message bytes, rate-limit probes
 and account for their Durable Object/SQLite work before deployment.
