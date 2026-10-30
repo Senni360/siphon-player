@@ -28,6 +28,11 @@ pub fn is_open(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
+/// Closes Now playing at once, for sign-out.
+pub fn close(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(open_id(), false));
+}
+
 pub fn toggle(ctx: &egui::Context) {
     let open = !is_open(ctx);
     ctx.data_mut(|data| data.insert_temp(open_id(), open));
@@ -288,8 +293,8 @@ fn pill(
 fn pills(app: &mut App, ui: &mut Ui, at: egui::Pos2, item: Option<&PlayableItem>, uri: &str) {
     let locale = app.locale;
     let mut x = at.x;
-    let downloadable = app.downloads.available
-        && item.is_some_and(|item| crate::downloads::Source::from_item(item).is_some());
+    let downloadable =
+        app.downloads.available && item.is_some_and(|item| app.download_source(item).is_some());
     let download_tip = if !app.downloads.available {
         gettext(locale, "Download needs the Siphon helper")
     } else {

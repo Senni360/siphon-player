@@ -443,9 +443,11 @@ pub(crate) fn island_rect(strip: Rect) -> Rect {
     )
 }
 
-/// What the island showed, kept so the next song can push it off.
+/// What the island showed, kept so the next song can push it off. It
+/// belongs to the signed-in account: another account never animates from it.
 #[derive(Clone, Debug, PartialEq)]
 struct Shown {
+    owner: Option<String>,
     uri: String,
     title: String,
     subtitle: String,
@@ -460,6 +462,18 @@ struct Leaving {
     shown: Shown,
     swipe: Swipe,
     transition: Transition,
+}
+
+const SHOWN_ID: &str = "island-shown";
+const LEAVING_ID: &str = "island-leaving";
+
+/// Forgets what the island showed, for sign-out: the next account's first
+/// song arrives without sliding a previous account's song off.
+pub(crate) fn forget_island(ctx: &egui::Context) {
+    ctx.data_mut(|data| {
+        data.remove::<Shown>(egui::Id::new(SHOWN_ID));
+        data.remove::<Leaving>(egui::Id::new(LEAVING_ID));
+    });
 }
 
 /// How a change from `before` to the song now playing reads: the queue's
@@ -486,10 +500,11 @@ fn song_with_queue(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option<&
         .map(|queue| queue.queue.iter().take(TILES).cloned().collect())
         .unwrap_or_default();
     let next_uri = upcoming.first().map(|item| item.uri().to_string());
-    let shown_id = egui::Id::new("island-shown");
-    let leaving_id = egui::Id::new("island-leaving");
+    let shown_id = egui::Id::new(SHOWN_ID);
+    let leaving_id = egui::Id::new(LEAVING_ID);
     if let Some(now) = now {
         let shown = Shown {
+            owner: app.user.as_ref().map(|user| user.id.clone()),
             uri: now.uri.clone(),
             title: now.title.clone(),
             subtitle: now.subtitle.clone(),
@@ -497,7 +512,9 @@ fn song_with_queue(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option<&
             next: next_uri.clone(),
         };
         let before = ctx.data(|data| data.get_temp::<Shown>(shown_id));
-        if let Some(before) = before.filter(|before| before.uri != shown.uri) {
+        if let Some(before) =
+            before.filter(|before| before.owner == shown.owner && before.uri != shown.uri)
+        {
             let swipe = swipe_for(&before, &shown.uri, next_uri.as_deref());
             let leaving = Leaving {
                 shown: before,
@@ -1575,6 +1592,7 @@ mod island_tests {
 
     fn shown(uri: &str, next: Option<&str>) -> Shown {
         Shown {
+            owner: Some("alice".into()),
             uri: uri.into(),
             title: uri.into(),
             subtitle: String::new(),
