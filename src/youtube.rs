@@ -8,6 +8,7 @@ mod resolver;
 #[cfg(test)]
 mod tests;
 
+use std::io::Read;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -197,19 +198,33 @@ pub struct Catalogue {
     pub cache: PathBuf,
 }
 
+const MAX_METADATA_BYTES: u64 = 4 * 1024 * 1024;
+
+fn read_cached_video(reader: impl Read) -> Option<Video> {
+    // Metadata is only an early rejection: a file can grow after stat/open.
+    // Read at most one excess byte so a growing cache cannot allocate freely.
+    let mut bytes = Vec::new();
+    reader
+        .take(MAX_METADATA_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() as u64 > MAX_METADATA_BYTES {
+        return None;
+    }
+    serde_json::from_slice(&bytes).ok()
+}
+
 impl Catalogue {
     pub async fn track(&self, uri: &str) -> Result<Track, Error> {
         let id = video_id(uri).ok_or(Error::Unavailable)?.to_owned();
         let path = self.cache.join(format!("{id}.json"));
         let read_path = path.clone();
         if let Ok(Some(video)) = tokio::task::spawn_blocking(move || {
-            let metadata = std::fs::metadata(&read_path).ok()?;
-            if metadata.len() > 4 * 1024 * 1024 {
+            let file = std::fs::File::open(read_path).ok()?;
+            if file.metadata().ok()?.len() > MAX_METADATA_BYTES {
                 return None;
             }
-            std::fs::read(read_path)
-                .ok()
-                .and_then(|bytes| serde_json::from_slice::<Video>(&bytes).ok())
+            read_cached_video(file)
         })
         .await
             && video.id == id

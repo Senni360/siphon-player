@@ -117,6 +117,37 @@ async fn cached_metadata_works_without_a_helper_and_never_contains_audio_urls() 
 }
 
 #[test]
+fn cached_metadata_read_is_bounded_when_file_grows_after_metadata_check() {
+    use std::io::{Seek, Write};
+
+    let scratch = Scratch::new();
+    let video = fixture();
+    let path = scratch.0.join(format!("{}.json", video.id));
+    let mut bytes = serde_json::to_vec(&video).unwrap();
+    // Trailing JSON whitespace is valid, including at the exact size limit.
+    bytes.resize(MAX_METADATA_BYTES as usize, b' ');
+    std::fs::write(&path, &bytes).unwrap();
+    let mut file = std::fs::File::open(&path).unwrap();
+    assert_eq!(file.metadata().unwrap().len(), MAX_METADATA_BYTES);
+    assert_eq!(read_cached_video(&mut file).unwrap().id, video.id);
+    file.rewind().unwrap();
+
+    // Deterministically grow the already-open file after checking its size.
+    // This reproduces the race boundary without concurrent scheduling.
+    let mut append = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap();
+    append.write_all(&[b' '; 128]).unwrap();
+    drop(append);
+    assert!(read_cached_video(&mut file).is_none());
+    assert_eq!(file.stream_position().unwrap(), MAX_METADATA_BYTES + 1);
+    assert_eq!(file.metadata().unwrap().len(), MAX_METADATA_BYTES + 128);
+    // Ignoring an oversized cache does not truncate or rewrite its contents.
+    assert_eq!(std::fs::read(&path).unwrap().len(), bytes.len() + 128);
+}
+
+#[test]
 fn local_likes_are_account_scoped_versioned_and_preserve_unreadable_state() {
     let scratch = Scratch::new();
     let path = likes::path(&scratch.0, "alice");

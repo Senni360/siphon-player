@@ -45,6 +45,8 @@ preload path; completed loads are accepted only for the current playback tag.
 Replacing or stopping playback cancels older resolver work. URL expiry is
 checked before reusing a prepared stream; metadata is reused from a bounded,
 private, account-scoped cache so browsing saved rows does not spawn processes.
+Cache reads enforce the 4 MiB limit on bytes actually read, even if a file grows
+after its size was checked. Oversized cache entries are ignored and refreshed.
 Upload dates, views and thumbnails remain optional, and the channel supplies
 the artist name. Thumbnail URLs are limited to YouTube's image hosts.
 
