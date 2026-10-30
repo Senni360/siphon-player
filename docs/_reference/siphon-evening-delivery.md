@@ -245,6 +245,62 @@ individual backend feature branches. Re-read main and all ready heads at final
 promotion; if main has advanced, reconcile from its new exact tip. No final-main
 integration or Windows validation is claimed by this recovery checkpoint.
 
+## Follow-up, 18:30 Amsterdam
+
+No candidate run is active. The latest Windows candidate remains
+`41092769318` at `1c99489`, refused before starting, with no artifacts. New main
+CI `41099517330` was also refused at 18:31 Amsterdam with the same account
+payment/spending annotation. Runner recovery has not been established, so this
+pass did not submit another unchanged blocked build. Cleanup is still `adb6157`;
+no local Windows package, exact manifest or real launch report has arrived.
+
+Claude's repository handoff at `3efbe6d` explicitly acknowledges the PR7 review
+and reports its integration rehearsal against `1823bf6`. It describes the two
+`src/demo.rs` conflict resolutions and attributes 1,896 passing library tests,
+formatting and clippy to its rehearsal. This is evidence that the frontend owner
+received the review through the repository, not a Windows-agent acknowledgment
+or an independently validated final combined build.
+
+The latest observed frontend is `7060b8cca2bc7a2ebc13a0d1ba89d5186f30d4a0`.
+Since `1c53af2`, it adds Now playing (`f1d5d02`), the Home group shelf (`8e628a0`),
+account scoping/download fallback/column fit (`9fab9be`), narrower album columns
+(`c5f8b47`), sidebar-handle fading (`cd1539c`), an explicit built-versus-planned
+design inventory (`3efbe6d`), and refusal motion (`7060b8c`). These milestones
+remain on Claude's branch. The owner is still publishing work, so this check did
+not start a competing frontend integration. Geist and glass/grain are explicitly
+not built in the design inventory; do not infer them from the target design.
+
+Read-only verification confirmed last-playlist owner filtering, sign-out cache
+clearing, `app.download_source` reuse and shared row/header column fitting. One
+account-switch edge remains for frontend follow-up: an already-created
+`Leaving` snapshot is consumed using only transition age at
+`src/ui/player_bar.rs:545`, without checking `leaving.shown.owner`. If identity
+changes during that transition without a login frame, the old snapshot can still
+be painted. Filter/clear it against the current owner at consumption too and
+cover an in-progress A transition followed directly by B. This is a static path
+finding; no native execution of that scenario is claimed.
+
+Claude also reported a reproducible backend test false positive under
+`RUST_BACKTRACE=1`. The coordinator reproduced it on `1823bf6`: the Cast URL
+redaction test searched Debug output for the generic word `private`, which also
+appears in `anyhow::__private` backtrace symbols. Test-only correction `ef26777`
+keeps both Display-chain and Debug coverage using distinctive fixture URL/grant
+values, covers all four command-error variants, and checks successful and failed
+media statuses. All six Cast media tests pass with backtraces enabled and disabled;
+all-feature/all-target clippy with warnings denied, formatting and whitespace
+checks pass. No runtime behavior changed. The fix was authored in an isolated
+checkout, then checked serially in the idle coordinator checkout with its own
+existing build cache. It does not require another Windows build while runner
+access remains blocked.
+
+Latest observed main is `2a2affe2a37d8cb7696161fbb5e39378b68dead9`. After
+`61933a4`, its published work adds offline selected-recording preparation
+(`a51020a`), opaque R2 multipart receipts (`7e9ad05`) and confirmed upload cleanup
+(`2a2affe`). These changes are not in the current evening candidate, were not
+modified or deployed by this coordinator, and must be preserved when reconciling
+final main ancestry. The exact-head integration plan remains subject to the
+20:30 ready heads and current ownership handoffs.
+
 ## Extra AI model
 
 The owner offered access to a model called "Jeff". Its provider/API is still
