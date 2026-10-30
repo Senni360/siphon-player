@@ -48,6 +48,7 @@ pub(super) struct HybridPlayback {
     tag: Option<PlaybackTag>,
     state: LocalState,
     loaded: bool,
+    load_settled: bool,
     seek_pending: Option<PendingSeek>,
     // Child snapshots report observations, never the user's transport intent.
     play_intent: bool,
@@ -77,6 +78,7 @@ impl Default for HybridPlayback {
             tag: None,
             state: LocalState::default(),
             loaded: false,
+            load_settled: false,
             seek_pending: None,
             playing_pending: None,
             play_intent: false,
@@ -1195,6 +1197,7 @@ impl App {
         self.hybrid.seek_pending = None;
         self.hybrid.playing_pending = None;
         self.hybrid.loaded = false;
+        self.hybrid.load_settled = false;
         self.hybrid.play_intent = play;
         self.hybrid.audible = false;
         if let Some(pending) = &mut self.hybrid.pending {
@@ -1315,6 +1318,7 @@ impl App {
                 }) {
                     return;
                 }
+                self.hybrid.load_settled |= !state.loading;
                 if let Some(pending) = self.hybrid.seek_pending {
                     let load_position_ack = pending.allow_load_position_ack
                         && !state.loading
@@ -1520,7 +1524,9 @@ impl App {
             .seek_pending
             .map_or(self.hybrid.state.seek_sequence, |pending| pending.sequence)
             .wrapping_add(1);
-        let allow_load_position_ack = !self.hybrid.loaded || self.hybrid.state.loading;
+        // Decoder reopen/buffering after a seek is not an initial Load. Once
+        // this generation has settled, every newer seek needs its sequence.
+        let allow_load_position_ack = !self.hybrid.load_settled;
         self.hybrid.seek_pending = Some(PendingSeek {
             position_ms,
             sequence,

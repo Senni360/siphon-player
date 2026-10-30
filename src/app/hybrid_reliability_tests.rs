@@ -168,6 +168,47 @@ fn hybrid_new_seek_after_load_settles_requires_numbered_ack() {
     app.backend.shutdown();
 }
 
+#[test]
+fn hybrid_seek_decoder_reopen_does_not_restore_initial_load_exception() {
+    use crate::player::HybridEvent;
+
+    let mut app = hybrid_fixture();
+    let ctx = egui::Context::default();
+    start_hybrid_fixture(&mut app);
+    app.apply(Action::Next, &ctx);
+    let tag = app.hybrid_tag().unwrap();
+    app.handle_hybrid_event(
+        tag,
+        HybridEvent::State(Box::new(reliability_state(
+            "soundcloud:track:7",
+            10_000,
+            0,
+            true,
+        ))),
+    );
+    app.apply(Action::Seek(20_000), &ctx);
+    let mut reopening = reliability_state("soundcloud:track:7", 20_000, 1, true);
+    reopening.loading = true;
+    app.handle_hybrid_event(tag, HybridEvent::State(Box::new(reopening)));
+    app.apply(Action::Seek(20_500), &ctx);
+    // Seek one's settled decoder state is close to seek two's target, but
+    // its sequence still identifies it as an older observation.
+    app.handle_hybrid_event(
+        tag,
+        HybridEvent::State(Box::new(reliability_state(
+            "soundcloud:track:7",
+            20_000,
+            1,
+            true,
+        ))),
+    );
+    assert_eq!(app.hybrid_position(), 20_500);
+    app.handle_hybrid_event(tag, HybridEvent::EndOfTrack);
+    assert_eq!(app.hybrid_tag().unwrap().occurrence, tag.occurrence);
+    assert_eq!(app.hybrid_position(), 20_500);
+    app.backend.shutdown();
+}
+
 mod hybrid_action_model {
     use super::*;
     use crate::hybrid_queue::{Entry, EntryId, HybridQueue, Origin, Repeat};
