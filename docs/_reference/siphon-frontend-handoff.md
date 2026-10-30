@@ -13,19 +13,30 @@ report and its interface requirements. It does not replace the backend's
 `docs/_reference/siphon-integration-contract.md`; where the two disagree, the
 backend contract wins on behaviour and this file is updated to match.
 
-## Status (2026-10-30)
+## Status (2026-10-30, 17:20 Amsterdam)
 
-- Phase 1, app direction: **approved.** The owner chose direction **D
-  (Hybrid)**: A's top bar and a floating sidebar, B's content, player island
-  and now-playing view, C's download options, and the reactive motion
-  catalogue. `DESIGN.md` at the repository root is the reference. The
-  mockups stay outside the repository as review evidence.
-- Phase 2, native implementation: started with shared tokens and reusable
-  controls under `src/ui/`. Views are rebuilt in the order of the brief
-  (shell, Home, lists, player, Group, downloads, settings).
-- `siphon-integration-contract.md` had not arrived on any branch when this
-  was written (`main` at `ac4bd07`; `siphon/cleanup`, `credits-isrc`,
-  `friends-feed`, `loudness`, `soundcloud`, `youtube` inspected).
+- Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`.
+- **Frontend branch:** `claude/focused-rubin-pxfk32`. It stays append-only
+  (no force pushes) and is based on `siphon/backend-delivery` (`8b94e5b`).
+  Every commit compiles and passes clippy and the library tests.
+- **For `siphon/evening-candidate`:** it already carries the frontend through
+  `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
+  `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. One
+  conflict is expected, in `src/demo.rs`: three SoundCloud source tests the
+  evening branch already rewrote. Keep the evening branch's versions, with
+  one change: the player-bar part of
+  `soundcloud_source_indicators_follow_tracks_into_the_queue_and_player_bar`
+  asserts that "SC" is **absent** (the island colours the title; the chip
+  is gone everywhere). This exact resolution was built and tested on top of
+  `b58d09c`: clippy (`--all-targets --features demo -D warnings`) clean,
+  1,890 library tests passed. One backend test,
+  `cast::media::tests::errors_and_statuses_cannot_expose_signed_urls`,
+  fails only when `RUST_BACKTRACE=1` is set: anyhow's `Debug` output then
+  includes backtrace frames named `anyhow::__private`, which contain the
+  word the test forbids. It passes with backtraces off. Backend owner:
+  consider checking `Display` (`{error:#}`) instead.
+- The final frontend head for tonight is published here by 20:30 Amsterdam,
+  with this section updated.
 
 ## Decisions carried into D
 
@@ -159,6 +170,45 @@ the `DESIGN.md` ramp with the shell, so the app does not change look
 halfway), and Geist is not bundled yet (Inter stays until its size is
 measured). `kit::Source::of` defers to `crate::soundcloud::Source::of`.
 
+### 2. Palette and source titles (`0d2943a` and before)
+
+The built-in themes use the neutral ramp, the accent is the text colour,
+and song titles take their source colour. The SC/YT chips are gone from
+rows, search cards, collection headers and the player.
+
+### 3. Player island (`f5341e4`)
+
+The bottom bar is a floating card (`theme::PLAYER_BAR_HEIGHT` is now the
+100 px strip that holds it), with every existing control. The next three
+queue songs show as small covers that spread on hover and open the queue.
+Song changes swipe: Next grows the first queue cover into the cover,
+Previous shrinks it back, anything else pushes the old song and queue off.
+The island keeps a snapshot of the outgoing song only while that runs.
+
+### 4. Floating sidebar (`cee85fe`)
+
+Docked, the sidebar is a rounded card inside the window. Hidden (the
+existing `ToggleSidebar`, Ctrl B), it becomes an edge handle that grows as
+the pointer nears, and the sidebar slides out over the page when the
+pointer reaches the left edge. No new setting.
+
+### 5. Row tools (`d58bbce`)
+
+Download (helper), BPM/key (off, with its reason, until the helper's
+analysis protocol exists), Credits (popover over `RequestCredits` /
+`app.credits`, cancelled on close), Add to last-used playlist
+(`AddToPlaylist`; the destination is learned from any add this session and
+lives in egui memory, so it resets on restart; storing it needs a backend
+state field).
+
+### Windows preview of the demo (`76d2805`)
+
+`.github/workflows/preview-windows.yml` builds the offline demo with a
+launcher per fixture state, so the redesign can be looked at without an
+account. It runs by hand once on main, or from a push whose head commit
+says `[preview]`. It complements the coordinator's `windows-candidate`
+workflow, which builds the real app.
+
 ## Files the frontend expects to touch
 
 New modules under `src/ui/` (tokens, source title, row tools, shell pieces)
@@ -168,9 +218,11 @@ listed in each milestone report.
 
 ## Checks
 
-Milestone 1, on Linux in the cloud container (not Windows):
-`cargo clippy --no-default-features --features demo --all-targets -- -D
-warnings` clean; the kit's 13 unit tests and the existing theme and motion
-tests pass; `rustfmt --check` on the new files. `cargo fmt --check` over the whole crate fails on `main` already
-(`src/app.rs` module order) and was left alone. Not run: the full test
-suite, a native demo render, anything on Windows.
+Each milestone, on Linux in the cloud container with software OpenGL (not
+Windows): `cargo clippy --all-targets -- -D warnings` clean, the full
+library test suite passing, `cargo fmt --all --check` clean, and native
+`--demo-shot` captures of the backend fixtures inspected in dark and light at
+1280 and 880 wide. Tests that encoded the old bar position or the SC chip
+were updated to the new layout, not removed: drag tests start from the
+island's cover, and source tests check the absence of the chip. Not run:
+anything on Windows, real accounts, the installed helper.
