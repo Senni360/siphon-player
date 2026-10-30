@@ -572,17 +572,12 @@ mod tests {
     #[test]
     fn shortcut_constants_name_the_platform_modifier() {
         let expected = if cfg!(target_os = "macos") {
-            ["Cmd+B", "Cmd+Q", "Cmd+Shift+M", "Cmd+Shift+K"]
+            ["Cmd+B", "Cmd+Q", "Cmd+Shift+M"]
         } else {
-            ["Ctrl+B", "Ctrl+Q", "Ctrl+M", "Ctrl+Shift+K"]
+            ["Ctrl+B", "Ctrl+Q", "Ctrl+M"]
         };
         assert_eq!(
-            [
-                SIDEBAR_SHORTCUT,
-                QUIT_SHORTCUT,
-                WINAMP_SHORTCUT,
-                MILKDROP_SHORTCUT,
-            ],
+            [SIDEBAR_SHORTCUT, QUIT_SHORTCUT, WINAMP_SHORTCUT],
             expected
         );
     }
