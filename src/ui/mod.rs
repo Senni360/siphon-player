@@ -69,6 +69,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         );
     }
     player_bar::show(app, ui);
+    let content = ui.available_rect_before_wrap();
     if app.lyrics_fullscreen.is_some() {
         lyrics::fullscreen(app, ui);
     } else {
@@ -85,6 +86,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             friends::side_panel(app, ui);
         }
         central(app, ui);
+        if !app.settings.sidebar_visible {
+            sidebar::floating(app, ui, content);
+        }
     }
     keep_room_for_panels(app, ctx);
     devices::popup(app, ctx);

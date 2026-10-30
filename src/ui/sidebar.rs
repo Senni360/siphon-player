@@ -544,6 +544,116 @@ fn permute<T>(entries: &mut [T], order: &[usize]) {
     }
 }
 
+/// The docked sidebar's gap to the window's edges, and its corners.
+const CARD_GAP: i8 = 8;
+const CARD_RADIUS: u8 = 14;
+/// The room between the card's edge and its rows.
+const CARD_PAD: Margin = Margin {
+    left: 8,
+    right: 6,
+    top: 0,
+    bottom: 6,
+};
+/// The floating sidebar's width, how close to the window's left edge the
+/// pointer has to come to call it, and how long it stays after the pointer
+/// leaves it.
+const FLOATING_WIDTH: f32 = 264.0;
+const FLOATING_EDGE: f32 = 16.0;
+const FLOATING_LINGER: f64 = 0.35;
+const FLOATING_SLIDE: f32 = 0.26;
+
+/// The sidebar while it is hidden: a thin handle at the window's left edge,
+/// and the whole sidebar sliding out over the page when the pointer reaches
+/// that edge. It slides away again a moment after the pointer leaves it.
+/// `area` is the room between the top of the window and the player.
+pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
+    let ctx = ui.ctx().clone();
+    let palette = app.palette;
+    let id = egui::Id::new("sidebar-floating");
+    let pointer = ctx.pointer_hover_pos();
+    let last_rect = ctx.data(|data| data.get_temp::<Rect>(id.with("rect")));
+    let near_edge = pointer
+        .is_some_and(|at| at.x <= area.left() + FLOATING_EDGE && area.y_range().contains(at.y));
+    let over_panel = pointer.is_some_and(|at| last_rect.is_some_and(|rect| rect.contains(at)));
+    let now = ctx.input(|input| input.time);
+    let mut last = ctx
+        .data(|data| data.get_temp::<f64>(id.with("last")))
+        .unwrap_or(f64::NEG_INFINITY);
+    if near_edge || over_panel {
+        last = now;
+        ctx.data_mut(|data| data.insert_temp(id.with("last"), last));
+    }
+    let wanted = now - last < FLOATING_LINGER;
+    if wanted && !(near_edge || over_panel) {
+        // Nothing else may wake the app when the pointer has left, so ask
+        // for the frame that closes it.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+            (FLOATING_LINGER - (now - last)).max(0.0),
+        ));
+    }
+    let open = ctx.animate_bool_with_time(
+        id.with("open"),
+        wanted,
+        crate::motion::seconds(&ctx, FLOATING_SLIDE),
+    );
+    let reach = ctx.animate_bool_with_time(
+        id.with("reach"),
+        pointer.is_some_and(|at| {
+            at.x <= area.left() + FLOATING_EDGE * 4.0 && area.y_range().contains(at.y)
+        }),
+        crate::motion::seconds(&ctx, super::kit::motion::FEEDBACK * 1.6),
+    );
+
+    // The handle grows as the pointer nears it, so the edge reads as a door.
+    let handle = Rect::from_center_size(
+        pos2(area.left() + 5.5, area.center().y),
+        vec2(3.0, 36.0 + 60.0 * reach),
+    );
+    ui.painter().rect_filled(
+        handle,
+        2.0,
+        palette.secondary.gamma_multiply(0.35 + 0.45 * reach),
+    );
+
+    if open <= 0.0 {
+        ctx.data_mut(|data| data.remove::<Rect>(id.with("rect")));
+        return;
+    }
+    let eased = super::kit::motion::ease(open);
+    let gap = f32::from(CARD_GAP);
+    let rect = Rect::from_min_size(
+        pos2(
+            area.left() + gap - (1.0 - eased) * (FLOATING_WIDTH + gap * 2.0),
+            area.top() + gap,
+        ),
+        vec2(FLOATING_WIDTH, area.height() - gap * 2.0),
+    );
+    ctx.data_mut(|data| data.insert_temp(id.with("rect"), rect));
+    egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(&ctx, |ui| {
+            Frame::new()
+                .fill(palette.panel)
+                .corner_radius(CARD_RADIUS)
+                .stroke(egui::Stroke::new(1.0, palette.outline))
+                .shadow(egui::epaint::Shadow {
+                    offset: [12, 0],
+                    blur: 40,
+                    spread: 0,
+                    color: palette.shadow,
+                })
+                .inner_margin(Margin::symmetric(8, 10))
+                .show(ui, |ui| {
+                    ui.set_width(FLOATING_WIDTH - 16.0);
+                    ui.set_height(rect.height() - 20.0);
+                    // The rows arrive just behind the panel's edge.
+                    ui.multiply_opacity(((open - 0.25) / 0.75).clamp(0.0, 1.0));
+                    contents(app, ui, None);
+                });
+        });
+}
+
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let expanded_art = has_expanded_art(app);
@@ -570,13 +680,39 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .default_size(app.settings.sidebar_width)
         .size_range(fit.range.clone())
         .show_separator_line(false)
-        .frame(Frame::new().fill(palette.panel).inner_margin(Margin {
-            left: 12,
-            right: 8,
-            top,
-            bottom: if expanded_art { 0 } else { 8 },
+        // A card floating inside the window, not a slab against its edge:
+        // the panel itself is the window's colour and the card is painted
+        // inside it, behind the contents.
+        .frame(Frame::new().fill(palette.window).inner_margin(Margin {
+            left: CARD_GAP + CARD_PAD.left,
+            right: CARD_PAD.right,
+            top: CARD_GAP + top - 4,
+            bottom: CARD_GAP + if expanded_art { 0 } else { CARD_PAD.bottom },
         }));
     let response = panel.show(ui, |ui| {
+        let inner = ui.max_rect();
+        let card = Rect::from_min_max(
+            pos2(
+                inner.left() - f32::from(CARD_PAD.left),
+                inner.top() - f32::from(top - 4),
+            ),
+            pos2(
+                inner.right() + f32::from(CARD_PAD.right),
+                inner.bottom()
+                    + if expanded_art {
+                        0.0
+                    } else {
+                        f32::from(CARD_PAD.bottom)
+                    },
+            ),
+        );
+        ui.painter().rect(
+            card,
+            CARD_RADIUS,
+            palette.panel,
+            egui::Stroke::new(1.0, palette.outline),
+            egui::StrokeKind::Inside,
+        );
         let art_rect = expanded_art.then(|| expanded_art_rect(ui));
         if let Some(rect) = art_rect.filter(|_| !floating_art) {
             reserve_expanded_art(ui, rect);
