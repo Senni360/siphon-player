@@ -253,7 +253,7 @@ a table of what is built tonight against the target. A song that cannot
 play shakes its title when double-clicked or when its play control is
 clicked, instead of doing nothing (no movement under reduced motion).
 
-### 10. Reactive motion (`80f0dab` to `51454df`)
+### 10. Reactive motion (`80f0dab` to `51454df`, `6e7ed5f`)
 
 Each answers something the user did, costs nothing once finished, and
 shows its end state at once under reduced motion:
@@ -263,6 +263,8 @@ shows its end state at once under reduced motion:
 - A new toast rises 12 px into place.
 - The library's highlight glides from the row that was open to the page
   just opened.
+- Now playing's Up next moves up one place when its head starts playing,
+  and comes in afresh when the queue is replaced (`6e7ed5f`).
 
 Also: Home's group notice wraps beside its button on narrow pages.
 
