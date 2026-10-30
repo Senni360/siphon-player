@@ -5678,14 +5678,31 @@ mod tests {
         for source in SearchSource::ALL {
             app.search.source = source;
             search_frame(&ctx, &mut app, vec![]);
-            let text = search_frame(&ctx, &mut app, vec![]);
-            let contains = |name: &str| text.iter().any(|(label, _)| label == name);
+            let text = view_text_shapes(
+                &ctx,
+                &mut app,
+                vec![],
+                crate::ui::search::show,
+                egui::vec2(1280.0, 2200.0),
+            );
+            let contains = |name: &str| text.iter().any(|shape| shape.galley.job.text == name);
             assert_eq!(contains("Rosewood"), source != SearchSource::SoundCloud);
             assert_eq!(
                 contains("Bonobo - Studio Sketch"),
                 source != SearchSource::Spotify
             );
-            assert_eq!(contains("SC"), source != SearchSource::Spotify);
+            assert!(
+                !contains("SC"),
+                "song rows indicate their source on the title"
+            );
+            for (title, source) in [
+                ("Rosewood", crate::ui::kit::Source::Spotify),
+                ("Bonobo - Studio Sketch", crate::ui::kit::Source::SoundCloud),
+            ] {
+                if contains(title) {
+                    source_title_rects(&text, title, source, &app.palette);
+                }
+            }
             assert_eq!(app.search.committed, "Bonobo");
             if source == SearchSource::SoundCloud {
                 assert!(!contains("Albums"));
@@ -5709,7 +5726,7 @@ mod tests {
                 crate::theme::apply(&ctx, &app.palette);
                 app.search.filter = SearchFilter::Songs;
                 let draw = |app: &mut App| {
-                    view_frame_sized(
+                    view_text_shapes(
                         &ctx,
                         app,
                         vec![],
@@ -5719,24 +5736,47 @@ mod tests {
                 };
                 draw(&mut app);
                 let text = draw(&mut app);
-                let heading =
-                    |label: &str| text.iter().rev().find(|(text, _)| text == label).unwrap().1;
+                let heading = |label: &str| {
+                    let shape = text
+                        .iter()
+                        .rev()
+                        .find(|shape| shape.galley.job.text == label)
+                        .unwrap();
+                    shape.galley.rect.translate(shape.pos.to_vec2())
+                };
                 let spotify = heading("Spotify");
                 let soundcloud = heading("SoundCloud");
+                let spotify_title = source_title_rects(
+                    &text,
+                    "Rosewood",
+                    crate::ui::kit::Source::Spotify,
+                    &app.palette,
+                )[0];
+                let soundcloud_title = source_title_rects(
+                    &text,
+                    "Bonobo - Studio Sketch",
+                    crate::ui::kit::Source::SoundCloud,
+                    &app.palette,
+                )[0];
+                assert!(spotify_title.top() >= spotify.bottom());
+                assert!(soundcloud_title.top() >= soundcloud.bottom());
                 if width >= 800.0 {
                     assert_eq!(spotify.top(), soundcloud.top());
                     assert!(soundcloud.left() > spotify.right());
+                    assert!(spotify_title.right() <= soundcloud.left());
+                    assert!(soundcloud_title.left() >= soundcloud.left());
                 } else {
                     assert!(soundcloud.top() > spotify.bottom());
+                    assert!(soundcloud_title.top() > spotify_title.bottom());
                 }
-                assert!(text.iter().any(|(label, _)| label == "SC"));
+                assert!(!text.iter().any(|shape| shape.galley.job.text == "SC"));
                 app.backend.shutdown();
             }
         }
     }
 
     #[test]
-    fn soundcloud_badges_follow_tracks_into_the_queue_and_player_bar() {
+    fn soundcloud_source_indicators_follow_tracks_into_the_queue_and_player_bar() {
         let (ctx, mut app) = accessible_app("soundcloud-queue-player-badges");
         let upload = soundcloud_search_results().tracks.remove(0);
         app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload.clone()));
@@ -5744,15 +5784,62 @@ mod tests {
             currently_playing: Some(PlayableItem::Track(upload.clone())),
             queue: vec![PlayableItem::Track(upload)],
         });
-        for view in [
-            crate::ui::queue::page as fn(&mut App, &mut egui::Ui),
-            crate::ui::player_bar::show,
-        ] {
-            view_frame(&ctx, &mut app, vec![], view);
-            let text = view_frame(&ctx, &mut app, vec![], view);
-            assert!(text.iter().any(|(label, _)| label == "SC"));
-        }
+        view_frame(&ctx, &mut app, vec![], crate::ui::queue::page);
+        let text = view_text_shapes(
+            &ctx,
+            &mut app,
+            vec![],
+            crate::ui::queue::page,
+            egui::vec2(1280.0, 2200.0),
+        );
+        let titles = source_title_rects(
+            &text,
+            "Bonobo - Studio Sketch",
+            crate::ui::kit::Source::SoundCloud,
+            &app.palette,
+        );
+        assert_eq!(
+            titles.len(),
+            2,
+            "both the current and upcoming row carry the source"
+        );
+        assert!(!text.iter().any(|shape| shape.galley.job.text == "SC"));
+
+        // The player bar keeps its source badge until that view is redesigned.
+        view_frame(&ctx, &mut app, vec![], crate::ui::player_bar::show);
+        let text = view_frame(&ctx, &mut app, vec![], crate::ui::player_bar::show);
+        assert!(text.iter().any(|(label, _)| label == "SC"));
         app.backend.shutdown();
+    }
+
+    fn source_title_rects(
+        text: &[egui::epaint::TextShape],
+        title: &str,
+        source: crate::ui::kit::Source,
+        palette: &crate::theme::Palette,
+    ) -> Vec<egui::Rect> {
+        let titles: Vec<_> = text
+            .iter()
+            .filter(|shape| shape.galley.job.text == title)
+            .collect();
+        assert!(!titles.is_empty(), "missing source-colored title {title:?}");
+        titles
+            .into_iter()
+            .map(|shape| {
+                assert!(!shape.galley.job.sections.is_empty());
+                for section in &shape.galley.job.sections {
+                    let color = shape.override_text_color.unwrap_or(
+                        if section.format.color == egui::Color32::PLACEHOLDER {
+                            shape.fallback_color
+                        } else {
+                            section.format.color
+                        },
+                    );
+                    assert_eq!(color, source.color(palette), "source color of {title:?}");
+                }
+                shape.galley.rect.translate(shape.pos.to_vec2())
+            })
+            .collect()
     }
 
     #[test]
@@ -6456,6 +6543,24 @@ mod tests {
         view: fn(&mut App, &mut egui::Ui),
         size: egui::Vec2,
     ) -> Vec<(String, egui::Rect)> {
+        view_text_shapes(ctx, app, events, view, size)
+            .into_iter()
+            .map(|shape| {
+                (
+                    shape.galley.job.text.clone(),
+                    shape.galley.rect.translate(shape.pos.to_vec2()),
+                )
+            })
+            .collect()
+    }
+
+    fn view_text_shapes(
+        ctx: &egui::Context,
+        app: &mut App,
+        events: Vec<egui::Event>,
+        view: fn(&mut App, &mut egui::Ui),
+        size: egui::Vec2,
+    ) -> Vec<egui::epaint::TextShape> {
         let mut output = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
@@ -6465,12 +6570,9 @@ mod tests {
             |ui| view(app, ui),
         );
         output.textures_delta.clear();
-        fn walk(shape: &egui::epaint::Shape, text: &mut Vec<(String, egui::Rect)>) {
+        fn walk(shape: &egui::epaint::Shape, text: &mut Vec<egui::epaint::TextShape>) {
             match shape {
-                egui::epaint::Shape::Text(shape) => text.push((
-                    shape.galley.job.text.clone(),
-                    shape.galley.rect.translate(shape.pos.to_vec2()),
-                )),
+                egui::epaint::Shape::Text(shape) => text.push(shape.clone()),
                 egui::epaint::Shape::Vec(shapes) => {
                     shapes.iter().for_each(|shape| walk(shape, text));
                 }
