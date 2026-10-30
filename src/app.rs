@@ -4089,7 +4089,7 @@ impl App {
         };
         if self.lyrics_uri.as_deref() == Some(now.uri.as_str())
             && self.lyrics_query.as_ref() == Some(&query)
-            && !matches!(self.lyrics, Loadable::NotLoaded | Loadable::Failed(_))
+            && (self.offline || !matches!(self.lyrics, Loadable::NotLoaded | Loadable::Failed(_)))
         {
             return;
         }
@@ -4151,6 +4151,80 @@ impl App {
         if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
             self.request_lyrics();
         }
+    }
+
+    /// Install an invented paused song and its complete lyrics request state.
+    /// This only changes in-memory demo state; no command or file write runs.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn install_demo_track_details(
+        &mut self,
+        track: &Track,
+        lyrics: Loadable<Option<crate::lyrics::Lyrics>>,
+    ) {
+        self.backend.set_offline(true);
+        self.offline = true;
+        self.playback_owner = PlaybackOwner::SpotifyConnect;
+        self.remote = None;
+        self.frame_now = None;
+        self.intent_track = None;
+        self.queued_play = None;
+        self.local_transfer_sequence = None;
+        self.pending_local_position = None;
+        self.optimistic_playing = None;
+        self.local_ready = true;
+        self.local_device_id = Some("local-demo".into());
+        self.local_playback = LocalPlayback::Ready {
+            device_id: "local-demo".into(),
+        };
+        self.local = LocalState {
+            playback: Playback::Paused,
+            track: Some(crate::player::LocalTrack {
+                uri: track.uri.clone(),
+                title: track.name.clone(),
+                artists: track.artists.clone(),
+                album: track
+                    .album
+                    .as_ref()
+                    .map(|album| album.name.clone())
+                    .unwrap_or_default(),
+                art_url: track
+                    .album
+                    .as_ref()
+                    .and_then(|album| pick_image(&album.images, 640))
+                    .map(str::to_owned),
+                art_small_url: track
+                    .album
+                    .as_ref()
+                    .and_then(|album| pick_image(&album.images, 64))
+                    .map(str::to_owned),
+                duration_ms: track.duration_ms,
+                is_episode: false,
+            }),
+            volume: self.settings.volume,
+            ..Default::default()
+        };
+        if let Some(id) = &track.id {
+            self.track_cache.insert(id.clone(), track.clone());
+        }
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_uri = Some(track.uri.clone());
+        self.lyrics_query = Some(crate::lyrics::Query {
+            artist: track
+                .artists
+                .first()
+                .map(|artist| artist.name.clone())
+                .unwrap_or_default(),
+            title: track.name.clone(),
+            album: track
+                .album
+                .as_ref()
+                .map(|album| album.name.clone())
+                .unwrap_or_default(),
+            duration_ms: track.duration_ms,
+        });
+        self.lyrics = lyrics;
+        self.lyrics_following = true;
+        self.lyrics_line_shown = None;
     }
 
     /// Pushes the Winamp window's always-on-top level to the live window.
@@ -15867,6 +15941,49 @@ mod tests {
         assert!(matches!(app.lyrics, Loadable::Loading));
         app.receive_lyrics(&uri, current, Err("Fixture failure".into()));
         assert!(matches!(app.lyrics, Loadable::Failed(_)));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn opening_lyrics_preserves_all_installed_demo_read_states() {
+        let mut app = headless_app();
+        let track = Track {
+            id: Some("0000000000000000000001".into()),
+            uri: "spotify:track:0000000000000000000001".into(),
+            name: "Invented fixture song".into(),
+            artists: vec![crate::api::models::ArtistRef {
+                name: "Demo Artist".into(),
+                ..Default::default()
+            }],
+            duration_ms: 180_000,
+            ..Default::default()
+        };
+        let states = [
+            Loadable::Loading,
+            Loadable::Loaded(None),
+            Loadable::Failed("Fixture failure".into()),
+            Loadable::Loaded(Some(crate::lyrics::Lyrics {
+                lines: vec![crate::lyrics::Line {
+                    at_ms: Some(0),
+                    text: "Invented fixture lyric".into(),
+                }],
+                synced: true,
+                instrumental: false,
+            })),
+        ];
+        let ctx = egui::Context::default();
+        for state in states {
+            app.install_demo_track_details(&track, state.clone());
+            let request = app.lyrics_request;
+            app.show_lyrics_panel = false;
+            app.apply(Action::ToggleLyricsPanel, &ctx);
+            assert_eq!(app.now_playing().unwrap().uri, track.uri);
+            assert_eq!(app.lyrics_request, request);
+            assert_eq!(
+                app.lyrics, state,
+                "opening the panel replaced the fixture state"
+            );
+        }
         app.backend.shutdown();
     }
 

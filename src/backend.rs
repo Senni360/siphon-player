@@ -2382,6 +2382,7 @@ impl Worker {
     }
 
     async fn run(&mut self, mut commands: mpsc::UnboundedReceiver<Command>) {
+        track_details::remove_legacy_isrc_cache(&self.dirs.cache).await;
         self.init_soundcloud();
         self.discover_download_helper();
         let (cache_writes, cache_write_receiver) = mpsc::channel(1);
