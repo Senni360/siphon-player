@@ -64,6 +64,7 @@ pub(super) struct HybridRuntime {
     pub(super) youtube_load: Option<tokio::task::AbortHandle>,
     pub(super) youtube_preload: Option<tokio::task::AbortHandle>,
     pub(super) youtube_context: Option<tokio::task::AbortHandle>,
+    pub(super) youtube_tracks: HashMap<String, tokio::task::AbortHandle>,
 }
 
 impl Worker {
@@ -331,7 +332,13 @@ impl Worker {
                 position_ms,
                 play,
             } => {
-                if let Some(task) = self.hybrid.youtube_load.take() { task.abort(); }
+                if let Some(task) = self.hybrid.youtube_load.take() {
+                    task.abort();
+                }
+                if let Some(task) = self.hybrid.youtube_preload.take() {
+                    task.abort();
+                }
+                self.hybrid.preload_uri = None;
                 self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;
                 self.hybrid.tag = Some(tag);
@@ -342,7 +349,9 @@ impl Worker {
                 self.resume_verify = None;
                 log::info!(
                     "Hybrid playback: load source={} generation={} play={play} position_ms={position_ms} local_engine_ready={}",
-                    if crate::soundcloud::is_track_uri(&track.uri) {
+                    if crate::youtube::is_track_uri(&track.uri) {
+                        "youtube"
+                    } else if crate::soundcloud::is_track_uri(&track.uri) {
                         "soundcloud"
                     } else {
                         "spotify"
@@ -421,7 +430,13 @@ impl Worker {
                             ),
                         });
                     }
-                } else if let Some(stream) = self.hybrid.streams.get(&track.uri).filter(|stream| !crate::youtube::url_expired(&stream.url)).cloned() {
+                } else if let Some(stream) = self
+                    .hybrid
+                    .streams
+                    .get(&track.uri)
+                    .filter(|stream| !crate::youtube::url_expired(&stream.url))
+                    .cloned()
+                {
                     self.load_soundcloud(tag, stream).await;
                 } else {
                     self.resolve_soundcloud_stream(tag, track.uri, false, None);
@@ -431,11 +446,21 @@ impl Worker {
                 if self.hybrid.tag != Some(tag) || self.engine.is_none() {
                     return;
                 }
-                if self.hybrid.preload_uri.as_ref() == Some(&track.uri) { return; }
-                if let Some(task) = self.hybrid.youtube_preload.take() { task.abort(); }
+                if self.hybrid.preload_uri.as_ref() == Some(&track.uri) {
+                    return;
+                }
+                if let Some(task) = self.hybrid.youtube_preload.take() {
+                    task.abort();
+                }
                 self.hybrid.preload_uri = Some(track.uri.clone());
                 if crate::youtube::is_external(&track.uri) {
-                    if let Some(stream) = self.hybrid.streams.get(&track.uri).filter(|stream| !crate::youtube::url_expired(&stream.url)).cloned() {
+                    if let Some(stream) = self
+                        .hybrid
+                        .streams
+                        .get(&track.uri)
+                        .filter(|stream| !crate::youtube::url_expired(&stream.url))
+                        .cloned()
+                    {
                         if let Some(engine) = &self.hybrid.engine {
                             engine.command(sc::Command::Preload(stream));
                         }
@@ -763,6 +788,9 @@ impl Worker {
     }
 
     fn resolve_hybrid_context(&mut self, generation: u64, uri: String) {
+        if let Some(task) = self.hybrid.youtube_context.take() {
+            task.abort();
+        }
         if crate::youtube::is_track_uri(&uri) {
             self.resolve_youtube_context(generation, uri);
             return;

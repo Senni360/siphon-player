@@ -201,7 +201,7 @@ fn download_request(job: &str, source: &Source, url: &str) -> Value {
     // The helper does not read chrome.storage.sync or accept tag overrides.
     let all = matches!(source, Source::SoundCloud { all: true, .. });
     json!({"type": "download", "jobId": job, "url": url,
-        "source": if matches!(source, Source::Spotify(_)) { "youtube" } else { "soundcloud" },
+        "source": if matches!(source, Source::SoundCloud { .. }) { "soundcloud" } else { "youtube" },
         "options": if all { json!({"playlist": "all"}) } else { json!({}) }})
 }
 
@@ -334,7 +334,7 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         let progress_event = |progress| emit(Event::Progress { id, progress });
         progress_event(progress.clone());
         let url = match &source {
-            Source::SoundCloud { url, .. } => Ok(url.clone()),
+            Source::SoundCloud { url, .. } | Source::YouTube { url, .. } => Ok(url.clone()),
             Source::Spotify(track) => session.spotify_match(track).await,
         };
         let result = match url {
@@ -639,7 +639,7 @@ mod tests {
             .unwrap();
         assert_eq!(hello["ffmpeg"]["found"], true);
         let url = match &source {
-            Source::SoundCloud { url, .. } => url.clone(),
+            Source::SoundCloud { url, .. } | Source::YouTube { url, .. } => url.clone(),
             Source::Spotify(track) => session
                 .spotify_match(track)
                 .await

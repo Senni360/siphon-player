@@ -262,8 +262,6 @@ impl SlowAppBanner {
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-    /// YouTube likes and row metadata stay on this computer.
-    pub youtube_likes: Vec<crate::api::models::Track>,
     /// The Spotify Connect name other devices see.
     pub device_name: String,
     /// 96, 160, or 320 kbps.
@@ -485,7 +483,6 @@ impl Default for Settings {
     /// settings files, including an inactive playlist ownership filter.
     fn default() -> Self {
         Self {
-            youtube_likes: Vec::new(),
             device_name: crate::brand::NAME.to_string(),
             bitrate: 320,
             normalisation: false,

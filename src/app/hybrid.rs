@@ -184,8 +184,10 @@ impl App {
     /// in a view, media-key adapter or platform integration.
     pub(super) fn dispatch_hybrid_action(&mut self, action: &Action) -> bool {
         let start = match action {
-            Action::Search(text) | Action::OpenLink(text) if crate::youtube::parse(text).is_some() => Some((
-                PlayRequest::context(crate::youtube::parse(text).unwrap()), false, None,
+            Action::Search(text) if crate::youtube::parse(text).is_some() => Some((
+                PlayRequest::context(crate::youtube::parse(text).unwrap()),
+                false,
+                None,
             )),
             Action::Search(text) if crate::link::soundcloud_url(text).is_some() => Some((
                 PlayRequest::context(crate::link::soundcloud_url(text).unwrap()),
@@ -313,9 +315,7 @@ impl App {
             _ => None,
         };
         if let Some((tracks, position)) = additions {
-            let foreign = tracks
-                .iter()
-                .any(|t| crate::youtube::is_external(&t.uri));
+            let foreign = tracks.iter().any(|t| crate::youtube::is_external(&t.uri));
             if !self.hybrid_owned() && !foreign {
                 return false;
             }
@@ -791,6 +791,13 @@ impl App {
     }
 
     fn loaded_hybrid_context(&self, uri: &str) -> Option<Context> {
+        if uri == "youtube:likes" {
+            return Some(Context {
+                uri: uri.into(),
+                name: "YouTube Likes".into(),
+                tracks: self.youtube_likes()?.to_vec(),
+            });
+        }
         if self.own_soundcloud_likes_context(uri) {
             return (self.soundcloud_library.snapshot.likes_loaded
                 && self.soundcloud_library.snapshot.next_likes.is_none())
@@ -900,7 +907,9 @@ impl App {
     }
 
     fn hybrid_context_name(&self, uri: &str) -> String {
-        if uri == "youtube:likes" { return "YouTube Likes".into(); }
+        if uri == "youtube:likes" {
+            return "YouTube Likes".into();
+        }
         if uri.starts_with("soundcloud:likes:") {
             return gettext(self.locale, "SoundCloud Likes").into_owned();
         }
@@ -961,7 +970,14 @@ impl App {
     }
 
     pub(super) fn hybrid_cached_track(&self, uri: &str) -> Option<Track> {
-        if let Some(track) = self.settings.youtube_likes.iter().find(|track| track.uri == uri) { return Some(track.clone()); }
+        if let Some(track) = self
+            .youtube_likes()
+            .unwrap_or_default()
+            .iter()
+            .find(|track| track.uri == uri)
+        {
+            return Some(track.clone());
+        }
         self.hybrid
             .queue
             .current()
