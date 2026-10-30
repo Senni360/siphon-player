@@ -52,6 +52,12 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   upload endpoint, participant authentication or production route. See the
   [service runbook](https://github.com/Senni360/siphon-player/tree/main/services/media-gateway)
   for exact limits, configuration and the separately required deployment review.
+- `services/media-gateway/src/uploads.mjs` is an isolated SQLite admission and
+  cancellation ledger, with ownership, quota reservations, bounded part leases,
+  resume identity checks and cleanup reconciliation. Its
+  [integration contract](https://github.com/Senni360/siphon-player/blob/main/services/media-gateway/UPLOADS.md)
+  documents the missing authentication, direct-storage signer, verifier and
+  native uploader. No Worker route or upload capability is enabled by it.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -378,3 +384,9 @@ isolation. No real receiver, acoustic measurement, two-computer room or
 cloud-hosted expiry/revocation/cleanup was validated. Generated test audio
 stayed in disposable local storage; no infrastructure was changed. Measured
 synchronization: **none**.
+
+The isolated upload ledger has 19 deterministic SQLite tests; all
+46 service tests pass on Windows. It validates admission and cancellation state,
+not real multipart storage or native upload behavior. Latest GitHub jobs for
+`ab53cbb` did not start: the account reports failed payments or a spending limit.
+No billing setting was changed, and the macOS socket-path rerun remains pending.

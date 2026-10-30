@@ -398,5 +398,7 @@ test("unknown routes, insecure origins, duplicate query grants and encoded paths
   assert.equal((await f.request(`/v1/media/${assetId}?grant=${capability}&grant=${capability}`)).status, 404);
   assert.equal((await f.request(`/v1/media/%2e%2e%2fsecret?grant=${capability}`)).status, 404);
   assert.equal((await f.request("/upload", { method: "POST", body: "no" })).status, 404);
+  assert.equal((await f.request("/v1/uploads", { method: "POST", body: "no" })).status, 404);
+  assert.equal((await f.admin("PUT", `/admin/uploads/${assetId}`, { explicit_selection: true })).status, 404);
   assert.equal(f.bucket.calls.length, 0);
 });

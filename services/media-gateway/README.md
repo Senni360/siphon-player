@@ -15,6 +15,10 @@ without buffering the file in the Worker. Nothing goes through the website or
 a Vercel Function. This singleton is a bounded technical spike, not a room
 service or a scalable general media-hosting design.
 
+The separate [upload ledger](UPLOADS.md) is an isolated milestone-2 foundation
+for reservations, bounded part progress, cancellation races and cleanup. It has
+no HTTP route, signer or storage executor and does not enable uploads here.
+
 ## Run locally
 
 Node 24 or later is sufficient. There are no npm dependencies and no install

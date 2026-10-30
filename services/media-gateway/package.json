@@ -3,5 +3,5 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24" },
-  "scripts": { "test": "node --test test/*.test.mjs", "check": "node --check src/gateway.mjs && node --check src/registry.mjs && node --check admin.mjs" }
+  "scripts": { "test": "node --test test/*.test.mjs", "check": "node --check src/gateway.mjs && node --check src/registry.mjs && node --check src/uploads.mjs && node --check admin.mjs" }
 }
