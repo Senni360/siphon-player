@@ -13129,8 +13129,10 @@ impl App {
                 // Open links off the UI thread with the platform-specific
                 // launcher used elsewhere in the app.
                 std::thread::spawn(move || {
-                    if let Err(error) = crate::opener::open(&url) {
-                        log::warn!("unable to open {url}: {error}");
+                    if crate::opener::open(&url).is_err() {
+                        // A shared link may be an unlisted video or carry a
+                        // private SoundCloud secret. Keep it out of logs.
+                        log::warn!("unable to open external link");
                     }
                 });
             }
