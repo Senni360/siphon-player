@@ -7,13 +7,21 @@ The existing **Normalisation** setting controls all local sources. Off leaves
 decoded levels unchanged (EQ, volume and the final peak limiter still apply).
 There is no additional setting or source-specific volume slider.
 
-Spotify keeps librespot's supplied track gain, with explicit zero dB pregain
-and track mode instead of automatic album mode. Spotify's
+Spotify keeps librespot's supplied track gain, with explicit zero dB pregain,
+track mode instead of automatic album mode, and dynamic normalisation. The
+pinned librespot revision `3ba977f1f918582edce566cfc16617f8eccdfb1e`
+applies `10^((track_gain_db + normalisation_pregain_db) / 20)` in
+[`NormalisationData::get_factor`](https://github.com/crmne/librespot/blob/3ba977f1f918582edce566cfc16617f8eccdfb1e/playback/src/player.rs).
+Its [`PlayerConfig`](https://github.com/crmne/librespot/blob/3ba977f1f918582edce566cfc16617f8eccdfb1e/playback/src/config.rs)
+defaults supply a -2 dBFS dynamic-limiter threshold, 5 ms attack, 100 ms release
+and 5 dB knee; Siphon retains those values. No LUFS target is hardcoded in that
+gain calculation: Spotify supplies the measured gain. Spotify's
 [published track reference is -14 LUFS](https://support.spotify.com/us/artists/article/loudness-normalization/).
 Keeping the supplied measurement avoids decoding whole Spotify songs before
 playback or estimating them from a short intro. Spotify metadata is trusted;
 it is not remeasured, so exact agreement with every historical master is not
-guaranteed. Track mode deliberately matches individual tracks across sources
+guaranteed. Missing gain metadata falls back to zero dB, not a fresh LUFS
+measurement. Track mode deliberately matches individual tracks across sources
 rather than preserving relative album levels.
 
 All external PCM uses the same pure Rust `ebur128` gated integrated R128
@@ -21,8 +29,10 @@ measurement at stereo 44.1 kHz, before EQ, volume or limiting. Gain is
 `-14 LUFS + 0 dB pregain - measured LUFS`. This uses R128's measurement method,
 not its broadcast playback target of -23 LUFS. Boost is capped at 12 dB and
 attenuation at 30 dB; silence never produces a gain estimate. The existing
-final limiter remains after gain and EQ and protects boosted peaks. Strong
-EQ, limiting, different masters and exceptionally quiet recordings can keep
+final limiter remains after gain and EQ and protects boosted peaks. Spotify
+also has its upstream dynamic limiter, while external sources use Siphon's
+existing final limiter (a -1 dBFS threshold and 2 dB knee). Their peak handling
+therefore differs. Strong EQ, limiting, different masters and exceptionally quiet recordings can keep
 the audible result from exactly reaching the reference.
 
 On the first play, SoundCloud decodes up to three seconds ahead and measures
@@ -48,6 +58,20 @@ whole-track value with a fragment; shorter prefixes cannot overwrite longer
 ones. Later plays start immediately at the cached gain. A completed measurement
 stays fixed during subsequent playback so quiet and loud passages retain their
 dynamics. Delete the record to remeasure a source whose content has changed.
+Seeks and decoder rebuilds of the current track retain its in-memory gain and
+pending checkpoint, so a delayed atomic write cannot cause a sudden return to
+the conservative starting level.
+
+An account transition must call `ExternalOutput::invalidate_loudness_cache()`
+on a backend worker before admitting new-account loads. The operation clears
+the active identity and measurement, removes the cache directory, and advances
+a generation shared by all live processors for that directory. Atomic writes
+hold the same barrier; an old queued write cannot recreate a cleared record.
+A continuing decoder retains its audible gain but cannot cache under the old
+identity. Deletion failures are returned and disable cache reads/writes for
+that generation; the coordinator must report/retry them. The method waits for
+disk and never belongs on the UI thread. It does not authorize or cancel any
+account request; those remain the backend's responsibility.
 
 ## External source API
 
@@ -65,3 +89,14 @@ without lookahead still start conservatively and converge. Call
 save a partial measurement; reset of EQ/limiter state must not reset track
 measurement on pause. These methods run on playback workers, never the UI
 thread. The redesign only needs to surface the existing normalisation toggle.
+
+## Validation limits
+
+Synthetic tests cover R128 reference tones, silence, capped gain, per-frame
+ramps, a quiet intro followed by loud audio through the final limiter,
+lookahead replay, cache generations, seek continuity and exact normalisation
+bypass. Decoder fixtures check buffered PCM is emitted once. These checks do
+not listen to an output device or verify Spotify's gain metadata for a live
+recording. Windows validation still needs source transitions, seeking,
+pause/resume, normalisation on/off, boosted EQ/limiter behavior, and audible
+first-play versus cached-play comparison using a separate test profile.
