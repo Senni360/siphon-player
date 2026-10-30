@@ -219,6 +219,9 @@ zbus = { version = "5", default-features = false, features = ["tokio"] }
 x11rb = { version = "0.13", default-features = false }
 
 [build-dependencies]
+# The icon and version information also need a host-side resource compiler when
+# cross-building Windows from Linux. Used only when the target OS is Windows.
+winresource = "0.1"
 # Drops unfinished PO entries and compiles catalog text and gettext plural
 # expressions to Rust. Ordinary builds do not need gettext tools.
 fastframe-i18n = { git = "https://github.com/crmne/fastframe", tag = "v0.15.2", features = ["build"] }
@@ -230,10 +233,6 @@ polib = "0.3"
 tokio = { version = "1", features = ["test-util"] }
 # Pins that installed copies keep the folders they had before fastframe-dirs.
 directories = "6"
-
-# The icon and version information Windows shows for the executable.
-[target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"
 
 [features]
 default = []
