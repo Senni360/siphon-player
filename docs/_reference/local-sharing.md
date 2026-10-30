@@ -107,6 +107,10 @@ the provider feasibility gates in this plan remain in force.
   and derives aggregate owner presence in the same transaction. Authentication,
   actual connections, alarm delivery and native decoder/output integration are
   still absent.
+  A [local reconnect harness](https://github.com/Senni360/siphon-player/blob/main/services/party-room/RECONNECT.md)
+  now combines two journaled clients, their clocks and the session authority
+  through a bounded simulated JSON wire. It tests fault recovery, not a real
+  transport, two computers or audio synchronization.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -679,3 +683,28 @@ The preceding `1ceb150` gateway run was refused before steps by GitHub's
 billing/spending restriction. These Windows results do not establish new Linux,
 macOS, native UI, real-account, device or audio acceptance. No billing changes
 were made, and the published combined native changes were preserved.
+
+The local reconnect checkpoint adds fourteen integrated fault scenarios,
+bringing the Windows room suite to 218. Lost/reordered/duplicate messages,
+journal reopening, old-session readiness, missed heartbeats and exhausted
+receipts preserve the existing command and optimistic-intent contracts. A
+regression demonstrated that a recreated clock can reuse an earlier instance's
+probe and generation numbers; the reference host now fences the actual
+connection before delivering a reply. It also rechecks the connection at the
+send boundary after durable packet release. These are requirements for the
+future transport adapter, not a claim that a production socket layer exists.
+The fixture uses deterministic clocks and separate in-memory SQLite stores on
+one computer. It opens no server and changes no infrastructure, secrets, upload
+quotas, retention or provider behavior. Real synchronization remains unmeasured.
+
+Required Windows checks passed after correcting a timing assumption in the
+existing native stale-seek/pause regression (`439c577`). That test now verifies
+the emitted seek target and the position actually frozen by Pause, rather than
+assuming Seek and Pause execute within the same millisecond. No player behavior
+changed. Both Clippy configurations, all-target suites (library 1865/1908
+passing, eight ignored each), doctests, warning-strict rustdoc, formatting and
+policy checks pass. All 218 room tests, 23 local Durable Object scenarios and
+60 media-service tests pass. Launcher checks retain three failures/five errors;
+Jekyll remains unavailable without Bundler. The preceding `4a3127e` gateway run
+was refused before steps by the confirmed GitHub billing/spending restriction.
+No new Linux/macOS, cloud, hardware or native-interface acceptance is claimed.

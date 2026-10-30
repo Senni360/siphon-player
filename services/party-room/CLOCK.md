@@ -49,6 +49,13 @@ changed epoch or incompatible server-clock samples, obtain a fresh room snapshot
 and begin a new connection generation. Do not reuse the old estimate while
 collecting new samples. Merely having a ready clock does not authorize playback.
 
+Connection generations and probe IDs are local to one `RoomClock` instance.
+After reconstructing the object, its counters can collide with an earlier
+instance. The transport must reject replies from old connection objects before
+calling `accept`, even if their numeric counters match. The
+[reconnect harness](RECONNECT.md) covers this collision and the required host
+fence. No socket-level fence is implemented by the clock model itself.
+
 ## Bounds and calculation
 
 | Bound | Pilot value |

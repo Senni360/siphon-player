@@ -163,7 +163,7 @@ Production authentication/revocation, connection heartbeat delivery, alarms,
 rate limits, cross-room quotas, retention, native journal integration, decoder
 readiness, output control and physical-device handoff remain absent. No hosted
 party, second computer, Chromecast or audible synchronization was tested. M1
-cloud/hardware acceptance remains open. The next bounded integration can exercise
-the session-bound client and authority through a local-only disconnect/reconnect
-transport harness, preserving the existing journal and command identities,
-before any public endpoint or playback integration.
+cloud/hardware acceptance remains open. The
+[local reconnect harness](RECONNECT.md) now exercises the session-bound client,
+journal, clock and authority together with synthetic faults. Production
+transport, authentication and playback integration remain absent.

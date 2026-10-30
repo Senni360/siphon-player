@@ -5,7 +5,8 @@
   "engines": { "node": ">=24" },
   "scripts": {
     "test": "node --test test/*.test.mjs",
+    "test:reconnect": "node --test test/reconnect.test.mjs",
     "test:runtime": "node test/runtime/queue.mjs",
-    "check": "node --check src/queue.mjs && node --check src/readiness.mjs && node --check src/sessions.mjs && node --check src/client.mjs && node --check src/journal.mjs && node --check src/sqlite-journal.mjs && node --check src/timeline.mjs && node --check src/clock.mjs && node --check test/runtime/queue.mjs && node --check test/runtime/queue.worker.mjs && node --check test/runtime/sessions.worker.mjs"
+    "check": "node --check src/queue.mjs && node --check src/readiness.mjs && node --check src/sessions.mjs && node --check src/client.mjs && node --check src/journal.mjs && node --check src/sqlite-journal.mjs && node --check src/timeline.mjs && node --check src/clock.mjs && node --check test/support/reconnect-harness.mjs && node --check test/runtime/queue.mjs && node --check test/runtime/queue.worker.mjs && node --check test/runtime/sessions.worker.mjs"
   }
 }

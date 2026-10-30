@@ -20,6 +20,11 @@ npm run check
 npm test
 ```
 
+`npm run test:reconnect` runs the bounded
+[two-participant fault rehearsal](RECONNECT.md). It combines the session
+authority, client journals and clocks through a simulated JSON wire, including
+lost acknowledgements and old-connection counter collisions. It opens no socket.
+
 The tests use real SQLite through Node's built-in `node:sqlite`, fake membership
 and media authorities, and deterministic clocks. They include the actual upload
 ledger from `services/media-gateway`. No audio, network, library scan or provider
@@ -297,3 +302,10 @@ pauses at the original last-owner expiry plus grace. The existing optimistic
 client contract remains intact. The proof adapter is default-denied; tests use
 fake connection proofs. No authenticator, endpoint, native output, scheduler or
 deployment was added. See [SESSIONS.md](SESSIONS.md) for the integration boundary.
+
+The reconnect harness adds fourteen integration scenarios, bringing the room
+suite to 218. It verifies unchanged retry packets, pending intent, journal
+reopening, session/output fencing and fresh clock sampling together. It also
+demonstrates two required host checks: fence inbound replies by the active
+connection before consulting recreated cores, and recheck that connection at
+actual send time after durable packet release. Production adapters remain absent.

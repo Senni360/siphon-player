@@ -76,6 +76,9 @@ The host must not bypass this wrapper with the raw in-memory client's
 `outbound()`. It must also bind returned packets to the same active authenticated
 session and serialize actual socket dispatch. This library neither authenticates
 connections nor implements exclusive native-process ownership of a journal.
+Recheck that captured connection at the actual send boundary, including after
+any await following `outbound()`. The [reconnect harness](RECONNECT.md) tests a
+disconnect in that gap and requires the original packet to remain journaled.
 
 ## Local SQLite adapter
 
