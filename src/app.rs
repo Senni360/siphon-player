@@ -34991,7 +34991,20 @@ mod tests {
         app.apply(Action::Next, &ctx);
         let tag = app.hybrid_tag().unwrap();
         app.apply(Action::Seek(15_000), &ctx);
+        assert!(app.backend.take_hybrid_commands().iter().any(|command| {
+            matches!(
+                command,
+                crate::backend::HybridCommand::Seek {
+                    position_ms: 15_000,
+                    ..
+                }
+            )
+        }));
         app.apply(Action::TogglePlay, &ctx);
+        // Playback may advance between Seek and Pause. The stale echo must
+        // preserve the position Pause froze, not assume both ran in one ms.
+        let paused_position = app.now_playing().unwrap().position_ms;
+        assert!(paused_position >= 15_000);
         app.handle_hybrid_event(
             tag,
             crate::player::HybridEvent::State(Box::new(LocalState {
@@ -35006,7 +35019,7 @@ mod tests {
             })),
         );
         let now = app.now_playing().unwrap();
-        assert_eq!(now.position_ms, 15_000);
+        assert_eq!(now.position_ms, paused_position);
         assert!(!now.playing);
         app.handle_hybrid_event(
             tag,
