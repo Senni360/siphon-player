@@ -253,14 +253,23 @@ out, or a reconnection that gives up stops it.
   when a song starts, even when no view on screen is showing it. Linux MPRIS
   carries the Spotify artwork URL for the desktop to resolve and asks for
   nothing extra.
-- Lyrics, in the cache directory, for a month.
+- Positive lyrics, in the cache directory, for a month, written atomically.
+  Missing answers are not persisted. External-source lookup and the
+  session-only ISRC mapping cache are described in
+  [Track details](/track-details/).
 - Liked Songs metadata, scoped to the verified account, in the cache directory.
   This behavior is available since 0.8.0.
   Cached pages less than 15 minutes old need no repeat request. Older cached
   prefixes refresh through the existing Web API grant, one page at a time,
   while the saved rows remain visible. Manual refresh starts immediately.
   Like and Unlike are kept over lagging reads until Spotify confirms them.
-- Siphon has no telemetry, analytics, or hosted service. When the lyrics
+- Siphon has no telemetry or analytics. An optional owner-configured private
+  Friends service receives explicitly shared metadata and source links,
+  including private SoundCloud tokens when those links are shared. It receives
+  no Spotify or SoundCloud account grants. The group bearer uses an independent
+  protected credential slot. See the repository's `services/friends/README.md`
+  for its API, deployment setup, membership revocation and local-forget rules.
+  When the lyrics
   panel is open and neither Spotify nor a local file has lyrics, it sends
   the track's artist, title, album, and length to
   [lrclib.net](https://lrclib.net). It also checks

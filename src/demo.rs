@@ -5,6 +5,8 @@
 //! content. Cover art comes from a public placeholder service so the artwork
 //! pipeline (download, disk cache, accent colour) is exercised too.
 
+pub mod siphon;
+
 use std::time::Instant;
 
 use jiff::{SignedDuration, Timestamp};
@@ -1294,6 +1296,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            name if siphon::Scenario::from_flag(name).is_some() => {
+                siphon::apply(app, siphon::Scenario::from_flag(name).unwrap());
+            }
             "downloads-ready" => app.downloads.available = true,
             "downloads" => {
                 app.downloads.available = true;
@@ -1562,9 +1567,8 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             | "lyrics-instrumental"
             | "lyrics-no-playback" => {
                 app.show_lyrics_panel = true;
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 app.lyrics_following = false;
-                app.lyrics = match surface {
+                let lyrics = match surface {
                     "lyrics-empty" => Loadable::Loaded(None),
                     "lyrics-loading" => Loadable::Loading,
                     "lyrics-error" => Loadable::Failed("Connection interrupted".into()),
@@ -1574,6 +1578,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                         Loadable::Loaded(Some(lyrics))
                     }
                 };
+                app.install_demo_lyrics(lyrics);
                 if surface == "lyrics-no-playback" {
                     app.remote = None;
                 }
@@ -1865,8 +1870,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 );
             }
             "lyrics" | "lyrics-fullscreen" => {
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
-                app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+                app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 if surface == "lyrics-fullscreen" {
@@ -1876,10 +1880,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             // Full-screen lyrics drawn in the window as it is, for shots at
             // a chosen size, which a real full screen would override.
             "lyrics-fullscreen-view" | "lyrics-fullscreen-instrumental" => {
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 let mut lyrics = sample_lyrics();
                 lyrics.instrumental = surface == "lyrics-fullscreen-instrumental";
-                app.lyrics = Loadable::Loaded(Some(lyrics));
+                app.install_demo_lyrics(Loadable::Loaded(Some(lyrics)));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 app.lyrics_fullscreen = Some(false);
@@ -3017,8 +3020,7 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("translated-lyrics-{locale:?}"));
             app.locale = locale;
             app.show_lyrics_panel = true;
-            app.lyrics_uri = app.now_playing().map(|now| now.uri);
-            app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+            app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
             app.lyrics_following = false;
             accessible_frame(&ctx, &mut app, vec![]);
             let tree = accessible_frame(&ctx, &mut app, vec![]);
@@ -3063,7 +3065,7 @@ mod tests {
             assert!(app.lyrics_fullscreen.is_none());
             for fullscreen in [false, true] {
                 app.lyrics_fullscreen = fullscreen.then_some(false);
-                app.lyrics = Loadable::Failed("fixture failure".into());
+                app.install_demo_lyrics(Loadable::Failed("fixture failure".into()));
                 let tree = accessible_frame(&ctx, &mut app, vec![]);
                 let retry = accessible_node(&tree, &gettext(locale, "Try again"), Role::Button);
                 accessible_frame(
@@ -3095,7 +3097,6 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("translated-panel-states-{locale:?}"));
             app.locale = locale;
             app.show_lyrics_panel = true;
-            app.lyrics_uri = app.now_playing().map(|now| now.uri);
             for fullscreen in [false, true] {
                 app.lyrics_fullscreen = fullscreen.then_some(false);
                 let view = |app: &mut App, ui: &mut egui::Ui| app.frame_ui(ui);
@@ -3132,7 +3133,7 @@ mod tests {
                         vec![sample_lyrics().lines[0].text.clone()],
                     ),
                 ] {
-                    app.lyrics = state;
+                    app.install_demo_lyrics(state);
                     app.lyrics_following = false;
                     view_frame(&ctx, &mut app, vec![], view);
                     let painted = view_frame(&ctx, &mut app, vec![], view);
@@ -8659,7 +8660,7 @@ mod tests {
         populate(&mut app);
         app.settings.queue_width = crate::theme::SIDE_PANEL_MIN_WIDTH;
         app.settings.lyrics_width = crate::theme::SIDE_PANEL_MIN_WIDTH;
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.lyrics_following = false;
 
         let input = egui::RawInput {
@@ -8866,7 +8867,7 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("sung-line-{fullscreen}"));
             app.show_lyrics_panel = true;
             app.lyrics_fullscreen = Some(fullscreen);
-            app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+            app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
             app.lyrics_following = true;
             let remote = app.remote.as_mut().unwrap();
             remote.state.is_playing = false;
@@ -8979,7 +8980,7 @@ mod tests {
         ] {
             let (ctx, mut app) = accessible_app("lyrics-centred-while-loading");
             apply_flags(&mut app, None, Some("lyrics-fullscreen-view"));
-            app.lyrics = state;
+            app.install_demo_lyrics(state);
             let mut shapes = Vec::new();
             for frame in 0..10 {
                 let mut output = ctx.run_ui(
@@ -9030,7 +9031,7 @@ mod tests {
         populate(&mut app);
         app.show_lyrics_panel = true;
         app.lyrics_fullscreen = Some(false);
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.lyrics_following = false;
         let mut sizes = Vec::new();
         for (step, position) in [0, 41_000].into_iter().enumerate() {
@@ -9144,8 +9145,7 @@ mod tests {
         }
         frame(&ctx, &mut app);
         app.manual_queue.clear();
-        app.lyrics_uri = app.now_playing().map(|now| now.uri);
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.show_lyrics_panel = true;
         frame(&ctx, &mut app);
         app.lyrics_fullscreen = Some(false);

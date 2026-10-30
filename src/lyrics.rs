@@ -29,9 +29,28 @@ const RATE_LIMIT_RETRIES: u32 = 3;
 /// and a click on it asks again.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(5);
 
-/// Lyrics providers only support Spotify catalogue tracks and matched local files.
+/// Sources with a lyrics route. Non-Spotify sources require strict matching.
 pub fn supports_uri(uri: &str) -> bool {
-    uri.starts_with("spotify:track:") || uri.starts_with("spotify:local:")
+    uri.starts_with("spotify:track:")
+        || uri.starts_with("spotify:local:")
+        || crate::soundcloud::track_id(uri).is_some()
+        || uri.strip_prefix("youtube:video:").is_some_and(|id| {
+            id.len() == 11
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        })
+}
+
+/// Only a catalogue URI or a verified SoundCloud ISRC mapping may ask Spotify.
+pub fn spotify_uri<'a>(uri: &'a str, matched: Option<&'a str>) -> Option<&'a str> {
+    if uri.starts_with("spotify:track:") {
+        Some(uri)
+    } else if crate::soundcloud::track_id(uri).is_some() {
+        matched.filter(|uri| uri.starts_with("spotify:track:"))
+    } else {
+        None
+    }
 }
 
 /// Track metadata used for lyrics lookup.
@@ -117,7 +136,7 @@ pub fn cached(path: &Path) -> Option<Option<Lyrics>> {
     read_cache(&path.to_path_buf())
 }
 
-/// Remember an answer at `path`, `None` included.
+/// Atomically remember a positive answer at `path`.
 pub fn store(path: &Path, found: &Option<Lyrics>) {
     write_cache(path, found);
 }
@@ -129,8 +148,8 @@ pub async fn fetch(
     query: &Query,
 ) -> Result<Option<Lyrics>> {
     let cache_path = cache_dir.join(format!("{}.json", cache_key(query)));
-    if let Some(cached) = read_cache(&cache_path) {
-        return Ok(cached);
+    if let Some(Some(cached)) = read_cache(&cache_path) {
+        return Ok(Some(cached));
     }
     let found = lookup(http, query).await?;
     write_cache(&cache_path, &found);
@@ -170,6 +189,75 @@ async fn lookup(http: &reqwest::Client, query: &Query) -> Result<Option<Lyrics>>
     .await?
     .unwrap_or_default();
     Ok(pick(candidates, query).and_then(|record| record.lyrics()))
+}
+
+/// LRCLIB for SoundCloud and YouTube. This deliberately has a separate cache
+/// namespace and never strips version, remix, live or featured-artist labels.
+pub async fn fetch_strict(
+    http: &reqwest::Client,
+    cache_dir: &Path,
+    query: &Query,
+) -> Result<Option<Lyrics>> {
+    fetch_strict_from(http, API, cache_dir, query).await
+}
+
+async fn fetch_strict_from(
+    http: &reqwest::Client,
+    api: &str,
+    cache_dir: &Path,
+    query: &Query,
+) -> Result<Option<Lyrics>> {
+    let path = cache_dir.join(format!("strict-v1-{}.json", cache_key(query)));
+    if let Some(Some(cached)) = read_cache(&path) {
+        return Ok(Some(cached));
+    }
+    let found = lookup_strict(http, api, query).await?;
+    write_cache(&path, &found);
+    Ok(found)
+}
+
+async fn lookup_strict(http: &reqwest::Client, api: &str, query: &Query) -> Result<Option<Lyrics>> {
+    if query.duration_ms == 0
+        || normalize(&query.artist).is_empty()
+        || normalize(&query.title).is_empty()
+    {
+        return Ok(None);
+    }
+    let duration = (f64::from(query.duration_ms) / 1000.0).to_string();
+    let params = [
+        ("artist_name", query.artist.as_str()),
+        ("track_name", query.title.as_str()),
+        ("duration", duration.as_str()),
+    ];
+    if let Some(record) = get_from::<Record>(http, api, "/get", &params).await?
+        && strict_match(&record, query)
+        && let Some(lyrics) = record.lyrics()
+    {
+        return Ok(Some(lyrics));
+    }
+    let records = get_from::<Vec<Record>>(http, api, "/search", &params[..2])
+        .await?
+        .unwrap_or_default();
+    Ok(records
+        .into_iter()
+        .filter(|record| strict_match(record, query))
+        .filter_map(|record| record.lyrics())
+        .max_by_key(|lyrics| lyrics.synced))
+}
+
+fn strict_match(record: &Record, query: &Query) -> bool {
+    let artist = normalize(&query.artist);
+    let title = normalize(&query.title);
+    !artist.is_empty()
+        && !title.is_empty()
+        && normalize(&record.artist_name) == artist
+        && normalize(&record.track_name) == title
+        && query.duration_ms > 0
+        && record.duration.is_some_and(|duration| {
+            duration.is_finite()
+                && duration > 0.0
+                && (duration - f64::from(query.duration_ms) / 1000.0).abs() <= 2.0
+        })
 }
 
 /// One LRCLIB request. A 404 is "nobody has transcribed this" and a 400 is
@@ -662,13 +750,15 @@ fn read_cache(path: &PathBuf) -> Option<Option<Lyrics>> {
 }
 
 fn write_cache(path: &Path, found: &Option<Lyrics>) {
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
+    // A missing answer can change with metadata, account access or the
+    // provider's catalogue. Keep it only in the current UI request state.
+    if found.is_none() {
+        return;
     }
     if let Ok(text) = serde_json::to_string(&Cached {
         found: found.clone(),
     }) {
-        let _ = std::fs::write(path, text);
+        let _ = fastframe_file::write(path, text);
     }
 }
 
@@ -677,7 +767,7 @@ mod tests {
     use super::*;
 
     /// A local LRCLIB that gives each request, in turn, one of `answers`.
-    async fn lrclib(answers: Vec<&'static str>) -> (String, tokio::task::JoinHandle<()>) {
+    async fn lrclib(answers: Vec<String>) -> (String, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -694,10 +784,92 @@ mod tests {
 
     const LIMITED: &str = "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
 
+    fn json_response(value: serde_json::Value) -> String {
+        let body = value.to_string();
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[test]
+    fn strict_matching_preserves_versions_artists_and_two_second_boundary() {
+        let query = Query {
+            title: "Song (Live Remix) feat. Guest".into(),
+            artist: "Artist & Guest".into(),
+            album: "YouTube".into(),
+            duration_ms: 200_000,
+        };
+        let mut candidate = record("song live remix feat guest", "ARTIST & GUEST", 202.0, true);
+        assert!(strict_match(&candidate, &query));
+        candidate.duration = Some(202.001);
+        assert!(!strict_match(&candidate, &query));
+        candidate.duration = Some(200.0);
+        candidate.track_name = "Song".into();
+        assert!(!strict_match(&candidate, &query));
+        candidate.track_name = query.title.clone();
+        candidate.artist_name = "Artist".into();
+        assert!(!strict_match(&candidate, &query));
+        candidate.artist_name = query.artist.clone();
+        for duration in [None, Some(0.0), Some(f64::NAN), Some(f64::INFINITY)] {
+            candidate.duration = duration;
+            assert!(!strict_match(&candidate, &query));
+        }
+    }
+
+    #[tokio::test]
+    async fn strict_lookup_rejects_a_loose_get_before_using_an_exact_search_result() {
+        use serde_json::json;
+        let (api, server) = lrclib(vec![
+            json_response(json!({"trackName":"Song", "artistName":"Artist", "duration":200, "plainLyrics":"Wrong version"})),
+            json_response(json!([
+                {"trackName":"Song (Remix)", "artistName":"Other", "duration":200, "syncedLyrics":"[00:01.00]Wrong artist"},
+                {"trackName":"Song (Remix)", "artistName":"Artist", "duration":200, "syncedLyrics":"[00:01.00]Right version"}
+            ])),
+        ]).await;
+        let query = Query {
+            title: "Song (Remix)".into(),
+            artist: "Artist".into(),
+            album: String::new(),
+            duration_ms: 200_000,
+        };
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let found = lookup_strict(&http, &api, &query).await.unwrap().unwrap();
+        assert_eq!(found.lines[0].text, "Right version");
+        assert!(found.synced);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_legacy_negative_cache_does_not_hide_new_lyrics() {
+        use serde_json::json;
+        let dir =
+            std::env::temp_dir().join(format!("siphon-lyrics-negative-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let query = Query {
+            title: "Song".into(),
+            artist: "Artist".into(),
+            album: String::new(),
+            duration_ms: 200_000,
+        };
+        let path = dir.join(format!("strict-v1-{}.json", cache_key(&query)));
+        std::fs::write(&path, br#"{"found":null}"#).unwrap();
+        let (api, server) = lrclib(vec![json_response(json!({"trackName":"Song", "artistName":"Artist", "duration":200, "plainLyrics":"Available now"}))]).await;
+        let http = reqwest::Client::builder().no_proxy().build().unwrap();
+        let found = fetch_strict_from(&http, &api, &dir, &query)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(found.lines[0].text, "Available now");
+        server.await.unwrap();
+        assert_eq!(cached(&path), Some(Some(found)));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
     #[tokio::test]
     async fn a_busy_lrclib_is_asked_again_when_it_says() {
         let found = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]";
-        let (api, server) = lrclib(vec![LIMITED, LIMITED, found]).await;
+        let (api, server) = lrclib(vec![LIMITED.into(), LIMITED.into(), found.into()]).await;
         let http = reqwest::Client::builder().no_proxy().build().unwrap();
         let answer = get_from::<Vec<Record>>(&http, &api, "/search", &[]).await;
         assert!(matches!(answer, Ok(Some(records)) if records.is_empty()));
@@ -706,7 +878,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_lrclib_that_stays_busy_is_an_error() {
-        let answers = vec![LIMITED; RATE_LIMIT_RETRIES as usize + 1];
+        let answers = vec![LIMITED.to_owned(); RATE_LIMIT_RETRIES as usize + 1];
         let (api, server) = lrclib(answers).await;
         let http = reqwest::Client::builder().no_proxy().build().unwrap();
         let answer = get_from::<Vec<Record>>(&http, &api, "/search", &[]).await;
@@ -856,8 +1028,20 @@ mod source_guard_tests {
     use super::*;
 
     #[test]
-    fn soundcloud_never_uses_spotify_or_inferred_lyrics() {
-        assert!(!supports_uri("soundcloud:track:123"));
+    fn unmatched_sources_never_use_spotify_or_loose_lyrics() {
+        assert!(supports_uri("soundcloud:track:123"));
+        assert!(supports_uri("youtube:video:dQw4w9WgXcQ"));
+        assert!(!supports_uri("youtube:track:dQw4w9WgXcQ"));
+        assert!(!supports_uri("youtube:video:123"));
+        assert_eq!(spotify_uri("soundcloud:track:123", None), None);
+        assert_eq!(
+            spotify_uri("youtube:video:123", Some("spotify:track:abc")),
+            None
+        );
+        assert_eq!(
+            spotify_uri("soundcloud:track:123", Some("spotify:track:abc")),
+            Some("spotify:track:abc")
+        );
         assert!(!supports_uri("spotifast:playlist:123"));
         assert!(supports_uri("spotify:track:123"));
         assert!(supports_uri("spotify:local:a:b:c:1"));

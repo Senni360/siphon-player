@@ -305,8 +305,32 @@ impl Album {
     }
 }
 
+/// Publisher-supplied recording data. Missing fields stay unknown instead of
+/// being inferred from the title, uploader, or a different catalogue entry.
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+pub struct PublisherMetadata {
+    pub isrc: Option<String>,
+    pub artist: Option<String>,
+    pub album_title: Option<String>,
+    pub release_title: Option<String>,
+    pub writer_composer: Option<String>,
+    pub publisher: Option<String>,
+    pub p_line: Option<String>,
+    pub upc_or_ean: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Track {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher_metadata: Option<Box<PublisherMetadata>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label_name: Option<String>,
+    /// Source-supplied release date (ISO date or timestamp), absent when unknown.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub release_date: Option<String>,
+    /// Source-supplied plays, never inferred from popularity or social counts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub play_count: Option<u64>,
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
@@ -342,7 +366,7 @@ pub struct Track {
     /// The originally requested track when Spotify substituted a playable
     /// release for the account's market.
     #[serde(default)]
-    pub linked_from: Option<LinkedTrack>,
+    pub linked_from: Option<Box<LinkedTrack>>,
     #[serde(default)]
     pub external_urls: ExternalUrls,
 }

@@ -1518,6 +1518,19 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             {
                 super::widgets::scroll_during_drag(ui);
             }
+            if "youtube likes".contains(&needle)
+                && nav_row(
+                    ui,
+                    &palette,
+                    Icon::Heart,
+                    "YouTube Likes",
+                    app.page() == &Page::SoundCloud("youtube:likes".into()),
+                )
+                .clicked()
+            {
+                app.actions
+                    .push(Action::Open(Page::SoundCloud("youtube:likes".into())));
+            }
             soundcloud_section(app, ui, &needle);
             if loading {
                 super::widgets::loading_row(ui, &palette, app.locale);

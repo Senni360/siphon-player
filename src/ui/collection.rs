@@ -3644,6 +3644,7 @@ mod tests {
                     external_ids: Default::default(),
                     linked_from: None,
                     external_urls: Default::default(),
+                    ..Default::default()
                 };
                 (
                     PlayableItem::Track(track),

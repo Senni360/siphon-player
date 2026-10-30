@@ -27,8 +27,10 @@ pub mod api;
 pub mod browse;
 pub mod connect;
 pub mod engine;
+pub mod following;
 pub mod library;
 pub mod models;
+pub mod reposts;
 
 /// The URI scheme prefix of a SoundCloud track.
 pub const TRACK_PREFIX: &str = "soundcloud:track:";
@@ -93,12 +95,15 @@ pub fn user_id(uri: &str) -> Option<u64> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Source {
     Spotify,
+    YouTube,
     SoundCloud,
 }
 
 impl Source {
     pub fn of(uri: &str) -> Self {
-        if is_uri(uri) {
+        if crate::youtube::is_track_uri(uri) {
+            Self::YouTube
+        } else if is_uri(uri) {
             Self::SoundCloud
         } else {
             Self::Spotify

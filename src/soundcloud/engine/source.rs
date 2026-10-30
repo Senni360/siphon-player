@@ -189,7 +189,7 @@ impl Read for RangeSource {
                 }
                 Err(error) => {
                     *self.error.lock().unwrap_or_else(PoisonError::into_inner) = Some(error);
-                    return Err(io::Error::other("SoundCloud stream read failed"));
+                    return Err(io::Error::other("Audio stream read failed"));
                 }
             }
         }
