@@ -686,13 +686,36 @@ pub fn blend(base: Color32, tint: Color32, amount: f32) -> Color32 {
     color
 }
 
+/// How long a new toast takes to rise into place.
+const TOAST_RISE: f32 = 0.26;
+
+/// How far below its place a toast `age` seconds old still sits, rising
+/// 12 points over `duration` seconds.
+fn toast_lift(age: f32, duration: f32) -> f32 {
+    if duration <= 0.0 || age >= duration {
+        0.0
+    } else {
+        (1.0 - kit::motion::ease(age / duration)) * 12.0
+    }
+}
+
 fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
     if app.toasts.is_empty() && app.downloads.active.is_empty() {
         return;
     }
     let palette = app.palette;
+    // The newest toast rises out of the island's edge as it fades in.
+    let newest = app
+        .toasts
+        .iter()
+        .map(|toast| toast.created.elapsed().as_secs_f32())
+        .fold(f32::INFINITY, f32::min);
+    let lift = toast_lift(newest, crate::motion::seconds(ctx, TOAST_RISE));
+    if lift > 0.0 {
+        ctx.request_repaint();
+    }
     egui::Area::new(egui::Id::new("toasts"))
-        .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset))
+        .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset + lift))
         .order(egui::Order::Tooltip)
         .interactable(!app.downloads.active.is_empty())
         .show(ctx, |ui| {
@@ -747,6 +770,22 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                     });
             }
         });
+}
+
+#[cfg(test)]
+mod toast_tests {
+    use super::*;
+
+    /// A toast starts 12 points low, rises into place, and never moves
+    /// under reduced motion or once it has arrived.
+    #[test]
+    fn a_new_toast_rises_into_place() {
+        assert_eq!(toast_lift(0.0, TOAST_RISE), 12.0);
+        assert!(toast_lift(TOAST_RISE / 2.0, TOAST_RISE) < 12.0);
+        assert_eq!(toast_lift(TOAST_RISE, TOAST_RISE), 0.0);
+        assert_eq!(toast_lift(f32::INFINITY, TOAST_RISE), 0.0);
+        assert_eq!(toast_lift(0.0, 0.0), 0.0);
+    }
 }
 
 #[cfg(test)]
