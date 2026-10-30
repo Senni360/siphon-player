@@ -13,7 +13,7 @@ report and its interface requirements. It does not replace the backend's
 `docs/_reference/siphon-integration-contract.md`; where the two disagree, the
 backend contract wins on behaviour and this file is updated to match.
 
-## Status (2026-10-30, 18:40 Amsterdam)
+## Status (2026-10-30, 19:10 Amsterdam)
 
 - Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`.
 - **Frontend branch:** `claude/focused-rubin-pxfk32`. It stays append-only
@@ -22,7 +22,7 @@ backend contract wins on behaviour and this file is updated to match.
 - **For `siphon/evening-candidate`:** it already carries the frontend through
   `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
   `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. Rehearsed
-  on `1823bf6` with the frontend at `7060b8c`: two conflicts, both in
+  on `1823bf6` with the frontend at `51454df`: two conflicts, both in
   `src/demo.rs`; every other commit applies cleanly.
   1. At `f5341e4` (player island): four hunks in the SoundCloud source
      tests the evening branch already rewrote. Keep the evening side of
@@ -36,7 +36,7 @@ backend contract wins on behaviour and this file is updated to match.
      both, the helper first.
 
   The rehearsed result: clippy (`--no-default-features --features demo
-  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,898
+  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,902
   library tests passed (`RUST_BACKTRACE=0`). One backend test,
   `cast::media::tests::errors_and_statuses_cannot_expose_signed_urls`,
   fails only when `RUST_BACKTRACE=1` is set: anyhow's `Debug` output then
@@ -252,6 +252,23 @@ The sidebar's edge handle fades under the revealed card. `DESIGN.md` gains
 a table of what is built tonight against the target. A song that cannot
 play shakes its title when double-clicked or when its play control is
 clicked, instead of doing nothing (no movement under reduced motion).
+
+### 10. Reactive motion (`80f0dab` to `51454df`)
+
+Each answers something the user did, costs nothing once finished, and
+shows its end state at once under reduced motion:
+
+- Playing a song from its row sweeps one band of light across that row.
+- Liking a song pops its heart (rows and group cards share one curve).
+- A new toast rises 12 px into place.
+- The library's highlight glides from the row that was open to the page
+  just opened.
+
+Also: Home's group notice wraps beside its button on narrow pages.
+
+Known and left alone: with the friends and queue panels both open at
+1280 wide, the existing top bar squeezes its search field into the
+device pill. The top bar is Spotifast's, not yet rebuilt.
 
 ### Windows preview of the demo (`76d2805`)
 
