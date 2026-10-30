@@ -227,6 +227,7 @@ impl Worker {
         account: crate::soundcloud::account::Account,
         request: u64,
     ) {
+        self.track_details.clear();
         self.hybrid.active_account_request = request;
         self.hybrid.account_lease = Some(self.credentials.lease(CredentialSlot::SoundCloud));
         let id = self.hybrid.client.as_ref().and_then(Client::client_id);

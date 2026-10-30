@@ -10,14 +10,7 @@ use crate::theme::{self, Icon};
 use super::widgets;
 
 fn unavailable_reason(app: &App) -> std::borrow::Cow<'static, str> {
-    if app
-        .now_playing()
-        .is_some_and(|now| crate::soundcloud::is_uri(&now.uri))
-    {
-        gettext(app.locale, "Lyrics are unavailable for SoundCloud tracks")
-    } else {
-        gettext(app.locale, "No lyrics found for this track.")
-    }
+    gettext(app.locale, "No lyrics found for this track.")
 }
 
 const LINE_SIZE: f32 = 19.0;

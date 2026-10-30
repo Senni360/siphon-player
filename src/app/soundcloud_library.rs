@@ -106,6 +106,7 @@ impl App {
     // Keep generations monotonic so queued answers from the previous session
     // cannot repopulate a private playlist after disconnecting or switching.
     pub(super) fn reset_soundcloud_collections(&mut self) {
+        self.reset_track_details();
         self.reload_soundcloud_hybrid_context();
         for page in self.soundcloud_pages.values_mut() {
             page.generation = page.generation.wrapping_add(1);

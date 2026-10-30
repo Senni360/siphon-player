@@ -50,6 +50,7 @@ pub async fn track_credits(
             .partner_request(&login.access_token, &client_token, &query)
             .await?;
         let Some(page) = crate::credits::spotify_page(&body)? else {
+            anyhow::ensure!(offset == 0, "Spotify credits changed while paging");
             return Ok(crate::credits::finish(found));
         };
         found.contributors.extend(page.credits.contributors);
