@@ -13,7 +13,7 @@ report and its interface requirements. It does not replace the backend's
 `docs/_reference/siphon-integration-contract.md`; where the two disagree, the
 backend contract wins on behaviour and this file is updated to match.
 
-## Status (2026-10-30, 17:20 Amsterdam)
+## Status (2026-10-30, 18:20 Amsterdam)
 
 - Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`.
 - **Frontend branch:** `claude/focused-rubin-pxfk32`. It stays append-only
@@ -21,20 +21,36 @@ backend contract wins on behaviour and this file is updated to match.
   Every commit compiles and passes clippy and the library tests.
 - **For `siphon/evening-candidate`:** it already carries the frontend through
   `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
-  `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. One
-  conflict is expected, in `src/demo.rs`: three SoundCloud source tests the
-  evening branch already rewrote. Keep the evening branch's versions, with
-  one change: the player-bar part of
-  `soundcloud_source_indicators_follow_tracks_into_the_queue_and_player_bar`
-  asserts that "SC" is **absent** (the island colours the title; the chip
-  is gone everywhere). This exact resolution was built and tested on top of
-  `b58d09c`: clippy (`--all-targets --features demo -D warnings`) clean,
-  1,890 library tests passed. One backend test,
+  `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. Rehearsed
+  at 18:10 on `1823bf6` with the frontend at `9fab9be`: two conflicts, both
+  in `src/demo.rs`.
+  1. At `f5341e4` (player island): four hunks in the SoundCloud source
+     tests the evening branch already rewrote. Keep the evening side of
+     every hunk, then make one change: the player-bar part of
+     `soundcloud_source_indicators_follow_tracks_into_the_queue_and_player_bar`
+     asserts that "SC" is **absent** (the island colours the title; the
+     chip is gone everywhere).
+  2. At `9fab9be` (account scoping): one hunk where the evening branch added
+     the helper `source_title_rects` and the frontend added the test
+     `the_island_title_takes_its_source_colour` at the same place. Keep
+     both, the helper first.
+
+  The rehearsed result: clippy (`--no-default-features --features demo
+  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,896
+  library tests passed. One backend test,
   `cast::media::tests::errors_and_statuses_cannot_expose_signed_urls`,
   fails only when `RUST_BACKTRACE=1` is set: anyhow's `Debug` output then
   includes backtrace frames named `anyhow::__private`, which contain the
   word the test forbids. It passes with backtraces off. Backend owner:
   consider checking `Display` (`{error:#}`) instead.
+- **Review fixes (PR 7 comment):** the last-used playlist and the island's
+  song snapshots belong to the signed-in account, and sign-out forgets them
+  and closes Now playing (`another_account_never_sees_the_last_playlist`).
+  Row and Now playing downloads ask `app.download_source`. Rows and header
+  share one column rule (the album narrows to 140 px, then gives way, then
+  the tools do; the title keeps 220 px), tested at 560/561, 760/761 and
+  920/921. The island
+  title's source colour is tested in both themes.
 - The final frontend head for tonight is published here by 20:30 Amsterdam,
   with this section updated.
 
@@ -197,9 +213,35 @@ pointer reaches the left edge. No new setting.
 Download (helper), BPM/key (off, with its reason, until the helper's
 analysis protocol exists), Credits (popover over `RequestCredits` /
 `app.credits`, cancelled on close), Add to last-used playlist
-(`AddToPlaylist`; the destination is learned from any add this session and
-lives in egui memory, so it resets on restart; storing it needs a backend
-state field).
+(`AddToPlaylist`; the destination is learned from any add this session,
+lives in egui memory for the signed-in account only, and resets on restart
+or sign-out; storing it needs a backend state field).
+
+### 6. Now playing (`f1d5d02`)
+
+Clicking the island's cover grows Now playing out of the island into the
+page area (the top bar stays). The ground is the cover's tint, darkened, in
+both themes. Left: the cover, the title in its source colour, artists and
+album, and pills for Download, BPM and key (off, with its reason), Credits
+and Share with group (`friends::NewPost::from_item`). Right: Up next,
+Lyrics (`app.lyrics`, the active line from `Lyrics::active_line`, or a Show
+lyrics button over `ToggleLyricsPanel`) and Credits tabs. Clicking the
+cover again, or Escape, shrinks it back. It is a view over existing state:
+no new action, no setting.
+
+### 7. From the group (`8e628a0`)
+
+Home opens with the group's three newest shares from `app.friends_feed`:
+cover, title in its source colour, who and when, their note, a heart
+(`Friends(Like)`) and play (`OpenLink`). Not joined, failed (with Try
+again over `Friends(Refresh)`), loading and empty each have their own line.
+Spotify's own shelves follow unchanged.
+
+### 8. Account scoping and column fit (`9fab9be`)
+
+See the review fixes above. A playlist in a 1280 window keeps its album
+column beside the tools, narrowed when needed; below about 870 px of list
+width the album gives way to the tools rather than squeezing the title.
 
 ### Windows preview of the demo (`76d2805`)
 
