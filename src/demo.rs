@@ -5,6 +5,8 @@
 //! content. Cover art comes from a public placeholder service so the artwork
 //! pipeline (download, disk cache, accent colour) is exercised too.
 
+pub mod siphon;
+
 use std::time::Instant;
 
 use jiff::{SignedDuration, Timestamp};
@@ -1294,6 +1296,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            name if siphon::Scenario::from_flag(name).is_some() => {
+                siphon::apply(app, siphon::Scenario::from_flag(name).unwrap());
+            }
             "downloads-ready" => app.downloads.available = true,
             "downloads" => {
                 app.downloads.available = true;
