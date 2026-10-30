@@ -79,8 +79,12 @@ pub fn preview_badge(ui: &mut Ui, palette: &Palette, locale: Locale) {
     ));
 }
 
+/// A row says its source with the title's colour, so the only marker left
+/// beside the artist is SoundCloud's "Preview only".
 fn track_source_badges(ui: &mut Ui, palette: &Palette, locale: Locale, track: &Track) {
-    if source_badge(ui, palette, locale, &track.uri).is_some() && track.preview_only {
+    if track.preview_only
+        && crate::ui::kit::Source::of(&track.uri) == crate::ui::kit::Source::SoundCloud
+    {
         preview_badge(ui, palette, locale);
     }
 }
@@ -2010,13 +2014,12 @@ fn track_row_contents(
         pos2((text_right - 12.0).max(x), rect.bottom()),
     );
 
-    // Title and artists.
+    // Title and artists. The title carries its source's colour; the playing
+    // row is marked by its cover, not by a different title colour.
     let title_color = if unavailable {
         palette.dim
-    } else if is_current {
-        palette.accent
     } else {
-        palette.text
+        crate::ui::kit::Source::of(row.item.uri()).color(&palette)
     };
     let subtitle_color = if hovered {
         palette.text
