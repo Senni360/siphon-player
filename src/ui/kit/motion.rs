@@ -107,6 +107,9 @@ pub fn running(ctx: &Context, id: Id) -> Option<f32> {
     Some(transition.progress(ctx))
 }
 
+/// How long the light takes to cross a row that started playing.
+pub const SWEEP: f32 = 0.55;
+
 /// How long a refused action shakes.
 pub const REFUSE: f32 = 0.36;
 
