@@ -5,8 +5,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use ebur128::{EbuR128, Mode};
 use serde::{Deserialize, Serialize};
@@ -57,16 +57,16 @@ struct Cache {
 }
 
 struct CacheGeneration {
-    epoch: AtomicU64,
-    available: AtomicBool,
+    // Low bit: reads/writes enabled. Other bits: invalidation epoch.
+    // One atomic prevents an old clear from re-enabling a newer epoch.
+    state: AtomicU64,
     write_barrier: Mutex<()>,
 }
 
 impl Default for CacheGeneration {
     fn default() -> Self {
         Self {
-            epoch: AtomicU64::new(0),
-            available: AtomicBool::new(true),
+            state: AtomicU64::new(1),
             write_barrier: Mutex::new(()),
         }
     }
@@ -81,7 +81,7 @@ struct PendingMeasurement {
 // Old sinks can still have queued writes when a replacement sink starts.
 // Share the invalidation barrier across processors using the same directory.
 fn cache_generation(directory: Option<&Path>) -> Arc<CacheGeneration> {
-    type Generations = HashMap<PathBuf, Weak<CacheGeneration>>;
+    type Generations = HashMap<PathBuf, Arc<CacheGeneration>>;
     static GENERATIONS: OnceLock<Mutex<Generations>> = OnceLock::new();
     let Some(directory) = directory else {
         return Arc::default();
@@ -90,13 +90,67 @@ fn cache_generation(directory: Option<&Path>) -> Arc<CacheGeneration> {
         .get_or_init(Mutex::default)
         .lock()
         .unwrap_or_else(PoisonError::into_inner);
-    generations.retain(|_, generation| generation.strong_count() > 0);
-    if let Some(generation) = generations.get(directory).and_then(Weak::upgrade) {
-        return generation;
+    // Retain disabled epochs even with no sink or queued writer. A failed or
+    // abandoned clear must not let a later sink reopen the previous account's
+    // files. The application uses one fixed loudness directory per profile.
+    Arc::clone(generations.entry(directory.to_owned()).or_default())
+}
+
+/// Prepared without disk IO; finish on a blocking worker. Dropping an
+/// unfinished job safely leaves this directory's cache disabled.
+pub struct Invalidation {
+    directory: Option<PathBuf>,
+    generation: Arc<CacheGeneration>,
+    ticket: u64,
+}
+
+impl Invalidation {
+    fn prepare(directory: Option<&Path>, generation: Arc<CacheGeneration>) -> Self {
+        let old = generation
+            .state
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |state| {
+                Some((state & !1).wrapping_add(2))
+            })
+            .expect("invalidation always advances its epoch");
+        Self {
+            directory: directory.map(Path::to_owned),
+            generation,
+            ticket: (old & !1).wrapping_add(2),
+        }
     }
-    let generation = Arc::new(CacheGeneration::default());
-    generations.insert(directory.to_owned(), Arc::downgrade(&generation));
-    generation
+
+    /// Delete old records, then enable only this job's generation. A newer
+    /// account transition supersedes this job even while deletion is running.
+    pub fn finish(self) -> std::io::Result<()> {
+        let _guard = self
+            .generation
+            .write_barrier
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if self.generation.state.load(Ordering::Acquire) != self.ticket {
+            return Ok(());
+        }
+        if let Some(directory) = &self.directory {
+            match std::fs::remove_dir_all(directory) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                result => result?,
+            }
+        }
+        let _ = self.generation.state.compare_exchange(
+            self.ticket,
+            self.ticket | 1,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+        Ok(())
+    }
+}
+
+/// Disable old-account cache reads and writes synchronously, without waiting
+/// for disk or an active sink. Call before installing the replacement account,
+/// then hand the returned job to a blocking worker for `finish()`.
+pub fn prepare_invalidation(directory: &Path) -> Invalidation {
+    Invalidation::prepare(Some(directory), cache_generation(Some(directory)))
 }
 
 impl Cache {
@@ -110,9 +164,8 @@ impl Cache {
                 .write_barrier
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner);
-            if writes.epoch.load(Ordering::Acquire) != pending.generation
-                || !writes.available.load(Ordering::Acquire)
-            {
+            let state = writes.state.load(Ordering::Acquire);
+            if state >> 1 != pending.generation || state & 1 == 0 {
                 return Ok(());
             }
             // Keep the barrier through atomic replacement: invalidation waits
@@ -130,7 +183,7 @@ impl Cache {
     }
 
     fn generation(&self) -> u64 {
-        self.generation.epoch.load(Ordering::Acquire)
+        self.generation.state.load(Ordering::Acquire) >> 1
     }
 
     fn path(&self, uri: &str) -> Option<PathBuf> {
@@ -142,12 +195,15 @@ impl Cache {
     }
 
     fn load(&self, uri: &str) -> Option<Measurement> {
+        if self.generation.state.load(Ordering::Acquire) & 1 == 0 {
+            return None;
+        }
         let _guard = self
             .generation
             .write_barrier
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if !self.generation.available.load(Ordering::Acquire) {
+        if self.generation.state.load(Ordering::Acquire) & 1 == 0 {
             return None;
         }
         let path = self.path(uri)?;
@@ -172,22 +228,7 @@ impl Cache {
     }
 
     fn invalidate(&self) -> std::io::Result<()> {
-        let _guard = self
-            .generation
-            .write_barrier
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        self.generation.epoch.fetch_add(1, Ordering::AcqRel);
-        // A failed deletion must not let the next account reuse old data.
-        self.generation.available.store(false, Ordering::Release);
-        if let Some(directory) = &self.directory {
-            match std::fs::remove_dir_all(directory) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                result => result?,
-            }
-        }
-        self.generation.available.store(true, Ordering::Release);
-        Ok(())
+        Invalidation::prepare(self.directory.as_deref(), Arc::clone(&self.generation)).finish()
     }
 }
 
@@ -719,12 +760,63 @@ mod tests {
         std::fs::rename(&path, &backup).unwrap();
         std::fs::write(&path, b"not a directory").unwrap();
         assert!(processor.invalidate_cache().is_err());
+        drop(processor);
         std::fs::remove_file(&path).unwrap();
         std::fs::rename(&backup, &path).unwrap();
+        // No old sink or invalidation job is alive. Its failed epoch must
+        // still stop a newly created sink reopening these private records.
+        let mut processor = Processor::new(true, Some(&path));
         assert!(processor.cache.load("soundcloud:track:1").is_none());
         assert!(processor.track.uri.is_empty());
         processor.invalidate_cache().unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn preparing_without_a_sink_disables_reads_without_waiting_for_disk() {
+        let directory = TestDirectory::new();
+        let generation = cache_generation(Some(directory.path()));
+        let barrier = generation.write_barrier.lock().unwrap();
+        let invalidation = prepare_invalidation(directory.path());
+        // Both preparation and an ensuing new-account load must return even
+        // while an old durable write still owns the disk barrier.
+        let mut new_account = Processor::new(true, Some(directory.path()));
+        new_account.begin_track("soundcloud:track:1", true);
+        assert!(new_account.needs_lookahead());
+        assert_eq!(generation.state.load(Ordering::Acquire) & 1, 0);
+        drop(barrier);
+        invalidation.finish().unwrap();
+        assert_eq!(generation.state.load(Ordering::Acquire) & 1, 1);
+    }
+
+    #[test]
+    fn superseded_clears_cannot_enable_or_delete_a_newer_accounts_cache() {
+        let directory = TestDirectory::new();
+        let first = prepare_invalidation(directory.path());
+        let generation = Arc::clone(&first.generation);
+        let barrier = generation.write_barrier.lock().unwrap();
+        let worker = std::thread::spawn(move || first.finish());
+        let second = prepare_invalidation(directory.path());
+        drop(barrier);
+        worker.join().unwrap().unwrap();
+        assert_eq!(generation.state.load(Ordering::Acquire), second.ticket);
+        second.finish().unwrap();
+        // Also exercise reversed completion order after a new account has
+        // already successfully written its own measurement.
+        let obsolete = prepare_invalidation(directory.path());
+        prepare_invalidation(directory.path()).finish().unwrap();
+        let mut current = Processor::new(true, Some(directory.path()));
+        current.begin_track("youtube:video:new", true);
+        current.process(&mut sine(0.5, 4));
+        current.finish_track(true);
+        assert!(
+            current
+                .cache
+                .writer
+                .flush(std::time::Duration::from_secs(5))
+        );
+        obsolete.finish().unwrap();
+        assert!(current.cache.load("youtube:video:new").is_some());
     }
 
     #[test]

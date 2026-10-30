@@ -223,6 +223,20 @@ impl Worker {
         account: crate::soundcloud::account::Account,
         request: u64,
     ) {
+        let scope = |account: &crate::soundcloud::account::Account| {
+            account
+                .user()
+                .map(|user| (user.user_id, account.token().is_some()))
+        };
+        // Initial request-zero restoration is the same saved account, not an
+        // account switch. Token refresh/name changes and engine restarts keep
+        // its measurements. Explicit disconnect also retries failed deletion.
+        let initial_restore = self.hybrid.account_generation == 0 && request == 0;
+        if !initial_restore && scope(&self.hybrid.account) != scope(&account)
+            || request != 0 && matches!(account, crate::soundcloud::account::Account::Disconnected)
+        {
+            self.invalidate_loudness_cache();
+        }
         self.hybrid.active_account_request = request;
         self.hybrid.account_lease = Some(self.credentials.lease(CredentialSlot::SoundCloud));
         let id = self.hybrid.client.as_ref().and_then(Client::client_id);
@@ -905,6 +919,91 @@ pub(super) async fn persist_client_id(client: &Client, path: std::path::PathBuf)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seed_loudness_cache(worker: &Worker) -> std::path::PathBuf {
+        use sha1::{Digest, Sha1};
+        let directory = worker.engine_config.volume_dir.join("loudness");
+        std::fs::create_dir_all(&directory).unwrap();
+        let uri = "soundcloud:track:7";
+        std::fs::write(
+            directory.join(format!("{:x}.json", Sha1::digest(uri.as_bytes()))),
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "uri": uri,
+                "lufs": -8.0,
+                "frames": 176400,
+                "complete": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        directory
+    }
+
+    fn loudness_cached(directory: &std::path::Path) -> bool {
+        let mut processor = crate::loudness::Processor::new(true, Some(directory));
+        processor.begin_track("soundcloud:track:7", true);
+        !processor.needs_lookahead()
+    }
+
+    async fn wait_for_loudness_clear(directory: &std::path::Path) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while directory.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn restored_loudness_survives_same_account_but_not_a_switch_without_an_engine() {
+        use crate::soundcloud::account::{Account, Profile};
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("loudness-account-switch");
+        runtime.block_on(async {
+            let directory = seed_loudness_cache(&worker);
+            let profile = |user_id, name: &str| {
+                Account::Profile(Profile {
+                    user_id,
+                    username: name.into(),
+                    permalink: name.into(),
+                    avatar: None,
+                })
+            };
+            worker.install_soundcloud_account(profile(1, "saved"), 0);
+            assert!(
+                loudness_cached(&directory),
+                "startup restoration keeps measurements"
+            );
+            worker.install_soundcloud_account(profile(1, "renamed"), 1);
+            assert!(
+                loudness_cached(&directory),
+                "same account keeps measurements"
+            );
+            assert!(worker.engine.is_none());
+            worker.install_soundcloud_account(profile(2, "other"), 2);
+            assert!(
+                !loudness_cached(&directory),
+                "new loads cannot read old measurements"
+            );
+            wait_for_loudness_clear(&directory).await;
+        });
+    }
+
+    #[test]
+    fn spotify_signout_clears_loudness_without_an_active_sink() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("loudness-signout");
+        runtime.block_on(async {
+            let directory = seed_loudness_cache(&worker);
+            assert!(loudness_cached(&directory));
+            assert!(worker.engine.is_none());
+            worker.sign_out();
+            assert!(!loudness_cached(&directory));
+            wait_for_loudness_clear(&directory).await;
+        });
+    }
 
     #[test]
     fn a_background_engine_failure_does_not_interrupt_an_active_child() {
