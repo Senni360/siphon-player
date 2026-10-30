@@ -583,10 +583,15 @@ impl Worker {
                 }
             }
             command @ (HybridCommand::Stop | HybridCommand::Release) => {
-                self.cancel_youtube();
-                self.hybrid.cancel_soundcloud_work();
-                self.hybrid.new_owner_intent();
                 let release = matches!(command, HybridCommand::Release);
+                if release {
+                    self.cancel_youtube();
+                    self.hybrid.cancel_soundcloud_work();
+                }
+                // Stop also represents waiting for an unresolved context after
+                // Next exhausts the known manual rows. Its catalogue request
+                // must survive until it can supply the remaining queue.
+                self.hybrid.new_owner_intent();
                 log::info!(
                     "Playback ownership: {}",
                     if release {
@@ -1216,7 +1221,7 @@ mod tests {
     }
 
     #[test]
-    fn context_replacement_and_account_switch_cancel_reads_but_manual_load_keeps_context() {
+    fn context_survives_manual_load_and_stop_but_release_and_account_switch_cancel_it() {
         let (runtime, mut worker, _) =
             super::super::authorization_tests::worker("soundcloud-context-cancel");
         runtime.block_on(async {
@@ -1250,9 +1255,39 @@ mod tests {
                     .is_finished(),
                 "a manual row must not discard its still-loading context tail"
             );
-            worker.install_soundcloud_account(crate::soundcloud::account::Account::Disconnected, 1);
+            worker.hybrid_command(HybridCommand::Stop).await;
+            assert!(
+                worker.hybrid.catalogue_context.is_some(),
+                "Next may stop audio while waiting for this context"
+            );
+            worker.hybrid_command(HybridCommand::Release).await;
             assert_eq!(server.closed().await, "/tracks/31");
             assert!(worker.hybrid.catalogue_context.is_none());
+            worker.resolve_hybrid_context(3, "soundcloud:track:32".into());
+            assert_eq!(server.request().await, "/tracks/32");
+            worker.install_soundcloud_account(crate::soundcloud::account::Account::Disconnected, 1);
+            assert_eq!(server.closed().await, "/tracks/32");
+            assert!(worker.hybrid.catalogue_context.is_none());
+        });
+    }
+
+    #[test]
+    fn youtube_context_can_finish_after_stop_but_release_cancels_it() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("youtube-context-stop");
+        runtime.block_on(async {
+            let (finish, result) = tokio::sync::oneshot::channel();
+            let context = tokio::spawn(async { result.await.unwrap() });
+            worker.hybrid.youtube_context = Some(context.abort_handle());
+            worker.hybrid_command(HybridCommand::Stop).await;
+            finish.send(7).unwrap();
+            assert_eq!(context.await.unwrap(), 7);
+
+            let context = tokio::spawn(std::future::pending::<()>());
+            worker.hybrid.youtube_context = Some(context.abort_handle());
+            worker.hybrid_command(HybridCommand::Release).await;
+            assert!(context.await.unwrap_err().is_cancelled());
+            assert!(worker.hybrid.youtube_context.is_none());
         });
     }
 

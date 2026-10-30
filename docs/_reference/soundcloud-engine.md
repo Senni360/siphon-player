@@ -137,11 +137,13 @@ Route volume through the existing Spotify mixer commands for either source.
 
 The backend retains one active stream-resolution task and one lookahead task
 per external source, plus one catalogue-context task. Replacing a request
-aborts its previous HTTP future; Stop, Release, account changes, sign-out and
-backend shutdown cancel abandoned SoundCloud work. Pause cancels source
+aborts its previous HTTP future; Stop cancels active/preload stream work,
+while Release, account changes, sign-out and backend shutdown also cancel
+abandoned catalogue work. Pause cancels source
 lookahead while keeping the current track load, and Play requests lookahead
-again. Starting a known manual row retains a still-loading context behind it,
-as required by the queue contract. Late replies still pass the existing tag
+again. Starting a known manual row or stopping audio while Next waits for
+the unresolved context retains that context, as required by the queue contract.
+Late replies still pass the existing tag
 and account-generation checks.
 
 `Engine::command` queues `Load`, `Play`, `Pause`, `Toggle`, `Seek`, `Stop`,
