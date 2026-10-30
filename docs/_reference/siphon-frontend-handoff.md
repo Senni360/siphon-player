@@ -13,16 +13,17 @@ report and its interface requirements. It does not replace the backend's
 `docs/_reference/siphon-integration-contract.md`; where the two disagree, the
 backend contract wins on behaviour and this file is updated to match.
 
-## Status (2026-10-30, 19:10 Amsterdam)
+## Status (2026-10-30, 19:25 Amsterdam)
 
-- Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`.
+- Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`, which
+  ends with a table of what is built tonight against the target.
 - **Frontend branch:** `claude/focused-rubin-pxfk32`. It stays append-only
   (no force pushes) and is based on `siphon/backend-delivery` (`8b94e5b`).
   Every commit compiles and passes clippy and the library tests.
 - **For `siphon/evening-candidate`:** it already carries the frontend through
   `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
   `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. Rehearsed
-  on `1823bf6` with the frontend at `51454df`: two conflicts, both in
+  on `264f3d2` with the frontend at `e8e3097`: two conflicts, both in
   `src/demo.rs`; every other commit applies cleanly.
   1. At `f5341e4` (player island): four hunks in the SoundCloud source
      tests the evening branch already rewrote. Keep the evening side of
@@ -36,19 +37,18 @@ backend contract wins on behaviour and this file is updated to match.
      both, the helper first.
 
   The rehearsed result: clippy (`--no-default-features --features demo
-  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,902
-  library tests passed (`RUST_BACKTRACE=0`). One backend test,
-  `cast::media::tests::errors_and_statuses_cannot_expose_signed_urls`,
-  fails only when `RUST_BACKTRACE=1` is set: anyhow's `Debug` output then
-  includes backtrace frames named `anyhow::__private`, which contain the
-  word the test forbids. It passes with backtraces off. Backend owner:
-  consider checking `Display` (`{error:#}`) instead.
-- **Against `main`:** `main` through `2a2affe` (shared media and upload
-  work) touches none of the frontend's files; `git merge-tree` of it and
+  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,903
+  library tests passed with `RUST_BACKTRACE=1` (the Cast test is fixed on
+  the evening branch by `ef26777`).
+- **Against `main`:** `main` through `a84f9b1` (shared media, upload and
+  room work) touches none of the frontend's files; `git merge-tree` of it and
   the frontend head reports no conflict.
-- **Review fixes (PR 7 comment):** the last-used playlist and the island's
-  song snapshots belong to the signed-in account, and sign-out forgets them
-  and closes Now playing (`another_account_never_sees_the_last_playlist`).
+- **Review fixes (PR 7 comment and the 18:30 evening note):** the
+  last-used playlist and the island's song snapshots belong to the
+  signed-in account, and sign-out forgets them and closes Now playing
+  (`another_account_never_sees_the_last_playlist`). A song caught
+  mid-swipe is dropped the moment the account differs, without waiting for
+  a signed-out frame (`e8e3097`, `another_account_never_sees_a_song_leaving`).
   Row and Now playing downloads ask `app.download_source`. Rows and header
   share one column rule (the album narrows to 140 px, then gives way, then
   the tools do; the title keeps 220 px), tested at 560/561, 760/761 and
