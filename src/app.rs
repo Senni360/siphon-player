@@ -16056,6 +16056,49 @@ mod tests {
     }
 
     #[test]
+    fn switching_siphon_demo_scenarios_clears_previous_private_models() {
+        use crate::demo::siphon::{Scenario, apply};
+        let mut app = headless_app();
+        crate::demo::populate(&mut app);
+        apply(&mut app, Scenario::Ready);
+        assert_eq!(app.youtube_likes().unwrap().len(), 1);
+        assert_eq!(app.friends_feed.posts.len(), 3);
+        assert_eq!(app.soundcloud_library.snapshot.following.items.len(), 1);
+        assert_eq!(
+            app.mixed_playlists
+                .get("demo-siphon")
+                .unwrap()
+                .entries
+                .len(),
+            3
+        );
+        apply(&mut app, Scenario::Unavailable);
+        assert!(app.youtube_likes().is_none());
+        assert!(app.friends_feed.posts.is_empty());
+        assert!(app.friends_feed.profile.is_none());
+        assert!(app.soundcloud_library.snapshot.following.items.is_empty());
+        assert!(app.soundcloud_account.token().is_none());
+        apply(&mut app, Scenario::Empty);
+        assert!(
+            app.mixed_playlists
+                .get("demo-siphon")
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        assert_eq!(
+            app.mixed_playlists
+                .playlists
+                .iter()
+                .filter(|p| p.id == "demo-siphon")
+                .count(),
+            1
+        );
+        assert!(app.offline);
+        app.backend.shutdown();
+    }
+
+    #[test]
     fn lyrics_metadata_changes_retry_a_previous_unavailable_result() {
         let mut app = headless_app();
         app.backend.set_offline(true);

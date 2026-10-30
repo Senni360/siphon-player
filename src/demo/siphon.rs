@@ -91,7 +91,14 @@ pub fn fixture(scenario: Scenario) -> Fixture {
                 _ => Loadable::Loaded(Some(Credits {
                     contributors: vec![Credit {
                         name: "Demo Producer".into(),
-                        role: Some("Producer".into()),
+                        role: Some(
+                            if track.uri == SOUNDCLOUD_URI {
+                                "Writer / Composer"
+                            } else {
+                                "Producer"
+                            }
+                            .into(),
+                        ),
                         group: Some("Production".into()),
                         artist_uri: None,
                     }],
@@ -162,7 +169,7 @@ pub fn fixture(scenario: Scenario) -> Fixture {
                         ..Default::default()
                     },
                     created_at: "2026-10-01T12:00:00Z".into(),
-                    content: following::Content::Track(track.clone()),
+                    content: following::Content::Track(Box::new(track.clone())),
                 })
                 .collect(),
             next: None,
@@ -181,6 +188,39 @@ pub fn fixture(scenario: Scenario) -> Fixture {
 /// Populate existing surfaces without choosing a new layout or visual system.
 pub fn apply(app: &mut crate::app::App, scenario: Scenario) {
     let fixture = fixture(scenario);
+    app.soundcloud_library.reset();
+    app.soundcloud_account = crate::soundcloud::account::Account::Disconnected;
+    if scenario != Scenario::Unavailable {
+        super::soundcloud_profile(app);
+        if let Some(user) = app.soundcloud_account.user().cloned() {
+            app.soundcloud_account = crate::soundcloud::account::Account::Session {
+                user,
+                token: crate::soundcloud::account::SessionToken::parse(
+                    "2-000000-dummy_session_token",
+                )
+                .unwrap(),
+            };
+        }
+        app.soundcloud_library.snapshot.reposts.loaded = matches!(
+            scenario,
+            Scenario::Ready | Scenario::Empty | Scenario::LongTitles
+        );
+    }
+    let youtube_likes = match scenario {
+        Scenario::Loading => Loadable::Loading,
+        Scenario::Error => Loadable::Failed("Demo: YouTube library could not be read.".into()),
+        Scenario::Unavailable => Loadable::NotLoaded,
+        _ => Loadable::Loaded(crate::youtube::likes::Likes {
+            tracks: fixture
+                .tracks
+                .iter()
+                .filter(|track| crate::youtube::is_track_uri(&track.uri))
+                .cloned()
+                .collect(),
+            ..Default::default()
+        }),
+    };
+    app.set_demo_youtube_likes(youtube_likes);
     app.credits.clear();
     for (uri, state) in fixture.credits {
         let request = app.credits.begin(&uri).unwrap();
@@ -190,8 +230,12 @@ pub fn apply(app: &mut crate::app::App, scenario: Scenario) {
             _ => {}
         }
     }
-    app.lyrics_uri = Some(SPOTIFY_URI.into());
-    app.lyrics = fixture.lyrics;
+    if let Some(track) = fixture.tracks.first() {
+        app.install_demo_track_details(track, fixture.lyrics);
+    } else {
+        app.lyrics_uri = None;
+        app.lyrics = fixture.lyrics;
+    }
     let mut friends = Model::default();
     friends.restored = true;
     if scenario != Scenario::Unavailable {
