@@ -43,6 +43,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let greeting = crate::util::greeting(app.locale);
     theme::text(ui, greeting.as_ref(), theme::bold(30.0), palette.text);
     ui.add_space(12.0);
+    // The group's own shares come before anything a service suggests.
+    super::group_shelf::show(app, ui);
     quick_access(app, ui);
     ui.add_space(16.0);
 

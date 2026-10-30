@@ -8,6 +8,7 @@ pub(crate) mod devices;
 mod dialogs;
 mod downloads;
 pub(crate) mod friends;
+mod group_shelf;
 pub mod home;
 mod keys;
 pub mod kit;
