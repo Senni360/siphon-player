@@ -1,0 +1,30 @@
+# Reviewed deployment template only. Do not deploy/create resources without
+# maintainer approval of the account, region, costs, routes and test recording.
+name = "siphon-media"
+main = "src/gateway.mjs"
+compatibility_date = "2026-10-30"
+workers_dev = false
+preview_urls = false
+
+[observability]
+enabled = false
+
+[vars]
+MEDIA_ORIGIN = "https://media.senni.dev"
+# ADMIN_SECRET is a separately supplied 32-byte random hex secret, never a var.
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "siphon-media-pilot"
+
+[[durable_objects.bindings]]
+name = "MEDIA_REGISTRY"
+class_name = "MediaRegistry"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MediaRegistry"]
+
+[triggers]
+crons = ["*/15 * * * *"]
+# No public route is configured. Custom-domain routing is a separate approval.

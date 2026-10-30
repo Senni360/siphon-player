@@ -39,7 +39,8 @@ Upstream links and historical release notes below still describe Spotifast;
 build this fork from source for Siphon.
 
 The personal fork's [local-sharing and listening-party plan](docs/_reference/local-sharing.md)
-includes an opt-in hosted MP3 diagnostic for desktop and Chromecast. Sharing,
+includes an opt-in hosted MP3 diagnostic for desktop and Chromecast, plus a
+[locally tested private-media gateway](services/media-gateway). Sharing,
 parties and local-file Cast playback are not yet supported application features;
 hosting and real-device acceptance remain gated.
 

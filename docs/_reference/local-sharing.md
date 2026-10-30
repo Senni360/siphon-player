@@ -8,10 +8,11 @@ nav_order: 22
 
 This is the personal fork's implementation plan, inspected on 2026-10-30.
 The maintainer authorized designing shared local recordings behind `senni.dev`
-and the bounded diagnostic below. No infrastructure has been provisioned, no
-recording uploaded and no listening-party support advertised. The diagnostic
-is the first independently reviewable part of milestone 1. The hosted and
-hardware acceptance gate remains open.
+and the bounded diagnostic below. No infrastructure has been provisioned and
+no recording uploaded to a cloud service. The diagnostic and locally tested
+private-media gateway are independently reviewable parts of milestone 1.
+The hosted and hardware acceptance gate remains open. Listening parties are
+not yet supported.
 
 The explicit fork exception is to CONTRIBUTING's Spotify-only scope, prohibition
 on another backend or operated service, and AGENTS' hosted-backend boundary, for
@@ -45,6 +46,12 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   Connect. It does not serve local bytes. The new `cast::media` diagnostic path
   launches Google's Default Media Receiver independently, with no provider
   credentials. Spotify activation is unchanged.
+- `services/media-gateway` is a bounded, operator-only test service with private
+  R2 reads, opaque temporary capabilities, revocation and retention cleanup.
+  Its SQLite registry and local Workers runtime have been tested. It has no
+  upload endpoint, participant authentication or production route. See the
+  [service runbook](https://github.com/Senni360/siphon-player/tree/main/services/media-gateway)
+  for exact limits, configuration and the separately required deployment review.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -274,6 +281,10 @@ The first read must supply a strong ETag. Later desktop/preflight range reads
 send `If-Match` and reject a changed ETag even when the byte length is unchanged.
 The Cast receiver fetches the URL itself, so the gateway must independently
 enforce the asset's immutable stored object version on every request.
+For a local HTTPS emulator only, `--ca-certificate /private/test-cert.pem` adds
+one explicitly supplied certificate to the diagnostic's trust roots without
+disabling TLS or changing system trust. It cannot be combined with `--cast`:
+the receiver needs its own trusted public HTTPS endpoint.
 
 ```sh
 cargo run --locked --no-default-features --example hosted_media_probe -- /private/test.json --approved-test-media
@@ -302,10 +313,13 @@ After server expiry or revocation the last command requires a denied fresh read;
 successful preflight alone does not validate revocation or actual playback.
 
 The next bounded milestone is completing M1's approved hosted/hardware matrix,
-then implementing upload admission and cancellation in M2. Required secrets are
-scoped R2 multipart signing credentials, room-auth/session keys and media-grant
-signing keys, held server-side. Native clients receive only scoped short-lived
-upload/playback grants. No secrets are required to run regression tests.
+then implementing upload admission and cancellation in M2. The M1 gateway needs
+only an operator `ADMIN_SECRET` and service bindings. It stores capability
+hashes, not signed grants, and requires no separate media signing key. Later
+direct uploads need scoped R2 multipart signing credentials; rooms need their
+own session authentication. These secrets stay server-side. Native clients
+receive only scoped short-lived upload/playback grants. No real credentials
+are required to run regression tests.
 
 ## Validation record (2026-10-30)
 
@@ -325,14 +339,39 @@ Dependency-source, review-evidence and new-settings policy checks passed.
 ordering issue in `src/app.rs` was corrected in a separate formatting commit.
 
 All six required default/all-feature Cargo Clippy, test, doctest and rustdoc
-commands were attempted. Each stopped in `projectm-sys` because Windows
-`VCPKG_INSTALLATION_ROOT` is unset. Launcher checks reported three failures and
-five errors from missing Unix/Ruby tools and Windows path handling. The Jekyll
-build could not run because Bundler/Ruby is unavailable. These are open full-check
-gates, not a green contribution run. No Linux or macOS build was tested.
+commands passed on Windows after configuring the already installed Visual
+Studio, vcpkg and libclang build tools. The default library suite passed 1,743
+tests and the all-feature library suite passed 1,785, with five ignored in each.
+The no-default-feature suite also passed. Launcher checks reported three
+failures and five errors from missing Unix/Ruby tools and Windows path handling.
+Local Jekyll could not run without Bundler/Ruby. GitHub's Linux Docs job did
+successfully build the site for `cf4d941`, then failed to upload its artifact
+because the account's artifact storage quota was exhausted. No Linux or macOS
+Rust build was tested locally. These remaining gates are not a fully green
+contribution run.
+The same GitHub checkpoint passed policy, quality and CI documentation jobs.
+Its Linux test runner exhausted disk space; its macOS default suite reported
+three existing `single_instance` handoff failures. These failures remain open
+and are separate from the passing Windows result.
+
+The gateway passed 27 Node tests using SQLite and deterministic clocks. A
+separate Wrangler 4.156.0 local Workers run used real local SQLite/R2 bindings,
+HTTPS and a generated 12-second 44.1 kHz stereo MP3. Registration and grant
+retries, full and range reads, HEAD, ETags, conditional reads, revocation and
+expiry passed. A retention alarm deleted a second test object, confirmed by an
+independent local R2 read. This validates the emulator, not a deployed
+Cloudflare account, public DNS/TLS or receiver reachability.
+The native probe passed first/final HTTPS range reads with an explicitly trusted
+local test certificate, decoded the recording and completed five seconds through
+the Windows default audio sink starting at position five seconds. After the
+operator CLI deleted the asset, the native denial check passed with the same
+manifest. Audible quality and the perceived seek point were not independently
+confirmed. TLS verification remained enabled; the untrusted certificate was
+rejected before adding explicit test trust.
 
 A five-second IPv4 mDNS query on the default interface found no Cast
 advertisements; this cannot rule out devices behind another interface or network
-isolation. No real receiver, native acoustic output, two-computer room,
-hosted expiry/revocation or cleanup was validated. No audio was uploaded and no
-infrastructure was changed. Measured synchronization: **none**.
+isolation. No real receiver, acoustic measurement, two-computer room or
+cloud-hosted expiry/revocation/cleanup was validated. Generated test audio
+stayed in disposable local storage; no infrastructure was changed. Measured
+synchronization: **none**.

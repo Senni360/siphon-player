@@ -55,6 +55,10 @@ struct Args {
     /// Check that an expired or revoked URL refuses a new range request.
     #[arg(long, conflicts_with_all = ["desktop", "cast"])]
     expect_denied: bool,
+    /// Trust this additional PEM certificate for a local HTTPS test gateway.
+    /// Does not change system trust or the receiver's own trust store.
+    #[arg(long, conflicts_with = "cast")]
+    ca_certificate: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -91,13 +95,23 @@ fn main() -> Result<()> {
     {
         bail!("seek target must be inside the declared recording duration");
     }
-    let client = Client::builder()
+    let mut client = Client::builder()
         .https_only(true)
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(15))
-        .no_gzip()
-        .build()
-        .map_err(redact)?;
+        .no_gzip();
+    if let Some(path) = &args.ca_certificate {
+        let file = std::fs::File::open(path).context("cannot open test certificate")?;
+        let mut pem = Vec::new();
+        file.take(64 * 1024 + 1).read_to_end(&mut pem)?;
+        if pem.len() > 64 * 1024 {
+            bail!("test certificate exceeds 64 KiB");
+        }
+        let certificate = reqwest::Certificate::from_pem(&pem)
+            .map_err(|_| anyhow!("invalid PEM test certificate"))?;
+        client = client.add_root_certificate(certificate);
+    }
+    let client = client.build().map_err(redact)?;
     if args.expect_denied {
         let response = request(&client, &manifest.url, 0, 0, None)?;
         if !matches!(response.status().as_u16(), 401 | 403 | 404 | 410) {
