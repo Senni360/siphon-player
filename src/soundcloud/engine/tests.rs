@@ -97,10 +97,11 @@ async fn changed_stream_lengths_and_cached_read_cancellation_are_not_eof() {
         b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/8\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
         b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-7/9\r\nContent-Length: 4\r\n\r\nefgh".to_vec(),
     ]).await;
-    let (worker, _, _) = worker();
+    let (first_worker, _, _) = worker();
     tokio::task::spawn_blocking(move || {
         let error = Arc::new(Mutex::new(None));
-        let mut source = source::RangeSource::new(worker.fetch, url, Arc::clone(&error)).unwrap();
+        let mut source =
+            source::RangeSource::new(first_worker.fetch, url, Arc::clone(&error)).unwrap();
         assert!(source.read_to_end(&mut Vec::new()).is_err());
         assert!(matches!(*error.lock().unwrap(), Some(Error::Network(_))));
     })
