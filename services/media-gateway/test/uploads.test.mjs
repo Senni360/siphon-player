@@ -227,6 +227,28 @@ test("ready requires verified bytes and duplicate completion preserves the origi
   }
 });
 
+test("opaque Workers part receipts survive unchanged while oversized or malformed tokens fail closed", async t => {
+  const f = fixture(t); await f.uploading();
+  const first = await f.ledger.leasePart(alice, input().id, 1, 1);
+  for (const etag of ["", "x".repeat(1025), '"quoted"', "bad\r\nvalue", "non-ascii-\u00e9"]) {
+    await assert.rejects(f.ledger.recordPart(input().id, 1, {
+      number: 1, lease_id: first.lease_id, size: first.size, etag,
+    }), error("invalid_storage_result"));
+  }
+  assert.equal((await f.ledger.snapshot(alice, input().id)).uploaded_bytes, 0);
+  const tokens = ["r".repeat(171), "s".repeat(1024)];
+  for (const [index, etag] of tokens.entries()) {
+    const lease = await f.ledger.leasePart(alice, input().id, 1, index + 1);
+    await f.ledger.recordPart(input().id, 1, {
+      number: lease.number, lease_id: lease.lease_id, size: lease.size, etag,
+    });
+  }
+  f.restart();
+  const effect = await f.ledger.beginComplete(alice, input().id, 1);
+  assert.deepEqual(effect.parts.map(part => part.etag), tokens);
+  assert.ok(!JSON.stringify(await f.ledger.snapshot(alice, input().id)).includes(tokens[0]));
+});
+
 test("late completion cannot resurrect cancellation and cleanup waits for an uncertain outcome", async t => {
   const f = fixture(t); await f.uploading(); await f.parts();
   await f.ledger.beginComplete(alice, input().id, 1);

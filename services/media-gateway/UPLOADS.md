@@ -110,6 +110,16 @@ parallel HTTP requests. A future signer and abuse policy must address that
 separately. Before resuming, the native worker must rehash the explicitly chosen
 file and compare both digest and size through `snapshot`.
 
+Workers multipart part receipts are opaque completion tokens. The local R2
+runtime returned a 171-character token, which the original 128-character object
+ETag limit rejected. Part receipts now accept up to 1,024 visible ASCII
+characters (excluding quotes) and preserve them byte for byte. They remain
+server-only and are not proof of media contents. The stricter object ETag limit
+is unchanged. Regression tests reject oversized/malformed receipts and confirm
+that completion receives the original tokens after ledger recreation.
+The receipt fix passed all 47 existing gateway/ledger tests on Windows,
+including the new token-boundary regression.
+
 `recordPart`, `settleCreate`, `settleComplete`, `cleanupFailed` and
 `acknowledgeCleanup` are **trusted executor methods**, not participant commands.
 Do not expose them as routes accepting a client's claim that upload or deletion

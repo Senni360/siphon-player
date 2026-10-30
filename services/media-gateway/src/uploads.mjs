@@ -11,6 +11,9 @@ export const UPLOAD_LIMITS = Object.freeze({
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const HASH = /^[0-9a-f]{64}$/;
 const ETAG = /^[!#-~]{1,128}$/;
+// Workers multipart receipts are opaque tokens, not object MD5 ETags. The
+// local R2 runtime returns 171 characters; preserve them exactly for completion.
+const PART_ETAG = /^[!#-~]{1,1024}$/;
 const PROFILE = "mp3-44100-stereo";
 const ACTIVE = new Set(["reserved", "creating", "uploading", "completing"]);
 
@@ -179,7 +182,7 @@ export class UploadLedger {
   // Storage-confirmed part receipt, not a client's claimed byte count or ETag.
   async recordPart(id, generation, input) {
     fields(input, ["number", "lease_id", "size", "etag"]);
-    requireThat(uuid(input.lease_id) && etag(input.etag)
+    requireThat(uuid(input.lease_id) && typeof input.etag === "string" && PART_ETAG.test(input.etag)
       && integer(input.number, 1, Math.ceil(UPLOAD_LIMITS.fileBytes / UPLOAD_LIMITS.partBytes))
       && integer(input.size, 1, Number.MAX_SAFE_INTEGER), "invalid_storage_result");
     return this.commit(() => {
