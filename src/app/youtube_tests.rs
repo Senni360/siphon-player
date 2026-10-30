@@ -134,3 +134,27 @@ fn youtube_external_links_raise_window_and_use_the_common_queue() {
     assert!(app.backend.take_remote_play_requests().is_empty());
     app.backend.shutdown();
 }
+
+#[test]
+fn youtube_copy_link_accepts_both_menu_urls_and_canonical_uris() {
+    let mut app = hybrid_fixture();
+    let ctx = egui::Context::default();
+    for link in [
+        "youtube:video:aB9_-012xyz",
+        "https://www.youtube.com/watch?v=aB9_-012xyz",
+    ] {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            app.apply(Action::CopyLink(link.into()), ui.ctx());
+        });
+        output.textures_delta.clear();
+        assert!(
+            output
+                .platform_output
+                .commands
+                .contains(&egui::OutputCommand::CopyText(
+                    "https://www.youtube.com/watch?v=aB9_-012xyz".into(),
+                ))
+        );
+    }
+    app.backend.shutdown();
+}
