@@ -2040,6 +2040,7 @@ mod tests {
     /// left after 14 points of padding.
     const NOW_PLAYING_COVER: egui::Pos2 = egui::pos2(124.0, 750.0);
     /// Empty island beside that cover: the visualizer's click target.
+    #[cfg(feature = "demo")]
     const ISLAND_EMPTY: egui::Pos2 = egui::pos2(86.0, 750.0);
     use crate::app::AppOptions;
     use crate::paths::AppDirs;
