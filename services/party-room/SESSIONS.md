@@ -34,10 +34,19 @@ revocation must close the affected sessions or revoke room membership promptly;
 changing the proof callback alone does not immediately erase a cached ready vote.
 Failed heartbeats eventually expire the lease, but are not immediate revocation.
 
-Use only `SessionRoom` for a store once it has acquired session state. Mixing it
-with raw `RoomQueue` would bypass output fencing. The base class remains the
-isolated trusted-input protocol core. Internal transition helpers are not
-transport endpoints. SessionRoom refuses external `publishOwnerPresence` calls
+Use only `SessionRoom` for a store once it has acquired session state. The raw
+`RoomQueue` constructor now refuses a store with the session marker table, even
+if that table is empty. A raw instance retained across upgrade also refuses its
+transactional operations with `session_authority_required`; its upload callback
+returns false. Replace every authority reference, including upload callbacks,
+when upgrading. Existing raw stores remain supported until their first upgrade;
+there is no downgrade API. SessionRoom reconstruction remains supported.
+
+The internal subclass marker is a composition guard, not authentication or a
+sandbox against privileged code with database access. It is not a serializable
+participant option. The base class remains the isolated trusted-input protocol
+core. Internal transition helpers are not transport endpoints.
+SessionRoom refuses external `publishOwnerPresence` calls
 with `presence_managed`, and replaces the readiness roster callback with the
 current live-session roster, deduplicated by actor.
 
@@ -149,13 +158,14 @@ recovery grants a session or automatically starts playback.
 
 ## Validation and remaining gates
 
-Twenty-nine deterministic Windows tests cover default-denied authorization,
+Thirty-three deterministic Windows tests cover default-denied authorization,
 ownership, bounds, stale/equal revisions, lost replies, rollback, reconstruction,
 legacy upgrade, aggregate owner departure, exact lease/grace boundaries, output
 replacement, old readiness callbacks, journal privacy and pending optimistic
-transport intent. The full room suite passes 204 tests. Eight new local SQLite
-Durable Object cases bring the runtime total to 23, including unchanged leases
-after reconstruction and a late tick pausing at the original deadline. The runner
+transport intent, raw-authority refusal after upgrade and upload-callback
+rewiring. The full room suite passes 243 tests. Ten local SQLite session cases
+bring the runtime total to 25, including unchanged leases after reconstruction,
+a late tick pausing at the original deadline and refusal of raw authority reuse. The runner
 disposes its runtime. Core reconstruction is not cloud eviction or process-crash
 validation, and these tests use deterministic clocks and fake connection proofs.
 

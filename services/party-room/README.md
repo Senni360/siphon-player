@@ -317,3 +317,10 @@ frames, synchronous queue acceptance and serialized durable dispatch. Twenty-one
 new tests bring the suite to 239, including same-connection clock resynchronization
 without probe-ID reuse. It still needs a real authenticated transport, scheduling
 and native integration; it does not enable room playback in the app.
+
+Session-managed stores now refuse the older raw queue authority, including a
+raw instance retained across upgrade. Hosts must replace upload callbacks as
+well as their room reference. Four regression tests bring the room suite to
+243; two added local runtime cases bring that total to 25. See
+[SESSIONS.md](SESSIONS.md) for the composition guard and unchanged authentication
+requirements. No transport or playback capability is enabled by this guard.

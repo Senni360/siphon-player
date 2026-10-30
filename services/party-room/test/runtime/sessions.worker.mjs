@@ -1,6 +1,6 @@
 // Local-only fixture. Fixed connection proofs are not production authentication.
 import { SessionRoom, SESSION_LIMITS } from "../../src/sessions.mjs";
-import { ROOM_LIMITS } from "../../src/queue.mjs";
+import { RoomQueue, ROOM_LIMITS } from "../../src/queue.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const owner = uuid(1), member = uuid(2), roomId = uuid(3), epoch = uuid(4);
@@ -16,7 +16,12 @@ export class SessionProbe {
       authorize: actor => [owner, member].includes(actor),
       authorizeSession: (actor, id) => actor === owner ? [oldSession, newSession].includes(id) : id === peerSession,
       resolveRecording: () => ({ owner_id: owner, revision: 1, state: "ready", duration_ms: 120000 }) };
+    const legacy = new RoomQueue(this.storage, options);
     let room = new SessionRoom(this.storage, options);
+    let rawOpenDenied = false, retainedDenied = false;
+    try { new RoomQueue(this.storage, options); } catch (error) { rawOpenDenied = error.code === "session_authority_required"; }
+    try { await legacy.snapshot(owner); } catch (error) { retainedDenied = error.code === "session_authority_required"; }
+    check(rawOpenDenied && retainedDenied, "session upgrade fences both raw construction and retained instances");
     const send = async type => {
       const view = await room.snapshot(owner);
       return room.command(owner, { epoch, command_id: view.self.next_command_id, expected_revision: view.revision,
@@ -35,6 +40,8 @@ export class SessionProbe {
     now += 1000;
     check((await room.openSession(owner, event(oldSession))).session.lease_until === first.session.lease_until, "retry never renews lease");
     await send("add"); await send("advance"); await send("prepare");
+    check(!legacy.allowsUpload(owner, roomId, occurrence, "cancel")
+      && room.allowsUpload(owner, roomId, occurrence, "cancel"), "upload authorization requires rewiring to the session authority");
     await report(owner, oldSession, 1); await report(member, peerSession, 1);
     const second = await room.openSession(owner, event(newSession));
     await room.publishOutput(owner, event(newSession, 2));
@@ -61,6 +68,6 @@ export class SessionProbe {
     check(!(await room.snapshot(owner)).timeline.playing, "expired session retry never resumes playback");
     const encoded = JSON.stringify(paused);
     check(![oldSession, newSession, peerSession, "session_id", "output_revision"].some(value => encoded.includes(value)), "snapshots hide connection identities");
-    return Response.json({ cases: 8, paused: true, lease_preserved: true });
+    return Response.json({ cases: 10, paused: true, lease_preserved: true });
   }
 }

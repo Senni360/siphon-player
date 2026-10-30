@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { RoomQueue, RoomError, ROOM_LIMITS } from "../src/queue.mjs";
+import { RoomQueue, RoomError, ROOM_LIMITS, SESSION_COORDINATOR } from "../src/queue.mjs";
 import { SessionRoom, SESSION_LIMITS as L } from "../src/sessions.mjs";
 import { RoomClient } from "../src/client.mjs";
 
@@ -361,4 +361,42 @@ test("output invalidation does not erase a pending optimistic playback command",
   const receipt = await f.queue.command(owner, packet); assert.equal(receipt.error, "stale_revision");
   client.receiveReceipt(connection, receipt);
   assert.equal(client.view().pending_transport.state, "rejected"); assert.equal(client.view().pending_transport.playing, true);
+});
+
+test("session-managed stores refuse raw queue construction without changing state", async t => {
+  const f = await fixture(t); await f.ready(); const before = await f.view();
+  assert.throws(() => new RoomQueue(f.storage, f.options), error("session_authority_required"));
+  assert.deepEqual(await f.view(), before);
+  f.restart(); assert.deepEqual(await f.view(), before);
+});
+
+test("a raw instance retained across upgrade cannot mutate or read the room through public operations", async t => {
+  const f = await fixture(t, {}, false);
+  f.db.exec("DROP TABLE room_session_state; DROP TABLE room_sessions; DROP TABLE room_outputs");
+  const raw = new RoomQueue(f.storage, f.options);
+  await raw.publishOwnerPresence({ epoch, revision: 1, connected: true });
+  f.queue = raw; await f.send({ type: "add", occurrence_id: occurrence, recording_id: recording, explicit_selection: true });
+  const packet = await f.packet({ type: "advance" });
+  assert.equal(raw.allowsUpload(owner, roomId, occurrence, "cancel"), true);
+  f.restart(); const before = await f.view();
+  await assert.rejects(raw.snapshot(owner), error("session_authority_required"));
+  await assert.rejects(raw.command(owner, packet), error("session_authority_required"));
+  await assert.rejects(raw.publishOwnerPresence({ epoch, revision: 2, connected: true }), error("session_authority_required"));
+  await assert.rejects(raw.publishMedia(recording, { owner_id: owner, revision: 2, state: "unavailable", duration_ms: 120000 }), error("session_authority_required"));
+  assert.equal(raw.allowsUpload(owner, roomId, occurrence, "cancel"), false);
+  assert.equal(f.queue.allowsUpload(owner, roomId, occurrence, "cancel"), true);
+  assert.deepEqual(await f.view(), before);
+});
+
+test("serialized flags and the internal marker cannot opt a raw RoomQueue into session management", async t => {
+  const f = await fixture(t);
+  for (const marker of [true, "session-coordinator", { session: true }, SESSION_COORDINATOR]) {
+    assert.throws(() => new RoomQueue(f.storage, f.options, marker), error("authority_required"));
+  }
+});
+
+test("an incomplete session marker never silently falls back to the raw authority", async t => {
+  const f = await fixture(t, {}, false); f.db.exec("DELETE FROM room_session_state");
+  assert.throws(() => new RoomQueue(f.storage, f.options), error("session_authority_required"));
+  f.restart(); assert.equal((await f.view()).owner_presence.state, "unknown");
 });

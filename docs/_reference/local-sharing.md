@@ -733,3 +733,29 @@ errors, and local Jekyll still lacks Bundler. GitHub's preceding `2d6c90b` media
 job was refused before steps by its confirmed billing/spending restriction.
 No new Linux/macOS or deployed-platform coverage is claimed. The local runtime
 was disposed and all test/build processes completed before handoff.
+
+The session-authority guard closes an integration gap in the documented upgrade
+contract. Once a store has acquired session state, raw RoomQueue construction
+and retained raw instances refuse transactional operations before maintenance
+or mutation; old upload callbacks deny access until replaced. SessionRoom can
+still reconstruct that store, and legacy raw stores remain supported until
+upgrade. The internal composition marker is not authentication or a sandbox
+against privileged code with database access. No downgrade API was added.
+
+Four deterministic Windows regressions bring the room suite to 243. Two added
+local Durable Object cases verify raw-authority refusal and upload-callback
+rewiring, bringing the runtime total to 25. All 60 media-service tests pass.
+Required Windows default/all-feature Clippy and all-target suites (library
+1865/1908 passing, eight ignored each), doctests, warning-strict rustdoc,
+formatting and policy checks pass. Launcher checks still report three failures
+and five errors, and Bundler is unavailable for local Jekyll. The preceding
+`20a6a94` GitHub media job failed before steps with the confirmed billing/spending
+restriction. No new Linux/macOS coverage is claimed.
+
+This guard changes no provider capability, interface, infrastructure, secret,
+upload quota or audio retention. Production transport/authentication, native
+output integration and the M1 hosted/hardware gate remain open. Real audible
+synchronization remains unmeasured. The next bounded integration should address
+readiness-report sequencing across a selected-output replacement, using the
+existing authoritative report cursor and connection fence. It must not treat
+participant readiness claims as trusted media verification.

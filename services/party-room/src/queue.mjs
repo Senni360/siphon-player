@@ -6,6 +6,9 @@ export const ROOM_LIMITS = Object.freeze({ pending: 32, occurrences: 256, actors
   lifetimeMs: 24 * 60 * 60 * 1000, ownerGraceMs: 30_000 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const STATES = new Set(["unavailable", "uploading", "ready"]);
+// Internal composition marker for SessionRoom, not an authentication grant or
+// participant option. JSON cannot opt a raw authority into session management.
+export const SESSION_COORDINATOR = Symbol("session-coordinator");
 
 export class RoomError extends Error {
   constructor(code) { super(code); this.code = code; }
@@ -54,17 +57,21 @@ function fingerprint(command) {
 }
 
 export class RoomQueue {
+  #sessionAuthority;
   constructor(storage, { roomId, ownerId, epoch, authorize, resolveRecording, canStart = () => false,
-    readinessParticipants = () => [], now = Date.now } = {}) {
+    readinessParticipants = () => [], now = Date.now } = {}, coordinator) {
     requireThat([roomId, ownerId, epoch].every(uuid) && typeof authorize === "function"
       && typeof resolveRecording === "function" && typeof canStart === "function"
       && typeof readinessParticipants === "function" && typeof now === "function", "authority_required");
+    requireThat(coordinator === undefined || (coordinator === SESSION_COORDINATOR && new.target !== RoomQueue), "authority_required");
+    this.#sessionAuthority = coordinator === SESSION_COORDINATOR;
     this.storage = storage; this.sql = storage.sql;
     this.roomId = roomId; this.ownerId = ownerId; this.epoch = epoch;
     this.authorize = authorize; this.resolveRecording = resolveRecording; this.canStart = canStart; this.now = now;
     this.readinessParticipants = readinessParticipants;
     const created = now(); requireThat(integer(created) && integer(created + ROOM_LIMITS.lifetimeMs), "invalid_clock");
     storage.transactionSync(() => {
+      this.requireAuthority();
       this.sql.exec(`CREATE TABLE IF NOT EXISTS room_queue (
         singleton INTEGER PRIMARY KEY CHECK(singleton=1), room_id TEXT NOT NULL, owner_id TEXT NOT NULL,
         epoch TEXT NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
@@ -107,6 +114,11 @@ export class RoomQueue {
     });
   }
   rows(query, ...parameters) { return this.sql.exec(query, ...parameters).toArray(); }
+  requireAuthority() {
+    requireThat(this.#sessionAuthority || !this.rows(
+      "SELECT name FROM sqlite_schema WHERE type='table' AND name='room_session_state'"
+    ).length, "session_authority_required");
+  }
   room() { return this.rows("SELECT * FROM room_queue WHERE singleton=1")[0]; }
   active(now = this.now()) {
     const row = this.room();
@@ -154,6 +166,7 @@ export class RoomQueue {
       const now = this.now();
       requireThat(integer(now) && now >= this.clockFloor(), "invalid_clock");
       const result = this.storage.transactionSync(() => {
+        this.requireAuthority();
         const extraChanged = this.beforeCommit(now);
         const expiredOwner = this.expireOwner(now);
         const readinessChanged = this.maintainReadiness(now);
@@ -429,6 +442,7 @@ export class RoomQueue {
   // Removed occurrences keep ownership tombstones so cancellation still works.
   allowsUpload(actor, roomId, occurrenceId, operation) {
     try {
+      this.requireAuthority();
       if (roomId !== this.roomId || !this.member(actor, "upload")) return false;
       const row = this.rows(`SELECT o.added_by,m.owner_id,m.state FROM room_occurrences o
         JOIN room_media m ON o.recording_id=m.id WHERE o.id=?`, occurrenceId)[0];

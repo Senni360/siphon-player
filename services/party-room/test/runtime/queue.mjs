@@ -26,8 +26,8 @@ try {
   console.log("Fifteen local Durable Object cases passed: duplicate commands, ownership/stale state, upload eligibility/cancellation, media revisions, gated starts, timeline reconstruction, media-loss pause, clock sampling, owner-departure recovery, durable load timeout, explicit partial start, stale-load fencing, transport overlay confirmation, unchanged reconnect retries and mixed queue/transport sequencing.");
   const sessions = await runtime.dispatchFetch("http://localhost/sessions");
   assert.equal(sessions.status, 200, await sessions.clone().text());
-  assert.deepEqual(await sessions.json(), { cases: 8, paused: true, lease_preserved: true });
-  console.log("Eight local session cases passed: command separation, bounded retry leases, stale output rejection, report cursor fencing, durable reconstruction, aggregate owner presence, late expiry pause and private snapshots.");
+  assert.deepEqual(await sessions.json(), { cases: 10, paused: true, lease_preserved: true });
+  console.log("Ten local session cases passed: command separation, bounded retry leases, stale output rejection, report cursor fencing, durable reconstruction, aggregate owner presence, late expiry pause, private snapshots, raw-authority refusal and upload-callback rewiring.");
 } finally {
   await runtime.dispose();
 }

@@ -1,6 +1,6 @@
 // Session/output coordination only. Opaque IDs are correlation fences, never
 // authentication. A trusted live-connection adapter must authorize every event.
-import { RoomQueue, RoomError } from "./queue.mjs";
+import { RoomQueue, RoomError, SESSION_COORDINATOR } from "./queue.mjs";
 import { pausedTimeline } from "./timeline.mjs";
 
 export const SESSION_LIMITS = Object.freeze({ actors: 8, perActor: 2, lifetimeSessions: 64,
@@ -16,7 +16,7 @@ function fields(value, keys) {
 
 export class SessionRoom extends RoomQueue {
   constructor(storage, options) {
-    super(storage, options);
+    super(storage, options, SESSION_COORDINATOR);
     this.authorizeSession = options.authorizeSession ?? (() => false);
     requireThat(typeof this.authorizeSession === "function", "authority_required");
     storage.transactionSync(() => {
