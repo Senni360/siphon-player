@@ -1,7 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
-mod extension_bridge;
 mod download_actions;
+mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
@@ -12050,6 +12050,8 @@ impl App {
                 }
             }
             Action::ToggleSoundCloudLike(uri) => self.toggle_soundcloud_like(&uri),
+            Action::ToggleSoundCloudRepost(uri) => self.toggle_soundcloud_repost(&uri),
+            Action::LoadSoundCloudFollowing { more } => self.load_soundcloud_following(more),
             Action::ToggleSaved(uri) if crate::soundcloud::is_track_uri(&uri) => {
                 self.toggle_soundcloud_like(&uri)
             }

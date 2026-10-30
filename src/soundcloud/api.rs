@@ -315,6 +315,52 @@ impl Client {
         self.get(&format!("tracks/{id}"), &[]).await
     }
 
+    /// Rehydrate a saved private share on a fresh connection before resolving
+    /// audio. Public permalinks and already known secrets keep the numeric read.
+    pub(crate) async fn track_for_playback(
+        &self,
+        uri: &str,
+        share_url: Option<&str>,
+    ) -> Result<Track> {
+        let id = super::track_id(uri).ok_or(Error::InvalidUrl)?;
+        let share = share_url.map(soundcloud_share_url).transpose()?;
+        let has_secret = self
+            .access
+            .secrets
+            .read()
+            .unwrap_or_else(|lock| lock.into_inner())
+            .contains_key(uri);
+        let private_share = share.as_ref().filter(|url| {
+            !has_secret
+                && (url.host_str() == Some("on.soundcloud.com")
+                    || url.path_segments().is_some_and(|mut parts| {
+                        parts
+                            .nth(2)
+                            .is_some_and(|part| part.starts_with("s-") && part.len() > 2)
+                    })
+                    || url
+                        .query_pairs()
+                        .any(|(key, value)| key == "secret_token" && !value.is_empty()))
+        });
+        let track = if let Some(url) = private_share {
+            // Do not hydrate a set if a stale/mismatched link resolves to one.
+            let resolved: Resolved = self.get("resolve", &[("url", url.to_string())]).await?;
+            match resolved {
+                Resolved::Track(mut track) => {
+                    track.permalink_url = Some(url.to_string());
+                    track
+                }
+                _ => return Err(Error::MissingTrack(id)),
+            }
+        } else {
+            self.track(id).await?
+        };
+        if track.id != id {
+            return Err(Error::MissingTrack(id));
+        }
+        Ok(track)
+    }
+
     /// Ordered like ids, including duplicates. Missing tracks are errors,
     /// never silently dropped, so playlist positions remain trustworthy.
     pub async fn tracks(&self, ids: &[u64]) -> Result<Vec<Track>> {
@@ -384,26 +430,20 @@ impl Client {
     }
 
     pub async fn resolve(&self, url: &str) -> Result<Resolved> {
-        let url = Url::parse(url).map_err(|_| Error::InvalidUrl)?;
-        if !matches!(url.scheme(), "https" | "http")
-            || !matches!(
-                url.host_str(),
-                Some(
-                    "soundcloud.com"
-                        | "www.soundcloud.com"
-                        | "m.soundcloud.com"
-                        | "on.soundcloud.com"
-                )
-            )
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.port().is_some()
-        {
-            return Err(Error::InvalidUrl);
-        }
+        let url = soundcloud_share_url(url)?;
         let mut resolved = self.get("resolve", &[("url", url.to_string())]).await?;
-        if let Resolved::Playlist(playlist) = &mut resolved {
-            self.fill_playlist(playlist).await?;
+        match &mut resolved {
+            Resolved::Track(track) => {
+                // The API's canonical permalink can omit a private share
+                // token. Preserve the accepted input for copy/share and saved
+                // metadata, including short links that grant private access.
+                track.permalink_url = Some(url.to_string());
+            }
+            Resolved::Playlist(playlist) => {
+                playlist.permalink_url = Some(url.to_string());
+                self.fill_playlist(playlist).await?;
+            }
+            Resolved::User(_) => {}
         }
         Ok(resolved)
     }
@@ -458,6 +498,37 @@ impl Client {
         self.user_page(id, "followings", limit, offset).await
     }
 
+    /// The web app's Feed, not its activities/notification inbox.
+    /// Cursor validation stays specific to this session-only endpoint.
+    pub async fn following_feed(&self, next: Option<&str>) -> Result<Page<super::following::Item>> {
+        if self.oauth_token.is_none() {
+            return Err(Error::NotSignedIn);
+        }
+        let path = self.social_cursor(next.unwrap_or("stream"), "/stream")?;
+        let query = if next.is_none() {
+            vec![("limit", "50".into()), ("linked_partitioning", "1".into())]
+        } else {
+            Vec::new()
+        };
+        let page: Page<super::following::WireItem> = self.get(&path, &query).await?;
+        let next_href = page
+            .next_href
+            .map(|cursor| self.social_cursor(&cursor, "/stream"))
+            .transpose()?;
+        if next.is_some() && next_href.as_deref() == Some(path.as_str()) {
+            return Err(Error::Decode);
+        }
+        Ok(Page {
+            collection: page
+                .collection
+                .into_iter()
+                .filter_map(super::following::WireItem::into_item)
+                .collect(),
+            next_href,
+            total_results: page.total_results,
+        })
+    }
+
     /// One explicit mutation. The caller supplies the configured no-redirect,
     /// no-retry collection client so a credential cannot follow a redirect.
     pub async fn set_liked(
@@ -467,12 +538,65 @@ impl Client {
         track: u64,
         liked: bool,
     ) -> Result<()> {
+        self.set_membership(http, &format!("users/{user}/track_likes/{track}"), liked)
+            .await
+    }
+
+    pub async fn set_reposted(
+        &self,
+        http: &reqwest::Client,
+        target: super::reposts::Target,
+        reposted: bool,
+    ) -> Result<()> {
+        self.set_membership(
+            http,
+            &format!("{}/{}", target.path(), target.id()),
+            reposted,
+        )
+        .await
+    }
+
+    pub async fn reposted_ids(&self) -> Result<super::reposts::Snapshot> {
+        if self.oauth_token.is_none() {
+            return Err(Error::NotSignedIn);
+        }
+        let tracks = self.repost_ids("me/track_reposts/ids").await?;
+        let playlists = self.repost_ids("me/playlist_reposts/ids").await?;
+        Ok(super::reposts::Snapshot {
+            tracks,
+            playlists,
+            loaded: true,
+        })
+    }
+
+    async fn repost_ids(&self, path: &str) -> Result<std::collections::HashSet<u64>> {
+        let mut page: Page<u64> = self.get(path, &[("limit", "200".into())]).await?;
+        let mut ids = std::collections::HashSet::new();
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            ids.extend(page.collection);
+            let Some(next) = page.next_href else { break };
+            let next = self.social_cursor(&next, &format!("/{path}"))?;
+            if !seen.insert(next.clone()) {
+                return Err(Error::InvalidUrl);
+            }
+            page = self.get(&next, &[("limit", "200".into())]).await?;
+        }
+        Ok(ids)
+    }
+
+    async fn set_membership(
+        &self,
+        http: &reqwest::Client,
+        path: &str,
+        enabled: bool,
+    ) -> Result<()> {
         let token = self.oauth_token.as_ref().ok_or(Error::NotSignedIn)?;
         if self.access.expired.load(Ordering::SeqCst) || self.access.revoked.load(Ordering::SeqCst)
         {
             return Err(Error::SessionExpired);
         }
-        let mut url = self.api_url(&format!("users/{user}/track_likes/{track}"))?;
+        let mut url = self.api_url(path)?;
         let client_id = self.ensure_client_id(None).await?;
         url.query_pairs_mut().append_pair("client_id", &client_id);
         let mut authorization = header::HeaderValue::from_str(&format!("OAuth {token}"))
@@ -500,7 +624,7 @@ impl Client {
         {
             return Err(Error::SessionExpired);
         }
-        let method = if liked {
+        let method = if enabled {
             reqwest::Method::PUT
         } else {
             reqwest::Method::DELETE
@@ -662,18 +786,59 @@ impl Client {
         Ok(url)
     }
 
+    // Social cursors can be persisted in account-scoped caches. Keep only the
+    // expected API endpoint and pagination data, never credentials returned in
+    // a next_href. Resolving relative URLs also makes cursor-loop checks stable.
+    fn social_cursor(&self, path: &str, endpoint: &str) -> Result<String> {
+        let mut url = self.api_url(path)?;
+        if url.path() != endpoint {
+            return Err(Error::InvalidUrl);
+        }
+        let query = url
+            .query_pairs()
+            .filter(|(key, _)| {
+                !matches!(
+                    key.as_ref(),
+                    "client_id"
+                        | "oauth_token"
+                        | "access_token"
+                        | "secret_token"
+                        | "track_authorization"
+                )
+            })
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        url.set_query(None);
+        url.set_fragment(None);
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        Ok(url.to_string())
+    }
+
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
         if self.access.revoked.load(Ordering::SeqCst) {
             return Err(Error::NotSignedIn);
         }
         let mut url = self.api_url(path)?;
-        let requires_session = url.path() == "/me" || url.path().ends_with("/liked_and_owned");
+        let requires_session = url.path() == "/me"
+            || url.path().starts_with("/me/")
+            || url.path() == "/stream"
+            || url.path().ends_with("/liked_and_owned");
+        if requires_session && self.oauth_token.is_none() {
+            return Err(Error::NotSignedIn);
+        }
         if requires_session && self.access.expired.load(Ordering::SeqCst) {
             return Err(Error::SessionExpired);
         }
         let retained = url
             .query_pairs()
-            .filter(|(key, _)| key != "client_id" && key != "oauth_token" && key != "access_token")
+            .filter(|(key, _)| {
+                key != "client_id"
+                    && key != "oauth_token"
+                    && key != "access_token"
+                    && !query.iter().any(|(name, _)| key.as_ref() == *name)
+            })
             .map(|(key, value)| (key.into_owned(), value.into_owned()))
             .collect::<Vec<_>>();
         url.set_query(None);
@@ -706,11 +871,17 @@ impl Client {
         }
         let mut id = self.ensure_client_id(None).await?;
         for attempt in 0..2 {
+            if requires_session && self.access.expired.load(Ordering::SeqCst) {
+                return Err(Error::SessionExpired);
+            }
             let mut authenticated = url.clone();
             authenticated
                 .query_pairs_mut()
                 .append_pair("client_id", &id);
-            let oauth = self.oauth_token.is_some() && !self.access.expired.load(Ordering::SeqCst);
+            // A session-only request must never become anonymous if another
+            // request expires the account between this check and dispatch.
+            let oauth = self.oauth_token.is_some()
+                && (requires_session || !self.access.expired.load(Ordering::SeqCst));
             let response = match self.send(authenticated, oauth).await {
                 Err(error @ Error::Status(401 | 403)) if oauth => {
                     // A rejected public client ID can look like a rejected
@@ -817,6 +988,9 @@ impl Client {
             if self.access.revoked.load(Ordering::SeqCst) {
                 return Err(Error::NotSignedIn);
             }
+            if oauth && self.access.expired.load(Ordering::SeqCst) {
+                return Err(Error::SessionExpired);
+            }
             let mut request = self
                 .shared
                 .http
@@ -824,10 +998,7 @@ impl Client {
                 .map_err(Error::Network)?
                 .get(url.clone())
                 .timeout(Duration::from_secs(30));
-            if oauth
-                && !self.access.expired.load(Ordering::SeqCst)
-                && let Some(token) = &self.oauth_token
-            {
+            if oauth && let Some(token) = &self.oauth_token {
                 let mut value = header::HeaderValue::from_str(&format!("OAuth {token}"))
                     .map_err(|_| Error::NotSignedIn)?;
                 value.set_sensitive(true);
@@ -855,6 +1026,24 @@ impl Client {
         }
         unreachable!("the last attempt always returns")
     }
+}
+
+fn soundcloud_share_url(url: &str) -> Result<Url> {
+    let url = Url::parse(url).map_err(|_| Error::InvalidUrl)?;
+    if !matches!(url.scheme(), "https" | "http")
+        || !matches!(
+            url.host_str(),
+            Some(
+                "soundcloud.com" | "www.soundcloud.com" | "m.soundcloud.com" | "on.soundcloud.com"
+            )
+        )
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.port().is_some()
+    {
+        return Err(Error::InvalidUrl);
+    }
+    Ok(url)
 }
 
 fn remember_secrets(

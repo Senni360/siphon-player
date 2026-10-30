@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{playlist_uri, track_uri, user_uri};
 use crate::api::models as app;
+pub use crate::api::models::PublisherMetadata;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Page<T> {
@@ -59,11 +60,6 @@ impl User {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct PublisherMetadata {
-    pub artist: Option<String>,
-}
-
 #[derive(Clone, Default, Deserialize, Serialize)]
 pub struct Track {
     pub id: u64,
@@ -72,9 +68,14 @@ pub struct Track {
     pub duration: u32,
     pub full_duration: Option<u32>,
     pub artwork_url: Option<String>,
+    pub created_at: Option<String>,
+    pub release_date: Option<String>,
+    pub display_date: Option<String>,
+    pub playback_count: Option<u64>,
+    pub label_name: Option<String>,
     pub permalink_url: Option<String>,
     pub user: Option<User>,
-    pub publisher_metadata: Option<PublisherMetadata>,
+    pub publisher_metadata: Option<Box<PublisherMetadata>>,
     pub streamable: Option<bool>,
     pub policy: Option<String>,
     pub state: Option<String>,
@@ -153,6 +154,30 @@ impl Track {
             name: self.title.clone().unwrap_or_default(),
             uri: track_uri(self.id),
             duration_ms: self.full_duration.unwrap_or(self.duration),
+            release_date: self
+                .release_date
+                .as_ref()
+                .filter(|date| !date.trim().is_empty())
+                .or_else(|| {
+                    self.display_date
+                        .as_ref()
+                        .filter(|date| !date.trim().is_empty())
+                })
+                .or_else(|| {
+                    self.created_at
+                        .as_ref()
+                        .filter(|date| !date.trim().is_empty())
+                })
+                .cloned(),
+            play_count: self.playback_count,
+            publisher_metadata: self.publisher_metadata.clone(),
+            label_name: self.label_name.clone(),
+            external_ids: app::ExternalIds {
+                isrc: self
+                    .publisher_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.isrc.clone()),
+            },
             artists: artists.clone(),
             album: Some(app::Album {
                 id: playlist.map(|list| list.id.to_string()).unwrap_or_default(),
