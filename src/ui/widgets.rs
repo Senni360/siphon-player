@@ -1750,6 +1750,38 @@ fn refuse(ctx: &egui::Context, row: egui::Id) {
     super::kit::motion::begin(ctx, row.with("refused"), super::kit::motion::REFUSE);
 }
 
+/// Sweeps one band of light across the song row `row`: the answer to
+/// playing it, so the eye lands on the row that started.
+fn sweep(ctx: &egui::Context, row: egui::Id) {
+    super::kit::motion::begin(ctx, row.with("played"), super::kit::motion::SWEEP);
+    ctx.request_repaint();
+}
+
+/// The band of light [`sweep`] moves across `rect` at progress `t`: a soft
+/// horizontal gradient in `color` that fades as it travels.
+fn paint_sweep(painter: &egui::Painter, rect: Rect, t: f32, color: Color32) {
+    const BAND: f32 = 240.0;
+    let center = rect.left() - BAND / 2.0 + (rect.width() + BAND) * t;
+    let peak = color.gamma_multiply(0.12 * (1.0 - t * t));
+    let clear = Color32::TRANSPARENT;
+    let mut mesh = egui::Mesh::default();
+    for (x, tint) in [
+        (center - BAND / 2.0, clear),
+        (center, peak),
+        (center + BAND / 2.0, clear),
+    ] {
+        mesh.colored_vertex(pos2(x, rect.top()), tint);
+        mesh.colored_vertex(pos2(x, rect.bottom()), tint);
+    }
+    for left in [0, 2] {
+        mesh.add_triangle(left, left + 1, left + 2);
+        mesh.add_triangle(left + 1, left + 2, left + 3);
+    }
+    painter
+        .with_clip_rect(rect.intersect(painter.clip_rect()))
+        .add(mesh);
+}
+
 /// Draws one song in a list.
 ///
 /// Returns the selection behavior for a row-body click. The caller supplies
@@ -1904,6 +1936,9 @@ fn track_row_contents(
                 .surface_hover
                 .gamma_multiply(if palette.dark { 0.7 } else { 1.0 }),
         );
+    }
+    if let Some(t) = super::kit::motion::running(ui.ctx(), response.id.with("played")) {
+        paint_sweep(ui.painter(), rect, t, palette.text);
     }
     // The row highlight also shows keyboard focus. Do not add an outline
     // when a mouse click gives the row focus for arrow-key navigation.
@@ -2424,6 +2459,7 @@ fn track_row_contents(
             uri: row.item.uri().to_string(),
             index: row.index as u32,
         });
+        sweep(ui.ctx(), response.id);
     } else if ui.is_enabled() && response.double_clicked() {
         refuse(ui.ctx(), response.id);
     } else if ui.is_enabled() && response.clicked() {
@@ -2451,6 +2487,7 @@ fn track_row_contents(
                     uri: row.item.uri().to_string(),
                     index: row.index as u32,
                 });
+                sweep(ui.ctx(), response.id);
             }
         } else if on_control {
             refuse(ui.ctx(), response.id);
@@ -4983,11 +5020,9 @@ mod tests {
         })
     }
 
-    /// A song that cannot play answers a double click on its body, or a
-    /// click on its play control, with a shake of its title, and plays
-    /// nothing.
-    #[test]
-    fn an_unplayable_song_shakes_instead_of_playing() {
+    /// Draws one song row, then clicks its body twice or its play control
+    /// once. Returns the actions pushed, the context and the row's id.
+    fn click_song_row(item: PlayableItem, target: &str) -> (Vec<Action>, egui::Context, egui::Id) {
         let click = |pos: egui::Pos2| {
             let button = |pressed| egui::Event::PointerButton {
                 pos,
@@ -4997,79 +5032,109 @@ mod tests {
             };
             vec![egui::Event::PointerMoved(pos), button(true), button(false)]
         };
-        for target in ["body", "control"] {
-            let mut app = test_app();
-            app.backend.shutdown();
-            let ctx = egui::Context::default();
-            theme::install(&ctx);
-            let item = PlayableItem::Track(Track {
-                uri: "spotify:track:gone".into(),
-                name: "Gone".into(),
-                is_playable: Some(false),
-                ..Default::default()
-            });
-            let context = RowContext::Queue;
-            let mut frame = |events: Vec<egui::Event>| {
-                let mut row = (Rect::NOTHING, egui::Id::NULL);
-                let mut output = ctx.run_ui(
-                    egui::RawInput {
-                        screen_rect: Some(Rect::from_min_size(
-                            egui::Pos2::ZERO,
-                            vec2(900.0, 400.0),
-                        )),
-                        events,
-                        ..Default::default()
-                    },
-                    |ui| {
-                        let (response, _) = track_row_response(
-                            ui,
-                            &mut app,
-                            TrackRow {
-                                index: 0,
-                                number: Some(1),
-                                item: &item,
-                                context: &context,
-                                show_cover: false,
-                                show_album: false,
-                                added_at: None,
-                                added_by: None,
-                                show_added_by: false,
-                                show_plays: false,
-                                compact: false,
-                                thin: false,
-                                shift: 0.0,
-                                picked: false,
-                                picked_songs: &[],
-                                picked_positions: &[],
-                                position: None,
-                            },
-                        );
-                        row = (response.rect, response.id);
-                    },
-                );
-                output.textures_delta.clear();
-                row
-            };
-            let (rect, id) = frame(vec![]);
-            let at = if target == "body" {
-                rect.center()
-            } else {
-                pos2(rect.left() + 30.0, rect.center().y)
-            };
-            frame(click(at));
-            if target == "body" {
-                frame(click(at));
-            }
-            assert!(
-                !app.actions
-                    .iter()
-                    .any(|action| matches!(action, Action::PlayFromRow { .. })),
-                "{target}"
+        let mut app = test_app();
+        app.backend.shutdown();
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let context = RowContext::Context {
+            uri: "spotify:playlist:rows".into(),
+            editable_playlist: None,
+        };
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut row = (Rect::NOTHING, egui::Id::NULL);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 400.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let (response, _) = track_row_response(
+                        ui,
+                        &mut app,
+                        TrackRow {
+                            index: 0,
+                            number: Some(1),
+                            item: &item,
+                            context: &context,
+                            show_cover: false,
+                            show_album: false,
+                            added_at: None,
+                            added_by: None,
+                            show_added_by: false,
+                            show_plays: false,
+                            compact: false,
+                            thin: false,
+                            shift: 0.0,
+                            picked: false,
+                            picked_songs: &[],
+                            picked_positions: &[],
+                            position: None,
+                        },
+                    );
+                    row = (response.rect, response.id);
+                },
             );
+            output.textures_delta.clear();
+            row
+        };
+        let (rect, id) = frame(vec![]);
+        let at = if target == "body" {
+            rect.center()
+        } else {
+            pos2(rect.left() + 30.0, rect.center().y)
+        };
+        frame(click(at));
+        if target == "body" {
+            frame(click(at));
+        }
+        (std::mem::take(&mut app.actions), ctx, id)
+    }
+
+    fn song_named(uri: &str, playable: bool) -> PlayableItem {
+        PlayableItem::Track(Track {
+            uri: uri.into(),
+            name: "Row".into(),
+            is_playable: Some(playable),
+            ..Default::default()
+        })
+    }
+
+    fn plays(actions: &[Action]) -> bool {
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::PlayFromRow { .. }))
+    }
+
+    /// A song that cannot play answers a double click on its body, or a
+    /// click on its play control, with a shake of its title, and plays
+    /// nothing.
+    #[test]
+    fn an_unplayable_song_shakes_instead_of_playing() {
+        for target in ["body", "control"] {
+            let (actions, ctx, id) =
+                click_song_row(song_named("spotify:track:gone", false), target);
+            assert!(!plays(&actions), "{target}");
             assert!(
                 super::super::kit::motion::running(&ctx, id.with("refused")).is_some(),
                 "{target}: the title should be shaking"
             );
+            assert!(super::super::kit::motion::running(&ctx, id.with("played")).is_none());
+        }
+    }
+
+    /// Playing a song from its row sweeps one band of light across that
+    /// row, whether by a double click or by its play control.
+    #[test]
+    fn playing_a_song_sweeps_its_row() {
+        for target in ["body", "control"] {
+            let (actions, ctx, id) = click_song_row(song_named("spotify:track:here", true), target);
+            assert!(plays(&actions), "{target}");
+            assert!(
+                super::super::kit::motion::running(&ctx, id.with("played")).is_some(),
+                "{target}: the row should sweep"
+            );
+            assert!(super::super::kit::motion::running(&ctx, id.with("refused")).is_none());
         }
     }
 
