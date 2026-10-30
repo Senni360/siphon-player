@@ -61,6 +61,63 @@ this session; report delays honestly rather than changing the promised result.
 The ordinary release pipeline signs and publishes releases and is intentionally
 not used for these private candidates.
 
+## Validated combined checkpoint
+
+The cloud coordinator's `siphon/evening-candidate` has tested code at
+`216e998e57e0251d5a4322bdb761820c10960735`. It combines:
+
+- the complete reliability backend `siphon/reliability-delivery` at `1c619b4`;
+- published cleanup `adb6157` (MilkDrop removal), preserving the backend's
+  credentials, lyrics, Friends and cache-invalidation hooks;
+- current main's hosted-media diagnostic and object-version guard through
+  `cf4d941`, with the already-present module-order change skipped;
+- Claude's frontend through `0d2943a`: approved design reference, design kit,
+  backend source classification, neutral palettes and source-colored track rows.
+
+The frontend shell, fonts and rebuilt views have not yet been published at this
+checkpoint. The frontend handoff's old "nothing on screen changes" wording lags
+the actual palette/row commits. Treat code and exact heads as evidence of what is
+included. This branch uses linear cherry-picks; because it includes copies of
+main's newer commits, do not assume it can fast-forward current main. Reconcile
+with the latest published main before any final main update. The owner asked for
+the work combined; no unrelated branch was reset or overwritten.
+
+Validation on Debian Linux and Rust 1.98.0:
+
+| Check | Result |
+| --- | --- |
+| Default-feature all-target tests | 1,847 library tests passed, 7 ignored; other targets passed |
+| All-feature all-target tests | 1,889 library tests passed, 7 ignored; other targets passed |
+| Default/all-feature all-target clippy with warnings denied | Passed |
+| Formatting, whitespace, dependency/review/new-settings checks | Passed |
+| Policy, launcher, release-name and Flatpak metadata regressions | 27, 4, 8 and 4 passed respectively |
+| Doctests / rustdoc with warnings denied | Passed; no doctests defined |
+| Production Jekyll build | Passed with isolated Ruby 3.3.8, Bundler 4.0.16 and locked gems |
+| Native demo build and render | Passed under Xvfb/software OpenGL: matching 1280×800 dark and 820×760 light/long-title captures before and after Claude's palette/row changes |
+
+The capture baseline was `941104b`; the changed production UI was `3146f9e`.
+`216e998` then changes only tests. Inspection confirmed source-colored titles,
+neutral controls, elision and row layout; app capture logs had no warning, error
+or panic. These images use invented fixtures and do not establish live service
+or real-device behavior. The obsolete SC-chip assertions were replaced with
+actual rendered-title color/placement assertions; the player bar's remaining
+badge and preview warnings retain coverage. Two cleanup leftovers in shortcut
+tests and helper ordering were fixed without restoring removed visualizers.
+
+The local Rust-to-Node Friends round trip and 25 Node tests passed on the same
+backend/service code before the frontend/cleanup integration. A hosted-media
+FFmpeg smoke remains an explicitly ignored optional example test. Nix packaging,
+CI Ruby 4.0, real provider accounts, installed-helper behavior and audio-device
+validation have not been established by these Linux checks. Jekyll emitted an
+existing nonfatal duplicate SEO-description warning.
+
+Scheduled cloud follow-ups check builds at 17:30, 18:30 and 19:30 Amsterdam,
+integrate at 20:30, and verify delivery at 22:00. They must inspect current heads,
+avoid concurrent writers and diagnose failures rather than assuming this
+checkpoint is tonight's finished application. The private Windows workflow
+artifact's manifest must identify the eventual combined commit. An executable
+from the early `c63163c` build is only an initial Windows compatibility probe.
+
 ## Extra AI model
 
 The owner offered access to a model called "Jeff". Its provider/API is still
