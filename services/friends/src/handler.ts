@@ -6,7 +6,13 @@ import { createService } from './service.ts';
 export function createHandler(env: NodeJS.ProcessEnv) {
   let service: ReturnType<typeof createService> | undefined;
   return async function handler(req: IncomingMessage, res: ServerResponse) {
+    const disconnected = new AbortController();
+    const abort = () => disconnected.abort();
+    const closed = () => { if (!res.writableEnded) abort(); };
+    req.once('aborted', abort);
+    res.once('close', closed);
     try {
+      if (req.aborted || res.destroyed) abort();
       service ??= createService(configuredStorage(env), env.SIPHON_FRIENDS_INVITE_CODE ?? '');
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) if (value) headers.set(key, Array.isArray(value) ? value.join(',') : value);
@@ -16,7 +22,7 @@ export function createHandler(env: NodeJS.ProcessEnv) {
         Buffer.isBuffer(parsed) ? new Uint8Array(parsed) :
         typeof parsed === 'string' ? parsed : JSON.stringify(parsed);
       const request = new Request(`http://localhost${req.url}`, {
-        method: req.method, headers,
+        method: req.method, headers, signal: disconnected.signal,
         ...(!['GET', 'HEAD'].includes(req.method ?? 'GET') ? { body: requestBody, duplex: 'half' } : {}),
       });
       const ip = env.VERCEL ? headers.get('x-vercel-forwarded-for') ?? 'unknown' : req.socket.remoteAddress ?? 'local';
@@ -26,7 +32,7 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     } catch {
       res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       res.end('{"error":"Service unavailable"}');
-    }
+    } finally { req.off('aborted', abort); res.off('close', closed); }
   };
 }
 

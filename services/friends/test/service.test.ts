@@ -94,7 +94,7 @@ test('validation, body bounds, bad cursor and shared join rate limit', async () 
   for (let i = 0; i < 10; i++) await call('/join', 'POST', { invite_code: 'wrong', display_name: 'A' }, undefined, 'other');
   const limited = await call('/join', 'POST', { invite_code: invite, display_name: 'A' }, undefined, 'other');
   assert.equal(limited.status, 429);
-  assert.equal(limited.response.headers.get('retry-after'), '60');
+  assert.equal(limited.response.headers.get('retry-after'), '3600');
 });
 
 test('concurrent updates retain every post and distinct heart', async () => {

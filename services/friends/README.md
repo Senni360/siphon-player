@@ -108,13 +108,28 @@ join attempts to 10/hour/IP, all requests to 180/minute/IP and authenticated
 requests to 120 reads or 60 writes/minute/user. On Vercel the IP comes from the
 platform's overwritten `x-vercel-forwarded-for`, not client-supplied forwarding
 headers. IP identifiers are hashed in the rate-limit keys. 429 includes
-`Retry-After: 60`; the client uses longer exponential backoff after failures.
+`Retry-After: 60` for minute budgets or `3600` for the hourly join budget. These
+are conservative window bounds; rejected attempts do not extend a window.
+The client uses longer exponential backoff after feed failures.
 
 Storage uses atomic compare-and-set on a single versioned group document and
 expiring rate counters, under `siphon:friends:v1:*`. This deliberately favors
 the owner's small group over an indexed public social network. Concurrent writes
-retry only the storage CAS, never external requests. The group is capped at 500
-identities and 5,000 posts; delete old posts before the feed fills. Back up Redis
+retry only explicit storage CAS conflicts, with up to 20 attempts and jittered
+backoff capped at 64 ms. An uncertain transport failure is never retried, because
+its write may already have committed. Requests have a 12-second I/O deadline;
+each Redis REST command is limited to five seconds. Client disconnects cancel
+pending body reads, storage requests and conflict waits. Cancellation cannot
+undo a write already accepted by Redis.
+
+The group is capped at 500 identities, 5,000 posts and 8 MiB of serialized state,
+whichever is reached first. A write exceeding the byte budget returns 409
+without replacing the existing document. Redis response reads are also bounded,
+including chunked bodies and JSON escaping overhead. Persisted row schemas,
+source URLs, identity uniqueness and heart membership are checked before use;
+malformed data fails closed rather than silently becoming an empty feed. Feed
+responses contain only their documented public fields. Delete old posts before
+the feed fills. Back up Redis
 and monitor its quota. There is no admin UI or token recovery endpoint. Former
 members' retained posts need administrator storage maintenance if they must be
 removed later. Delete your posts before leaving if you want them removed.
@@ -166,7 +181,14 @@ local HTTP test runs the real Node adapter with streamed and pre-parsed Buffer
 bodies through join/share/heart/rename/delete/leave. Redis REST tests use an
 isolated fake transport, including two service instances sharing a simulated
 persisted document, CAS conflicts, expiration commands, invalid replies and
-configuration failures. These tests do not claim a live Upstash or Vercel run.
+configuration failures. A bounded six-client burst exercises 48 simultaneous
+creates and 18 duplicate heart operations; pagination fixtures combine equal
+timestamps with creation, deletion, rename and revocation. Additional cases
+cover CAS exhaustion, a committed write whose response is lost, shared
+concurrent rate limits, body/Redis cancellation, malformed and oversized Redis
+responses, and document capacity. Stress timings printed by the suite describe
+only the local fixture, not production latency or capacity. These tests do not
+claim a live Upstash or Vercel run.
 
 Rust's `friends::tests` covers the fake-server protocol, secrets redaction,
 account-switch generations and cancellation of a stalled join using a disposable

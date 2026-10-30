@@ -1,3 +1,5 @@
+import { httpsUrl, sourceUrl } from './urls.ts';
+
 export interface User { user_id: string; display_name: string; secret_hash: string }
 export interface Payload {
   url: string;
@@ -16,16 +18,42 @@ export interface Post extends Payload {
 }
 export interface State { revision: number; users: User[]; posts: Post[] }
 export const empty = (): State => ({ revision: 0, users: [], posts: [] });
+export const MAX_USERS = 500;
+export const MAX_POSTS = 5000;
+export const MAX_STATE_BYTES = 8 * 1024 * 1024;
+// A REST provider may encode a stored character as six ASCII bytes (\uXXXX).
+const MAX_RESPONSE_BYTES = MAX_STATE_BYTES * 6 + 1024;
+export class StorageFullError extends Error {}
+
+function encodedState(state: State): string {
+  if (!Number.isSafeInteger(state.revision) || state.revision < 0 || state.revision >= Number.MAX_SAFE_INTEGER) throw new Error('Invalid state revision');
+  const encoded = JSON.stringify(state);
+  if (Buffer.byteLength(encoded) > MAX_STATE_BYTES) throw new StorageFullError('Group storage is full');
+  return encoded;
+}
 
 function storedState(value: unknown): State {
   if (!value || typeof value !== 'object') throw new Error('Invalid stored group');
   const state = value as State;
-  if (!Number.isSafeInteger(state.revision) || state.revision < 0 ||
-      !Array.isArray(state.users) || !Array.isArray(state.posts) ||
-      !state.users.every(u => u && typeof u.user_id === 'string' && typeof u.display_name === 'string' && typeof u.secret_hash === 'string') ||
-      !state.posts.every(p => p && typeof p.id === 'string' && typeof p.author_id === 'string' && Array.isArray(p.likes))) {
+  const id = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(value);
+  const text = (value: unknown, max: number, empty = false): value is string => typeof value === 'string' && value.length <= max && (empty || !!value.trim()) && !/[\x00-\x1f\x7f]/.test(value);
+  if (!Number.isSafeInteger(state.revision) || state.revision < 0 || state.revision >= Number.MAX_SAFE_INTEGER ||
+      !Array.isArray(state.users) || state.users.length > MAX_USERS || !Array.isArray(state.posts) || state.posts.length > MAX_POSTS ||
+      !state.users.every(u => u && id(u.user_id) && text(u.display_name, 40) && typeof u.secret_hash === 'string' && /^[a-f0-9]{64}$/.test(u.secret_hash)) ||
+      new Set(state.users.map(u => u.user_id)).size !== state.users.length ||
+      new Set(state.users.map(u => u.secret_hash)).size !== state.users.length) {
     throw new Error('Invalid stored group');
   }
+  const members = new Set(state.users.map(u => u.user_id));
+  if (!state.posts.every(p => p && id(p.id) && id(p.author_id) &&
+      Number.isSafeInteger(p.created_at) && p.created_at >= 0 &&
+      sourceUrl(p.url, p.source) !== null && text(p.title, 300) &&
+      Array.isArray(p.artists) && p.artists.length <= 20 && p.artists.every(a => text(a, 200)) &&
+      (p.artwork_url === null || httpsUrl(p.artwork_url) !== null) &&
+      Number.isSafeInteger(p.duration_ms) && p.duration_ms >= 0 && p.duration_ms <= 604800000 &&
+      (p.note === undefined || text(p.note, 280, true)) && Array.isArray(p.likes) &&
+      p.likes.length <= MAX_USERS && new Set(p.likes).size === p.likes.length && p.likes.every(id => members.has(id))) ||
+      new Set(state.posts.map(p => p.id)).size !== state.posts.length) throw new Error('Invalid stored group');
   return state;
 }
 
@@ -33,21 +61,24 @@ function storedState(value: unknown): State {
 // instances. The group is deliberately small; one document keeps the adapter
 // dependency-free. No read/modify/write is allowed without compareAndSet.
 export interface Storage {
-  read(): Promise<State>;
-  compareAndSet(previous: number, next: State): Promise<boolean>;
-  limit(key: string, maximum: number, seconds: number): Promise<boolean>;
+  read(signal?: AbortSignal): Promise<State>;
+  compareAndSet(previous: number, next: State, signal?: AbortSignal): Promise<boolean>;
+  limit(key: string, maximum: number, seconds: number, signal?: AbortSignal): Promise<boolean>;
 }
 
 export class MemoryStorage implements Storage {
   private state = empty();
   private limits = new Map<string, { count: number; until: number }>();
-  async read() { return structuredClone(this.state); }
-  async compareAndSet(previous: number, next: State) {
+  async read(signal?: AbortSignal) { signal?.throwIfAborted(); return structuredClone(this.state); }
+  async compareAndSet(previous: number, next: State, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     if (this.state.revision !== previous) return false;
+    encodedState(next);
     this.state = structuredClone(next);
     return true;
   }
-  async limit(key: string, maximum: number, seconds: number) {
+  async limit(key: string, maximum: number, seconds: number, signal?: AbortSignal) {
+    signal?.throwIfAborted();
     const now = Date.now();
     for (const [key, value] of this.limits) if (value.until <= now) this.limits.delete(key);
     const bucket = this.limits.get(key) ?? { count: 0, until: now + seconds * 1000 };
@@ -72,29 +103,55 @@ export class RedisStorage implements Storage {
       throw new Error('Invalid Redis REST configuration');
     }
   }
-  private async command(args: (string | number)[]): Promise<unknown> {
+  private async command(args: (string | number)[], caller?: AbortSignal): Promise<unknown> {
+    const signal = AbortSignal.any([AbortSignal.timeout(5000), ...(caller ? [caller] : [])]);
+    signal.throwIfAborted();
     const response = await fetch(this.url, {
       method: 'POST', headers: { Authorization: `Bearer ${this.token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(args), signal: AbortSignal.timeout(10000), redirect: 'error',
+      body: JSON.stringify(args), signal, redirect: 'error',
     });
-    if (!response.ok) throw new Error('Storage unavailable');
-    const value = await response.json() as { result?: unknown; error?: unknown } | null;
+    if (!response.ok || Number(response.headers.get('content-length')) > MAX_RESPONSE_BYTES) {
+      await response.body?.cancel();
+      throw new Error('Storage unavailable');
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('Storage unavailable');
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      signal.throwIfAborted();
+      while (true) {
+        const part = await reader.read();
+        signal.throwIfAborted();
+        if (part.done) break;
+        size += part.value.length;
+        if (size > MAX_RESPONSE_BYTES) throw new Error('Storage unavailable');
+        chunks.push(part.value);
+      }
+    } catch (error) {
+      await reader.cancel().catch(() => {});
+      throw error;
+    } finally { signal.removeEventListener('abort', cancel); reader.releaseLock(); }
+    const value = JSON.parse(Buffer.concat(chunks, size).toString('utf8')) as { result?: unknown; error?: unknown } | null;
     if (!value || typeof value !== 'object' || 'error' in value || !('result' in value)) throw new Error('Storage unavailable');
     return value.result;
   }
-  async read(): Promise<State> {
-    const result = await this.command(['GET', `${this.prefix}:state`]);
+  async read(signal?: AbortSignal): Promise<State> {
+    const result = await this.command(['GET', `${this.prefix}:state`], signal);
     if (result === null) return empty();
-    if (typeof result !== 'string') throw new Error('Invalid stored group');
+    if (typeof result !== 'string' || Buffer.byteLength(result) > MAX_STATE_BYTES) throw new Error('Invalid stored group');
     return storedState(JSON.parse(result));
   }
-  async compareAndSet(previous: number, next: State) {
-    const result = await this.command(['EVAL', CAS, 1, `${this.prefix}:state`, previous, JSON.stringify(next)]);
+  async compareAndSet(previous: number, next: State, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const result = await this.command(['EVAL', CAS, 1, `${this.prefix}:state`, previous, encodedState(next)], signal);
     if (result !== 0 && result !== 1) throw new Error('Storage unavailable');
     return result === 1;
   }
-  async limit(key: string, maximum: number, seconds: number) {
-    const result = await this.command(['EVAL', LIMIT, 1, `${this.prefix}:limit:${key}`, seconds]);
+  async limit(key: string, maximum: number, seconds: number, signal?: AbortSignal) {
+    const result = await this.command(['EVAL', LIMIT, 1, `${this.prefix}:limit:${key}`, seconds], signal);
     if (typeof result !== 'number' || !Number.isSafeInteger(result) || result < 1) throw new Error('Storage unavailable');
     return result <= maximum;
   }

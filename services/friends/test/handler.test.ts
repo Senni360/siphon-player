@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer, request, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 test('Node HTTP adapter handles streaming and pre-parsed bodies through a complete local lifecycle', async t => {
@@ -47,4 +47,36 @@ test('Node HTTP adapter handles streaming and pre-parsed bodies through a comple
   assert.deepEqual((await call('/posts', 'GET', undefined, secret)).body.posts, []);
   assert.equal((await call('/me', 'DELETE', undefined, secret)).status, 200);
   assert.equal((await call('/posts', 'GET', undefined, secret)).status, 401);
+});
+
+test('disconnecting a Node HTTP client aborts its pending Redis operation', { timeout: 3000 }, async t => {
+  const { createHandler } = await import('../src/handler.ts');
+  const handler = createHandler({
+    SIPHON_FRIENDS_INVITE_CODE: 'disconnect-fixture-invite',
+    KV_REST_API_URL: 'https://redis.invalid', KV_REST_API_TOKEN: 'fixture-token',
+  });
+  const original = globalThis.fetch;
+  let started!: () => void;
+  const called = new Promise<void>(resolve => { started = resolve; });
+  let aborted = false;
+  globalThis.fetch = (async (_url: unknown, init: RequestInit) => {
+    started();
+    return new Promise<Response>((_resolve, reject) => init.signal!.addEventListener('abort', () => {
+      aborted = true;
+      reject(new Error('fixture request cancelled'));
+    }, { once: true }));
+  }) as typeof fetch;
+  let done!: () => void;
+  let failed!: (error: unknown) => void;
+  const finished = new Promise<void>((resolve, reject) => { done = resolve; failed = reject; });
+  const server = createServer((req, res) => { void handler(req, res).then(done, failed); });
+  t.after(() => { globalThis.fetch = original; server.closeAllConnections(); server.close(); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const client = request(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/posts`);
+  client.on('error', () => {});
+  client.end();
+  await called;
+  client.destroy();
+  await finished;
+  assert(aborted);
 });
