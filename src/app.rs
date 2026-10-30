@@ -1725,6 +1725,7 @@ impl App {
     }
 
     pub fn soundcloud_link(&self, uri: &str) -> Option<String> {
+        if let Some(url) = crate::youtube::permalink(uri) { return Some(url); }
         if !crate::soundcloud::is_uri(uri) {
             return None;
         }
@@ -1819,6 +1820,9 @@ impl App {
     }
 
     pub fn is_saved(&self, uri: &str) -> Option<bool> {
+        if crate::youtube::is_track_uri(uri) {
+            return Some(self.settings.youtube_likes.iter().any(|track| track.uri == uri));
+        }
         if let Some(id) = crate::soundcloud::track_id(uri) {
             return self
                 .can_like_soundcloud()
@@ -2753,6 +2757,18 @@ impl App {
                     self.playlist_link_resolved(request, result);
                 }
                 Event::Download(event) => self.handle_download_event(event),
+                Event::YouTubeTrack { uri, result } => {
+                    match result {
+                        Ok(track) => {
+                            self.cache_soundcloud_tracks(&[*track.clone()]);
+                            self.resolve_pasted_song(&uri, Some(PlayableItem::Track(*track)));
+                        }
+                        Err(error) => {
+                            self.resolve_pasted_song(&uri, None);
+                            self.toast_error(error);
+                        }
+                    }
+                }
                 Event::SoundCloudPlaylistAdd {
                     request,
                     complete,
@@ -7037,6 +7053,12 @@ impl App {
     }
 
     fn load_soundcloud_page(&mut self, uri: String, more: bool) {
+        if uri == "youtube:likes" {
+            self.soundcloud_pages.entry(uri).or_default().content = Loadable::Loaded(SoundCloudCollection {
+                title: "YouTube Likes".into(), tracks: self.settings.youtube_likes.clone(), next: None,
+            });
+            return;
+        }
         let page = self.soundcloud_pages.entry(uri.clone()).or_default();
         if page.loading {
             return;
@@ -11486,7 +11508,7 @@ impl App {
                 }
             })
             .filter(|uri| {
-                crate::soundcloud::is_track_uri(uri)
+                crate::youtube::is_external(uri)
                     || matches!(util::uri_kind(uri), Some("track" | "episode"))
             })
             .collect();
@@ -11510,6 +11532,8 @@ impl App {
             }
             if let Some(item) = self.known_song(&uri) {
                 paste.found.insert(uri, item);
+            } else if crate::youtube::is_track_uri(&uri) {
+                self.backend.send(Command::YouTubeTrack(uri));
             } else if let Some(id) = uri.strip_prefix("spotify:track:").map(str::to_string) {
                 if self.track_requests.insert(id.clone()) {
                     self.backend.api(ApiRequest::Track { id });
@@ -11528,7 +11552,7 @@ impl App {
         if let Some(item) = self.copied_songs.iter().find(|item| item.uri() == uri) {
             return Some(item.clone());
         }
-        if crate::soundcloud::is_track_uri(uri) {
+        if crate::youtube::is_external(uri) {
             return self.soundcloud_track(uri).cloned().map(PlayableItem::Track);
         }
         let id = uri.strip_prefix("spotify:track:")?;
@@ -12075,6 +12099,14 @@ impl App {
                 if !uris.is_empty() {
                     self.backend.api(ApiRequest::SetSaved { uris, saved });
                 }
+            }
+            Action::ToggleSaved(uri) if crate::youtube::is_track_uri(&uri) => {
+                if let Some(index) = self.settings.youtube_likes.iter().position(|track| track.uri == uri) {
+                    self.settings.youtube_likes.remove(index);
+                } else if let Some(track) = self.hybrid_cached_track(&uri) {
+                    self.settings.youtube_likes.insert(0, track);
+                }
+                self.settings_dirty = true;
             }
             Action::ToggleSoundCloudLike(uri) => self.toggle_soundcloud_like(&uri),
             Action::ToggleSoundCloudRepost(uri) => self.toggle_soundcloud_repost(&uri),

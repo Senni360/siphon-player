@@ -80,9 +80,9 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported(s) => write!(f, "Unsupported SoundCloud stream: {s}"),
+            Self::Unsupported(s) => write!(f, "Unsupported audio stream: {s}"),
             Self::Network(s) | Self::Decode(s) | Self::Output(s) => f.write_str(s),
-            Self::Expired => f.write_str("The SoundCloud stream URL expired"),
+            Self::Expired => f.write_str("The audio stream URL expired"),
             Self::Cancelled => f.write_str("Playback request cancelled"),
         }
     }

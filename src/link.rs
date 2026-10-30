@@ -25,6 +25,9 @@ pub fn playlist_item(text: &str) -> Option<String> {
     if text.len() > 4096 || text.chars().any(char::is_control) {
         return None;
     }
+    if let Some(uri) = crate::youtube::parse(text) {
+        return Some(uri);
+    }
     if text.starts_with("spotify:") {
         let uri = parse(text)?;
         return matches!(
@@ -103,6 +106,9 @@ pub fn canonical_context_uri(uri: &str) -> String {
 /// without a locale segment (`/intl-de/`), a query string, or the old
 /// `/user/NAME/playlist/ID` shape.
 pub fn parse(text: &str) -> Option<String> {
+    if let Some(uri) = crate::youtube::parse(text) {
+        return Some(uri);
+    }
     if let Some(url) = soundcloud_url(text) {
         return Some(url);
     }

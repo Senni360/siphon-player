@@ -216,6 +216,7 @@ pub fn open_spotify_url(uri: &str) -> Option<String> {
 
 /// A service's real share link. SoundCloud permalinks cannot be derived from IDs.
 pub fn item_link(item: &crate::api::models::PlayableItem) -> Option<String> {
+    if let Some(url) = crate::youtube::permalink(item.uri()) { return Some(url); }
     if crate::soundcloud::is_uri(item.uri()) {
         let crate::api::models::PlayableItem::Track(track) = item else {
             return None;

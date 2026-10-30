@@ -797,10 +797,18 @@ mod download_jobs;
 mod hybrid;
 pub(crate) mod soundcloud_library;
 mod track_details;
+mod youtube;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
     Friends(crate::friends::Request),
+    YouTubeTrack(String),
+    YouTubeStream {
+        tag: crate::player::PlaybackTag,
+        preload: bool,
+        refresh: Option<u64>,
+        result: Result<crate::soundcloud::engine::Stream, String>,
+    },
     ResolvePlaylistLink {
         url: String,
         request: u64,
@@ -1134,6 +1142,7 @@ pub enum Event {
         request: u64,
         result: Result<Option<crate::credits::Credits>, String>,
     },
+    YouTubeTrack { uri: String, result: Result<Box<Track>, String> },
     PlaylistLinkResolved {
         request: u64,
         result: Result<crate::extension_bridge::ResolvedItem, String>,
@@ -2460,6 +2469,10 @@ impl Worker {
                 },
                 Command::SoundCloudAccountRestored { .. } => {}
                 Command::SoundCloudEngine(event) => self.soundcloud_event(event).await,
+                Command::YouTubeTrack(uri) => self.youtube_track(uri),
+                Command::YouTubeStream { tag, preload, refresh, result } => {
+                    self.soundcloud_stream(tag, preload, refresh, result).await;
+                }
                 Command::HybridContextResolved {
                     account_generation,
                     generation,
