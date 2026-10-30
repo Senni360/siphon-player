@@ -158,7 +158,9 @@ impl Page {
     }
 
     pub fn decode(text: &str) -> Option<Self> {
-        if text == "youtube:likes" { return Some(Page::SoundCloud(text.into())); }
+        if text == "youtube:likes" {
+            return Some(Page::SoundCloud(text.into()));
+        }
         if crate::soundcloud::playlist_id(text).is_some()
             || crate::soundcloud::user_id(text).is_some()
         {
@@ -194,7 +196,9 @@ impl Page {
 
     /// Keep foreign schemes in page keys, never reinterpret their numeric IDs.
     pub fn from_uri(uri: &str) -> Option<Self> {
-        if uri == "youtube:likes" { return Some(Page::SoundCloud(uri.into())); }
+        if uri == "youtube:likes" {
+            return Some(Page::SoundCloud(uri.into()));
+        }
         if crate::soundcloud::is_uri(uri) {
             return Self::decode(uri);
         }

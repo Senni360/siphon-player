@@ -294,3 +294,9 @@ Licensed under the [MIT License](LICENSE).
     <img alt="Upstream Spotifast GitHub stars over time" src="https://api.star-history.com/chart?repos=crmne/spotifast&amp;type=date">
   </picture>
 </a>
+
+YouTube audio support uses the installed Siphon helper's yt-dlp and the same
+local mixed queue as SoundCloud. Public/unlisted links, local YouTube Likes,
+source metadata and supported-error states are documented in
+[YouTube audio](docs/_reference/youtube.md), including the remaining Windows
+helper and live-playback validation.
