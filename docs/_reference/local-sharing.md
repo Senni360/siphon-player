@@ -58,6 +58,10 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   [integration contract](https://github.com/Senni360/siphon-player/blob/main/services/media-gateway/UPLOADS.md)
   documents the missing authentication, direct-storage signer, verifier and
   native uploader. No Worker route or upload capability is enabled by it.
+- `src/shared_media.rs` prepares one selected file on a blocking worker, with
+  bounded reading, SHA-256 identity, MP3 profile decoding and cancellation. The
+  offline `prepare_shared_recording` example exercises it without a library
+  scan, account, service request or output device. It is not an app upload flow.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -269,7 +273,59 @@ timeline mapping must all be validated before promising it.
 6. **Cross-provider matching:** separate proposal after source-consistent rooms
    pass. No automatic uncertain substitutions.
 
-## Running the bounded diagnostic
+## Preparing one selected recording offline
+
+The native preparation command accepts one regular file, at most 16 MiB, with
+44.1 kHz stereo MP3 audio and a decoded duration between ten seconds and one hour.
+It requires raw MPEG-1 Layer III frames, optionally after one ID3v2 tag;
+ID3v2.4 footers and MP3 embedded in another container are outside this pilot.
+It reads in 64 KiB chunks on a worker thread, computes SHA-256, decodes the
+demuxer's packets without playing them, and checks file size/modification state
+before returning. It keeps an immutable encoded snapshot, so a later filesystem
+edit cannot change those prepared bytes. A fresh preparation rehashes the file
+before comparing it with a previous identity.
+
+```sh
+cargo run --locked --no-default-features --example prepare_shared_recording -- /private/selected.mp3
+cargo run --locked --no-default-features --example prepare_shared_recording -- /private/selected.mp3 --json
+cargo run --locked --no-default-features --example prepare_shared_recording -- /private/selected.mp3 --matches /private/previous-identity.json
+cargo run --locked --no-default-features --example prepare_shared_recording -- /private/selected.mp3 --cancel-after-ms 0
+```
+
+The last command deliberately exercises cancellation and exits without identity
+output. `--json` emits only `size`, `sha256`, `profile` and `duration_ms` on stdout;
+save that result in a private file to use `--matches`. Progress goes to stderr
+and contains no filename or tag values. No audio or metadata file is written by
+the command itself. A recording hash is identifying metadata, not an access
+token; keep it out of room messages and public logs.
+
+Cancellation and the 30-second work budget are checked between reads and decoder
+packets. They cannot interrupt a stalled operating-system read. The future app
+must discard completions for cancelled or superseded selections and keep the UI
+responsive while the worker exits. The progress channel is bounded. The encoded
+snapshot holds at most 16 MiB; conversion to shared storage can briefly hold a
+second encoded copy, in addition to decoder state. Larger-file support needs a
+different bounded reader, not simply raising this constant.
+
+The decoder validates the profile and packets it exposes. This is not forensic
+validation of every container byte; a demuxer may tolerate damaged or truncated
+tails. Size/modification checks are not an atomic filesystem lock. The digest
+always describes the immutable snapshot, and resume compares a fresh full digest
+and byte size, not timestamps alone. Original embedded tags stay in those bytes;
+preparation neither strips metadata nor transcodes. Preparation alone never
+authorizes upload or registers a playable remote asset.
+
+The private JSON is not a playback manifest or an upload request. A future
+adapter must map its identity fields into an authenticated, explicitly selected
+queue occurrence; the ledger does not accept arbitrary metadata fields.
+
+```sh
+cargo test --locked --no-default-features --lib shared_media::tests
+# Requires ffmpeg; creates only synthetic recordings in disposable local storage.
+cargo test --locked --no-default-features --lib shared_media::tests -- --include-ignored
+```
+
+## Running the bounded hosted diagnostic
 
 Use a private file outside the repository containing:
 
@@ -318,9 +374,12 @@ fresh invocation with a refreshed manifest tests recovery at a known position.
 After server expiry or revocation the last command requires a denied fresh read;
 successful preflight alone does not validate revocation or actual playback.
 
-The next bounded milestone is completing M1's approved hosted/hardware matrix,
-then implementing upload admission and cancellation in M2. The M1 gateway needs
-only an operator `ADMIN_SECRET` and service bindings. It stores capability
+M1's approved hosted/hardware matrix remains an acceptance gate. The next bounded
+code milestone is a multipart storage executor tested against local Workers/R2,
+including cleanup after an uncertain completion. Upload admission and native
+preparation are separate, tested components; neither enables a public upload
+endpoint. The M1 gateway needs only an operator `ADMIN_SECRET` and service
+bindings. It stores capability
 hashes, not signed grants, and requires no separate media signing key. Later
 direct uploads need scoped R2 multipart signing credentials; rooms need their
 own session authentication. These secrets stay server-side. Native clients
@@ -346,8 +405,9 @@ ordering issue in `src/app.rs` was corrected in a separate formatting commit.
 
 All six required default/all-feature Cargo Clippy, test, doctest and rustdoc
 commands passed on Windows after configuring the already installed Visual
-Studio, vcpkg and libclang build tools. The default library suite passed 1,743
-tests and the all-feature library suite passed 1,785, with five ignored in each.
+Studio, vcpkg and libclang build tools. After adding native preparation, the
+default library suite passed 1,753 tests and the all-feature library suite passed
+1,795, with six ignored in each (the synthetic preparation test was run separately).
 The no-default-feature suite also passed. Launcher checks reported three
 failures and five errors from missing Unix/Ruby tools and Windows path handling.
 Local Jekyll could not run without Bundler/Ruby. GitHub's Linux Docs job did
@@ -390,3 +450,9 @@ The isolated upload ledger has 19 deterministic SQLite tests; all
 not real multipart storage or native upload behavior. Latest GitHub jobs for
 `ab53cbb` did not start: the account reports failed payments or a spending limit.
 No billing setting was changed, and the macOS socket-path rerun remains pending.
+
+Native preparation passed eleven focused Windows tests, including an explicitly
+run ffmpeg synthetic-media test. The executable validated a generated 193,141-byte
+recording with a decoded duration of 12,000 ms. Command-line JSON shape, matching
+and mismatching identities, cancellation and malformed-metadata privacy checks
+passed. No device or network service was used for these preparation checks.

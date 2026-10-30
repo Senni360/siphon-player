@@ -138,6 +138,9 @@ unexpected database/provider errors; the module deliberately has no HTTP layer.
 - Add the native background file reader, hashing, bounded part transfers,
   cancellation and resume verification. Preserve optimistic UI and obtain any
   required visual approval before changing the interface.
+  `src/shared_media.rs` and `prepare_shared_recording` now cover bounded offline
+  preparation and identity checks for one selected file. They do not schedule
+  transfers, connect to this ledger or provide an application upload interface.
 - Implement independent stored-byte validation and the final immutable asset
   registration. The current ledger's `ready` status does not issue playback
   access or register an M1 asset.

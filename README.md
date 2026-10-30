@@ -43,6 +43,8 @@ includes an opt-in hosted MP3 diagnostic for desktop and Chromecast, plus a
 [locally tested private-media gateway](services/media-gateway). Sharing,
 parties and local-file Cast playback are not yet supported application features;
 hosting and real-device acceptance remain gated.
+The plan also documents an offline `prepare_shared_recording` command for
+validating one selected MP3 and checking its identity before future uploads.
 
 Siphon is a Spotify client written in Rust with
 [egui](https://www.egui.rs) and [fastframe](https://fastframe.dev), the
