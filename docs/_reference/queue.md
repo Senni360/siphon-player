@@ -15,7 +15,7 @@ Songs, or a radio named after the song, playlist, album, or artist it is
 based on, which opens the radio's page. The line shows only while a song is
 playing from a known collection, including this fork's local mixed playlists.
 
-In this personal fork the same rules cover mixed Spotify and SoundCloud
+In this personal fork the same rules cover mixed Spotify, SoundCloud, and YouTube
 playback. Mixed playlists, Spotify playlists with local insertions, and mixed
 song lists use one queue on this computer. Shuffle and repeat belong to that
 queue across both sources. Remote transfer is refused while it owns playback.
@@ -33,7 +33,10 @@ Album additions keep loading across local
 playback changes. Failed mixed rows are skipped once per occurrence until a
 song actually plays; Repeat All cannot loop through a fully failing context.
 Pause and Play retain the latest user intent through child-engine errors and
-late transport snapshots. A Spotify audio-key refusal pauses the current
+late transport snapshots. Seeking keeps the selected position visible while
+playback catches up. An end-of-track event while that seek is pending retries
+the same occurrence at the requested position without consuming the next row.
+A Spotify audio-key refusal pauses the current
 occurrence for an explicit retry and keeps every mixed successor queued.
 
 These are the rules the app follows. The queue tests in `src/app.rs`
