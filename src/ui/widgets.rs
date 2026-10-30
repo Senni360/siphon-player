@@ -4556,7 +4556,12 @@ mod tests {
             .iter()
             .filter_map(|(_, node)| node.label())
             .collect();
-        for expected in ["Copy SoundCloud link", "Open on SoundCloud", "Go to artist", "Repost (connect a SoundCloud session)"] {
+        for expected in [
+            "Copy SoundCloud link",
+            "Open on SoundCloud",
+            "Go to artist",
+            "Repost (connect a SoundCloud session)",
+        ] {
             assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
         }
         for absent in [

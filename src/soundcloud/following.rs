@@ -35,7 +35,7 @@ pub struct Item {
 }
 
 impl Item {
-    fn key(&self) -> (String, String, String, bool) {
+    pub(crate) fn key(&self) -> (String, String, String, bool) {
         (
             self.by.uri.clone(),
             self.content.uri().to_owned(),

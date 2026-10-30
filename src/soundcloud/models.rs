@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{playlist_uri, track_uri, user_uri};
 use crate::api::models as app;
+pub use crate::api::models::PublisherMetadata;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Page<T> {
@@ -57,18 +58,6 @@ impl User {
             uri: Some(user_uri(self.id)),
         }
     }
-}
-
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct PublisherMetadata {
-    pub isrc: Option<String>,
-    pub artist: Option<String>,
-    pub album_title: Option<String>,
-    pub release_title: Option<String>,
-    pub writer_composer: Option<String>,
-    pub publisher: Option<String>,
-    pub p_line: Option<String>,
-    pub upc_or_ean: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize, Serialize)]
@@ -181,6 +170,14 @@ impl Track {
                 })
                 .cloned(),
             play_count: self.playback_count,
+            publisher_metadata: self.publisher_metadata.clone(),
+            label_name: self.label_name.clone(),
+            external_ids: app::ExternalIds {
+                isrc: self
+                    .publisher_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.isrc.clone()),
+            },
             artists: artists.clone(),
             album: Some(app::Album {
                 id: playlist.map(|list| list.id.to_string()).unwrap_or_default(),

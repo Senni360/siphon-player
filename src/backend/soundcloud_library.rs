@@ -258,6 +258,8 @@ pub(crate) async fn following(
     let mut page = client.following_feed(next).await?;
     if next.is_none() {
         let mut cursors = std::collections::HashSet::new();
+        let mut items = std::collections::HashSet::new();
+        page.collection.retain(|item| items.insert(item.key()));
         while page.collection.len() < cached {
             let Some(next) = page.next_href.take() else {
                 break;
@@ -266,7 +268,11 @@ pub(crate) async fn following(
                 return Err(crate::soundcloud::api::Error::Decode);
             }
             let more = client.following_feed(Some(&next)).await?;
-            page.collection.extend(more.collection);
+            page.collection.extend(
+                more.collection
+                    .into_iter()
+                    .filter(|item| items.insert(item.key())),
+            );
             page.next_href = more.next_href;
         }
     }

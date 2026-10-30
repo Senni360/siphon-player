@@ -464,17 +464,18 @@ impl Client {
         if self.oauth_token.is_none() {
             return Err(Error::NotSignedIn);
         }
-        let path = next.unwrap_or("stream");
-        if self.api_url(path)?.path() != "/stream" {
-            return Err(Error::InvalidUrl);
-        }
+        let path = self.social_cursor(next.unwrap_or("stream"), "/stream")?;
         let query = if next.is_none() {
             vec![("limit", "50".into()), ("linked_partitioning", "1".into())]
         } else {
             Vec::new()
         };
-        let page: Page<super::following::WireItem> = self.get(path, &query).await?;
-        if next.is_some() && page.next_href.as_deref() == next {
+        let page: Page<super::following::WireItem> = self.get(&path, &query).await?;
+        let next_href = page
+            .next_href
+            .map(|cursor| self.social_cursor(&cursor, "/stream"))
+            .transpose()?;
+        if next.is_some() && next_href.as_deref() == Some(path.as_str()) {
             return Err(Error::Decode);
         }
         Ok(Page {
@@ -483,7 +484,7 @@ impl Client {
                 .into_iter()
                 .filter_map(super::following::WireItem::into_item)
                 .collect(),
-            next_href: page.next_href,
+            next_href,
             total_results: page.total_results,
         })
     }
@@ -535,8 +536,8 @@ impl Client {
         loop {
             ids.extend(page.collection);
             let Some(next) = page.next_href else { break };
-            let url = self.api_url(&next)?;
-            if url.path().trim_start_matches('/') != path || !seen.insert(next.clone()) {
+            let next = self.social_cursor(&next, &format!("/{path}"))?;
+            if !seen.insert(next.clone()) {
                 return Err(Error::InvalidUrl);
             }
             page = self.get(&next, &[("limit", "200".into())]).await?;
@@ -745,6 +746,36 @@ impl Client {
         Ok(url)
     }
 
+    // Social cursors can be persisted in account-scoped caches. Keep only the
+    // expected API endpoint and pagination data, never credentials returned in
+    // a next_href. Resolving relative URLs also makes cursor-loop checks stable.
+    fn social_cursor(&self, path: &str, endpoint: &str) -> Result<String> {
+        let mut url = self.api_url(path)?;
+        if url.path() != endpoint {
+            return Err(Error::InvalidUrl);
+        }
+        let query = url
+            .query_pairs()
+            .filter(|(key, _)| {
+                !matches!(
+                    key.as_ref(),
+                    "client_id"
+                        | "oauth_token"
+                        | "access_token"
+                        | "secret_token"
+                        | "track_authorization"
+                )
+            })
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        url.set_query(None);
+        url.set_fragment(None);
+        if !query.is_empty() {
+            url.query_pairs_mut().extend_pairs(query);
+        }
+        Ok(url.to_string())
+    }
+
     async fn get<T: DeserializeOwned>(&self, path: &str, query: &[(&str, String)]) -> Result<T> {
         if self.access.revoked.load(Ordering::SeqCst) {
             return Err(Error::NotSignedIn);
@@ -800,6 +831,9 @@ impl Client {
         }
         let mut id = self.ensure_client_id(None).await?;
         for attempt in 0..2 {
+            if requires_session && self.access.expired.load(Ordering::SeqCst) {
+                return Err(Error::SessionExpired);
+            }
             let mut authenticated = url.clone();
             authenticated
                 .query_pairs_mut()
@@ -910,6 +944,9 @@ impl Client {
             }
             if self.access.revoked.load(Ordering::SeqCst) {
                 return Err(Error::NotSignedIn);
+            }
+            if oauth && self.access.expired.load(Ordering::SeqCst) {
+                return Err(Error::SessionExpired);
             }
             let mut request = self
                 .shared
