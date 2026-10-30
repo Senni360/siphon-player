@@ -65,16 +65,32 @@ public URL lookup; SoundCloud search needs no account connection. Connect a
 public profile from the sidebar or account menu to browse cached Likes,
 playlists, uploads and followed artists. Advanced session connections include
 your private playlists and uploads, and allow liking and unliking tracks.
+Session connections also support reposting tracks and sets from their menus.
+The secondary following feed is exposed to the application API for the
+upcoming redesign. SoundCloud track data retains release dates, play counts
+and publisher metadata, with 500px artwork for large covers. See the
+[social and track-data contract](docs/_reference/soundcloud-social.md).
 Tokens stay in protected storage. Expired sessions offer a reconnect prompt
 while public browsing remains available. The
 [SoundCloud reference](docs/_reference/soundcloud.md) describes connections
 and playback limits. SoundCloud items use their real SoundCloud links;
-Spotify saves, radio, album navigation, lyrics and remote Spotify outputs
+Spotify saves, radio, album navigation and remote Spotify outputs
 are unavailable for them.
+SoundCloud lyrics use an exact ISRC recording match when available, then a
+strict artist/title/duration match. Source-provided credits and cancellable
+per-track requests are documented in the
+[track-details reference](docs/_reference/track-details.md).
 SoundCloud search offers **Retry** when it fails, keeps successful results
 visible, and shows short recovery messages instead of HTTP or network details.
 Known previews are marked **Preview only** in song rows, the queue and the
 player bar.
+
+The optional private **Friends** group shares Spotify, SoundCloud (including
+private links), and YouTube finds behind an invite code. The owner must first
+configure the service; no production endpoint is bundled. **Leave group**
+revokes membership while retaining shared posts; **Forget this device** only
+removes its saved identity and works offline. See the
+[service setup and integration contract](services/friends/README.md).
 
 The owner's browser extension can open **Add to playlist** with
 `siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,
@@ -253,6 +269,10 @@ the complete mixed queue and restores it paused. Paste a SoundCloud song or
 playlist link into search and press Enter to resolve and play it.
 
 SoundCloud uses the existing local audio output, EQ, visualizers and volume.
+The existing **Normalisation** setting also matches external audio to Spotify's
+track loudness reference. First plays use R128 measurement and a conservative
+starting gain; later plays reuse a local per-track measurement. See
+[Loudness Matching](docs/_reference/loudness.md) for the method and limits.
 
 Mixed playback keeps manual additions, including albums and Spotify episodes,
 across local context changes. Next consumes known queued rows even while a
@@ -297,3 +317,9 @@ Licensed under the [MIT License](LICENSE).
     <img alt="Upstream Spotifast GitHub stars over time" src="https://api.star-history.com/chart?repos=crmne/spotifast&amp;type=date">
   </picture>
 </a>
+
+YouTube audio support uses the installed Siphon helper's yt-dlp and the same
+local mixed queue as SoundCloud. Public/unlisted links, local YouTube Likes,
+source metadata and supported-error states are documented in
+[YouTube audio](docs/_reference/youtube.md), including the remaining Windows
+helper and live-playback validation.

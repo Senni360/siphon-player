@@ -184,6 +184,11 @@ impl App {
     /// in a view, media-key adapter or platform integration.
     pub(super) fn dispatch_hybrid_action(&mut self, action: &Action) -> bool {
         let start = match action {
+            Action::Search(text) if crate::youtube::parse(text).is_some() => Some((
+                PlayRequest::context(crate::youtube::parse(text).unwrap()),
+                false,
+                None,
+            )),
             Action::Search(text) if crate::link::soundcloud_url(text).is_some() => Some((
                 PlayRequest::context(crate::link::soundcloud_url(text).unwrap()),
                 false,
@@ -310,9 +315,7 @@ impl App {
             _ => None,
         };
         if let Some((tracks, position)) = additions {
-            let foreign = tracks
-                .iter()
-                .any(|t| crate::soundcloud::is_track_uri(&t.uri));
+            let foreign = tracks.iter().any(|t| crate::youtube::is_external(&t.uri));
             if !self.hybrid_owned() && !foreign {
                 return false;
             }
@@ -452,7 +455,7 @@ impl App {
     pub fn cache_soundcloud_tracks(&mut self, tracks: &[Track]) {
         for track in tracks
             .iter()
-            .filter(|t| crate::soundcloud::is_track_uri(&t.uri))
+            .filter(|t| crate::youtube::is_external(&t.uri))
         {
             self.track_cache.insert(track.uri.clone(), track.clone());
             self.track_used.insert(track.uri.clone(), Instant::now());
@@ -474,6 +477,8 @@ impl App {
             .or_else(|| request.context_uri.clone())
             .unwrap_or_default();
         let special = context_uri.starts_with(crate::mixed_playlists::PLAYLIST_PREFIX)
+            || crate::youtube::is_track_uri(&context_uri)
+            || context_uri == "youtube:likes"
             || crate::soundcloud::is_uri(&context_uri)
             || crate::link::soundcloud_url(&context_uri).is_some()
             || context_uri
@@ -483,7 +488,7 @@ impl App {
             .uris
             .iter()
             .chain(request.offset_uri.iter())
-            .any(|uri| crate::soundcloud::is_track_uri(uri));
+            .any(|uri| crate::youtube::is_external(uri));
         // Keep manual occurrences across a new context, including when its
         // current row happens to be Spotify. Pure starts with no manual rows
         // return to the unchanged Connect path.
@@ -695,6 +700,7 @@ impl App {
         let pending = self.hybrid.pending.take().unwrap();
         match result {
             Ok(mut context) => {
+                self.cache_soundcloud_tracks(&context.tracks);
                 if self.own_soundcloud_likes_context(&context.uri) {
                     self.overlay_soundcloud_likes(&mut context.tracks);
                 }
@@ -785,6 +791,13 @@ impl App {
     }
 
     fn loaded_hybrid_context(&self, uri: &str) -> Option<Context> {
+        if uri == "youtube:likes" {
+            return Some(Context {
+                uri: uri.into(),
+                name: "YouTube Likes".into(),
+                tracks: self.youtube_likes()?.to_vec(),
+            });
+        }
         if self.own_soundcloud_likes_context(uri) {
             return (self.soundcloud_library.snapshot.likes_loaded
                 && self.soundcloud_library.snapshot.next_likes.is_none())
@@ -818,7 +831,7 @@ impl App {
                 tracks: playlist.to_tracks(),
             });
         }
-        if crate::soundcloud::is_track_uri(uri) {
+        if crate::youtube::is_external(uri) {
             let track = self.hybrid_cached_track(uri)?;
             return Some(Context {
                 uri: uri.into(),
@@ -894,6 +907,9 @@ impl App {
     }
 
     fn hybrid_context_name(&self, uri: &str) -> String {
+        if uri == "youtube:likes" {
+            return "YouTube Likes".into();
+        }
         if uri.starts_with("soundcloud:likes:") {
             return gettext(self.locale, "SoundCloud Likes").into_owned();
         }
@@ -954,6 +970,14 @@ impl App {
     }
 
     pub(super) fn hybrid_cached_track(&self, uri: &str) -> Option<Track> {
+        if let Some(track) = self
+            .youtube_likes()
+            .unwrap_or_default()
+            .iter()
+            .find(|track| track.uri == uri)
+        {
+            return Some(track.clone());
+        }
         self.hybrid
             .queue
             .current()

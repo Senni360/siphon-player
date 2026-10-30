@@ -17,44 +17,6 @@ pub const CARD_WIDTH: f32 = 172.0;
 pub const CARD_ART: f32 = CARD_WIDTH - 24.0;
 pub const CARD_GAP: f32 = 14.0;
 pub const PAGE_PADDING: f32 = 24.0;
-pub const SOURCE_BADGE_SIZE: Vec2 = vec2(23.0, 15.0);
-
-/// Quiet service marker. Spotify, the native source, consumes no space.
-/// Reusable in rows, search, the queue and the now-playing bar.
-pub fn source_badge(
-    ui: &mut Ui,
-    palette: &Palette,
-    locale: Locale,
-    uri: &str,
-) -> Option<egui::Response> {
-    if crate::soundcloud::Source::of(uri) != crate::soundcloud::Source::SoundCloud {
-        return None;
-    }
-    let label = gettext(locale, "SoundCloud");
-    let (rect, response) = ui.allocate_exact_size(SOURCE_BADGE_SIZE, Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label.as_ref())
-    });
-    ui.painter()
-        .rect_filled(rect, CornerRadius::same(3), palette.surface_active);
-    ui.painter().text(
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        // Translators: short source badge for SoundCloud; keep it compact.
-        gettext(locale, "SC"),
-        theme::semibold(9.5),
-        palette.secondary,
-    );
-    Some(
-        response.on_hover_text(
-            gettext(
-                locale,
-                "{source}. Playlist additions are stored on this computer only.",
-            )
-            .replace("{source}", &label),
-        ),
-    )
-}
 
 /// Availability belongs next to the source and artist, before playback.
 pub fn preview_badge(ui: &mut Ui, palette: &Palette, locale: Locale) {
@@ -70,8 +32,12 @@ pub fn preview_badge(ui: &mut Ui, palette: &Palette, locale: Locale) {
     ));
 }
 
+/// A row says its source with the title's colour, so the only marker left
+/// beside the artist is SoundCloud's "Preview only".
 fn track_source_badges(ui: &mut Ui, palette: &Palette, locale: Locale, track: &Track) {
-    if source_badge(ui, palette, locale, &track.uri).is_some() && track.preview_only {
+    if track.preview_only
+        && crate::ui::kit::Source::of(&track.uri) == crate::ui::kit::Source::SoundCloud
+    {
         preview_badge(ui, palette, locale);
     }
 }
@@ -1139,6 +1105,18 @@ fn item_menu_at(
     ui.set_max_width(300.0);
     let uri = item.uri().to_string();
     let label = item.name().to_string();
+    if let Ok(post) = crate::friends::NewPost::from_item(item)
+        && menu_item_enabled(
+            ui,
+            &palette,
+            Some(Icon::Users),
+            "Share with friends",
+            app.friends_feed.profile.is_some() && !app.friends_feed.busy,
+        )
+    {
+        app.actions
+            .push(Action::Friends(crate::friends::Action::Share(post)));
+    }
     if app.download_source(item).is_some() && download_menu_item(ui, app, "Download") {
         app.actions.push(Action::Download(vec![item.clone()]));
     }
@@ -1183,7 +1161,9 @@ fn item_menu_at(
         });
     }
     if item.is_track() {
+        soundcloud_repost_menu(ui, app, &uri);
         if util::uri_kind(&uri) == Some("track")
+            || (crate::youtube::is_track_uri(&uri) && app.is_saved(&uri).is_some())
             || (crate::soundcloud::is_track_uri(&uri) && app.can_like_soundcloud())
         {
             let saved = app.is_saved(&uri).unwrap_or(false);
@@ -1373,7 +1353,7 @@ fn item_menu_at(
         }
     }
     menu_separator(ui, &palette);
-    if crate::soundcloud::is_uri(&uri) {
+    if crate::youtube::is_external(&uri) {
         soundcloud_link_menu(ui, app, util::item_link(item).as_deref());
         return;
     }
@@ -1398,15 +1378,24 @@ fn item_menu_at(
 /// SoundCloud shares only the permalink returned by its catalogue.
 fn soundcloud_link_menu(ui: &mut Ui, app: &mut App, url: Option<&str>) {
     let palette = app.palette;
+    let youtube = url.and_then(crate::youtube::parse).is_some();
     for (icon, label, open) in [
         (
             Icon::Copy,
-            gettext(app.locale, "Copy SoundCloud link"),
+            if youtube {
+                std::borrow::Cow::Borrowed("Copy YouTube link")
+            } else {
+                gettext(app.locale, "Copy SoundCloud link")
+            },
             false,
         ),
         (
             Icon::ExternalLink,
-            gettext(app.locale, "Open on SoundCloud"),
+            if youtube {
+                std::borrow::Cow::Borrowed("Open on YouTube")
+            } else {
+                gettext(app.locale, "Open on SoundCloud")
+            },
             true,
         ),
     ] {
@@ -1426,6 +1415,23 @@ fn soundcloud_link_menu(ui: &mut Ui, app: &mut App, url: Option<&str>) {
                 Action::CopyLink(url.into())
             });
         }
+    }
+}
+
+fn soundcloud_repost_menu(ui: &mut Ui, app: &mut App, uri: &str) {
+    if crate::soundcloud::reposts::Target::from_uri(uri).is_none() {
+        return;
+    }
+    let text = if !app.can_like_soundcloud() {
+        "Repost (connect a SoundCloud session)"
+    } else if app.soundcloud_reposted(uri) {
+        "Remove SoundCloud repost"
+    } else {
+        "Repost on SoundCloud"
+    };
+    if menu_item_enabled(ui, &app.palette, None, text, app.can_repost_soundcloud(uri)) {
+        app.actions
+            .push(Action::ToggleSoundCloudRepost(uri.to_owned()));
     }
 }
 
@@ -1479,6 +1485,7 @@ pub fn context_menu_items(
     if crate::soundcloud::is_uri(uri) {
         if crate::soundcloud::playlist_id(uri).is_some() {
             soundcloud_playlist_add_menu(ui, app, uri);
+            soundcloud_repost_menu(ui, app, uri);
         }
         let url = app.soundcloud_link(uri);
         soundcloud_link_menu(ui, app, url.as_deref());
@@ -1652,9 +1659,36 @@ struct Columns {
     added_by: f32,
     added: f32,
     plays: f32,
+    tools: f32,
     heart: f32,
     duration: f32,
     more: f32,
+}
+
+/// The narrowest a title gets before a row gives up the album column, and
+/// then the tools, to keep it readable.
+const TITLE_MIN: f32 = 220.0;
+
+/// The narrowest the album column gets before it gives way entirely.
+const ALBUM_MIN: f32 = 140.0;
+
+/// The tools' and album's widths in a list `width` wide, in rows and in the
+/// header alike. `fixed` is everything else the row always shows and
+/// `optional` the date, adder and plays columns. The album narrows first,
+/// down to [`ALBUM_MIN`], then gives way, then the tools do; the title never
+/// drops below [`TITLE_MIN`] for them.
+fn fit_tools(width: f32, fixed: f32, album: f32, optional: f32) -> (f32, f32) {
+    let tools = super::row_tools::WIDTH;
+    let title = width - fixed - optional - tools;
+    if title - album >= TITLE_MIN {
+        (tools, album)
+    } else if album > 0.0 && title - ALBUM_MIN >= TITLE_MIN {
+        (tools, title - TITLE_MIN)
+    } else if album > 0.0 && title >= TITLE_MIN {
+        (tools, 0.0)
+    } else {
+        (0.0, album)
+    }
 }
 
 /// The play count column's width, in rows and in the header alike.
@@ -1669,7 +1703,7 @@ fn columns(width: f32, row: &TrackRow<'_>) -> Columns {
     let extra_wide = width > 920.0;
     let wide = width > 760.0;
     let medium = width > 560.0;
-    Columns {
+    let mut cols = Columns {
         number: if row.compact { 0.0 } else { 44.0 },
         cover: if row.show_cover {
             if row.compact { 44.0 } else { 52.0 }
@@ -1696,10 +1730,56 @@ fn columns(width: f32, row: &TrackRow<'_>) -> Columns {
         } else {
             0.0
         },
+        tools: 0.0,
         heart: if row.compact { 0.0 } else { 36.0 },
         duration: if row.compact { 44.0 } else { 56.0 },
         more: if row.compact { 0.0 } else { 36.0 },
+    };
+    if !row.compact {
+        let fixed =
+            8.0 + cols.number + cols.cover + cols.heart + cols.duration + cols.more + 8.0 + 12.0;
+        let optional = cols.added + cols.added_by + cols.plays;
+        (cols.tools, cols.album) = fit_tools(width, fixed, cols.album, optional);
     }
+    cols
+}
+
+/// Shakes the title of the song row `row` once: the answer to playing a
+/// song that cannot play, instead of a dialog.
+fn refuse(ctx: &egui::Context, row: egui::Id) {
+    super::kit::motion::begin(ctx, row.with("refused"), super::kit::motion::REFUSE);
+}
+
+/// Sweeps one band of light across the song row `row`: the answer to
+/// playing it, so the eye lands on the row that started.
+fn sweep(ctx: &egui::Context, row: egui::Id) {
+    super::kit::motion::begin(ctx, row.with("played"), super::kit::motion::SWEEP);
+    ctx.request_repaint();
+}
+
+/// The band of light [`sweep`] moves across `rect` at progress `t`: a soft
+/// horizontal gradient in `color` that fades as it travels.
+fn paint_sweep(painter: &egui::Painter, rect: Rect, t: f32, color: Color32) {
+    const BAND: f32 = 240.0;
+    let center = rect.left() - BAND / 2.0 + (rect.width() + BAND) * t;
+    let peak = color.gamma_multiply(0.12 * (1.0 - t * t));
+    let clear = Color32::TRANSPARENT;
+    let mut mesh = egui::Mesh::default();
+    for (x, tint) in [
+        (center - BAND / 2.0, clear),
+        (center, peak),
+        (center + BAND / 2.0, clear),
+    ] {
+        mesh.colored_vertex(pos2(x, rect.top()), tint);
+        mesh.colored_vertex(pos2(x, rect.bottom()), tint);
+    }
+    for left in [0, 2] {
+        mesh.add_triangle(left, left + 1, left + 2);
+        mesh.add_triangle(left + 1, left + 2, left + 3);
+    }
+    painter
+        .with_clip_rect(rect.intersect(painter.clip_rect()))
+        .add(mesh);
 }
 
 /// Draws one song in a list.
@@ -1857,6 +1937,9 @@ fn track_row_contents(
                 .gamma_multiply(if palette.dark { 0.7 } else { 1.0 }),
         );
     }
+    if let Some(t) = super::kit::motion::running(ui.ctx(), response.id.with("played")) {
+        paint_sweep(ui.painter(), rect, t, palette.text);
+    }
     // The row highlight also shows keyboard focus. Do not add an outline
     // when a mouse click gives the row focus for arrow-key navigation.
     let cols = columns(width, &row);
@@ -1952,21 +2035,24 @@ fn track_row_contents(
         }
         x += cols.cover;
     }
-    let right_fixed = cols.heart + cols.duration + cols.more + 8.0;
+    let right_fixed = cols.tools + cols.heart + cols.duration + cols.more + 8.0;
     let text_right =
         rect.right() - right_fixed - cols.plays - cols.added - cols.added_by - cols.album;
+    // A song that cannot play shakes its title when asked to.
+    let refused = super::kit::motion::running(ui.ctx(), response.id.with("refused"))
+        .map_or(0.0, super::kit::motion::refuse);
     let title_rect = Rect::from_min_max(
         pos2(x, rect.top()),
         pos2((text_right - 12.0).max(x), rect.bottom()),
-    );
+    )
+    .translate(vec2(refused, 0.0));
 
-    // Title and artists.
+    // Title and artists. The title carries its source's colour; the playing
+    // row is marked by its cover, not by a different title colour.
     let title_color = if unavailable {
         palette.dim
-    } else if is_current {
-        palette.accent
     } else {
-        palette.text
+        crate::ui::kit::Source::of(row.item.uri()).color(&palette)
     };
     let subtitle_color = if hovered {
         palette.text
@@ -2166,7 +2252,7 @@ fn track_row_contents(
                     .layout(Layout::left_to_right(Align::Center)),
             );
             child.set_clip_rect(album_rect.intersect(ui.clip_rect()));
-            let supported = !crate::soundcloud::is_uri(&track.uri);
+            let supported = !crate::youtube::is_external(&track.uri);
             let response = child
                 .add_enabled_ui(supported, |ui| {
                     theme::link(ui, album.name.clone(), theme::regular(13.0), subtitle_color)
@@ -2174,7 +2260,7 @@ fn track_row_contents(
                 .inner
                 .on_disabled_hover_text(gettext(
                     app.locale,
-                    "Spotify album pages are unavailable for SoundCloud tracks",
+                    "Spotify album pages are unavailable for external tracks",
                 ));
             if response.clicked()
                 && !album.id.is_empty()
@@ -2248,12 +2334,23 @@ fn track_row_contents(
         x += cols.plays;
     }
 
+    // Tools: Download, BPM/key, Credits, Add to the last-used playlist.
+    if cols.tools > 0.0 {
+        let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.tools, row_height));
+        let shown = hovered
+            || is_current
+            || egui::Popup::is_id_open(ui.ctx(), ui.id().with(("row-menu", row.index)));
+        super::row_tools::show(ui, app, row.item, cell, shown, unavailable);
+        x += cols.tools;
+    }
+
     // Heart.
     if cols.heart > 0.0 {
         let saved = app.is_saved(row.item.uri());
         let heart_rect = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.heart, row_height));
         if row.item.is_track()
             && (util::uri_kind(row.item.uri()) == Some("track")
+                || (crate::youtube::is_track_uri(row.item.uri()) && saved.is_some())
                 || (crate::soundcloud::is_track_uri(row.item.uri()) && app.can_like_soundcloud()))
         {
             let mut child = ui.new_child(
@@ -2289,7 +2386,19 @@ fn track_row_contents(
             } else {
                 gettext(app.locale, "Save to Liked Songs")
             };
-            if theme::icon_button(&mut child, icon, 16.0, color, hover, &tooltip).clicked() {
+            // A heart pops when it is given, not when a liked song scrolls in.
+            let given = saved == Some(true);
+            let pop = child.ctx().animate_bool_with_time(
+                egui::Id::new(("row-heart-pop", row.item.uri())),
+                given,
+                crate::motion::seconds(child.ctx(), super::kit::motion::POP),
+            );
+            let size = if given {
+                16.0 * super::kit::motion::pop(pop)
+            } else {
+                16.0
+            };
+            if theme::icon_button(&mut child, icon, size, color, hover, &tooltip).clicked() {
                 app.actions
                     .push(if crate::soundcloud::is_track_uri(row.item.uri()) {
                         Action::ToggleSoundCloudLike(row.item.uri().to_owned())
@@ -2362,6 +2471,9 @@ fn track_row_contents(
             uri: row.item.uri().to_string(),
             index: row.index as u32,
         });
+        sweep(ui.ctx(), response.id);
+    } else if ui.is_enabled() && response.double_clicked() {
+        refuse(ui.ctx(), response.id);
     } else if ui.is_enabled() && response.clicked() {
         // The cell that holds the play control: the number column when
         // there is one, the cover when there is not.
@@ -2387,8 +2499,11 @@ fn track_row_contents(
                     uri: row.item.uri().to_string(),
                     index: row.index as u32,
                 });
+                sweep(ui.ctx(), response.id);
             }
-        } else if !on_control {
+        } else if on_control {
+            refuse(ui.ctx(), response.id);
+        } else {
             // The body of the row, which plays nothing on a single click.
             response.request_focus();
             let modifiers = ui.input(|input| input.modifiers);
@@ -2726,7 +2841,14 @@ pub fn table_header(
     } else {
         0.0
     };
-    let right_fixed = 36.0 + 56.0 + 36.0 + 8.0;
+    let fixed = 8.0 + 44.0 + if show_cover { 52.0 } else { 0.0 } + 36.0 + 56.0 + 36.0 + 8.0 + 12.0;
+    let (tools_width, album_width) = fit_tools(
+        width,
+        fixed,
+        album_width,
+        added_width + added_by_width + plays_width,
+    );
+    let right_fixed = tools_width + 36.0 + 56.0 + 36.0 + 8.0;
     let mut cx =
         rect.right() - right_fixed - plays_width - added_width - added_by_width - album_width;
     if album_width > 0.0 {
@@ -3940,37 +4062,6 @@ mod tests {
     use crate::settings::Settings;
 
     #[test]
-    fn source_badges_name_soundcloud_and_reserve_no_space_for_spotify() {
-        for palette in [Palette::dark(), Palette::light()] {
-            let ctx = egui::Context::default();
-            ctx.enable_accesskit();
-            theme::install(&ctx);
-            for _ in 0..2 {
-                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                    let before = ui.cursor();
-                    assert!(
-                        source_badge(ui, &palette, Locale::English, "spotify:track:abc").is_none()
-                    );
-                    assert_eq!(ui.cursor(), before);
-                    let badge =
-                        source_badge(ui, &palette, Locale::English, "soundcloud:track:1").unwrap();
-                    assert_eq!(badge.rect.size(), SOURCE_BADGE_SIZE);
-                });
-                output.textures_delta.clear();
-                let tree = output.platform_output.accesskit_update.unwrap();
-                assert!(
-                    tree.nodes
-                        .iter()
-                        // egui labels expose their spoken text as the node's value.
-                        .any(|(_, node)| node.value() == Some("SoundCloud")
-                            && node.role() == egui::accesskit::Role::Label),
-                    "{tree:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn soundcloud_errors_offer_recovery_without_transport_details() {
         for (raw, expected) in [
             (
@@ -4537,7 +4628,12 @@ mod tests {
             .iter()
             .filter_map(|(_, node)| node.label())
             .collect();
-        for expected in ["Copy SoundCloud link", "Open on SoundCloud", "Go to artist"] {
+        for expected in [
+            "Copy SoundCloud link",
+            "Open on SoundCloud",
+            "Go to artist",
+            "Repost (connect a SoundCloud session)",
+        ] {
             assert!(labels.contains(&expected), "missing {expected}: {labels:?}");
         }
         for absent in [
@@ -4573,6 +4669,10 @@ mod tests {
             assert!(labels.contains(&"Open on SoundCloud"));
             assert_eq!(
                 labels.contains(&"Add to playlist"),
+                uri.starts_with("soundcloud:playlist:")
+            );
+            assert_eq!(
+                labels.contains(&"Repost (connect a SoundCloud session)"),
                 uri.starts_with("soundcloud:playlist:")
             );
             for absent in [
@@ -4930,6 +5030,241 @@ mod tests {
             uri: uri.to_string(),
             ..Default::default()
         })
+    }
+
+    /// Draws one song row, then clicks its body twice or its play control
+    /// once. Returns the actions pushed, the context and the row's id.
+    fn click_song_row(item: PlayableItem, target: &str) -> (Vec<Action>, egui::Context, egui::Id) {
+        let click = |pos: egui::Pos2| {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            vec![egui::Event::PointerMoved(pos), button(true), button(false)]
+        };
+        let mut app = test_app();
+        app.backend.shutdown();
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let context = RowContext::Context {
+            uri: "spotify:playlist:rows".into(),
+            editable_playlist: None,
+        };
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut row = (Rect::NOTHING, egui::Id::NULL);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(900.0, 400.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let (response, _) = track_row_response(
+                        ui,
+                        &mut app,
+                        TrackRow {
+                            index: 0,
+                            number: Some(1),
+                            item: &item,
+                            context: &context,
+                            show_cover: false,
+                            show_album: false,
+                            added_at: None,
+                            added_by: None,
+                            show_added_by: false,
+                            show_plays: false,
+                            compact: false,
+                            thin: false,
+                            shift: 0.0,
+                            picked: false,
+                            picked_songs: &[],
+                            picked_positions: &[],
+                            position: None,
+                        },
+                    );
+                    row = (response.rect, response.id);
+                },
+            );
+            output.textures_delta.clear();
+            row
+        };
+        let (rect, id) = frame(vec![]);
+        let at = if target == "body" {
+            rect.center()
+        } else {
+            pos2(rect.left() + 30.0, rect.center().y)
+        };
+        frame(click(at));
+        if target == "body" {
+            frame(click(at));
+        }
+        (std::mem::take(&mut app.actions), ctx, id)
+    }
+
+    fn song_named(uri: &str, playable: bool) -> PlayableItem {
+        PlayableItem::Track(Track {
+            uri: uri.into(),
+            name: "Row".into(),
+            is_playable: Some(playable),
+            ..Default::default()
+        })
+    }
+
+    fn plays(actions: &[Action]) -> bool {
+        actions
+            .iter()
+            .any(|action| matches!(action, Action::PlayFromRow { .. }))
+    }
+
+    /// A song that cannot play answers a double click on its body, or a
+    /// click on its play control, with a shake of its title, and plays
+    /// nothing.
+    #[test]
+    fn an_unplayable_song_shakes_instead_of_playing() {
+        for target in ["body", "control"] {
+            let (actions, ctx, id) =
+                click_song_row(song_named("spotify:track:gone", false), target);
+            assert!(!plays(&actions), "{target}");
+            assert!(
+                super::super::kit::motion::running(&ctx, id.with("refused")).is_some(),
+                "{target}: the title should be shaking"
+            );
+            assert!(super::super::kit::motion::running(&ctx, id.with("played")).is_none());
+        }
+    }
+
+    /// Playing a song from its row sweeps one band of light across that
+    /// row, whether by a double click or by its play control.
+    #[test]
+    fn playing_a_song_sweeps_its_row() {
+        for target in ["body", "control"] {
+            let (actions, ctx, id) = click_song_row(song_named("spotify:track:here", true), target);
+            assert!(plays(&actions), "{target}");
+            assert!(
+                super::super::kit::motion::running(&ctx, id.with("played")).is_some(),
+                "{target}: the row should sweep"
+            );
+            assert!(super::super::kit::motion::running(&ctx, id.with("refused")).is_none());
+        }
+    }
+
+    /// The row tools take room only where the title keeps at least
+    /// [`TITLE_MIN`] beside them, at and around each breakpoint, on a
+    /// playlist, an album and an artist's popular songs; the album column is
+    /// the first to give way to them.
+    #[test]
+    fn row_tools_never_squeeze_the_title_below_its_minimum() {
+        let item = song("spotify:track:fit");
+        let context = RowContext::Queue;
+        // (cover, album, added, added by, plays): a playlist, an album page,
+        // an artist's popular songs.
+        let lists = [
+            (true, true, true, true, false),
+            (false, false, false, false, true),
+            (true, false, false, false, true),
+        ];
+        for (cover, album, added, added_by, plays) in lists {
+            for width in [560.0, 561.0, 760.0, 761.0, 920.0, 921.0, 1280.0] {
+                let row = TrackRow {
+                    index: 0,
+                    number: Some(1),
+                    item: &item,
+                    context: &context,
+                    show_cover: cover,
+                    show_album: album,
+                    added_at: added.then_some("2026-10-30T12:00:00Z"),
+                    added_by: None,
+                    show_added_by: added_by,
+                    show_plays: plays,
+                    compact: false,
+                    thin: false,
+                    shift: 0.0,
+                    picked: false,
+                    picked_songs: &[],
+                    picked_positions: &[],
+                    position: None,
+                };
+                let cols = columns(width, &row);
+                let left = 8.0 + cols.number + cols.cover;
+                let right = cols.tools + cols.heart + cols.duration + cols.more + 8.0;
+                let title = width
+                    - left
+                    - right
+                    - cols.plays
+                    - cols.added
+                    - cols.added_by
+                    - cols.album
+                    - 12.0;
+                assert!(
+                    cols.album == 0.0 || cols.album >= ALBUM_MIN,
+                    "{width}: album squeezed to {}",
+                    cols.album
+                );
+                if cols.tools > 0.0 {
+                    assert!(
+                        title >= TITLE_MIN,
+                        "{width}: title {title} beside the tools, {lists:?}"
+                    );
+                } else {
+                    assert!(
+                        title - super::super::row_tools::WIDTH < TITLE_MIN,
+                        "{width}: the tools fit but were left out"
+                    );
+                }
+            }
+        }
+        // Wide enough for every column, tools and album stay together.
+        let wide = columns(
+            1280.0,
+            &TrackRow {
+                index: 0,
+                number: Some(1),
+                item: &item,
+                context: &context,
+                show_cover: true,
+                show_album: true,
+                added_at: Some("2026-10-30T12:00:00Z"),
+                added_by: None,
+                show_added_by: false,
+                show_plays: false,
+                compact: false,
+                thin: false,
+                shift: 0.0,
+                picked: false,
+                picked_songs: &[],
+                picked_positions: &[],
+                position: None,
+            },
+        );
+        assert!(wide.tools > 0.0 && wide.album > 0.0);
+        // A playlist in a 1280 window beside the docked sidebar keeps its
+        // album, narrowed, with the tools.
+        let docked = columns(
+            960.0,
+            &TrackRow {
+                index: 0,
+                number: Some(1),
+                item: &item,
+                context: &context,
+                show_cover: true,
+                show_album: true,
+                added_at: Some("2026-10-30T12:00:00Z"),
+                added_by: None,
+                show_added_by: false,
+                show_plays: false,
+                compact: false,
+                thin: false,
+                shift: 0.0,
+                picked: false,
+                picked_songs: &[],
+                picked_positions: &[],
+                position: None,
+            },
+        );
+        assert!(docked.tools > 0.0);
+        assert!((ALBUM_MIN..960.0 * 0.28).contains(&docked.album));
     }
 
     #[test]

@@ -61,6 +61,10 @@ pub(super) struct HybridRuntime {
     pub(super) restart_pending: bool,
     pub(super) shutdown_pending: bool,
     pub(super) signout_pending: bool,
+    pub(super) youtube_load: Option<tokio::task::AbortHandle>,
+    pub(super) youtube_preload: Option<tokio::task::AbortHandle>,
+    pub(super) youtube_context: Option<tokio::task::AbortHandle>,
+    pub(super) youtube_tracks: HashMap<String, tokio::task::AbortHandle>,
 }
 
 impl Worker {
@@ -223,6 +227,21 @@ impl Worker {
         account: crate::soundcloud::account::Account,
         request: u64,
     ) {
+        self.track_details.clear();
+        let scope = |account: &crate::soundcloud::account::Account| {
+            account
+                .user()
+                .map(|user| (user.user_id, account.token().is_some()))
+        };
+        // Initial request-zero restoration is the same saved account, not an
+        // account switch. Token refresh/name changes and engine restarts keep
+        // its measurements. Explicit disconnect also retries failed deletion.
+        let initial_restore = self.hybrid.account_generation == 0 && request == 0;
+        if !initial_restore && scope(&self.hybrid.account) != scope(&account)
+            || request != 0 && matches!(account, crate::soundcloud::account::Account::Disconnected)
+        {
+            self.invalidate_loudness_cache();
+        }
         self.hybrid.active_account_request = request;
         self.hybrid.account_lease = Some(self.credentials.lease(CredentialSlot::SoundCloud));
         let id = self.hybrid.client.as_ref().and_then(Client::client_id);
@@ -328,6 +347,13 @@ impl Worker {
                 position_ms,
                 play,
             } => {
+                if let Some(task) = self.hybrid.youtube_load.take() {
+                    task.abort();
+                }
+                if let Some(task) = self.hybrid.youtube_preload.take() {
+                    task.abort();
+                }
+                self.hybrid.preload_uri = None;
                 self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;
                 self.hybrid.tag = Some(tag);
@@ -338,7 +364,9 @@ impl Worker {
                 self.resume_verify = None;
                 log::info!(
                     "Hybrid playback: load source={} generation={} play={play} position_ms={position_ms} local_engine_ready={}",
-                    if crate::soundcloud::is_track_uri(&track.uri) {
+                    if crate::youtube::is_track_uri(&track.uri) {
+                        "youtube"
+                    } else if crate::soundcloud::is_track_uri(&track.uri) {
                         "soundcloud"
                     } else {
                         "spotify"
@@ -379,7 +407,7 @@ impl Worker {
                     });
                     return;
                 }
-                if !crate::soundcloud::is_track_uri(&track.uri) {
+                if !crate::youtube::is_external(&track.uri) {
                     if self.hybrid.claimed {
                         self.hybrid.pending = Some(HybridCommand::Load {
                             tag,
@@ -417,24 +445,54 @@ impl Worker {
                             ),
                         });
                     }
-                } else if let Some(stream) = self.hybrid.streams.get(&track.uri).cloned() {
+                } else if let Some(stream) = self
+                    .hybrid
+                    .streams
+                    .get(&track.uri)
+                    .filter(|stream| !crate::youtube::url_expired(&stream.url))
+                    .cloned()
+                {
                     self.load_soundcloud(tag, stream).await;
                 } else {
-                    self.resolve_soundcloud_stream(tag, track.uri, false, None);
+                    self.resolve_soundcloud_stream(
+                        tag,
+                        track.uri,
+                        track.external_urls.spotify,
+                        false,
+                        None,
+                    );
                 }
             }
             HybridCommand::Preload { tag, track } => {
                 if self.hybrid.tag != Some(tag) || self.engine.is_none() {
                     return;
                 }
+                if self.hybrid.preload_uri.as_ref() == Some(&track.uri) {
+                    return;
+                }
+                if let Some(task) = self.hybrid.youtube_preload.take() {
+                    task.abort();
+                }
                 self.hybrid.preload_uri = Some(track.uri.clone());
-                if crate::soundcloud::is_track_uri(&track.uri) {
-                    if let Some(stream) = self.hybrid.streams.get(&track.uri).cloned() {
+                if crate::youtube::is_external(&track.uri) {
+                    if let Some(stream) = self
+                        .hybrid
+                        .streams
+                        .get(&track.uri)
+                        .filter(|stream| !crate::youtube::url_expired(&stream.url))
+                        .cloned()
+                    {
                         if let Some(engine) = &self.hybrid.engine {
                             engine.command(sc::Command::Preload(stream));
                         }
                     } else {
-                        self.resolve_soundcloud_stream(tag, track.uri, true, None);
+                        self.resolve_soundcloud_stream(
+                            tag,
+                            track.uri,
+                            track.external_urls.spotify,
+                            true,
+                            None,
+                        );
                     }
                 } else if let Some(engine) = &self.engine {
                     let _ = engine.preload(&track.uri);
@@ -464,7 +522,7 @@ impl Worker {
                     .hybrid
                     .track
                     .as_ref()
-                    .is_some_and(|t| !crate::soundcloud::is_track_uri(&t.uri))
+                    .is_some_and(|t| !crate::youtube::is_external(&t.uri))
                     && let Some(engine) = &self.engine
                 {
                     engine.hybrid_transport(playing);
@@ -494,13 +552,14 @@ impl Worker {
                     .hybrid
                     .track
                     .as_ref()
-                    .is_some_and(|t| !crate::soundcloud::is_track_uri(&t.uri))
+                    .is_some_and(|t| !crate::youtube::is_external(&t.uri))
                     && let Some(engine) = &self.engine
                 {
                     engine.hybrid_seek(position_ms);
                 }
             }
             command @ (HybridCommand::Stop | HybridCommand::Release) => {
+                self.cancel_youtube();
                 self.hybrid.new_owner_intent();
                 let release = matches!(command, HybridCommand::Release);
                 log::info!(
@@ -609,12 +668,17 @@ impl Worker {
     }
 
     fn resolve_soundcloud_stream(
-        &self,
+        &mut self,
         tag: PlaybackTag,
         uri: String,
+        share_url: Option<String>,
         preload: bool,
         refresh: Option<u64>,
     ) {
+        if crate::youtube::is_track_uri(&uri) {
+            self.resolve_youtube_stream(tag, uri, preload, refresh);
+            return;
+        }
         let account_generation = self.hybrid.account_generation;
         let client = self.hybrid.client.as_ref().unwrap().clone();
         let commands = self.commands.clone();
@@ -628,7 +692,10 @@ impl Worker {
             let result = async {
                 let id = crate::soundcloud::track_id(&uri)
                     .ok_or_else(|| "Invalid SoundCloud track".to_owned())?;
-                let track = client.track(id).await.map_err(|e| e.to_string())?;
+                let track = client
+                    .track_for_playback(&uri, share_url.as_deref())
+                    .await
+                    .map_err(|e| e.to_string())?;
                 let info = client
                     .resolve_stream(&track)
                     .await
@@ -743,7 +810,17 @@ impl Worker {
             sc::Event::RefreshRequired {
                 request_id, uri, ..
             } => {
-                self.resolve_soundcloud_stream(tag, uri, false, Some(request_id));
+                let Some(track) = self.hybrid.track.as_ref().filter(|track| track.uri == uri)
+                else {
+                    return;
+                };
+                self.resolve_soundcloud_stream(
+                    tag,
+                    uri,
+                    track.external_urls.spotify.clone(),
+                    false,
+                    Some(request_id),
+                );
                 return;
             }
             _ => return,
@@ -751,7 +828,14 @@ impl Worker {
         self.emit(Event::Hybrid { tag, event });
     }
 
-    fn resolve_hybrid_context(&self, generation: u64, uri: String) {
+    fn resolve_hybrid_context(&mut self, generation: u64, uri: String) {
+        if let Some(task) = self.hybrid.youtube_context.take() {
+            task.abort();
+        }
+        if crate::youtube::is_track_uri(&uri) {
+            self.resolve_youtube_context(generation, uri);
+            return;
+        }
         let account_generation = self.hybrid.account_generation;
         let client = self.hybrid.client.as_ref().unwrap().clone();
         let api = Arc::clone(&self.api);
@@ -905,6 +989,91 @@ pub(super) async fn persist_client_id(client: &Client, path: std::path::PathBuf)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn seed_loudness_cache(worker: &Worker) -> std::path::PathBuf {
+        use sha1::{Digest, Sha1};
+        let directory = worker.engine_config.volume_dir.join("loudness");
+        std::fs::create_dir_all(&directory).unwrap();
+        let uri = "soundcloud:track:7";
+        std::fs::write(
+            directory.join(format!("{:x}.json", Sha1::digest(uri.as_bytes()))),
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "uri": uri,
+                "lufs": -8.0,
+                "frames": 176400,
+                "complete": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        directory
+    }
+
+    fn loudness_cached(directory: &std::path::Path) -> bool {
+        let mut processor = crate::loudness::Processor::new(true, Some(directory));
+        processor.begin_track("soundcloud:track:7", true);
+        !processor.needs_lookahead()
+    }
+
+    async fn wait_for_loudness_clear(directory: &std::path::Path) {
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while directory.exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn restored_loudness_survives_same_account_but_not_a_switch_without_an_engine() {
+        use crate::soundcloud::account::{Account, Profile};
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("loudness-account-switch");
+        runtime.block_on(async {
+            let directory = seed_loudness_cache(&worker);
+            let profile = |user_id, name: &str| {
+                Account::Profile(Profile {
+                    user_id,
+                    username: name.into(),
+                    permalink: name.into(),
+                    avatar: None,
+                })
+            };
+            worker.install_soundcloud_account(profile(1, "saved"), 0);
+            assert!(
+                loudness_cached(&directory),
+                "startup restoration keeps measurements"
+            );
+            worker.install_soundcloud_account(profile(1, "renamed"), 1);
+            assert!(
+                loudness_cached(&directory),
+                "same account keeps measurements"
+            );
+            assert!(worker.engine.is_none());
+            worker.install_soundcloud_account(profile(2, "other"), 2);
+            assert!(
+                !loudness_cached(&directory),
+                "new loads cannot read old measurements"
+            );
+            wait_for_loudness_clear(&directory).await;
+        });
+    }
+
+    #[test]
+    fn spotify_signout_clears_loudness_without_an_active_sink() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("loudness-signout");
+        runtime.block_on(async {
+            let directory = seed_loudness_cache(&worker);
+            assert!(loudness_cached(&directory));
+            assert!(worker.engine.is_none());
+            worker.sign_out();
+            assert!(!loudness_cached(&directory));
+            wait_for_loudness_clear(&directory).await;
+        });
+    }
 
     #[test]
     fn a_background_engine_failure_does_not_interrupt_an_active_child() {

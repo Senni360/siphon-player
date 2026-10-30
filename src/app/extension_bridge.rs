@@ -25,6 +25,8 @@ impl App {
             request,
             name: if uri.starts_with("spotify:") {
                 uri.clone()
+            } else if crate::youtube::is_track_uri(&uri) {
+                "YouTube".into()
             } else {
                 "SoundCloud".into()
             },
@@ -101,6 +103,23 @@ impl App {
         if pending.uri.starts_with("spotify:playlist:") && self.playlist_link_waits_for_session() {
             return;
         }
+        if crate::youtube::is_track_uri(&pending.uri) {
+            let uri = pending.uri.clone();
+            if let Some(track) = self.hybrid_cached_track(&uri) {
+                self.playlist_link_ready(
+                    track.name.clone(),
+                    vec![PlayableItem::Track(track)],
+                    None,
+                );
+            } else {
+                self.pending_playlist_link.as_mut().unwrap().started = true;
+                self.backend.send(Command::YouTubeTrack {
+                    uri,
+                    generation: self.youtube.generation,
+                });
+            }
+            return;
+        }
         let cached_id = pending
             .uri
             .strip_prefix("spotify:track:")
@@ -131,6 +150,30 @@ impl App {
     fn playlist_link_failed(&mut self) {
         self.cancel_playlist_link();
         self.toast_error("Could not load tracks from this link");
+    }
+
+    pub(super) fn youtube_playlist_link_pending(&self, uri: &str) -> bool {
+        self.pending_playlist_link.as_ref().is_some_and(|pending| {
+            pending.uri == uri && self.playlist_link_is_open(pending.request)
+        })
+    }
+
+    pub(super) fn youtube_playlist_link_received(
+        &mut self,
+        uri: &str,
+        result: &Result<Box<Track>, String>,
+    ) {
+        if !self.youtube_playlist_link_pending(uri) {
+            return;
+        }
+        match result {
+            Ok(track) => self.playlist_link_ready(
+                track.name.clone(),
+                vec![PlayableItem::Track(*track.clone())],
+                None,
+            ),
+            Err(_) => self.cancel_playlist_link(),
+        }
     }
 
     fn playlist_link_waits_for_session(&self) -> bool {

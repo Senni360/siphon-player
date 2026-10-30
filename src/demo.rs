@@ -5,6 +5,8 @@
 //! content. Cover art comes from a public placeholder service so the artwork
 //! pipeline (download, disk cache, accent colour) is exercised too.
 
+pub mod siphon;
+
 use std::time::Instant;
 
 use jiff::{SignedDuration, Timestamp};
@@ -1294,6 +1296,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
     }
     for surface in show.unwrap_or("").split(',').map(str::trim) {
         match surface {
+            name if siphon::Scenario::from_flag(name).is_some() => {
+                siphon::apply(app, siphon::Scenario::from_flag(name).unwrap());
+            }
             "downloads-ready" => app.downloads.available = true,
             "downloads" => {
                 app.downloads.available = true;
@@ -1562,9 +1567,8 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             | "lyrics-instrumental"
             | "lyrics-no-playback" => {
                 app.show_lyrics_panel = true;
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 app.lyrics_following = false;
-                app.lyrics = match surface {
+                let lyrics = match surface {
                     "lyrics-empty" => Loadable::Loaded(None),
                     "lyrics-loading" => Loadable::Loading,
                     "lyrics-error" => Loadable::Failed("Connection interrupted".into()),
@@ -1574,6 +1578,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                         Loadable::Loaded(Some(lyrics))
                     }
                 };
+                app.install_demo_lyrics(lyrics);
                 if surface == "lyrics-no-playback" {
                     app.remote = None;
                 }
@@ -1865,8 +1870,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 );
             }
             "lyrics" | "lyrics-fullscreen" => {
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
-                app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+                app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 if surface == "lyrics-fullscreen" {
@@ -1876,10 +1880,9 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             // Full-screen lyrics drawn in the window as it is, for shots at
             // a chosen size, which a real full screen would override.
             "lyrics-fullscreen-view" | "lyrics-fullscreen-instrumental" => {
-                app.lyrics_uri = app.now_playing().map(|now| now.uri);
                 let mut lyrics = sample_lyrics();
                 lyrics.instrumental = surface == "lyrics-fullscreen-instrumental";
-                app.lyrics = Loadable::Loaded(Some(lyrics));
+                app.install_demo_lyrics(Loadable::Loaded(Some(lyrics)));
                 app.lyrics_following = true;
                 app.show_lyrics_panel = true;
                 app.lyrics_fullscreen = Some(false);
@@ -2031,6 +2034,14 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The now-playing cover on the player island, in the 1280 by 800 test
+    /// window: the island is 1120 wide and centred, with the cover at its
+    /// left after 14 points of padding.
+    const NOW_PLAYING_COVER: egui::Pos2 = egui::pos2(124.0, 750.0);
+    /// Empty island beside that cover: the visualizer's click target.
+    #[cfg(feature = "demo")]
+    const ISLAND_EMPTY: egui::Pos2 = egui::pos2(86.0, 750.0);
     use crate::app::AppOptions;
     use crate::paths::AppDirs;
     use crate::settings::Settings;
@@ -3017,8 +3028,7 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("translated-lyrics-{locale:?}"));
             app.locale = locale;
             app.show_lyrics_panel = true;
-            app.lyrics_uri = app.now_playing().map(|now| now.uri);
-            app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+            app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
             app.lyrics_following = false;
             accessible_frame(&ctx, &mut app, vec![]);
             let tree = accessible_frame(&ctx, &mut app, vec![]);
@@ -3063,7 +3073,7 @@ mod tests {
             assert!(app.lyrics_fullscreen.is_none());
             for fullscreen in [false, true] {
                 app.lyrics_fullscreen = fullscreen.then_some(false);
-                app.lyrics = Loadable::Failed("fixture failure".into());
+                app.install_demo_lyrics(Loadable::Failed("fixture failure".into()));
                 let tree = accessible_frame(&ctx, &mut app, vec![]);
                 let retry = accessible_node(&tree, &gettext(locale, "Try again"), Role::Button);
                 accessible_frame(
@@ -3095,7 +3105,6 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("translated-panel-states-{locale:?}"));
             app.locale = locale;
             app.show_lyrics_panel = true;
-            app.lyrics_uri = app.now_playing().map(|now| now.uri);
             for fullscreen in [false, true] {
                 app.lyrics_fullscreen = fullscreen.then_some(false);
                 let view = |app: &mut App, ui: &mut egui::Ui| app.frame_ui(ui);
@@ -3132,7 +3141,7 @@ mod tests {
                         vec![sample_lyrics().lines[0].text.clone()],
                     ),
                 ] {
-                    app.lyrics = state;
+                    app.install_demo_lyrics(state);
                     app.lyrics_following = false;
                     view_frame(&ctx, &mut app, vec![], view);
                     let painted = view_frame(&ctx, &mut app, vec![], view);
@@ -5686,7 +5695,8 @@ mod tests {
                 contains("Bonobo - Studio Sketch"),
                 source != SearchSource::Spotify
             );
-            assert_eq!(contains("SC"), source != SearchSource::Spotify);
+            // Songs say their source with their title's colour, not a chip.
+            assert!(!contains("SC"));
             assert_eq!(app.search.committed, "Bonobo");
             if source == SearchSource::SoundCloud {
                 assert!(!contains("Albums"));
@@ -5730,14 +5740,14 @@ mod tests {
                 } else {
                     assert!(soundcloud.top() > spotify.bottom());
                 }
-                assert!(text.iter().any(|(label, _)| label == "SC"));
+                assert!(!text.iter().any(|(label, _)| label == "SC"));
                 app.backend.shutdown();
             }
         }
     }
 
     #[test]
-    fn soundcloud_badges_follow_tracks_into_the_queue_and_player_bar() {
+    fn soundcloud_tracks_carry_no_source_chip_in_the_queue_or_player() {
         let (ctx, mut app) = accessible_app("soundcloud-queue-player-badges");
         let upload = soundcloud_search_results().tracks.remove(0);
         app.remote.as_mut().unwrap().state.item = Some(PlayableItem::Track(upload.clone()));
@@ -5751,9 +5761,61 @@ mod tests {
         ] {
             view_frame(&ctx, &mut app, vec![], view);
             let text = view_frame(&ctx, &mut app, vec![], view);
-            assert!(text.iter().any(|(label, _)| label == "SC"));
+            assert!(!text.iter().any(|(label, _)| label == "SC"));
         }
         app.backend.shutdown();
+    }
+
+    /// The island names its source by colour alone: the playing title takes
+    /// its service's colour in both themes, with no chip beside it.
+    #[test]
+    fn the_island_title_takes_its_source_colour() {
+        let upload = soundcloud_search_results().tracks.remove(0);
+        let spotify = super::track(0);
+        for palette in [
+            crate::theme::Palette::dark(),
+            crate::theme::Palette::light(),
+        ] {
+            for item in [
+                PlayableItem::Track(spotify.clone()),
+                PlayableItem::Track(upload.clone()),
+            ] {
+                let (ctx, mut app) = accessible_app("island-title-colour");
+                app.palette = palette;
+                crate::theme::apply(&ctx, &app.palette);
+                let (title, uri) = (item.name().to_string(), item.uri().to_string());
+                app.remote.as_mut().unwrap().state.item = Some(item);
+                let mut colours = Vec::new();
+                for _ in 0..2 {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(1280.0, 800.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| crate::ui::player_bar::show(&mut app, ui),
+                    );
+                    output.textures_delta.clear();
+                    colours = output
+                        .shapes
+                        .iter()
+                        .filter_map(|clipped| match &clipped.shape {
+                            egui::epaint::Shape::Text(text) if text.galley.job.text == title => {
+                                text.override_text_color.or_else(|| {
+                                    text.galley.job.sections.first().map(|s| s.format.color)
+                                })
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                }
+                let wanted = crate::ui::kit::Source::of(&uri).color(&app.palette);
+                assert_eq!(colours, vec![wanted], "{uri}");
+                app.backend.shutdown();
+            }
+        }
     }
 
     #[test]
@@ -5845,7 +5907,7 @@ mod tests {
     }
 
     #[test]
-    fn soundcloud_badges_and_session_hearts_fit_rows_and_player_in_both_themes() {
+    fn soundcloud_session_hearts_fit_rows_and_player_in_both_themes() {
         use egui::accesskit::{Action as AccessibleAction, Role};
         for light in [false, true] {
             for width in [760.0, 1280.0] {
@@ -5907,18 +5969,6 @@ mod tests {
                         })
                         .expect("session heart");
                     let heart_bounds = heart.bounds().unwrap();
-                    let badge = tree
-                        .nodes
-                        .iter()
-                        .find(|(_, node)| {
-                            node.value() == Some("SoundCloud") && node.role() == Role::Label
-                        })
-                        .and_then(|(_, node)| node.bounds())
-                        .expect("source badge");
-                    assert!(
-                        badge.x1 < heart_bounds.x0,
-                        "badge and heart overlap at {width}"
-                    );
                     assert!(heart_bounds.x1 <= f64::from(width));
                     app.actions.clear();
                     draw(
@@ -6694,8 +6744,8 @@ mod tests {
             output.textures_delta.clear();
         };
         draw(&mut app, vec![]);
-        // The margin at the bar's left edge, beside the cover.
-        let empty = egui::pos2(6.0, 796.0);
+        // The island's padding beside the cover.
+        let empty = ISLAND_EMPTY;
         draw(&mut app, pointer_click(empty, egui::PointerButton::Primary));
         assert!(
             app.actions
@@ -6768,8 +6818,8 @@ mod tests {
         };
         let tip = "Click to change the visualizer";
 
-        // #given the tooltip shown over the empty margin beside the cover
-        let empty = egui::pos2(6.0, 796.0);
+        // #given the tooltip shown over the island's padding beside the cover
+        let empty = ISLAND_EMPTY;
         for _ in 0..3 {
             draw(&mut app, empty);
         }
@@ -8659,7 +8709,7 @@ mod tests {
         populate(&mut app);
         app.settings.queue_width = crate::theme::SIDE_PANEL_MIN_WIDTH;
         app.settings.lyrics_width = crate::theme::SIDE_PANEL_MIN_WIDTH;
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.lyrics_following = false;
 
         let input = egui::RawInput {
@@ -8866,7 +8916,7 @@ mod tests {
             let (ctx, mut app) = accessible_app(&format!("sung-line-{fullscreen}"));
             app.show_lyrics_panel = true;
             app.lyrics_fullscreen = Some(fullscreen);
-            app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+            app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
             app.lyrics_following = true;
             let remote = app.remote.as_mut().unwrap();
             remote.state.is_playing = false;
@@ -8979,7 +9029,7 @@ mod tests {
         ] {
             let (ctx, mut app) = accessible_app("lyrics-centred-while-loading");
             apply_flags(&mut app, None, Some("lyrics-fullscreen-view"));
-            app.lyrics = state;
+            app.install_demo_lyrics(state);
             let mut shapes = Vec::new();
             for frame in 0..10 {
                 let mut output = ctx.run_ui(
@@ -9030,7 +9080,7 @@ mod tests {
         populate(&mut app);
         app.show_lyrics_panel = true;
         app.lyrics_fullscreen = Some(false);
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.lyrics_following = false;
         let mut sizes = Vec::new();
         for (step, position) in [0, 41_000].into_iter().enumerate() {
@@ -9144,8 +9194,7 @@ mod tests {
         }
         frame(&ctx, &mut app);
         app.manual_queue.clear();
-        app.lyrics_uri = app.now_playing().map(|now| now.uri);
-        app.lyrics = Loadable::Loaded(Some(sample_lyrics()));
+        app.install_demo_lyrics(Loadable::Loaded(Some(sample_lyrics())));
         app.show_lyrics_panel = true;
         frame(&ctx, &mut app);
         app.lyrics_fullscreen = Some(false);
@@ -9801,7 +9850,7 @@ mod tests {
             frame(&ctx, &mut app);
         }
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -9875,7 +9924,7 @@ mod tests {
 
         // Drag the now-playing song from the bottom-left player, same
         // starting point as the equivalent playlist-insert test.
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -9945,7 +9994,7 @@ mod tests {
         // close/save buttons and tab chips.
         let end = egui::pos2(1100.0, 300.0);
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -10569,7 +10618,7 @@ mod tests {
         let button = bounds_of(button);
 
         let drag_to = |app: &mut App, end: egui::Pos2| {
-            let start = egui::pos2(40.0, 755.0);
+            let start = NOW_PLAYING_COVER;
             frame_events(
                 &ctx,
                 app,
@@ -10660,7 +10709,7 @@ mod tests {
         let target_row = row_rect("Queued 1");
         let end = egui::pos2(target_row.left() + 130.0, target_row.top() + 1.0);
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -10738,7 +10787,7 @@ mod tests {
         // still appends at the end, ignoring the row it landed on.
         let end = egui::pos2(bounds.x0 as f32 + 130.0, bounds.y0 as f32 + 2.0);
 
-        let start = egui::pos2(40.0, 755.0);
+        let start = NOW_PLAYING_COVER;
         frame_events(
             &ctx,
             &mut app,
@@ -11096,7 +11145,7 @@ mod tests {
             let tree = accessible_frame(&ctx, &mut app, vec![]);
             let target = row(&tree, "Liked Songs").center();
             app.saved.insert("spotify:track:trk0".into(), false);
-            let source = egui::pos2(40.0, 755.0);
+            let source = NOW_PLAYING_COVER;
             accessible_frame(
                 &ctx,
                 &mut app,
@@ -11201,7 +11250,7 @@ mod tests {
                         let row = row_rect(source_item.name());
                         egui::pos2(row.left() + 80.0, row.center().y)
                     } else {
-                        egui::pos2(40.0, 755.0)
+                        NOW_PLAYING_COVER
                     };
                     let row = row_rect(&format!("Destination {}", position.min(3)));
                     let end = egui::pos2(

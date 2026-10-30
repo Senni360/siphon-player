@@ -285,7 +285,7 @@ struct ExternalInner {
     control: Arc<AudioControl>,
 }
 
-/// SoundCloud's processing state is separate from Spotify's normalization
+/// External processing state is separate from Spotify's normalization
 /// and decoder history. Both paths write to the same physical RodioSink.
 pub(crate) struct ExternalPcm {
     pub sink: Arc<Mutex<RodioSink>>,
@@ -294,6 +294,7 @@ pub(crate) struct ExternalPcm {
     pub eq: crate::eq::Processor,
     pub volume: Box<dyn VolumeGetter + Send>,
     pub limiter: crate::limiter::Limiter,
+    pub loudness: crate::loudness::Processor,
 }
 
 impl Sink for ExternalPcm {
@@ -321,9 +322,10 @@ impl Sink for ExternalPcm {
                 "External audio must be PCM".into(),
             ));
         };
+        self.loudness.process(&mut samples);
         self.eq.process(&mut samples);
-        // Same ordering as vis::Tapped, with unity normalization for this
-        // source: all visualizers see post-EQ, pre-volume PCM, even at mute.
+        // The shared limiter remains after normalization and EQ. The tap
+        // sees post-EQ, pre-volume PCM, even at mute.
         self.tap.push(&samples, 1.0);
         let volume = self.volume.attenuation_factor();
         if volume > f64::EPSILON {
@@ -434,6 +436,67 @@ impl Sink for SharedSink {
 }
 
 impl ExternalOutput {
+    /// Clear account-private loudness state, including pending old writes.
+    /// Backend workers may call this without claiming audio ownership.
+    /// It waits for disk IO; never call it on the UI thread.
+    pub fn invalidate_loudness_cache(&self) -> std::io::Result<()> {
+        self.0
+            .sink
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .loudness
+            .invalidate_cache()
+    }
+
+    /// Identify any external source by its stable URI, never a signed stream
+    /// URL. Call after claim and on every Load/seek/refresh. Off the UI thread.
+    pub fn begin_track(&self, uri: &str, from_start: bool) {
+        if self.1 {
+            self.0
+                .sink
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .loudness
+                .begin_track(uri, from_start);
+        }
+    }
+
+    pub fn needs_loudness_lookahead(&self) -> bool {
+        self.1
+            && self
+                .0
+                .sink
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .loudness
+                .needs_lookahead()
+    }
+
+    /// Seed measurement with raw buffered PCM, then write that same PCM in
+    /// order. Producers without lookahead use conservative streaming gain.
+    pub fn prime_loudness(&self, samples: &[f64]) {
+        if self.1 {
+            self.0
+                .sink
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .loudness
+                .prime(samples);
+        }
+    }
+
+    /// Mark only real EOF as complete; Stop/seek/refresh save a prefix.
+    pub fn finish_track(&self, complete: bool) {
+        if self.1 {
+            self.0
+                .sink
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .loudness
+                .finish_track(complete);
+        }
+    }
+
     /// Queued frames not yet pulled by the device, for transport anchors.
     pub fn pending_ms(&self) -> u32 {
         let pcm = self.0.sink.lock().unwrap_or_else(PoisonError::into_inner);
@@ -535,6 +598,7 @@ impl ExternalOutput {
     }
     /// Returns the output to Spotify with no external samples left queued.
     pub fn release(&mut self) -> SinkResult<()> {
+        self.finish_track(false);
         let _guard = self
             .0
             .control
@@ -1534,6 +1598,7 @@ mod tests {
             eq: crate::eq::Processor::new(eq),
             volume: Box::new(FixedVolume(volume)),
             limiter: crate::limiter::Limiter::new(f64::from(SAMPLE_RATE)),
+            loudness: crate::loudness::Processor::new(false, None),
         }
     }
 

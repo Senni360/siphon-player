@@ -172,7 +172,10 @@ blocking demuxing and decoding; it never runs on the UI thread. Transport
 commands cancel outstanding HTTP requests. Progressive audio uses 32 KiB
 byte ranges rather than downloading a whole track. HLS follows up to four
 master/media playlist levels and fetches one compressed segment ahead, with
-a 16 MiB limit per object. Nothing is written to disk.
+a 16 MiB limit per object. Compressed audio is not written to disk. With
+normalisation enabled, decoded loudness measurements are cached locally;
+see [Loudness Matching](/loudness/), including the external source API and
+the bounded decode-ahead pass used before an uncached track's first write.
 
 Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4, including progressive
 AAC when no preferred MP3 or HLS stream is offered. The stream resolver

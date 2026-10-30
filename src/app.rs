@@ -5,6 +5,7 @@ mod extension_bridge;
 mod hybrid;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
+mod youtube;
 pub use hybrid::{PendingHybridSnapshot, PlaybackOwner};
 
 use std::borrow::Cow;
@@ -500,6 +501,7 @@ pub struct App {
     /// What the window's title bar says, as last set.
     window_title: String,
 
+    youtube: youtube::State,
     pub library: Library,
     liked_songs: crate::liked::LikedSongs,
     liked_recheck_at: Option<Instant>,
@@ -603,6 +605,7 @@ pub struct App {
     pub show_friends_panel: bool,
     /// What friends last played. A refresh keeps the last answer on screen.
     pub friends: Loadable<Vec<crate::session_reads::FriendActivity>>,
+    pub friends_feed: crate::friends::Model,
     friends_in_flight: bool,
     friends_fetched_at: Option<Instant>,
     /// Bumped when the account changes, so an answer for the last one is
@@ -618,6 +621,9 @@ pub struct App {
     pub lyrics_uri: Option<String>,
     /// `Loaded(None)` when no lyrics are available.
     pub lyrics: Loadable<Option<crate::lyrics::Lyrics>>,
+    lyrics_request: u64,
+    lyrics_query: Option<crate::lyrics::Query>,
+    pub credits: crate::credits::State,
     /// Whether the panel follows the current line. Manual scrolling disables
     /// it until Follow is used or the track changes.
     pub lyrics_following: bool,
@@ -1083,6 +1089,7 @@ impl App {
         let playlist_overlay_writable = overlay.is_ok();
         let palette = settings.fixed_palette().unwrap_or_else(Palette::dark);
         let mut app = Self {
+            youtube: Default::default(),
             playback_owner: PlaybackOwner::SpotifyConnect,
             hybrid: hybrid::HybridPlayback::default(),
             soundcloud_account: crate::soundcloud::account::Account::Disconnected,
@@ -1255,6 +1262,7 @@ impl App {
             show_lyrics_panel: false,
             show_friends_panel: false,
             friends: Loadable::NotLoaded,
+            friends_feed: crate::friends::Model::default(),
             friends_in_flight: false,
             friends_fetched_at: None,
             friends_generation: 0,
@@ -1266,6 +1274,9 @@ impl App {
             softened_covers: Default::default(),
             lyrics_uri: None,
             lyrics: Loadable::NotLoaded,
+            lyrics_request: 0,
+            lyrics_query: None,
+            credits: Default::default(),
             lyrics_following: true,
             lyrics_line_shown: None,
             show_devices: false,
@@ -1652,6 +1663,7 @@ impl App {
             .get(uri)
             .filter(|track| track.uri == uri)
             .or_else(|| self.track_cache.values().find(|track| track.uri == uri))
+            .or_else(|| self.youtube_likes()?.iter().find(|track| track.uri == uri))
             .or_else(|| {
                 self.search
                     .results
@@ -1721,6 +1733,11 @@ impl App {
     }
 
     pub fn soundcloud_link(&self, uri: &str) -> Option<String> {
+        if let Some(url) =
+            crate::youtube::parse(uri).and_then(|uri| crate::youtube::permalink(&uri))
+        {
+            return Some(url);
+        }
         if !crate::soundcloud::is_uri(uri) {
             return None;
         }
@@ -1790,23 +1807,25 @@ impl App {
         crate::soundcloud::permalink(url).map(str::to_owned)
     }
 
-    /// Spotify Connect, Cast and Sonos cannot receive SoundCloud audio.
+    /// Spotify Connect, Cast and Sonos cannot receive external-source audio.
     pub fn can_use_spotify_outputs(&self) -> bool {
         !self
             .now_playing()
-            .is_some_and(|now| crate::soundcloud::is_uri(&now.uri))
+            .is_some_and(|now| crate::youtube::is_external(&now.uri))
             && !self
                 .manual_queue
                 .iter()
-                .any(|uri| crate::soundcloud::is_uri(uri))
+                .any(|uri| crate::youtube::is_external(uri))
             && !self.queue.get().is_some_and(|queue| {
                 queue
                     .queue
                     .iter()
-                    .any(|item| crate::soundcloud::is_uri(item.uri()))
+                    .any(|item| crate::youtube::is_external(item.uri()))
             })
             && !self.playing_context_uri().is_some_and(|uri| {
-                crate::soundcloud::is_uri(&uri)
+                (crate::youtube::is_external(&uri)
+                    || crate::soundcloud::is_uri(&uri)
+                    || uri == "youtube:likes")
                     || uri.starts_with("spotifast:")
                     || uri
                         .strip_prefix("spotify:playlist:")
@@ -1815,6 +1834,11 @@ impl App {
     }
 
     pub fn is_saved(&self, uri: &str) -> Option<bool> {
+        if crate::youtube::is_track_uri(uri) {
+            return self
+                .youtube_likes()
+                .map(|tracks| tracks.iter().any(|track| track.uri == uri));
+        }
         if let Some(id) = crate::soundcloud::track_id(uri) {
             return self
                 .can_like_soundcloud()
@@ -2744,10 +2768,13 @@ impl App {
                 continue;
             }
             match event {
+                Event::Friends(event) => self.friends_feed.receive(event),
                 Event::PlaylistLinkResolved { request, result } => {
                     self.playlist_link_resolved(request, result);
                 }
                 Event::Download(event) => self.handle_download_event(event),
+                Event::YouTubeTrack { generation, uri, result } => self.youtube_track_received(generation, &uri, result),
+                Event::YouTubeLikes { account, generation, result } => self.youtube_likes_received(&account, generation, result),
                 Event::SoundCloudPlaylistAdd {
                     request,
                     complete,
@@ -2927,14 +2954,10 @@ impl App {
                     }
                     Err(error) => log::warn!("rootlist unavailable: {error}"),
                 },
-                Event::Lyrics { uri, result } => {
-                    if self.lyrics_uri.as_deref() == Some(uri.as_str()) {
-                        self.lyrics = match result {
-                            Ok(found) => Loadable::Loaded(found),
-                            Err(error) => Loadable::Failed(error),
-                        };
-                    }
+                Event::Credits { uri, request, result } => {
+                    self.credits.finish(&uri, request, result);
                 }
+                Event::Lyrics { uri, request, result } => self.receive_lyrics(&uri, request, result),
                 Event::PlaylistCache {
                     account_id,
                     id,
@@ -3152,6 +3175,7 @@ impl App {
                     self.load_made_for_you(false);
                 }
                 if became_ready {
+                    self.retry_missing_lyrics();
                     self.reread_playlists_over_session();
                     // The session reads Spotify's own feed of new releases,
                     // which the Web API stand-in only approximates.
@@ -3209,6 +3233,7 @@ impl App {
     }
 
     fn on_network_restored(&mut self) {
+        self.retry_missing_lyrics();
         if !self.is_connected() {
             return;
         }
@@ -3361,6 +3386,7 @@ impl App {
 
     /// Clears account data while preserving request serials that reject late answers.
     fn reset_data(&mut self) {
+        self.reset_youtube();
         self.pending_remote_volume = None;
         self.local_transfer_sequence = None;
         self.queue_start_pending = None;
@@ -3379,6 +3405,7 @@ impl App {
         // Friends belong to the signed-out account; an answer still on its
         // way is dropped.
         self.friends = Loadable::NotLoaded;
+        self.reset_track_details();
         self.friends_in_flight = false;
         self.friends_fetched_at = None;
         self.friends_generation += 1;
@@ -3626,7 +3653,12 @@ impl App {
             self.local.volume = volume;
         }
         if track_changed {
+            self.frame_now = None;
             self.on_now_playing_changed();
+            if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
+                // Metadata can arrive without changing the URI or occurrence.
+                self.request_lyrics();
+            }
         }
         if reconnected {
             self.replay_queued_play();
@@ -4064,36 +4096,162 @@ impl App {
     /// way. Podcasts have no lyrics to ask for.
     pub fn request_lyrics(&mut self) {
         let Some(now) = self.now_playing() else {
+            self.clear_lyrics();
             return;
         };
+        let query = crate::lyrics::Query {
+            artist: now
+                .artists
+                .first()
+                .map(|artist| artist.name.clone())
+                .unwrap_or_default(),
+            title: now.title,
+            album: now.album_name,
+            duration_ms: now.duration_ms,
+        };
         if self.lyrics_uri.as_deref() == Some(now.uri.as_str())
-            && !matches!(self.lyrics, Loadable::NotLoaded | Loadable::Failed(_))
+            && self.lyrics_query.as_ref() == Some(&query)
+            && (self.offline || !matches!(self.lyrics, Loadable::NotLoaded | Loadable::Failed(_)))
         {
             return;
         }
         self.lyrics_uri = Some(now.uri.clone());
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_query = Some(query.clone());
         self.lyrics_following = true;
         self.lyrics_line_shown = None;
-        if now.is_episode || crate::soundcloud::is_uri(&now.uri) || self.offline {
+        if now.is_episode || !crate::lyrics::supports_uri(&now.uri) || self.offline {
+            self.backend.send(Command::CancelLyrics);
             self.lyrics = Loadable::Loaded(None);
             return;
         }
         self.lyrics = Loadable::Loading;
         let local_file = self.local_file(&now.uri).map(std::path::Path::to_path_buf);
         self.backend.send(Command::Lyrics(Box::new(LyricsRequest {
+            request: self.lyrics_request,
             uri: now.uri,
-            query: crate::lyrics::Query {
-                artist: now
-                    .artists
-                    .first()
-                    .map(|artist| artist.name.clone())
-                    .unwrap_or_default(),
-                title: now.title,
-                album: now.album_name,
-                duration_ms: now.duration_ms,
-            },
+            query,
             local_file,
         })));
+    }
+
+    fn receive_lyrics(
+        &mut self,
+        uri: &str,
+        request: u64,
+        result: Result<Option<crate::lyrics::Lyrics>, String>,
+    ) {
+        if self.lyrics_request == request && self.lyrics_uri.as_deref() == Some(uri) {
+            self.lyrics = match result {
+                Ok(found) => Loadable::Loaded(found),
+                Err(error) => Loadable::Failed(error),
+            };
+        }
+    }
+
+    fn clear_lyrics(&mut self) {
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_uri = None;
+        self.lyrics_query = None;
+        self.lyrics = Loadable::NotLoaded;
+        self.backend.send(Command::CancelLyrics);
+    }
+
+    fn retry_missing_lyrics(&mut self) {
+        if !matches!(self.lyrics, Loadable::Loaded(Some(_))) {
+            self.clear_lyrics();
+            if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
+                self.request_lyrics();
+            }
+        }
+    }
+
+    pub(super) fn reset_track_details(&mut self) {
+        self.credits.clear();
+        self.frame_now = None;
+        self.clear_lyrics();
+        if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
+            self.request_lyrics();
+        }
+    }
+
+    /// Install an invented paused song and its complete lyrics request state.
+    /// This only changes in-memory demo state; no command or file write runs.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn install_demo_track_details(
+        &mut self,
+        track: &Track,
+        lyrics: Loadable<Option<crate::lyrics::Lyrics>>,
+    ) {
+        self.backend.set_offline(true);
+        self.offline = true;
+        self.playback_owner = PlaybackOwner::SpotifyConnect;
+        self.remote = None;
+        self.frame_now = None;
+        self.intent_track = None;
+        self.queued_play = None;
+        self.local_transfer_sequence = None;
+        self.pending_local_position = None;
+        self.optimistic_playing = None;
+        self.local_ready = true;
+        self.local_device_id = Some("local-demo".into());
+        self.local_playback = LocalPlayback::Ready {
+            device_id: "local-demo".into(),
+        };
+        self.local = LocalState {
+            playback: Playback::Paused,
+            track: Some(crate::player::LocalTrack {
+                uri: track.uri.clone(),
+                title: track.name.clone(),
+                artists: track.artists.clone(),
+                album: track
+                    .album
+                    .as_ref()
+                    .map(|album| album.name.clone())
+                    .unwrap_or_default(),
+                art_url: track
+                    .album
+                    .as_ref()
+                    .and_then(|album| pick_image(&album.images, 640))
+                    .map(str::to_owned),
+                art_small_url: track
+                    .album
+                    .as_ref()
+                    .and_then(|album| pick_image(&album.images, 64))
+                    .map(str::to_owned),
+                duration_ms: track.duration_ms,
+                is_episode: false,
+            }),
+            volume: self.settings.volume,
+            ..Default::default()
+        };
+        if let Some(id) = &track.id {
+            self.track_cache.insert(id.clone(), track.clone());
+        }
+        self.install_demo_lyrics(lyrics);
+        self.lyrics_following = true;
+        self.lyrics_line_shown = None;
+    }
+
+    /// Seed lyrics for the current demo song without changing its playback or
+    /// follow position. Include the query so opening a panel reuses the fixture.
+    #[cfg(any(test, feature = "demo"))]
+    pub(crate) fn install_demo_lyrics(&mut self, lyrics: Loadable<Option<crate::lyrics::Lyrics>>) {
+        self.frame_now = None;
+        let now = self.now_playing();
+        self.lyrics_request = self.lyrics_request.wrapping_add(1);
+        self.lyrics_uri = now.as_ref().map(|now| now.uri.clone());
+        self.lyrics_query = now.map(|now| crate::lyrics::Query {
+            artist: now
+                .artists
+                .first()
+                .map(|artist| artist.name.clone())
+                .unwrap_or_default(),
+            title: now.title,
+            album: now.album_name,
+            duration_ms: now.duration_ms,
+        });
+        self.lyrics = lyrics;
     }
 
     /// Pushes the Winamp window's always-on-top level to the live window.
@@ -4107,6 +4265,17 @@ impl App {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
+        let feed_visible = self.show_friends_panel
+            && !self.offline
+            && self.budget != crate::power::Budget::Background
+            && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        if self.friends_feed.poll_due(feed_visible) {
+            self.actions
+                .push(Action::Friends(crate::friends::Action::Refresh));
+        }
+        if feed_visible && self.friends_feed.profile.is_some() {
+            ctx.request_repaint_after(Duration::from_secs(60));
+        }
         self.poll_custom_themes(ctx);
         if let Some(wait) = self.window_focus(ctx.input(|input| {
             // A minimised window is away even where it keeps focus.
@@ -7017,6 +7186,10 @@ impl App {
     }
 
     fn load_soundcloud_page(&mut self, uri: String, more: bool) {
+        if uri == "youtube:likes" {
+            self.load_youtube_likes_page();
+            return;
+        }
         let page = self.soundcloud_pages.entry(uri.clone()).or_default();
         if page.loading {
             return;
@@ -7423,6 +7596,9 @@ impl App {
                         self.request_account_caches();
                     }
                     self.user = Some(user);
+                    if changed || due {
+                        self.request_youtube_likes();
+                    }
                     let page = self.page().clone();
                     self.ensure_loaded(page);
                     if let Some(now) = self.now_playing() {
@@ -8989,7 +9165,15 @@ impl App {
                             Some(PlayableItem::Track(track.clone())),
                         );
                         self.track_cache.insert(id.clone(), track);
+                        let current_lyrics = self.lyrics_uri.as_deref()
+                            == Some(format!("spotify:track:{id}").as_str());
                         self.track_used.insert(id, Instant::now());
+                        if current_lyrics
+                            && (self.show_lyrics_panel || self.lyrics_fullscreen.is_some())
+                        {
+                            self.frame_now = None;
+                            self.request_lyrics();
+                        }
                     }
                     Err(error) => {
                         self.resolve_pasted_song(&format!("spotify:track:{id}"), None);
@@ -9182,7 +9366,10 @@ impl App {
         let Some(uri) = self.pending_link.clone() else {
             return;
         };
-        if crate::soundcloud::is_uri(&uri) || crate::link::soundcloud_url(&uri).is_some() {
+        if crate::youtube::is_track_uri(&uri)
+            || crate::soundcloud::is_uri(&uri)
+            || crate::link::soundcloud_url(&uri).is_some()
+        {
             self.pending_link = None;
             self.try_hybrid_start(PlayRequest::context(uri), false, None);
             return;
@@ -11466,7 +11653,7 @@ impl App {
                 }
             })
             .filter(|uri| {
-                crate::soundcloud::is_track_uri(uri)
+                crate::youtube::is_external(uri)
                     || matches!(util::uri_kind(uri), Some("track" | "episode"))
             })
             .collect();
@@ -11490,6 +11677,11 @@ impl App {
             }
             if let Some(item) = self.known_song(&uri) {
                 paste.found.insert(uri, item);
+            } else if crate::youtube::is_track_uri(&uri) {
+                self.backend.send(Command::YouTubeTrack {
+                    uri,
+                    generation: self.youtube.generation,
+                });
             } else if let Some(id) = uri.strip_prefix("spotify:track:").map(str::to_string) {
                 if self.track_requests.insert(id.clone()) {
                     self.backend.api(ApiRequest::Track { id });
@@ -11508,7 +11700,7 @@ impl App {
         if let Some(item) = self.copied_songs.iter().find(|item| item.uri() == uri) {
             return Some(item.clone());
         }
-        if crate::soundcloud::is_track_uri(uri) {
+        if crate::youtube::is_external(uri) {
             return self.soundcloud_track(uri).cloned().map(PlayableItem::Track);
         }
         let id = uri.strip_prefix("spotify:track:")?;
@@ -11669,6 +11861,17 @@ impl App {
                 unreachable!("local playlist actions are applied by the source adapter")
             }
             Action::Open(page) => self.open(page),
+            Action::Friends(action) => {
+                if (!self.offline
+                    || matches!(
+                        action,
+                        crate::friends::Action::Leave | crate::friends::Action::DismissSecret
+                    ))
+                    && let Some(request) = self.friends_feed.begin(action)
+                {
+                    self.backend.send(Command::Friends(request));
+                }
+            }
             Action::Download(items) => self.download_items(items),
             Action::DownloadAll { uri, name } => self.download_all(uri, name),
             Action::CancelDownload(id) => {
@@ -12049,7 +12252,12 @@ impl App {
                     self.backend.api(ApiRequest::SetSaved { uris, saved });
                 }
             }
+            Action::ToggleSaved(uri) if crate::youtube::is_track_uri(&uri) => {
+                self.toggle_youtube_like(&uri)
+            }
             Action::ToggleSoundCloudLike(uri) => self.toggle_soundcloud_like(&uri),
+            Action::ToggleSoundCloudRepost(uri) => self.toggle_soundcloud_repost(&uri),
+            Action::LoadSoundCloudFollowing { more } => self.load_soundcloud_following(more),
             Action::ToggleSaved(uri) if crate::soundcloud::is_track_uri(&uri) => {
                 self.toggle_soundcloud_like(&uri)
             }
@@ -12665,6 +12873,8 @@ impl App {
                     self.show_queue_panel = false;
                     self.show_lyrics_panel = false;
                     self.refresh_friends();
+                    self.actions
+                        .push(Action::Friends(crate::friends::Action::Open));
                 }
             }
             Action::SetLyricsFullscreen(fullscreen) => {
@@ -12713,7 +12923,28 @@ impl App {
                 self.lyrics_line_shown = None;
             }
             Action::PauseLyricsFollow => self.lyrics_following = false,
-            Action::RetryLyrics => self.request_lyrics(),
+            Action::RetryLyrics => {
+                self.clear_lyrics();
+                self.request_lyrics();
+            }
+            Action::RequestCredits(uri) => {
+                if let Some(request) = self.credits.begin(&uri) {
+                    if self.offline {
+                        self.credits.finish(
+                            &uri,
+                            request,
+                            Err("Credits are unavailable offline.".into()),
+                        );
+                    } else {
+                        self.backend.send(Command::Credits { uri, request });
+                    }
+                }
+            }
+            Action::CancelCredits(uri) => {
+                if let Some(request) = self.credits.cancel(&uri) {
+                    self.backend.send(Command::CancelCredits { uri, request });
+                }
+            }
             Action::ToggleDevicesPopup => {
                 self.show_devices = !self.show_devices;
                 if self.show_devices {
@@ -12979,8 +13210,10 @@ impl App {
                 // Open links off the UI thread with the platform-specific
                 // launcher used elsewhere in the app.
                 std::thread::spawn(move || {
-                    if let Err(error) = crate::opener::open(&url) {
-                        log::warn!("unable to open {url}: {error}");
+                    if crate::opener::open(&url).is_err() {
+                        // A shared link may be an unlisted video or carry a
+                        // private SoundCloud secret. Keep it out of logs.
+                        log::warn!("unable to open external link");
                     }
                 });
             }
@@ -15758,6 +15991,185 @@ mod tests {
             (stored_width(&ctx) - crate::theme::SIDE_PANEL_MIN_WIDTH).abs() < 1.0,
             "the panel draws at its own minimum"
         );
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn lyrics_retries_reject_late_answers_for_the_same_uri() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.request_lyrics();
+        let first = app.lyrics_request;
+        let uri = app.lyrics_uri.clone().unwrap();
+        app.apply(Action::RetryLyrics, &egui::Context::default());
+        let current = app.lyrics_request;
+        assert_ne!(first, current);
+        app.receive_lyrics(&uri, first, Ok(None));
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        app.receive_lyrics(&uri, current, Err("Fixture failure".into()));
+        assert!(matches!(app.lyrics, Loadable::Failed(_)));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn opening_lyrics_preserves_all_installed_demo_read_states() {
+        let mut app = headless_app();
+        let track = Track {
+            id: Some("0000000000000000000001".into()),
+            uri: "spotify:track:0000000000000000000001".into(),
+            name: "Invented fixture song".into(),
+            artists: vec![crate::api::models::ArtistRef {
+                name: "Demo Artist".into(),
+                ..Default::default()
+            }],
+            duration_ms: 180_000,
+            ..Default::default()
+        };
+        let states = [
+            Loadable::Loading,
+            Loadable::Loaded(None),
+            Loadable::Failed("Fixture failure".into()),
+            Loadable::Loaded(Some(crate::lyrics::Lyrics {
+                lines: vec![crate::lyrics::Line {
+                    at_ms: Some(0),
+                    text: "Invented fixture lyric".into(),
+                }],
+                synced: true,
+                instrumental: false,
+            })),
+        ];
+        let ctx = egui::Context::default();
+        for state in states {
+            app.install_demo_track_details(&track, state.clone());
+            let request = app.lyrics_request;
+            app.show_lyrics_panel = false;
+            app.apply(Action::ToggleLyricsPanel, &ctx);
+            assert_eq!(app.now_playing().unwrap().uri, track.uri);
+            assert_eq!(app.lyrics_request, request);
+            assert_eq!(
+                app.lyrics, state,
+                "opening the panel replaced the fixture state"
+            );
+        }
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn switching_siphon_demo_scenarios_clears_previous_private_models() {
+        use crate::demo::siphon::{Scenario, apply};
+        let mut app = headless_app();
+        crate::demo::populate(&mut app);
+        apply(&mut app, Scenario::Ready);
+        assert_eq!(app.youtube_likes().unwrap().len(), 1);
+        assert_eq!(app.friends_feed.posts.len(), 3);
+        assert_eq!(app.soundcloud_library.snapshot.following.items.len(), 1);
+        assert_eq!(
+            app.mixed_playlists
+                .get("demo-siphon")
+                .unwrap()
+                .entries
+                .len(),
+            3
+        );
+        apply(&mut app, Scenario::Unavailable);
+        assert!(app.youtube_likes().is_none());
+        assert!(app.friends_feed.posts.is_empty());
+        assert!(app.friends_feed.profile.is_none());
+        assert!(app.soundcloud_library.snapshot.following.items.is_empty());
+        assert!(app.soundcloud_account.token().is_none());
+        apply(&mut app, Scenario::Empty);
+        assert!(
+            app.mixed_playlists
+                .get("demo-siphon")
+                .unwrap()
+                .entries
+                .is_empty()
+        );
+        assert_eq!(
+            app.mixed_playlists
+                .playlists
+                .iter()
+                .filter(|p| p.id == "demo-siphon")
+                .count(),
+            1
+        );
+        assert!(app.offline);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn lyrics_metadata_changes_retry_a_previous_unavailable_result() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+            duration_ms: 0,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.request_lyrics();
+        let first = app.lyrics_request;
+        let uri = app.lyrics_uri.clone().unwrap();
+        app.receive_lyrics(&uri, first, Ok(None));
+        app.local.track.as_mut().unwrap().duration_ms = 200_000;
+        app.request_lyrics();
+        assert_ne!(first, app.lyrics_request);
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn soundcloud_account_reset_discards_credits_and_retries_lyrics() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.show_lyrics_panel = true;
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "soundcloud:track:123".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        let credits_request = app.credits.begin("soundcloud:track:123").unwrap();
+        app.request_lyrics();
+        let previous = app.lyrics_request;
+        app.receive_lyrics("soundcloud:track:123", previous, Ok(None));
+        app.reset_soundcloud_collections();
+        app.credits
+            .finish("soundcloud:track:123", credits_request, Ok(None));
+        app.receive_lyrics("soundcloud:track:123", previous, Ok(None));
+        assert!(app.credits.get("soundcloud:track:123").is_none());
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        assert_ne!(previous, app.lyrics_request);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn playback_session_ready_retries_missing_lyrics() {
+        let mut app = headless_app();
+        app.backend.set_offline(true);
+        app.show_lyrics_panel = true;
+        app.local_ready = false;
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.request_lyrics();
+        let previous = app.lyrics_request;
+        let uri = app.lyrics_uri.clone().unwrap();
+        app.receive_lyrics(&uri, previous, Ok(None));
+        app.handle_playback(LocalPlayback::Ready {
+            device_id: "fixture-device".into(),
+        });
+        assert_ne!(previous, app.lyrics_request);
+        assert!(matches!(app.lyrics, Loadable::Loading));
         app.backend.shutdown();
     }
 
@@ -22242,6 +22654,24 @@ mod tests {
         );
         app.reveal_theme_changes = false;
         app
+    }
+
+    #[test]
+    fn friends_can_forget_identity_and_dismiss_secret_while_offline() {
+        let ctx = egui::Context::default();
+        let mut app = test_app("friends-offline-leave");
+        app.offline = true;
+        app.friends_feed.profile = Some(crate::friends::Profile {
+            user_id: "fixture-user".into(),
+            display_name: "Fixture".into(),
+        });
+        app.friends_feed.recovery_secret = Some("fixture-secret".into());
+        app.apply(Action::Friends(crate::friends::Action::DismissSecret), &ctx);
+        assert!(app.friends_feed.recovery_secret.is_none());
+        app.apply(Action::Friends(crate::friends::Action::Leave), &ctx);
+        assert!(app.friends_feed.profile.is_none());
+        assert!(app.friends_feed.posts.is_empty());
+        app.backend.shutdown();
     }
 
     /// Friend activity takes the right panel's place: opening it closes the
@@ -35069,4 +35499,5 @@ mod tests {
         assert_eq!(app.queued_rows_len(), 1);
         app.backend.shutdown();
     }
+    include!("app/youtube_tests.rs");
 }

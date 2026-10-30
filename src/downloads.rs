@@ -22,6 +22,10 @@ pub enum Source {
         title: String,
         all: bool,
     },
+    YouTube {
+        url: String,
+        title: String,
+    },
     Spotify(Box<Track>),
 }
 
@@ -30,6 +34,12 @@ impl Source {
         let PlayableItem::Track(track) = item else {
             return None;
         };
+        if let Some(url) = crate::youtube::permalink(&track.uri) {
+            return Some(Self::YouTube {
+                url,
+                title: track.name.clone(),
+            });
+        }
         if crate::soundcloud::is_track_uri(&track.uri) {
             return Some(Self::SoundCloud {
                 url: crate::soundcloud::permalink(track.external_urls.spotify.as_deref())?.into(),
@@ -43,7 +53,7 @@ impl Source {
 
     pub fn title(&self) -> &str {
         match self {
-            Self::SoundCloud { title, .. } => title,
+            Self::SoundCloud { title, .. } | Self::YouTube { title, .. } => title,
             Self::Spotify(track) => &track.name,
         }
     }

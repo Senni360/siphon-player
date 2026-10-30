@@ -8,16 +8,20 @@ pub(crate) mod devices;
 mod dialogs;
 mod downloads;
 pub(crate) mod friends;
+mod group_shelf;
 pub mod home;
 mod keys;
+pub mod kit;
 pub mod library;
 pub mod login;
 mod lyrics;
 pub mod new_releases;
+pub mod now_playing;
 pub mod player_bar;
 mod prerelease;
 pub mod queue;
 pub mod radio;
+pub(crate) mod row_tools;
 pub mod search;
 pub mod settings;
 pub mod show;
@@ -48,6 +52,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         || (app.is_connected() && app.user.is_none());
     if !signed_in {
         player_bar::end_tint_session(ctx);
+        // Nothing an account saw survives into the next one.
+        player_bar::forget_island(ctx);
+        row_tools::forget(ctx);
+        now_playing::close(ctx);
         login::show(app, ui, connecting);
         update::show(app, ctx);
         toasts(app, ctx, 20.0);
@@ -67,7 +75,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ),
         );
     }
+    let window = ui.max_rect();
     player_bar::show(app, ui);
+    let content = ui.available_rect_before_wrap();
     if app.lyrics_fullscreen.is_some() {
         lyrics::fullscreen(app, ui);
     } else {
@@ -83,9 +93,23 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if app.show_friends_panel {
             friends::side_panel(app, ui);
         }
+        let page = ui.available_rect_before_wrap();
         central(app, ui);
+        let strip = Rect::from_min_max(
+            egui::pos2(window.left(), window.bottom() - theme::PLAYER_BAR_HEIGHT),
+            window.max,
+        );
+        now_playing::show(app, ui, page, player_bar::island_rect(strip));
+        if !app.settings.sidebar_visible {
+            sidebar::floating(app, ui, content);
+        }
     }
     keep_room_for_panels(app, ctx);
+    row_tools::remember_last_playlist(
+        ctx,
+        app.user.as_ref().map(|user| user.id.as_str()),
+        &app.actions,
+    );
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
     update::show(app, ctx);
@@ -662,13 +686,36 @@ pub fn blend(base: Color32, tint: Color32, amount: f32) -> Color32 {
     color
 }
 
+/// How long a new toast takes to rise into place.
+const TOAST_RISE: f32 = 0.26;
+
+/// How far below its place a toast `age` seconds old still sits, rising
+/// 12 points over `duration` seconds.
+fn toast_lift(age: f32, duration: f32) -> f32 {
+    if duration <= 0.0 || age >= duration {
+        0.0
+    } else {
+        (1.0 - kit::motion::ease(age / duration)) * 12.0
+    }
+}
+
 fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
     if app.toasts.is_empty() && app.downloads.active.is_empty() {
         return;
     }
     let palette = app.palette;
+    // The newest toast rises out of the island's edge as it fades in.
+    let newest = app
+        .toasts
+        .iter()
+        .map(|toast| toast.created.elapsed().as_secs_f32())
+        .fold(f32::INFINITY, f32::min);
+    let lift = toast_lift(newest, crate::motion::seconds(ctx, TOAST_RISE));
+    if lift > 0.0 {
+        ctx.request_repaint();
+    }
     egui::Area::new(egui::Id::new("toasts"))
-        .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset))
+        .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset + lift))
         .order(egui::Order::Tooltip)
         .interactable(!app.downloads.active.is_empty())
         .show(ctx, |ui| {
@@ -723,6 +770,22 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                     });
             }
         });
+}
+
+#[cfg(test)]
+mod toast_tests {
+    use super::*;
+
+    /// A toast starts 12 points low, rises into place, and never moves
+    /// under reduced motion or once it has arrived.
+    #[test]
+    fn a_new_toast_rises_into_place() {
+        assert_eq!(toast_lift(0.0, TOAST_RISE), 12.0);
+        assert!(toast_lift(TOAST_RISE / 2.0, TOAST_RISE) < 12.0);
+        assert_eq!(toast_lift(TOAST_RISE, TOAST_RISE), 0.0);
+        assert_eq!(toast_lift(f32::INFINITY, TOAST_RISE), 0.0);
+        assert_eq!(toast_lift(0.0, 0.0), 0.0);
+    }
 }
 
 #[cfg(test)]

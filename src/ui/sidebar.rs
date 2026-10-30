@@ -544,6 +544,119 @@ fn permute<T>(entries: &mut [T], order: &[usize]) {
     }
 }
 
+/// The docked sidebar's gap to the window's edges, and its corners.
+const CARD_GAP: i8 = 8;
+const CARD_RADIUS: u8 = 14;
+/// The room between the card's edge and its rows.
+const CARD_PAD: Margin = Margin {
+    left: 8,
+    right: 6,
+    top: 0,
+    bottom: 6,
+};
+/// The floating sidebar's width, how close to the window's left edge the
+/// pointer has to come to call it, and how long it stays after the pointer
+/// leaves it.
+const FLOATING_WIDTH: f32 = 264.0;
+const FLOATING_EDGE: f32 = 16.0;
+const FLOATING_LINGER: f64 = 0.35;
+const FLOATING_SLIDE: f32 = 0.26;
+
+/// The sidebar while it is hidden: a thin handle at the window's left edge,
+/// and the whole sidebar sliding out over the page when the pointer reaches
+/// that edge. It slides away again a moment after the pointer leaves it.
+/// `area` is the room between the top of the window and the player.
+pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
+    let ctx = ui.ctx().clone();
+    let palette = app.palette;
+    let id = egui::Id::new("sidebar-floating");
+    let pointer = ctx.pointer_hover_pos();
+    let last_rect = ctx.data(|data| data.get_temp::<Rect>(id.with("rect")));
+    let near_edge = pointer
+        .is_some_and(|at| at.x <= area.left() + FLOATING_EDGE && area.y_range().contains(at.y));
+    let over_panel = pointer.is_some_and(|at| last_rect.is_some_and(|rect| rect.contains(at)));
+    let now = ctx.input(|input| input.time);
+    let mut last = ctx
+        .data(|data| data.get_temp::<f64>(id.with("last")))
+        .unwrap_or(f64::NEG_INFINITY);
+    if near_edge || over_panel {
+        last = now;
+        ctx.data_mut(|data| data.insert_temp(id.with("last"), last));
+    }
+    let wanted = now - last < FLOATING_LINGER;
+    if wanted && !(near_edge || over_panel) {
+        // Nothing else may wake the app when the pointer has left, so ask
+        // for the frame that closes it.
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+            (FLOATING_LINGER - (now - last)).max(0.0),
+        ));
+    }
+    let open = ctx.animate_bool_with_time(
+        id.with("open"),
+        wanted,
+        crate::motion::seconds(&ctx, FLOATING_SLIDE),
+    );
+    let reach = ctx.animate_bool_with_time(
+        id.with("reach"),
+        pointer.is_some_and(|at| {
+            at.x <= area.left() + FLOATING_EDGE * 4.0 && area.y_range().contains(at.y)
+        }),
+        crate::motion::seconds(&ctx, super::kit::motion::FEEDBACK * 1.6),
+    );
+
+    // The handle grows as the pointer nears it, so the edge reads as a door,
+    // and fades as the sidebar it opens slides over it.
+    let handle = Rect::from_center_size(
+        pos2(area.left() + 5.5, area.center().y),
+        vec2(3.0, 36.0 + 60.0 * reach),
+    );
+    ui.painter().rect_filled(
+        handle,
+        2.0,
+        palette
+            .secondary
+            .gamma_multiply((0.35 + 0.45 * reach) * (1.0 - open)),
+    );
+
+    if open <= 0.0 {
+        ctx.data_mut(|data| data.remove::<Rect>(id.with("rect")));
+        return;
+    }
+    let eased = super::kit::motion::ease(open);
+    let gap = f32::from(CARD_GAP);
+    let rect = Rect::from_min_size(
+        pos2(
+            area.left() + gap - (1.0 - eased) * (FLOATING_WIDTH + gap * 2.0),
+            area.top() + gap,
+        ),
+        vec2(FLOATING_WIDTH, area.height() - gap * 2.0),
+    );
+    ctx.data_mut(|data| data.insert_temp(id.with("rect"), rect));
+    egui::Area::new(id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(rect.min)
+        .show(&ctx, |ui| {
+            Frame::new()
+                .fill(palette.panel)
+                .corner_radius(CARD_RADIUS)
+                .stroke(egui::Stroke::new(1.0, palette.outline))
+                .shadow(egui::epaint::Shadow {
+                    offset: [12, 0],
+                    blur: 40,
+                    spread: 0,
+                    color: palette.shadow,
+                })
+                .inner_margin(Margin::symmetric(8, 10))
+                .show(ui, |ui| {
+                    ui.set_width(FLOATING_WIDTH - 16.0);
+                    ui.set_height(rect.height() - 20.0);
+                    // The rows arrive just behind the panel's edge.
+                    ui.multiply_opacity(((open - 0.25) / 0.75).clamp(0.0, 1.0));
+                    contents(app, ui, None);
+                });
+        });
+}
+
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let expanded_art = has_expanded_art(app);
@@ -570,13 +683,39 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .default_size(app.settings.sidebar_width)
         .size_range(fit.range.clone())
         .show_separator_line(false)
-        .frame(Frame::new().fill(palette.panel).inner_margin(Margin {
-            left: 12,
-            right: 8,
-            top,
-            bottom: if expanded_art { 0 } else { 8 },
+        // A card floating inside the window, not a slab against its edge:
+        // the panel itself is the window's colour and the card is painted
+        // inside it, behind the contents.
+        .frame(Frame::new().fill(palette.window).inner_margin(Margin {
+            left: CARD_GAP + CARD_PAD.left,
+            right: CARD_PAD.right,
+            top: CARD_GAP + top - 4,
+            bottom: CARD_GAP + if expanded_art { 0 } else { CARD_PAD.bottom },
         }));
     let response = panel.show(ui, |ui| {
+        let inner = ui.max_rect();
+        let card = Rect::from_min_max(
+            pos2(
+                inner.left() - f32::from(CARD_PAD.left),
+                inner.top() - f32::from(top - 4),
+            ),
+            pos2(
+                inner.right() + f32::from(CARD_PAD.right),
+                inner.bottom()
+                    + if expanded_art {
+                        0.0
+                    } else {
+                        f32::from(CARD_PAD.bottom)
+                    },
+            ),
+        );
+        ui.painter().rect(
+            card,
+            CARD_RADIUS,
+            palette.panel,
+            egui::Stroke::new(1.0, palette.outline),
+            egui::StrokeKind::Inside,
+        );
         let art_rect = expanded_art.then(|| expanded_art_rect(ui));
         if let Some(rect) = art_rect.filter(|_| !floating_art) {
             reserve_expanded_art(ui, rect);
@@ -989,6 +1128,54 @@ fn nav_row(
     });
     theme::focus_ring(ui, &response);
     response
+}
+
+/// How long the open page's highlight takes to glide to a new row.
+const HIGHLIGHT_SLIDE: f32 = 0.22;
+
+/// Where the library's highlight was and is going: the open page it marks,
+/// the row it left, and when it set off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Highlight {
+    key: egui::Id,
+    from: Option<Rect>,
+    shown: Option<Rect>,
+    transition: super::kit::motion::Transition,
+}
+
+impl Highlight {
+    fn moving_at(&self, now: f64) -> bool {
+        self.from.is_some() && !self.transition.finished_at(now)
+    }
+}
+
+/// Where the highlight is drawn at `now`, for the open page `key` whose row
+/// sits at `to` (or is not on screen). Opening another page sets it gliding
+/// from where it was drawn to the new row over `duration` seconds; it
+/// follows the row while the list scrolls.
+fn glide(
+    before: Option<Highlight>,
+    key: egui::Id,
+    to: Option<Rect>,
+    now: f64,
+    duration: f32,
+) -> (Option<Rect>, Highlight) {
+    let highlight = match before {
+        Some(before) if before.key == key => before,
+        before => Highlight {
+            key,
+            from: before.and_then(|before| before.shown),
+            shown: None,
+            transition: super::kit::motion::Transition::at(now, duration),
+        },
+    };
+    let shown = to.map(|to| match highlight.from {
+        Some(from) if !highlight.transition.finished_at(now) => {
+            from.lerp_towards(&to, highlight.transition.progress_at(now))
+        }
+        _ => to,
+    });
+    (shown, Highlight { shown, ..highlight })
 }
 
 /// Keep SoundCloud identities out of Spotify folders and edit targets.
@@ -1518,6 +1705,19 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             {
                 super::widgets::scroll_during_drag(ui);
             }
+            if "youtube likes".contains(&needle)
+                && nav_row(
+                    ui,
+                    &palette,
+                    Icon::Heart,
+                    "YouTube Likes",
+                    app.page() == &Page::SoundCloud("youtube:likes".into()),
+                )
+                .clicked()
+            {
+                app.actions
+                    .push(Action::Open(Page::SoundCloud("youtube:likes".into())));
+            }
             soundcloud_section(app, ui, &needle);
             if loading {
                 super::widgets::loading_row(ui, &palette, app.locale);
@@ -1584,6 +1784,10 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 (((pos.y - list_top) / row_height).round().max(0.0) as usize).min(entries.len())
             });
             let art = app.backend.art().clone();
+            // The open page's highlight is painted under the rows once they
+            // are laid out, so it can glide from the row that was open.
+            let highlight_slot = ui.painter().add(egui::Shape::Noop);
+            let mut active_rect = None;
             super::widgets::virtual_rows(ui, entries.len(), row_height, |ui, index| {
                 let entry = &entries[index];
                 if !app.settings.sidebar_compact
@@ -1638,11 +1842,13 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 // Set when the cover play button takes a click, so a double
                 // click on it does not also play from the row.
                 let mut cover_took_click = false;
+                // The open page's own fill is painted under the rows, by
+                // `highlight_slot`.
+                if active {
+                    active_rect = Some(rect);
+                }
                 if ui.is_rect_visible(rect) {
-                    if active {
-                        ui.painter()
-                            .rect_filled(rect, CornerRadius::same(6), palette.surface);
-                    } else if response.hovered() {
+                    if !active && response.hovered() {
                         ui.painter().rect_filled(
                             rect,
                             CornerRadius::same(6),
@@ -1827,6 +2033,22 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                     true,
                 );
             });
+            let key = egui::Id::new(&current_page);
+            let id = ui.id().with("library-highlight");
+            let now = ui.input(|input| input.time);
+            let duration = crate::motion::seconds(ui.ctx(), HIGHLIGHT_SLIDE);
+            let before = ui.ctx().data(|data| data.get_temp::<Highlight>(id));
+            let (shown, highlight) = glide(before, key, active_rect, now, duration);
+            ui.ctx().data_mut(|data| data.insert_temp(id, highlight));
+            if let Some(shown) = shown {
+                if highlight.moving_at(now) {
+                    ui.ctx().request_repaint();
+                }
+                ui.painter().set(
+                    highlight_slot,
+                    egui::Shape::rect_filled(shown, CornerRadius::same(6), palette.surface),
+                );
+            }
             if let Some(slot) = reorder_slot {
                 // A line in the gap the rows opened, so the eye lands
                 // where the row will.
@@ -2405,6 +2627,32 @@ pub fn liked_cover(ui: &egui::Ui, rect: Rect, radius: f32) {
 #[cfg(all(test, feature = "demo"))]
 mod ordering_tests {
     use super::*;
+
+    /// Opening another page glides the highlight from the row that was open
+    /// to the new one; it then follows its row, and arrives at once under
+    /// reduced motion or when nothing was highlighted before.
+    #[test]
+    fn the_library_highlight_glides_to_the_open_page() {
+        let row = |top: f32| Rect::from_min_size(pos2(0.0, top), vec2(200.0, 56.0));
+        let (a, b) = (egui::Id::new("a"), egui::Id::new("b"));
+        let (shown, first) = glide(None, a, Some(row(0.0)), 0.0, 0.22);
+        assert_eq!(shown, Some(row(0.0)), "nothing to glide from");
+        let (shown, gliding) = glide(Some(first), b, Some(row(112.0)), 1.0, 0.22);
+        assert_eq!(shown, Some(row(0.0)), "sets off from the old row");
+        let (shown, _) = glide(Some(gliding), b, Some(row(112.0)), 1.05, 0.22);
+        let top = shown.unwrap().top();
+        assert!(top > 0.0 && top < 112.0, "on its way: {top}");
+        let (shown, settled) = glide(Some(gliding), b, Some(row(112.0)), 1.3, 0.22);
+        assert_eq!(shown, Some(row(112.0)));
+        let (shown, _) = glide(Some(settled), b, Some(row(80.0)), 2.0, 0.22);
+        assert_eq!(
+            shown,
+            Some(row(80.0)),
+            "follows its row as the list scrolls"
+        );
+        let (shown, _) = glide(Some(settled), a, Some(row(0.0)), 2.0, 0.0);
+        assert_eq!(shown, Some(row(0.0)), "reduced motion arrives at once");
+    }
     use crate::api::models::Playlist;
     use crate::settings::Settings;
 
