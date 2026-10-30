@@ -50,6 +50,10 @@ checkpoint. Launcher checks retain three failures/five errors, and local Jekyll
 lacks Bundler. GitHub's `2bb8ce7` jobs failed; the media job's annotation confirms
 it was refused before any steps because of account billing/spending restrictions.
 No new Linux/macOS or physical-device coverage follows from these results.
+The two opt-in ffmpeg tests were also rerun on the current combined Windows
+checkout: selected-file snapshot identity, mutation detection and cancellation;
+and generated-MP3 decoding, sample-count seeking and end-of-file handling.
+Both passed. These checks use synthetic bytes and no audio device or cloud upload.
 
 No infrastructure or secret is needed for these regression suites. The proposed
 services, cost estimates and required server-side secrets below remain subject
@@ -812,3 +816,15 @@ synchronization remains unmeasured. The next bounded integration should address
 readiness-report sequencing across a selected-output replacement, using the
 existing authoritative report cursor and connection fence. It must not treat
 participant readiness claims as trusted media verification.
+
+Final native synthetic-media verification on the combined Windows checkout
+explicitly ran the two normally ignored ffmpeg tests, with the default feature
+set. Selected-file preparation preserved its original encoded snapshot after a
+file edit, rejected changed resume identity and unsupported profiles, and
+cancelled during decoding. The hosted diagnostic decoded an in-memory generated
+MP3, removed the expected 0.2 seconds of stereo samples when seeking, reached
+end of file and rejected invalid bytes. Both tests passed and their child
+processes completed. No library, cloud upload, output device, Cast receiver or
+audible synchronization was involved. No application code changed in this
+validation checkpoint; the earlier full Rust and service results still describe
+the same implementation.
