@@ -322,7 +322,7 @@ pub struct PublisherMetadata {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
 pub struct Track {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub publisher_metadata: Option<PublisherMetadata>,
+    pub publisher_metadata: Option<Box<PublisherMetadata>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_name: Option<String>,
     /// Source-supplied release date (ISO date or timestamp), absent when unknown.
@@ -366,7 +366,7 @@ pub struct Track {
     /// The originally requested track when Spotify substituted a playable
     /// release for the account's market.
     #[serde(default)]
-    pub linked_from: Option<LinkedTrack>,
+    pub linked_from: Option<Box<LinkedTrack>>,
     #[serde(default)]
     pub external_urls: ExternalUrls,
 }

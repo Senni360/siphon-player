@@ -167,7 +167,7 @@ mod tests {
                         ..Default::default()
                     },
                     created_at: "2026-10-30T12:00:00Z".into(),
-                    content: super::super::following::Content::Track(track(1)),
+                    content: super::super::following::Content::Track(track(1).into()),
                 }],
                 next: Some("stream?cursor=next".into()),
                 loaded: true,

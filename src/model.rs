@@ -88,6 +88,31 @@ fn track_retained_bytes(track: &Track) -> usize {
         + track.name.len()
         + track.uri.len()
         + track.id.as_ref().map(String::len).unwrap_or(0)
+        + track.release_date.as_ref().map_or(0, String::len)
+        + track.label_name.as_ref().map_or(0, String::len)
+        + track.publisher_metadata.as_ref().map_or(0, |metadata| {
+            std::mem::size_of::<PublisherMetadata>()
+                + [
+                    &metadata.isrc,
+                    &metadata.artist,
+                    &metadata.album_title,
+                    &metadata.release_title,
+                    &metadata.writer_composer,
+                    &metadata.publisher,
+                    &metadata.p_line,
+                    &metadata.upc_or_ean,
+                ]
+                .iter()
+                .map(|value| value.as_ref().map_or(0, String::len))
+                .sum::<usize>()
+        })
+        + track.external_ids.isrc.as_ref().map_or(0, String::len)
+        + track.linked_from.as_ref().map_or(0, |linked| {
+            std::mem::size_of::<LinkedTrack>()
+                + linked.id.as_ref().map_or(0, String::len)
+                + linked.uri.len()
+        })
+        + track.external_urls.spotify.as_ref().map_or(0, String::len)
         + track
             .artists
             .iter()
@@ -1809,6 +1834,30 @@ mod finite_scroll_tests {
 #[cfg(test)]
 mod source_guard_tests {
     use super::*;
+
+    #[test]
+    fn retained_row_budget_includes_publisher_metadata_and_share_links() {
+        let baseline = track_retained_bytes(&Track::default());
+        let mut track: Track = serde_json::from_value(serde_json::json!({
+            "publisher_metadata": {
+                "isrc":"USAAA2600001", "artist":"Artist", "album_title":"Album",
+                "release_title":"Release", "writer_composer":"Writer", "publisher":"Publisher",
+                "p_line":"2026 Label", "upc_or_ean":"0123456789012"
+            },
+            "linked_from":{"id":"original", "uri":"spotify:track:original"},
+            "release_date":"2026-10-30", "label_name":"Label",
+            "external_ids":{"isrc":"USAAA2600001"},
+            "external_urls":{"spotify":"https://soundcloud.com/artist/private/s-fixture"}
+        }))
+        .unwrap();
+        let metadata_bytes = track_retained_bytes(&track);
+        assert!(metadata_bytes > baseline + std::mem::size_of::<PublisherMetadata>());
+        track.publisher_metadata.as_mut().unwrap().publisher = Some("x".repeat(4096));
+        assert!(track_retained_bytes(&track) >= metadata_bytes + 4096 - "Publisher".len());
+        let json = serde_json::to_value(&track).unwrap();
+        assert_eq!(json["publisher_metadata"]["isrc"], "USAAA2600001");
+        assert_eq!(json["linked_from"]["uri"], "spotify:track:original");
+    }
 
     #[test]
     fn soundcloud_pages_preserve_scheme_and_history_keys() {

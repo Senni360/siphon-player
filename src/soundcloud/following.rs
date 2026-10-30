@@ -13,8 +13,8 @@ pub enum Kind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Content {
-    Track(Track),
-    Playlist(Playlist),
+    Track(Box<Track>),
+    Playlist(Box<Playlist>),
 }
 
 impl Content {
@@ -100,15 +100,21 @@ pub(crate) struct WireItem {
 impl WireItem {
     pub fn into_item(self) -> Option<Item> {
         let (kind, content) = match self.kind.as_str() {
-            "track" => (Kind::Posted, Content::Track(self.track?.to_track(None))),
-            "track-repost" => (Kind::Reposted, Content::Track(self.track?.to_track(None))),
+            "track" => (
+                Kind::Posted,
+                Content::Track(self.track?.to_track(None).into()),
+            ),
+            "track-repost" => (
+                Kind::Reposted,
+                Content::Track(self.track?.to_track(None).into()),
+            ),
             "playlist" => (
                 Kind::Posted,
-                Content::Playlist(self.playlist?.to_playlist()),
+                Content::Playlist(self.playlist?.to_playlist().into()),
             ),
             "playlist-repost" => (
                 Kind::Reposted,
-                Content::Playlist(self.playlist?.to_playlist()),
+                Content::Playlist(self.playlist?.to_playlist().into()),
             ),
             _ => return None,
         };
