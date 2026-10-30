@@ -2,9 +2,9 @@
 
 This is an isolated, unreleased part of Siphon's
 [local-sharing plan](../../docs/_reference/local-sharing.md). It implements a
-durable queue authority, an in-memory client recovery model and the queue-window
+durable queue/timeline authority, an in-memory client recovery model and the queue-window
 check used by the isolated upload ledger. It has **no server, WebSocket endpoint, participant authentication,
-playback timeline, UI, provider integration or deployment configuration**.
+UI, audio playback, provider integration or deployment configuration**.
 No new service, secret, account, setting or spending change is needed.
 
 Run with Node 24 or later, without installing dependencies:
@@ -43,6 +43,8 @@ The callbacks are synchronous and must not perform blocking network work.
 Membership requires literal `true`; a promise, exception or missing grant fails
 closed. A real session authenticator must supply the actor argument. Actor IDs
 never come from command JSON.
+The optional trusted `canStart` callback defaults to refusing playback starts.
+The [timeline contract](TIMELINE.md) defines its readiness gate and limitations.
 
 Commands have exactly this shape:
 
@@ -70,8 +72,8 @@ An actor starts at one and retains the same ID and payload when retrying.
 | `remove` with `occurrence_id` | Members remove their own pending rows; the owner can remove any pending row. Current rows require owner advancement. |
 | `advance` | Only the owner selects the next pending occurrence, or clears the current occurrence when the queue is empty. |
 
-An uploading or unavailable occurrence can become current, but this does not
-start audio. The future timeline must hold it until ready or explicitly skipped.
+An uploading or unavailable occurrence can become current, but its timeline stays
+paused until ready and explicitly started or skipped by the owner.
 There is no automatic completion/advance, shuffle, repeat, context queue or
 owner election. The existing desktop queue is untouched.
 
@@ -208,8 +210,9 @@ Retention cleanup, session revocation, quotas across rooms, request byte limits
 and rate limits must be implemented before deployment.
 
 This core has run in the local Durable Object emulator, but not a deployed
-service. Production runtime wiring, authentication, WebSocket recovery, native client overlays, authoritative timeline,
-clock-offset estimation, buffering, owner departure/handover and playback
+service. Production runtime wiring, authentication, WebSocket recovery, native
+client overlays, readiness coordination, clock-offset estimation, buffering,
+owner departure/handover and playback
 integration remain unimplemented. No two-computer party or Chromecast test has
 run, and no synchronization behavior has been measured. The hosted/hardware
 milestone-1 gate remains open. This module does not enable milestone 3 in the app.
@@ -233,3 +236,8 @@ revision changes, uncertain receipt eviction and competing device commands,
 explicit rejection retry, identity/media conflicts, exhausted actor capacity, bounded private-data-free
 messages and unchanged retry packets. These are protocol model tests, not a
 two-computer connection, native UI, playback or process-restart test.
+
+The durable timeline adds twenty-three deterministic tests, for 61 room tests in
+total. Seven local Durable Object cases cover the original queue checks plus
+gated starts, persisted timeline reconstruction and media-loss pause. See
+[TIMELINE.md](TIMELINE.md) for the command schema, validation and remaining gates.

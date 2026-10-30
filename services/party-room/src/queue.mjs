@@ -1,5 +1,6 @@
 // Isolated room authority. No HTTP/WebSocket handler, playback or credentials.
 // Membership and media metadata must come from synchronous trusted adapters.
+import { TIMELINE_LIMITS, selectedTimeline, pausedTimeline, projectTimeline, validateTimeline } from "./timeline.mjs";
 export const ROOM_LIMITS = Object.freeze({ pending: 32, occurrences: 256, actors: 8, receipts: 64,
   lifetimeMs: 24 * 60 * 60 * 1000 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -24,6 +25,11 @@ function action(input) {
     fields(input, ["type", "occurrence_id"]);
     requireThat(uuid(input.occurrence_id), "invalid_action");
   } else if (input.type === "advance") fields(input, ["type"]);
+  else if (["play", "pause", "seek"].includes(input.type)) {
+    fields(input, input.type === "seek" ? ["type", "occurrence_id", "position_ms"] : ["type", "occurrence_id"]);
+    requireThat(uuid(input.occurrence_id), "invalid_action");
+    if (input.type === "seek") requireThat(integer(input.position_ms) && input.position_ms <= 3_600_000, "invalid_action");
+  }
   else throw new RoomError("invalid_action");
 }
 // The headless client validates the same narrow command schema before queuing.
@@ -35,17 +41,20 @@ function media(value) {
 }
 function fingerprint(command) {
   const a = command.action;
+  if (["play", "pause", "seek"].includes(a.type)) return JSON.stringify([
+    command.expected_revision, a.type, a.occurrence_id, a.position_ms ?? null]);
+  // Keep the published queue-command representation stable across upgrades.
   return JSON.stringify([command.expected_revision, a.type, a.occurrence_id ?? null,
     a.recording_id ?? null, a.explicit_selection ?? null]);
 }
 
 export class RoomQueue {
-  constructor(storage, { roomId, ownerId, epoch, authorize, resolveRecording, now = Date.now } = {}) {
+  constructor(storage, { roomId, ownerId, epoch, authorize, resolveRecording, canStart = () => false, now = Date.now } = {}) {
     requireThat([roomId, ownerId, epoch].every(uuid) && typeof authorize === "function"
-      && typeof resolveRecording === "function" && typeof now === "function", "authority_required");
+      && typeof resolveRecording === "function" && typeof canStart === "function" && typeof now === "function", "authority_required");
     this.storage = storage; this.sql = storage.sql;
     this.roomId = roomId; this.ownerId = ownerId; this.epoch = epoch;
-    this.authorize = authorize; this.resolveRecording = resolveRecording; this.now = now;
+    this.authorize = authorize; this.resolveRecording = resolveRecording; this.canStart = canStart; this.now = now;
     const created = now(); requireThat(integer(created) && integer(created + ROOM_LIMITS.lifetimeMs), "invalid_clock");
     storage.transactionSync(() => {
       this.sql.exec(`CREATE TABLE IF NOT EXISTS room_queue (
@@ -64,15 +73,26 @@ export class RoomQueue {
         VALUES(1,?,?,?,?,?)`, roomId, ownerId, epoch, created, created + ROOM_LIMITS.lifetimeMs);
       const row = this.room();
       requireThat(row.room_id === roomId && row.owner_id === ownerId && row.epoch === epoch, "room_identity_conflict");
+      this.sql.exec(`CREATE TABLE IF NOT EXISTS room_timeline (
+        singleton INTEGER PRIMARY KEY CHECK(singleton=1), anchor TEXT NOT NULL, observed_at INTEGER NOT NULL)`);
+      // Existing queue stores acquire a paused anchor, never an automatic start.
+      this.sql.exec("INSERT OR IGNORE INTO room_timeline(singleton,anchor,observed_at) VALUES(1,?,?)",
+        JSON.stringify(selectedTimeline(this.entry(row.current_id), created)), created);
     });
   }
   rows(query, ...parameters) { return this.sql.exec(query, ...parameters).toArray(); }
   room() { return this.rows("SELECT * FROM room_queue WHERE singleton=1")[0]; }
-  active() {
-    const row = this.room(), now = this.now();
-    requireThat(integer(now) && now >= row.created_at, "invalid_clock");
+  active(now = this.now()) {
+    const row = this.room();
+    requireThat(integer(now) && now >= row.created_at && now >= this.clockFloor(), "invalid_clock");
     requireThat(now < row.expires_at, "room_expired");
-    return row;
+    return { ...row, observed_at: now };
+  }
+  clockFloor() { return this.rows("SELECT observed_at FROM room_timeline WHERE singleton=1")[0].observed_at; }
+  timeline() { return JSON.parse(this.rows("SELECT anchor FROM room_timeline WHERE singleton=1")[0].anchor); }
+  storeTimeline(value, current) {
+    validateTimeline(value, current);
+    this.sql.exec("UPDATE room_timeline SET anchor=? WHERE singleton=1", JSON.stringify(value));
   }
   member(actor, operation) {
     try { return uuid(actor) && this.authorize(actor, this.roomId, operation) === true; }
@@ -80,7 +100,13 @@ export class RoomQueue {
   }
   async commit(operation) {
     try {
-      const result = this.storage.transactionSync(operation);
+      const now = this.now();
+      requireThat(integer(now) && now >= this.clockFloor(), "invalid_clock");
+      const result = this.storage.transactionSync(() => {
+        const value = operation(now);
+        this.sql.exec("UPDATE room_timeline SET observed_at=? WHERE singleton=1", now);
+        return value;
+      });
       await this.storage.sync();
       return result;
     } catch (error) {
@@ -99,12 +125,12 @@ export class RoomQueue {
     return { ...row, source: "shared_local" };
   }
   async snapshot(actor) {
-    return this.commit(() => {
+    return this.commit(now => {
       requireThat(this.member(actor, "read"), "unavailable");
-      const row = this.active();
+      const row = this.active(now);
       return { room_id: row.room_id, owner_id: row.owner_id, epoch: row.epoch, revision: row.revision,
         expires_at: row.expires_at, current: this.entry(row.current_id),
-        pending: JSON.parse(row.pending).map(id => this.entry(id)), self: this.cursor(actor) };
+        pending: JSON.parse(row.pending).map(id => this.entry(id)), self: this.cursor(actor), timeline: this.timeline() };
     });
   }
   // command_id is a monotonically increasing integer scoped to (epoch, actor).
@@ -115,9 +141,9 @@ export class RoomQueue {
     requireThat(uuid(command.epoch) && integer(command.command_id, 1)
       && integer(command.expected_revision), "invalid_command");
     action(command.action);
-    return this.commit(() => {
+    return this.commit(now => {
       requireThat(this.member(actor, "command"), "unavailable");
-      const room = this.active();
+      const room = this.active(now);
       requireThat(command.epoch === room.epoch, "stale_epoch");
       const request = fingerprint(command);
       const prior = this.rows("SELECT * FROM room_receipts WHERE actor=? AND command_id=?", actor, command.command_id)[0];
@@ -145,6 +171,11 @@ export class RoomQueue {
     });
   }
   apply(actor, room, operation) {
+    if (["play", "pause", "seek"].includes(operation.type)) {
+      this.applyTransport(actor, room, operation);
+      this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
+      return;
+    }
     const pending = JSON.parse(room.pending);
     let current = room.current_id;
     if (operation.type === "add") {
@@ -160,7 +191,7 @@ export class RoomQueue {
       const prior = this.rows("SELECT * FROM room_media WHERE id=?", operation.recording_id)[0];
       this.checkMedia(prior, resolved);
       // All rejection checks precede writes so a recorded rejection is atomic.
-      this.writeMedia(operation.recording_id, prior, resolved);
+      this.writeMedia(operation.recording_id, prior, resolved, room.observed_at);
       this.sql.exec("INSERT INTO room_occurrences(id,recording_id,added_by) VALUES(?,?,?)", operation.occurrence_id, operation.recording_id, actor);
       pending.push(operation.occurrence_id);
     } else if (operation.type === "remove") {
@@ -172,29 +203,65 @@ export class RoomQueue {
       requireThat(actor === room.owner_id, "forbidden");
       requireThat(current !== null || pending.length > 0, "queue_empty");
       current = pending.shift() ?? null;
+      this.storeTimeline(selectedTimeline(this.entry(current), room.observed_at), this.entry(current));
     }
     this.sql.exec("UPDATE room_queue SET current_id=?,pending=?,revision=revision+1 WHERE singleton=1", current, JSON.stringify(pending));
+  }
+  applyTransport(actor, room, operation) {
+    requireThat(actor === room.owner_id, "forbidden");
+    const current = this.entry(room.current_id), anchor = this.timeline(), now = room.observed_at;
+    requireThat(current && current.id === operation.occurrence_id, "wrong_occurrence");
+    if (operation.type === "play") {
+      requireThat(current.state === "ready", "recording_not_ready");
+      const position = projectTimeline(anchor, current, now).position_ms;
+      requireThat(position < current.duration_ms, "seek_required");
+      requireThat(now + TIMELINE_LIMITS.startLeadMs < room.expires_at, "room_expiring");
+      let ready = false;
+      try { ready = this.canStart(Object.freeze({ epoch: room.epoch, revision: room.revision,
+        occurrence_id: current.id, media_revision: current.media_revision, position_ms: position,
+        server_time: now })) === true; } catch { /* Fail closed without exposing adapter data. */ }
+      requireThat(ready, "readiness_required");
+      requireThat(integer(now + TIMELINE_LIMITS.startLeadMs), "invalid_clock");
+      // A repeated Play intent cannot delay an already scheduled/running start.
+      if (!anchor.playing) this.storeTimeline({ occurrence_id: current.id, position_ms: position,
+        anchor_at: now + TIMELINE_LIMITS.startLeadMs, playing: true, reason: "playing" }, current);
+    } else if (operation.type === "pause") {
+      this.storeTimeline(pausedTimeline(anchor, current, now,
+        current.state === "ready" ? "owner_paused" : current.state), current);
+    } else {
+      requireThat(operation.position_ms <= current.duration_ms, "invalid_position");
+      // A seek cancels the old start. Explicit Play must pass readiness again.
+      this.storeTimeline({ occurrence_id: current.id, position_ms: operation.position_ms,
+        anchor_at: now, playing: false, reason: current.state === "ready" ? "seeked" : current.state }, current);
+    }
   }
   checkMedia(prior, next) {
     if (!prior) return;
     requireThat(prior.owner_id === next.owner_id && prior.duration_ms === next.duration_ms, "media_identity_conflict");
     if (prior.revision === next.revision) requireThat(prior.state === next.state, "media_revision_conflict");
   }
-  writeMedia(id, prior, next) {
-    if (!prior || next.revision > prior.revision) this.sql.exec(`INSERT INTO room_media(id,owner_id,revision,state,duration_ms)
+  writeMedia(id, prior, next, now) {
+    if (prior && next.revision <= prior.revision) return;
+    const current = this.entry(this.room().current_id);
+    if (current?.recording_id === id) {
+      const anchor = this.timeline(), updated = { ...current, state: next.state, media_revision: next.revision };
+      if (next.state !== "ready") this.storeTimeline(pausedTimeline(anchor, current, now, next.state), updated);
+      else if (current.state !== "ready") this.storeTimeline({ ...anchor, anchor_at: now, reason: "selected" }, updated);
+    }
+    this.sql.exec(`INSERT INTO room_media(id,owner_id,revision,state,duration_ms)
       VALUES(?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET revision=excluded.revision,state=excluded.state`,
     id, next.owner_id, next.revision, next.state, next.duration_ms);
   }
   // Trusted storage/verification event only. Never expose as participant input.
   async publishMedia(id, next) {
     requireThat(uuid(id), "invalid_media"); media(next);
-    return this.commit(() => {
-      this.active();
+    return this.commit(now => {
+      const room = this.active(now);
       const prior = this.rows("SELECT * FROM room_media WHERE id=?", id)[0];
       requireThat(prior, "recording_unavailable");
       this.checkMedia(prior, next);
       if (next.revision <= prior.revision) return { changed: false, revision: this.room().revision };
-      this.writeMedia(id, prior, next);
+      this.writeMedia(id, prior, next, room.observed_at);
       this.sql.exec("UPDATE room_queue SET revision=revision+1 WHERE singleton=1");
       return { changed: true, revision: this.room().revision };
     });

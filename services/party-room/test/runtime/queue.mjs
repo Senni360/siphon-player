@@ -8,7 +8,7 @@ const options = {
   host: "127.0.0.1", cf: false, telemetry: { enabled: false },
   workers: [{
     name: "room-queue-test",
-    modules: ["queue.worker.mjs", "../../src/queue.mjs", "../../../media-gateway/src/uploads.mjs"]
+    modules: ["queue.worker.mjs", "../../src/queue.mjs", "../../src/timeline.mjs", "../../../media-gateway/src/uploads.mjs"]
       .map(path => ({ type: "ESModule", path: fileURLToPath(new URL(path, import.meta.url)) })),
     modulesRoot: fileURLToPath(new URL("../../../", import.meta.url)),
     compatibilityDate: "2026-10-30",
@@ -21,8 +21,8 @@ try {
   const response = await runtime.dispatchFetch("http://localhost/run");
   assert.equal(response.status, 200, await response.clone().text());
   const result = await response.json();
-  assert.equal(result.cases, 4); assert.equal(result.revision, 8); assert.equal(result.pending, 1);
-  console.log("Four local Durable Object queue cases passed: duplicate commands, ownership/stale state, upload eligibility/cancellation and media revisions.");
+  assert.equal(result.cases, 7); assert.equal(result.revision, 12); assert.equal(result.pending, 1);
+  console.log("Seven local Durable Object cases passed: duplicate commands, ownership/stale state, upload eligibility/cancellation, media revisions, gated starts, timeline reconstruction and media-loss pause.");
 } finally {
   await runtime.dispose();
 }

@@ -72,7 +72,11 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   and a current-plus-two admission callback for the upload ledger. Its
   [protocol and limits](https://github.com/Senni360/siphon-player/tree/main/services/party-room)
   have SQLite and local Durable Object tests. It has no authentication endpoint,
-  room transport, native client overlay or playback timeline, and is not app support.
+  room transport or native client overlay, and is not app support. It now stores
+  owner-controlled timeline anchors atomically with queue revisions and receipts;
+  starts require a trusted readiness gate that defaults to refusal. Its
+  [timeline contract](https://github.com/Senni360/siphon-player/blob/main/services/party-room/TIMELINE.md)
+  distinguishes these tested anchors from unimplemented playback coordination.
   Its headless client model retains pending intent across stale snapshots and
   lost acknowledgements, with bounded retries and explicit uncertain outcomes.
   This model is in memory only and is not a native connection or crash journal.
@@ -392,11 +396,12 @@ M1's approved hosted/hardware matrix remains an acceptance gate. The next bounde
 code milestone is durable reconciliation of unknown multipart creation and
 completion, including an explicit recovery path for a lost provider handle.
 The tested cleanup executor intentionally withholds those unresolved tasks.
-The independent room-queue core and headless client snapshot/receipt recovery are
-now tested. The next bounded room milestone is a deterministic authoritative
-timeline with stale-command and buffering tests. Durable native pending-intent
-journaling and authenticated transport remain separate gates; none of these
-components enables a remote party by itself.
+The independent room queue, headless snapshot/receipt recovery and durable
+timeline anchors are now tested. The next bounded room milestone is readiness
+coordination with stale-load fencing and a deterministic timeout, or bounded
+clock-offset estimation. Owner-departure pause, native pending-intent journaling,
+optimistic transport and authenticated transport remain separate gates; none of
+these components enables a remote party by itself.
 Upload admission and native preparation remain separate components; neither
 enables a public upload endpoint. The M1 gateway needs only an operator
 `ADMIN_SECRET` and service bindings. It stores capability
@@ -507,11 +512,25 @@ adds, removals and advances across reordered snapshots/receipts and connection
 generations. Receipt eviction and conflicting command IDs require explicit
 resolution, never automatic replay under a new ID. Tests also cover stale
 media/identity, bounded messages, immutable retry packets and owner permissions.
-The projection is display intent only, not permission to play or upload. No
-socket, native UI, durable client journal, process-crash recovery or timeline is
-implemented. This checkpoint adds no infrastructure, secrets, storage retention
+The projection is display intent only, not permission to play or upload. That
+client-only checkpoint had no socket, native UI, durable client journal,
+process-crash recovery or timeline. It added no infrastructure, secrets, storage retention
 changes or provider capability. Synchronization remains unmeasured.
 The four local Durable Object queue cases, all 60 media-service tests, required
 default/all-feature Windows Rust checks, formatting and policy checks passed
 again for this checkpoint. Launcher checks still reported three failures and
 five errors; local Jekyll remained unavailable because Bundler is not installed.
+
+The durable timeline adds 23 deterministic SQLite tests, bringing the room suite
+to 61, plus seven local Durable Object cases. Owner-only play/pause/seek shares
+the queue's revisions and command receipts, and lost acknowledgements do not
+restart elapsed time. The default start gate refuses playback; fake readiness is
+used only in tests. Shared-media loss pauses atomically, readiness recovery does
+not auto-resume, and seeks pause pending explicit readiness-approved Play. No
+native behavior changed. The headless client exposes a validated confirmed
+anchor but has no optimistic transport controls. There is still no real clock
+offset, drift, device latency or synchronization measurement.
+All 60 media-service tests and required Windows Rust checks, formatting and
+policy checks passed again. Launcher checks still reported three failures and
+five errors; Jekyll remained blocked by missing Bundler. No Linux or macOS
+coverage is claimed for the timeline checkpoint.

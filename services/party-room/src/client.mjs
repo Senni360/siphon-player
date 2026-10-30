@@ -1,5 +1,6 @@
 // In-memory protocol model only. No sockets, disk writes, UI or playback.
 import { ROOM_LIMITS, validateRoomAction } from "./queue.mjs";
+import { validateTimeline } from "./timeline.mjs";
 
 export const CLIENT_LIMITS = Object.freeze({ intents: 16 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -27,7 +28,7 @@ function entry(value) {
     state: value.state, duration_ms: value.duration_ms, media_revision: value.media_revision, source: value.source };
 }
 function snapshot(value) {
-  fields(value, ["room_id", "owner_id", "epoch", "revision", "expires_at", "current", "pending", "self"]);
+  fields(value, ["room_id", "owner_id", "epoch", "revision", "expires_at", "current", "pending", "self", "timeline"]);
   fields(value.self, ["next_command_id", "receipt_floor"]);
   requireThat([value.room_id, value.owner_id, value.epoch].every(uuid) && integer(value.revision)
     && integer(value.expires_at, 1) && integer(value.self.next_command_id, 1)
@@ -36,9 +37,11 @@ function snapshot(value) {
   const current = value.current === null ? null : entry(value.current), pending = value.pending.map(entry);
   const ids = [current, ...pending].filter(Boolean).map(row => row.id);
   requireThat(new Set(ids).size === ids.length, "invalid_message");
+  try { validateTimeline(value.timeline, current); } catch { throw new ClientError("invalid_message"); }
   return { room_id: value.room_id, owner_id: value.owner_id, epoch: value.epoch,
     revision: value.revision, expires_at: value.expires_at, current, pending,
-    self: { next_command_id: value.self.next_command_id, receipt_floor: value.self.receipt_floor } };
+    self: { next_command_id: value.self.next_command_id, receipt_floor: value.self.receipt_floor },
+    timeline: structuredClone(value.timeline) };
 }
 function receipt(value) {
   fields(value, ["epoch", "command_id", "revision", "accepted", "error"]);
@@ -49,7 +52,9 @@ function receipt(value) {
     accepted: value.accepted, error: value.error };
 }
 function queueIdentity(value) {
-  return JSON.stringify([value.owner_id, value.expires_at, value.current, value.pending]);
+  const t = value.timeline;
+  return JSON.stringify([value.owner_id, value.expires_at, value.current, value.pending,
+    t.occurrence_id, t.position_ms, t.anchor_at, t.playing, t.reason]);
 }
 function rows(value) { return value ? [value.current, ...value.pending].filter(Boolean) : []; }
 function sameRecording(left, right) {
@@ -167,6 +172,7 @@ export class RoomClient {
     requireThat(this.#base && !this.#blocked, "needs_snapshot");
     requireThat(this.#intents.length < CLIENT_LIMITS.intents, "pending_limit");
     try { validateRoomAction(operation); } catch { throw new ClientError("invalid_action"); }
+    requireThat(["add", "remove", "advance"].includes(operation.type), "invalid_action");
     const shown = this.#project();
     let row = null, target = null, from = null;
     if (operation.type === "add") {
@@ -255,6 +261,7 @@ export class RoomClient {
   view() {
     return structuredClone({ mode: this.#blocked ? "blocked" : this.#connected ? "ready" : this.#awaiting ? "syncing" : "offline",
       blocked: this.#blocked, epoch: this.#base?.epoch ?? null, revision: this.#base?.revision ?? null,
+      confirmed_timeline: this.#base?.timeline ?? null,
       ...this.#project(), intents: this.#intents.map(item => ({ intent_id: item.id, action: item.action,
         state: item.state, error: item.error })) });
   }

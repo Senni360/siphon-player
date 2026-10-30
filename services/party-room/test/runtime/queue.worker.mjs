@@ -1,5 +1,6 @@
 // Local test fixture only. Fixed fake identities are not authentication.
 import { RoomQueue } from "../../src/queue.mjs";
+import { projectTimeline, TIMELINE_LIMITS } from "../../src/timeline.mjs";
 import { UploadLedger } from "../../../media-gateway/src/uploads.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -11,7 +12,8 @@ function check(value, reason) { if (!value) throw new Error(`Room runtime assert
 export class QueueProbe {
   constructor(state) { this.storage = state.storage; }
   async fetch() {
-    const options = { roomId, ownerId: owner, epoch, now: () => 1_800_000_000_000,
+    let now = 1_800_000_000_000, ready = false;
+    const options = { roomId, ownerId: owner, epoch, now: () => now, canStart: () => ready,
       authorize: actor => [owner, member].includes(actor),
       resolveRecording: actor => actor === owner
         ? { owner_id: owner, revision: 1, state: "uploading", duration_ms: 12000 } : null };
@@ -44,10 +46,32 @@ export class QueueProbe {
 
     await queue.publishMedia(recording, { owner_id: owner, revision: 3, state: "ready", duration_ms: 12000 });
     await queue.publishMedia(recording, { owner_id: owner, revision: 2, state: "unavailable", duration_ms: 12000 });
-    const final = await queue.snapshot(member);
+    let final = await queue.snapshot(member);
     check(final.current.id === occurrence(2) && final.current.state === "ready", "stale media event ignored");
     check(final.pending.length === 1 && final.pending[0].id === occurrence(3), "only intended occurrence removed");
-    return Response.json({ cases: 4, revision: final.revision, current: final.current.id, pending: final.pending.length });
+    check((await send(owner, { type: "play", occurrence_id: occurrence(2) })).error === "readiness_required", "start gate fails closed");
+    ready = true;
+    const startView = await queue.snapshot(owner);
+    const play = { epoch, command_id: startView.self.next_command_id, expected_revision: startView.revision,
+      action: { type: "play", occurrence_id: occurrence(2) } };
+    const started = await queue.command(owner, play);
+    check(started.accepted, "ready start accepted");
+    now += TIMELINE_LIMITS.startLeadMs + 1500;
+    queue = new RoomQueue(this.storage, options);
+    check(JSON.stringify(await queue.command(owner, play)) === JSON.stringify(started), "play receipt survives reconstruction");
+    final = await queue.snapshot(owner);
+    check(projectTimeline(final.timeline, final.current, now).position_ms === 1500, "original start time survives reconstruction");
+    await send(owner, { type: "pause", occurrence_id: occurrence(2) });
+    now += 5000;
+    final = await queue.snapshot(owner);
+    check(projectTimeline(final.timeline, final.current, now).position_ms === 1500, "pause freezes position");
+    await queue.publishMedia(recording, { owner_id: owner, revision: 4, state: "unavailable", duration_ms: 12000 });
+    final = await queue.snapshot(owner);
+    check(!final.timeline.playing && final.timeline.reason === "unavailable", "media loss pauses anchor");
+    await queue.publishMedia(recording, { owner_id: owner, revision: 5, state: "ready", duration_ms: 12000 });
+    final = await queue.snapshot(owner);
+    check(!final.timeline.playing && final.timeline.position_ms === 1500, "ready never resumes on its own");
+    return Response.json({ cases: 7, revision: final.revision, current: final.current.id, pending: final.pending.length });
   }
 }
 
