@@ -118,7 +118,20 @@ fn message(ui: &mut Ui, app: &App, text: &str, button: Option<String>) -> bool {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
-                theme::text(ui, text, theme::regular(13.5), palette.secondary);
+                // The line wraps beside its button instead of running under
+                // it when the page is narrow.
+                let reserve = if button.is_some() { 110.0 } else { 0.0 };
+                let width = (ui.available_width() - reserve).max(80.0);
+                ui.allocate_ui(vec2(width, 0.0), |ui| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(text)
+                                .font(theme::regular(13.5))
+                                .color(palette.secondary),
+                        )
+                        .wrap(),
+                    );
+                });
                 if let Some(label) = button {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         clicked = ui.button(label).clicked();
