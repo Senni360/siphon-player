@@ -65,6 +65,12 @@ struct Manifest {
     duration_seconds: u64,
 }
 
+#[derive(Clone, Debug)]
+struct RecordingVersion {
+    size: u64,
+    etag: String,
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
     if !args.approved_test_media {
@@ -93,27 +99,29 @@ fn main() -> Result<()> {
         .build()
         .map_err(redact)?;
     if args.expect_denied {
-        let response = request(&client, &manifest.url, 0, 0)?;
+        let response = request(&client, &manifest.url, 0, 0, None)?;
         if !matches!(response.status().as_u16(), 401 | 403 | 404 | 410) {
             bail!("temporary access is still usable or returned an unexpected status");
         }
         println!("Temporary access denied on a new range request.");
         return Ok(());
     }
-    let (first, total) = range(&client, &manifest.url, 0, None)?;
-    let (_, end_total) = range(
+    let (first, version) = range(&client, &manifest.url, 0, None)?;
+    range(
         &client,
         &manifest.url,
-        total.saturating_sub(RANGE_BYTES),
-        Some(total),
+        version.size.saturating_sub(RANGE_BYTES),
+        Some(&version),
     )?;
-    assert_eq!(total, end_total);
-    println!("HTTPS MP3 range checks passed: {total} bytes, first and final ranges.");
+    println!(
+        "HTTPS MP3 range checks passed: {} bytes, first and final ranges.",
+        version.size
+    );
     if args.desktop {
         let mut bytes = first;
-        while (bytes.len() as u64) < total {
+        while (bytes.len() as u64) < version.size {
             validate_manifest(&manifest, now()?, false)?;
-            bytes.extend(range(&client, &manifest.url, bytes.len() as u64, Some(total))?.0);
+            bytes.extend(range(&client, &manifest.url, bytes.len() as u64, Some(&version))?.0);
         }
         play_desktop(bytes, args.seek_seconds, args.seconds)?;
     } else if let Some(address) = args.cast {
@@ -185,20 +193,35 @@ fn request(
     url: &str,
     start: u64,
     end: u64,
+    etag: Option<&str>,
 ) -> Result<reqwest::blocking::Response> {
-    client
+    let mut request = client
         .get(url)
         .header(header::RANGE, format!("bytes={start}-{end}"))
-        .header(header::ACCEPT_ENCODING, "identity")
-        .send()
-        .map_err(redact)
+        .header(header::ACCEPT_ENCODING, "identity");
+    if let Some(etag) = etag {
+        request = request.header(header::IF_MATCH, etag);
+    }
+    request.send().map_err(redact)
 }
 
-fn range(client: &Client, url: &str, start: u64, total: Option<u64>) -> Result<(Vec<u8>, u64)> {
+fn range(
+    client: &Client,
+    url: &str,
+    start: u64,
+    version: Option<&RecordingVersion>,
+) -> Result<(Vec<u8>, RecordingVersion)> {
+    let total = version.map(|version| version.size);
     let end = total.map_or(start + RANGE_BYTES - 1, |total| {
         (start + RANGE_BYTES).min(total) - 1
     });
-    let response = request(client, url, start, end)?;
+    let response = request(
+        client,
+        url,
+        start,
+        end,
+        version.map(|version| version.etag.as_str()),
+    )?;
     if response.status().as_u16() != 206 {
         bail!("media server must return 206 for ranges (access may have expired)");
     }
@@ -212,6 +235,10 @@ fn range(client: &Client, url: &str, start: u64, total: Option<u64>) -> Result<(
     }
     if response.headers().contains_key(header::CONTENT_ENCODING) {
         bail!("compressed HTTP responses are not seekable by this probe");
+    }
+    let etag = strong_etag(response.headers())?;
+    if version.is_some_and(|version| version.etag != etag) {
+        bail!("recording changed between range reads; obtain fresh playback access");
     }
     let header = response
         .headers()
@@ -228,7 +255,29 @@ fn range(client: &Client, url: &str, start: u64, total: Option<u64>) -> Result<(
     if bytes.len() as u64 != expected {
         bail!("range body length mismatch");
     }
-    Ok((bytes, size))
+    Ok((bytes, RecordingVersion { size, etag }))
+}
+
+fn strong_etag(headers: &header::HeaderMap) -> Result<String> {
+    let mut values = headers.get_all(header::ETAG).iter();
+    let etag = values
+        .next()
+        .and_then(|value| value.to_str().ok())
+        .context("media requires a strong ETag for consistent range reads")?;
+    let opaque = etag
+        .strip_prefix('"')
+        .and_then(|value| value.strip_suffix('"'));
+    if values.next().is_some()
+        || etag.len() > 1024
+        || opaque.is_none_or(|value| {
+            !value
+                .bytes()
+                .all(|byte| byte == 0x21 || (0x23..=0x7e).contains(&byte))
+        })
+    {
+        bail!("media requires one valid strong ETag");
+    }
+    Ok(etag.to_owned())
 }
 
 fn validate_range(header: &str, start: u64, end: u64, total: Option<u64>) -> Result<u64> {
@@ -480,12 +529,13 @@ mod tests {
     #[test]
     fn real_range_reader_checks_headers_body_and_sends_no_provider_grant() {
         let (url, server) = serve(
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nETag: \"original\"\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
         );
         let client = Client::builder().no_proxy().build().unwrap();
-        let (body, size) = range(&client, &url, 0, None).unwrap();
+        let (body, version) = range(&client, &url, 0, None).unwrap();
         assert_eq!(body, b"test");
-        assert_eq!(size, 4);
+        assert_eq!(version.size, 4);
+        assert_eq!(version.etag, "\"original\"");
         let sent = server.join().unwrap().to_ascii_lowercase();
         assert!(sent.contains("range: bytes=0-32767"));
         assert!(sent.contains("accept-encoding: identity"));
@@ -494,15 +544,63 @@ mod tests {
         for response in [
             "HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
             "HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 3\r\nConnection: close\r\n\r\nbad",
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 5\r\nConnection: close\r\n\r\nextra",
-            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nContent-Range: bytes 0-3/4\r\nContent-Encoding: br\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nETag: \"original\"\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 3\r\nConnection: close\r\n\r\nbad",
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nETag: \"original\"\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 5\r\nConnection: close\r\n\r\nextra",
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nETag: \"original\"\r\nContent-Range: bytes 0-3/4\r\nContent-Encoding: br\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest",
         ] {
             let (url, server) = serve(response);
             let error = range(&client, &url, 0, None).unwrap_err();
             assert!(!format!("{error:?}").contains("private"));
             server.join().unwrap();
         }
+    }
+
+    #[test]
+    fn subsequent_ranges_pin_the_original_etag_even_when_size_is_unchanged() {
+        let client = Client::builder().no_proxy().build().unwrap();
+        let original = RecordingVersion {
+            size: 4,
+            etag: "\"original\"".into(),
+        };
+        let (url, server) = serve(
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nETag: \"original\"\r\nContent-Range: bytes 2-3/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nst",
+        );
+        assert_eq!(range(&client, &url, 2, Some(&original)).unwrap().0, b"st");
+        let sent = server.join().unwrap().to_ascii_lowercase();
+        assert!(sent.contains("range: bytes=2-3"));
+        assert!(sent.contains("if-match: \"original\""));
+        for response in [
+            "HTTP/1.1 412 Precondition Failed\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nETag: \"replacement\"\r\nContent-Range: bytes 2-3/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nXX",
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: audio/mpeg\r\nContent-Range: bytes 2-3/4\r\nContent-Length: 2\r\nConnection: close\r\n\r\nXX",
+        ] {
+            let (url, server) = serve(response);
+            assert!(range(&client, &url, 2, Some(&original)).is_err());
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn weak_malformed_or_ambiguous_etags_cannot_pin_a_recording() {
+        for value in [
+            "W/\"version\"",
+            "version",
+            "\"one\", \"two\"",
+            "\"has space\"",
+            "\"unterminated",
+        ] {
+            let mut headers = header::HeaderMap::new();
+            headers.insert(header::ETAG, value.parse().unwrap());
+            assert!(strong_etag(&headers).is_err());
+        }
+        let mut headers = header::HeaderMap::new();
+        assert!(strong_etag(&headers).is_err());
+        headers.append(header::ETAG, "\"first\"".parse().unwrap());
+        headers.append(header::ETAG, "\"second\"".parse().unwrap());
+        assert!(strong_etag(&headers).is_err());
+        headers.clear();
+        headers.insert(header::ETAG, "\"hash-1,opaque\"".parse().unwrap());
+        assert_eq!(strong_etag(&headers).unwrap(), "\"hash-1,opaque\"");
     }
 
     #[test]
@@ -520,6 +618,7 @@ mod tests {
             &format!("http://{address}/test?grant=private"),
             0,
             1,
+            None,
         )
         .unwrap_err();
         assert!(!format!("{error:?}").contains("private"));

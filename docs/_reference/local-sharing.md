@@ -270,6 +270,10 @@ removed after testing. The probe does not read settings or provider grants,
 upload anything or write audio to disk. It requires at least recording duration
 plus ten minutes access remaining, HTTPS, no redirects, identity encoding,
 `audio/mpeg`, exact range responses and a recording of at most 16 MiB.
+The first read must supply a strong ETag. Later desktop/preflight range reads
+send `If-Match` and reject a changed ETag even when the byte length is unchanged.
+The Cast receiver fetches the URL itself, so the gateway must independently
+enforce the asset's immutable stored object version on every request.
 
 ```sh
 cargo run --locked --no-default-features --example hosted_media_probe -- /private/test.json --approved-test-media
@@ -305,11 +309,11 @@ upload/playback grants. No secrets are required to run regression tests.
 
 ## Validation record (2026-10-30)
 
-Windows code-level checks passed: six new Cast media tests, six probe tests
+Windows code-level checks passed: six new Cast media tests, eight probe tests
 (including the explicitly run ffmpeg synthetic decode/seek/EOF check), sixteen
 existing Cast tests, ninety-three hybrid queue/backend tests and seventeen
 SoundCloud engine tests. The live SoundCloud smoke test stayed ignored. These
-138 passing tests are a focused subset, not the full application test suite.
+140 passing tests are a focused subset, not the full application test suite.
 `cargo clippy --locked --no-default-features --all-targets -- -D warnings`
 also passed. The runnable diagnostic built and its `--help` command completed
 successfully with `--no-default-features`.
@@ -317,9 +321,8 @@ The HTTP fixture uses loopback HTTP to test request/body behavior; it does not
 establish hosted HTTPS or receiver interoperability.
 
 Dependency-source, review-evidence and new-settings policy checks passed.
-Changed Rust files passed formatting and `git diff --check` passed. The full
-`cargo fmt --all --check` reports pre-existing module ordering in `src/app.rs`;
-no unrelated formatting change is included.
+`cargo fmt --all --check` and `git diff --check` passed. The pre-existing module
+ordering issue in `src/app.rs` was corrected in a separate formatting commit.
 
 All six required default/all-feature Cargo Clippy, test, doctest and rustdoc
 commands were attempted. Each stopped in `projectm-sys` because Windows
