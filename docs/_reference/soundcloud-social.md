@@ -116,3 +116,12 @@ public web bundles. Authenticated reads and writes are tested with local
 fixtures, not an owner's session. The following-feed item shape still needs a
 local authenticated check. These private web endpoints can change independently
 of the public SoundCloud API.
+
+## Private set links and sharing
+
+**Share to Friends** sends the selected track's own link. Public tracks inside
+private sets can still share normally. If a track is accessible only through
+the original private set link, its recipient may not be able to play the
+shared track link. Share the original set link explicitly when you intend to
+share access to that set. Siphon does not silently substitute a set link for
+a track share.
