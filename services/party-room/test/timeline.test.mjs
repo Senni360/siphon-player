@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { RoomQueue, RoomError, ROOM_LIMITS } from "../src/queue.mjs";
 import { RoomClient, ClientError } from "../src/client.mjs";
 import { TIMELINE_LIMITS, projectTimeline, validateTimeline, TimelineError } from "../src/timeline.mjs";
+import { prepareSolo } from "./solo-readiness.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const owner = uuid(1), member = uuid(2), roomId = uuid(3), epoch = uuid(4), recording = uuid(5);
@@ -31,6 +32,7 @@ async function fixture(t, { state = "ready", canStart = () => true } = {}) {
   let now = 1_800_000_000_000;
   const members = new Set([owner, member]);
   const options = { roomId, ownerId: owner, epoch, now: () => now, canStart,
+    readinessParticipants: () => [owner],
     authorize: actor => members.has(actor),
     resolveRecording: actor => actor === owner ? { owner_id: owner, revision: 1, state, duration_ms: 12000 } : null };
   const f = { db, storage, options, members, now: () => now, advance: ms => { now += ms; } };
@@ -39,6 +41,7 @@ async function fixture(t, { state = "ready", canStart = () => true } = {}) {
   await f.queue.publishOwnerPresence({ epoch, revision: 1, connected: true });
   f.view = () => f.queue.snapshot(owner);
   f.packet = async (action, actor = owner) => {
+    if (actor === owner) await prepareSolo(f.queue, owner, action, now);
     const view = await f.queue.snapshot(actor);
     return { epoch, command_id: view.self.next_command_id, expected_revision: view.revision, action };
   };
@@ -126,8 +129,8 @@ test("readiness receives exact server-owned occurrence, revision and position, n
   let request;
   const f = await fixture(t, { canStart: value => { request = value; return true; } });
   await f.select(); await f.send(transport("seek", 1, 4321));
-  const before = await f.view(); await f.send(transport("play"));
-  assert.deepEqual(request, { epoch, revision: before.revision, occurrence_id: occurrence(1),
+  const packet = await f.packet(transport("play")); await f.queue.command(owner, packet);
+  assert.deepEqual(request, { epoch, revision: packet.expected_revision, occurrence_id: occurrence(1),
     media_revision: 1, position_ms: 4321, server_time: f.now() });
   assert.equal(Object.isFrozen(request), true);
   await assert.rejects(f.send({ ...transport("play"), ready: true }), error("invalid_fields"));

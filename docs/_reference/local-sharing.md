@@ -86,6 +86,10 @@ scope approval and matching light/dark, narrow/normal evidence outside the repo.
   [Owner-presence recovery](https://github.com/Senni360/siphon-player/blob/main/services/party-room/PRESENCE.md)
   persists a departure deadline and pauses once without auto-resuming after a
   late return. Session detection, alarms and native output handling remain absent.
+  [Startup readiness](https://github.com/Senni360/siphon-player/blob/main/services/party-room/READINESS.md)
+  now coordinates bounded load generations, fresh participant reports and an
+  explicit owner choice after a ten-second timeout. These claims cannot verify
+  media or grant access; actual decoder and session/output integration is absent.
 
 Inspected contracts and tests: how-it-connects, queue, what-spotify-allows and
 soundcloud-engine; local-files matching; hybrid duplicate completions, stale
@@ -403,9 +407,10 @@ code milestone is durable reconciliation of unknown multipart creation and
 completion, including an explicit recovery path for a lost provider handle.
 The tested cleanup executor intentionally withholds those unresolved tasks.
 The independent room queue, headless snapshot/receipt recovery and durable
-timeline anchors and bounded clock estimation are now tested. The next bounded
-room milestone is readiness coordination with stale-load fencing and a
-deterministic timeout. Owner-presence grace/pause is now modeled and persisted;
+timeline anchors, bounded clock estimation and startup readiness are now tested.
+The next bounded room milestone is unified client transport intent and outbox
+recovery, preserving optimistic state across competing commands and reconnection.
+Owner-presence grace/pause is now modeled and persisted;
 session detection and alarm wiring remain gates. Native pending-intent journaling,
 optimistic transport and authenticated transport remain separate gates; none of
 these components enables a remote party by itself.
@@ -571,3 +576,23 @@ All 60 media-service tests, full required Windows Rust checks, formatting and
 policy checks passed again. Launcher checks still have three failures and five
 errors, and local Jekyll remains blocked by missing Bundler. No Linux/macOS or
 cloud-timer coverage is claimed for this checkpoint.
+
+Startup readiness adds 26 deterministic SQLite tests, bringing the room suite
+to 130, plus twelve local Durable Object cases. Preparation, fresh per-load
+reports, timeout and explicit partial starts use the same room revision stream.
+Tests cover stale loads, membership loss, expiry, duplicate reports, rollback,
+lost acknowledgements and pending queue intent. The local runtime confirms
+timeout recovery, an unready peer remaining excluded from startup, and old load
+reports rejected after a seek. The runtime is disposed after testing.
+Reports are participant claims, never storage verification or access grants.
+Production session/output fencing, actual decoder readiness, alarm scheduling
+and native optimistic transport are still absent. No infrastructure, secrets,
+upload quotas, retention or provider behavior changed. Two-computer/Chromecast
+playback and audible synchronization remain unmeasured; M1 acceptance is open.
+All 60 media-service tests and required Windows default/all-feature Clippy,
+all-target tests (library 1753/1795 passing, six ignored in each), doctests,
+strict rustdoc, formatting and policy checks passed again. Launcher checks
+retain three failures and five errors; local Jekyll lacks Bundler. GitHub's
+preceding `a440b75` gateway job did not start, with the billing/spending
+restriction confirmed in its annotation. No billing changes were made and no
+new Linux/macOS coverage is claimed.

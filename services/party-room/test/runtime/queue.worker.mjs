@@ -1,6 +1,7 @@
 // Local test fixture only. Fixed fake identities are not authentication.
 import { RoomQueue, ROOM_LIMITS } from "../../src/queue.mjs";
 import { projectTimeline, TIMELINE_LIMITS } from "../../src/timeline.mjs";
+import { READINESS_LIMITS } from "../../src/readiness.mjs";
 import { UploadLedger } from "../../../media-gateway/src/uploads.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
@@ -14,6 +15,7 @@ export class QueueProbe {
   async fetch() {
     let now = 1_800_000_000_000, ready = false;
     const options = { roomId, ownerId: owner, epoch, now: () => now, canStart: () => ready,
+      readinessParticipants: () => [owner, member],
       authorize: actor => [owner, member].includes(actor),
       resolveRecording: actor => actor === owner
         ? { owner_id: owner, revision: 1, state: "uploading", duration_ms: 12000 } : null };
@@ -22,6 +24,15 @@ export class QueueProbe {
       const snapshot = await queue.snapshot(actor);
       return queue.command(actor, { epoch, command_id: snapshot.self.next_command_id,
         expected_revision: snapshot.revision, action });
+    };
+    const report = async actor => {
+      const view = await queue.snapshot(actor);
+      return queue.publishReadiness(actor, { epoch, generation: view.readiness.generation,
+        revision: view.readiness.self.next_revision, status: "ready" });
+    };
+    const prepare = async () => {
+      const view = await queue.snapshot(owner);
+      check((await send(owner, { type: "prepare", occurrence_id: view.current.id })).accepted, "prepare accepted");
     };
     for (let n = 1; n <= 4; n++) check((await send(owner, add(n))).accepted, "add occurrence");
     const advance = { epoch, command_id: 5, expected_revision: 4, action: { type: "advance" } };
@@ -51,6 +62,8 @@ export class QueueProbe {
     check(final.pending.length === 1 && final.pending[0].id === occurrence(3), "only intended occurrence removed");
     await queue.publishOwnerPresence({ epoch, revision: 1, connected: true });
     check((await send(owner, { type: "play", occurrence_id: occurrence(2) })).error === "readiness_required", "start gate fails closed");
+    await prepare(); await report(owner); await report(member);
+    check((await send(owner, { type: "play", occurrence_id: occurrence(2) })).error === "readiness_required", "ready votes cannot bypass access gate");
     ready = true;
     const startView = await queue.snapshot(owner);
     const play = { epoch, command_id: startView.self.next_command_id, expected_revision: startView.revision,
@@ -76,7 +89,8 @@ export class QueueProbe {
     check(sample.room_id === roomId && sample.epoch === epoch && sample.probe_id === 7, "clock sample is room scoped");
     check(sample.received_at === now && sample.sent_at === now, "clock sample uses injected authority time");
     check(JSON.stringify(await queue.snapshot(owner)) === JSON.stringify(final), "clock sample leaves queue/revision/cursor unchanged");
-    await send(owner, { type: "play", occurrence_id: occurrence(2) });
+    await prepare(); await report(owner); await report(member);
+    check((await send(owner, { type: "play", occurrence_id: occurrence(2) })).accepted, "fresh resume accepted");
     await queue.publishOwnerPresence({ epoch, revision: 2, connected: false });
     now += ROOM_LIMITS.ownerGraceMs + 1000;
     queue = new RoomQueue(this.storage, options);
@@ -85,7 +99,28 @@ export class QueueProbe {
     await queue.publishOwnerPresence({ epoch, revision: 3, connected: true });
     final = await queue.snapshot(owner);
     check(!final.timeline.playing && final.timeline.reason === "owner_departed", "owner return never auto-resumes");
-    return Response.json({ cases: 9, revision: final.revision, current: final.current.id, pending: final.pending.length });
+    await send(owner, { type: "seek", occurrence_id: occurrence(2), position_ms: 1000 });
+    await prepare(); await report(owner);
+    const preparing = await queue.snapshot(owner);
+    now += READINESS_LIMITS.waitMs;
+    queue = new RoomQueue(this.storage, options);
+    check((await queue.tickReadiness()).changed, "load timeout survives reconstruction");
+    final = await queue.snapshot(owner);
+    check(final.readiness.phase === "timed_out" && !final.timeline.playing, "timeout does not auto-start");
+    const duplicate = await queue.publishReadiness(owner, { epoch, generation: preparing.readiness.generation, revision: 1, status: "ready" });
+    check(!duplicate.applied && (await queue.snapshot(owner)).readiness.ready_count === 0, "duplicate cannot revive expired vote");
+    await report(owner);
+    const partial = await send(owner, { type: "start_ready", occurrence_id: occurrence(2), generation: preparing.readiness.generation });
+    check(partial.accepted && (await queue.snapshot(member)).readiness.self.status === "waiting", "explicit partial start leaves peer waiting");
+    await send(owner, { type: "seek", occurrence_id: occurrence(2), position_ms: 2000 });
+    await prepare();
+    let staleLoad = false;
+    try { await queue.publishReadiness(member, { epoch, generation: preparing.readiness.generation, revision: 1, status: "ready" }); }
+    catch (error) { staleLoad = error.code === "stale_load"; }
+    check(staleLoad, "previous load callback refused after seek and new preparation");
+    final = await queue.snapshot(owner);
+    return Response.json({ cases: 12, revision: final.revision, current: final.current.id, pending: final.pending.length,
+      generation: final.readiness.generation, playing: final.timeline.playing });
   }
 }
 

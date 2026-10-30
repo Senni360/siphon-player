@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { RoomQueue, RoomError, ROOM_LIMITS as L } from "../src/queue.mjs";
 import { RoomClient, ClientError } from "../src/client.mjs";
 import { projectTimeline } from "../src/timeline.mjs";
+import { prepareSolo } from "./solo-readiness.mjs";
 
 const uuid = n => `00000000-0000-4000-8000-${n.toString(16).padStart(12, "0")}`;
 const owner = uuid(1), member = uuid(2), roomId = uuid(3), epoch = uuid(4), occurrence = uuid(5), recording = uuid(6);
@@ -28,12 +29,14 @@ async function fixture(t, { connected = true, mediaState = "ready", duration = 1
   let now = 1_800_000_000_000;
   const f = { db, storage, ready: true, now: () => now, advance: ms => { now += ms; } };
   const options = { roomId, ownerId: owner, epoch, now: () => now, canStart: () => f.ready,
+    readinessParticipants: () => [owner],
     authorize: actor => [owner, member].includes(actor),
     resolveRecording: actor => actor === owner ? { owner_id: owner, revision: 1, state: mediaState, duration_ms: duration } : null };
   f.restart = () => { f.queue = new RoomQueue(storage, options); }; f.restart();
   f.view = () => f.queue.snapshot(owner);
   f.event = (revision, connected) => f.queue.publishOwnerPresence({ epoch, revision, connected });
   f.packet = async (action, actor = owner) => {
+    if (actor === owner) await prepareSolo(f.queue, owner, action, now);
     const view = await f.queue.snapshot(actor);
     return { epoch, command_id: view.self.next_command_id, expected_revision: view.revision, action };
   };

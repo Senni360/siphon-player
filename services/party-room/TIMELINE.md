@@ -50,12 +50,12 @@ the exact current `occurrence_id`:
 
 | Action | Effect |
 | --- | --- |
-| `{type: "play", occurrence_id}` | Requires trusted connected-owner presence, ready media, a position before EOF and the readiness gate. Schedules a start 750 ms after the command's server time. A new start cannot fall at or after room expiry. |
+| `{type: "play", occurrence_id}` | Requires trusted connected-owner presence, ready media, a position before EOF, fresh startup readiness and the independent access gate. Schedules a start 750 ms after the command's server time. A new start cannot fall at or after room expiry. |
 | `{type: "pause", occurrence_id}` | Freezes the projected position immediately, including before a scheduled start. |
 | `{type: "seek", occurrence_id, position_ms}` | Accepts an integer from zero through the duration. Cancels the previous start and pauses at that position. Explicit Play must pass readiness again. |
 
 Seeking deliberately pauses in this bounded protocol increment. Seamless
-playing seeks require the future load/readiness coordination and optimistic
+playing seeks require native load/readiness integration and optimistic
 transport overlay. The existing native player's seek behavior is unchanged.
 At EOF the owner must seek before starting again. Selecting another occurrence
 always starts with a paused zero-position anchor. There is no automatic advance.
@@ -75,15 +75,17 @@ other result refuses the start. The frozen context contains only:
 
 `{epoch, revision, occurrence_id, media_revision, position_ms, server_time}`.
 
-The adapter must read readiness belonging to this exact occurrence and current
-load/position, with valid playback access. Participant JSON cannot supply a
-readiness approval. The deterministic tests use fake ready decisions; the local
-Workers fixture does the same. Those fixtures are not deployable adapters.
+The adapter must independently check verified media and valid playback access
+for this exact occurrence and position. Participant JSON cannot supply that
+approval. The deterministic and local Workers tests use fake access decisions;
+those fixtures are not deployable adapters.
 
-The proposed ten-second readiness barrier, bounded participant reports, owner
-decision after the deadline and stale-load fencing are **not implemented** here.
-Do not configure an unconditional approval in an application. A real readiness
-adapter is required before using these commands for playback.
+The [startup-readiness protocol](READINESS.md) now supplies a bounded ten-second
+barrier, stale-load fencing and an explicit owner choice after timeout. New
+paused-to-playing transitions require preparation and fresh participant reports
+in addition to `canStart`. Reports are claims, not storage verification. Actual
+decoder and temporary-access adapters remain absent. Never configure an
+unconditional access approval in an application.
 
 Uploading and unavailable selections stay paused. A newer trusted media event
 that makes the current recording unavailable freezes its position in the same
@@ -110,7 +112,7 @@ The 750 ms lead is a testable protocol default, not a measured device guarantee.
 
 The [presence contract](PRESENCE.md) now persists grace and departure pauses.
 Actual session detection, alarms, handover, authenticated WebSockets,
-durable client journaling, optimistic transport controls, readiness coordination,
+durable client journaling, optimistic transport controls, decoder readiness,
 native clock integration, receiver commands and drift correction remain absent. No
 two-computer or Chromecast run has been performed and synchronization remains
 unmeasured. Cloud and hardware acceptance for milestone 1 is still open.

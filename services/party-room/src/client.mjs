@@ -1,6 +1,7 @@
 // In-memory protocol model only. No sockets, disk writes, UI or playback.
 import { ROOM_LIMITS, validateRoomAction } from "./queue.mjs";
 import { validateTimeline } from "./timeline.mjs";
+import { validateReadiness } from "./readiness.mjs";
 
 export const CLIENT_LIMITS = Object.freeze({ intents: 16 });
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -28,7 +29,7 @@ function entry(value) {
     state: value.state, duration_ms: value.duration_ms, media_revision: value.media_revision, source: value.source };
 }
 function snapshot(value) {
-  fields(value, ["room_id", "owner_id", "epoch", "revision", "expires_at", "current", "pending", "self", "timeline", "owner_presence"]);
+  fields(value, ["room_id", "owner_id", "epoch", "revision", "expires_at", "current", "pending", "self", "timeline", "owner_presence", "readiness"]);
   fields(value.self, ["next_command_id", "receipt_floor"]);
   requireThat([value.room_id, value.owner_id, value.epoch].every(uuid) && integer(value.revision)
     && integer(value.expires_at, 1) && integer(value.self.next_command_id, 1)
@@ -38,6 +39,8 @@ function snapshot(value) {
   const ids = [current, ...pending].filter(Boolean).map(row => row.id);
   requireThat(new Set(ids).size === ids.length, "invalid_message");
   try { validateTimeline(value.timeline, current); } catch { throw new ClientError("invalid_message"); }
+  try { validateReadiness(value.readiness, current, value.expires_at, value.timeline); } catch { throw new ClientError("invalid_message"); }
+  const r = value.readiness;
   const p = value.owner_presence;
   fields(p, ["state", "pause_at", "paused"]);
   requireThat(["unknown", "connected", "disconnected"].includes(p.state) && typeof p.paused === "boolean"
@@ -46,7 +49,11 @@ function snapshot(value) {
   return { room_id: value.room_id, owner_id: value.owner_id, epoch: value.epoch,
     revision: value.revision, expires_at: value.expires_at, current, pending,
     self: { next_command_id: value.self.next_command_id, receipt_floor: value.self.receipt_floor },
-    timeline: structuredClone(value.timeline), owner_presence: { state: p.state, pause_at: p.pause_at, paused: p.paused } };
+    timeline: structuredClone(value.timeline), owner_presence: { state: p.state, pause_at: p.pause_at, paused: p.paused },
+    readiness: { generation: r.generation, phase: r.phase, occurrence_id: r.occurrence_id,
+      media_revision: r.media_revision, position_ms: r.position_ms, deadline: r.deadline, expires_at: r.expires_at,
+      participant_count: r.participant_count, ready_count: r.ready_count,
+      self: { included: r.self.included, status: r.self.status, next_revision: r.self.next_revision } } };
 }
 function receipt(value) {
   fields(value, ["epoch", "command_id", "revision", "accepted", "error"]);
@@ -59,7 +66,7 @@ function receipt(value) {
 function queueIdentity(value) {
   const t = value.timeline;
   return JSON.stringify([value.owner_id, value.expires_at, value.current, value.pending,
-    t.occurrence_id, t.position_ms, t.anchor_at, t.playing, t.reason, value.owner_presence]);
+    t.occurrence_id, t.position_ms, t.anchor_at, t.playing, t.reason, value.owner_presence, value.readiness]);
 }
 function rows(value) { return value ? [value.current, ...value.pending].filter(Boolean) : []; }
 function sameRecording(left, right) {
@@ -127,6 +134,11 @@ export class RoomClient {
       if (next.revision < this.#base.revision || next.self.next_command_id < this.#base.self.next_command_id
         || next.self.receipt_floor < this.#base.self.receipt_floor) return false;
       if (next.revision === this.#base.revision) requireThat(queueIdentity(next) === queueIdentity(this.#base), "snapshot_conflict");
+      requireThat(next.readiness.generation >= this.#base.readiness.generation, "snapshot_conflict");
+      if (next.readiness.generation === this.#base.readiness.generation
+        && next.readiness.self.included && this.#base.readiness.self.included) {
+        requireThat(next.readiness.self.next_revision >= this.#base.readiness.self.next_revision, "snapshot_conflict");
+      }
     }
     consistentRows(rows(next), rows(this.#base), this.#intents.flatMap(item => [item.preview, item.target].filter(Boolean)));
     this.#base = next; this.#connected = true; this.#awaiting = false;
@@ -268,6 +280,7 @@ export class RoomClient {
       blocked: this.#blocked, epoch: this.#base?.epoch ?? null, revision: this.#base?.revision ?? null,
       confirmed_timeline: this.#base?.timeline ?? null,
       confirmed_owner_presence: this.#base?.owner_presence ?? null,
+      confirmed_readiness: this.#base?.readiness ?? null,
       ...this.#project(), intents: this.#intents.map(item => ({ intent_id: item.id, action: item.action,
         state: item.state, error: item.error })) });
   }

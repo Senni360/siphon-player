@@ -241,6 +241,7 @@ function authority(t) {
   let server = OFFSET + 1000;
   const members = new Set([owner, member]);
   const queue = new RoomQueue(storage, { roomId, ownerId: owner, epoch, now: () => server, canStart: () => true,
+    readinessParticipants: () => [owner],
     authorize: actor => members.has(actor), resolveRecording: () => ({ owner_id: owner, revision: 1, state: "ready", duration_ms: 12000 }) });
   return { queue, storage, members, advance: ms => { server += ms; }, now: () => server };
 }
@@ -292,7 +293,11 @@ test("real queue samples feed a clocked timeline projection through synthetic de
     action: { type: "add", occurrence_id: uuid(20), recording_id: uuid(21), explicit_selection: true } });
   await a.queue.command(owner, { epoch, command_id: 2, expected_revision: 2, action: { type: "advance" } });
   await a.queue.command(owner, { epoch, command_id: 3, expected_revision: 3,
+    action: { type: "prepare", occurrence_id: uuid(20) } });
+  await a.queue.publishReadiness(owner, { epoch, generation: 1, revision: 1, status: "ready" });
+  const started = await a.queue.command(owner, { epoch, command_id: 4, expected_revision: 5,
     action: { type: "play", occurrence_id: uuid(20) } });
+  assert.equal(started.accepted, true);
   f.advance(2500); a.advance(2500);
   const snapshot = await a.queue.snapshot(owner), clock = f.estimate(); assert.equal(clock.status, "ready");
   const estimated = projectTimeline(snapshot.timeline, snapshot.current, clock.server_time_ms);

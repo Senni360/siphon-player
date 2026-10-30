@@ -49,6 +49,9 @@ The [clock contract](CLOCK.md) documents authenticated timestamp sampling and
 bounded in-memory estimation, without adding an endpoint or a native adapter.
 The [presence contract](PRESENCE.md) adds a durable owner-departure grace period;
 new starts also require trusted connected-owner presence.
+The [startup-readiness contract](READINESS.md) defines bounded load attempts,
+participant reports and explicit partial starts. Its trusted roster callback
+defaults to empty, and readiness claims never replace the separate access gate.
 
 Commands have exactly this shape:
 
@@ -215,7 +218,7 @@ and rate limits must be implemented before deployment.
 
 This core has run in the local Durable Object emulator, but not a deployed
 service. Production runtime wiring, authentication, WebSocket recovery, native
-client overlays, readiness coordination, native clock sampling, buffering,
+client overlays, actual decoder readiness, native clock sampling, buffering,
 session presence detection, alarm wiring, owner handover and playback
 integration remain unimplemented. No two-computer party or Chromecast test has
 run, and no synchronization behavior has been measured. The hosted/hardware
@@ -255,3 +258,9 @@ Owner-presence recovery adds twenty deterministic tests, for 104 room tests in
 total, and a ninth local Durable Object case. It persists a 30-second loss
 deadline, pauses once at that deadline and never auto-resumes after a late return.
 The actual session authority, alarm and native pause integrations remain absent.
+
+Startup readiness adds 26 deterministic tests, for 130 room tests in total, and
+three further local Durable Object cases, for twelve. Fixed load generations,
+freshness expiry and explicit partial starts share the existing room revisions
+and command receipts. Participant reports do not verify media or authorize
+access. Session/output fencing, native readiness and playback remain absent.

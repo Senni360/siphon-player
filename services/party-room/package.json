@@ -6,6 +6,6 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:runtime": "node test/runtime/queue.mjs",
-    "check": "node --check src/queue.mjs && node --check src/client.mjs && node --check src/timeline.mjs && node --check src/clock.mjs && node --check test/runtime/queue.mjs && node --check test/runtime/queue.worker.mjs"
+    "check": "node --check src/queue.mjs && node --check src/readiness.mjs && node --check src/client.mjs && node --check src/timeline.mjs && node --check src/clock.mjs && node --check test/runtime/queue.mjs && node --check test/runtime/queue.worker.mjs"
   }
 }
