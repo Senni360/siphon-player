@@ -576,10 +576,7 @@ mod tests {
         } else {
             ["Ctrl+B", "Ctrl+Q", "Ctrl+M"]
         };
-        assert_eq!(
-            [SIDEBAR_SHORTCUT, QUIT_SHORTCUT, WINAMP_SHORTCUT],
-            expected
-        );
+        assert_eq!([SIDEBAR_SHORTCUT, QUIT_SHORTCUT, WINAMP_SHORTCUT], expected);
     }
 
     #[test]
