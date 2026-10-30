@@ -509,7 +509,9 @@ pub struct App {
     /// Local play history. See [`crate::history`].
     pub plays: crate::history::History,
     /// Writes settings, session and history off the UI thread.
-    files: fastframe_file::Writer,
+    // Background restores may wait for the same writer off the UI thread.
+    // This preserves one queue and the existing suspend/exit flush barrier.
+    files: std::sync::Arc<fastframe_file::Writer>,
     pub mixed_playlists: crate::mixed_playlists::Store,
     pub playlist_overlay: crate::playlist_overlay::Store,
     mixed_playlists_writable: bool,
@@ -1200,7 +1202,7 @@ impl App {
             liked_recheck_at: None,
             home: HomeData::default(),
             plays,
-            files: fastframe_file::Writer::new(),
+            files: std::sync::Arc::new(fastframe_file::Writer::new()),
             mixed_playlists: mixed.unwrap_or_default(),
             playlist_overlay: overlay.unwrap_or_default(),
             mixed_playlists_writable,
@@ -2775,6 +2777,7 @@ impl App {
                 Event::Download(event) => self.handle_download_event(event),
                 Event::YouTubeTrack { generation, uri, result } => self.youtube_track_received(generation, &uri, result),
                 Event::YouTubeLikes { account, generation, result } => self.youtube_likes_received(&account, generation, result),
+                Event::YouTubeLikesWriteFailed { account, generation, revision } => self.youtube_likes_write_failed(&account, generation, revision),
                 Event::SoundCloudPlaylistAdd {
                     request,
                     complete,

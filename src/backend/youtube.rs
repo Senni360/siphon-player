@@ -105,7 +105,13 @@ impl Worker {
         }
     }
 
-    pub(super) fn youtube_likes(&self, account: String, generation: u64) {
+    pub(super) fn youtube_likes(
+        &self,
+        account: String,
+        generation: u64,
+        files: Arc<fastframe_file::Writer>,
+        writes: Arc<crate::youtube::likes::Writes>,
+    ) {
         if self.api.account().as_ref().map(|value| value.as_str()) != Some(account.as_str()) {
             return;
         }
@@ -113,16 +119,13 @@ impl Worker {
         let events = self.events.clone();
         let waker = self.waker.clone();
         tokio::spawn(async move {
-            let result =
-                tokio::task::spawn_blocking(move || crate::youtube::likes::Likes::load(&path))
-                    .await
-                    .map_err(|_| "Could not read YouTube likes".to_owned())
-                    .and_then(|result| {
-                        result.map_err(|_| {
-                            "Could not read YouTube likes. Your saved file has been kept."
-                                .to_owned()
-                        })
-                    });
+            let read_account = account.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                writes.load_after_writes(&files, &path, &read_account)
+            })
+            .await
+            .map_err(|_| "Could not read YouTube likes".to_owned())
+            .and_then(|result| result);
             let _ = events.send(Event::YouTubeLikes {
                 account,
                 generation,

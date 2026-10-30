@@ -810,6 +810,13 @@ pub enum Command {
     YouTubeLikes {
         account: String,
         generation: u64,
+        files: Arc<fastframe_file::Writer>,
+        writes: Arc<crate::youtube::likes::Writes>,
+    },
+    YouTubeLikesWriteFailed {
+        account: String,
+        generation: u64,
+        revision: u64,
     },
     YouTubeStream {
         tag: crate::player::PlaybackTag,
@@ -1165,7 +1172,12 @@ pub enum Event {
     YouTubeLikes {
         account: String,
         generation: u64,
-        result: Result<crate::youtube::likes::Likes, String>,
+        result: Result<crate::youtube::likes::Restored, String>,
+    },
+    YouTubeLikesWriteFailed {
+        account: String,
+        generation: u64,
+        revision: u64,
     },
     PlaylistLinkResolved {
         request: u64,
@@ -1562,6 +1574,25 @@ impl Backend {
         let commands = self.commands.clone();
         move || {
             let _ = commands.send(Command::SoundCloudSaveFailed);
+        }
+    }
+
+    pub(crate) fn youtube_likes_write_failure(
+        &self,
+        account: String,
+        generation: u64,
+        revision: u64,
+        writes: Arc<crate::youtube::likes::Writes>,
+    ) -> impl FnOnce() + Send + 'static {
+        let commands = self.commands.clone();
+        move || {
+            if writes.failed(&account, revision) {
+                let _ = commands.send(Command::YouTubeLikesWriteFailed {
+                    account,
+                    generation,
+                    revision,
+                });
+            }
         }
     }
 
@@ -2506,7 +2537,20 @@ impl Worker {
                 Command::YouTubeLikes {
                     account,
                     generation,
-                } => self.youtube_likes(account, generation),
+                    files,
+                    writes,
+                } => self.youtube_likes(account, generation, files, writes),
+                Command::YouTubeLikesWriteFailed {
+                    account,
+                    generation,
+                    revision,
+                } => {
+                    self.emit(Event::YouTubeLikesWriteFailed {
+                        account,
+                        generation,
+                        revision,
+                    });
+                }
                 Command::YouTubeStream {
                     tag,
                     preload,

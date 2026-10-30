@@ -106,7 +106,8 @@ fn youtube_likes_refresh_immediately_and_old_account_results_are_ignored() {
         Ok(crate::youtube::likes::Likes {
             tracks: vec![track.clone()],
             ..Default::default()
-        }),
+        }
+        .into()),
     );
     app.youtube_track_received(generation, &track.uri, Ok(Box::new(track.clone())));
     assert!(app.youtube_likes().is_none());
@@ -114,6 +115,150 @@ fn youtube_likes_refresh_immediately_and_old_account_results_are_ignored() {
     app.youtube_likes_received("bob", app.youtube.generation, Ok(Default::default()));
     assert!(app.youtube_likes().unwrap().is_empty());
     app.backend.shutdown();
+}
+
+#[test]
+fn youtube_likes_duplicate_load_and_round_trip_failure_cannot_undo_current_edits() {
+    let mut app = hybrid_fixture();
+    let track = youtube_fixture_track();
+    app.user = Some(User {
+        id: "alice".into(),
+        ..Default::default()
+    });
+    app.request_youtube_likes();
+    let old_generation = app.youtube.generation;
+    app.youtube_likes_received("alice", old_generation, Ok(Default::default()));
+    app.cache_soundcloud_tracks(std::slice::from_ref(&track));
+    app.toggle_youtube_like(&track.uri);
+    app.youtube_likes_received("alice", old_generation, Ok(Default::default()));
+    assert_eq!(app.youtube_likes().unwrap(), std::slice::from_ref(&track));
+
+    app.user = Some(User {
+        id: "bob".into(),
+        ..Default::default()
+    });
+    app.request_youtube_likes();
+    assert!(app.youtube_likes().is_none());
+    assert!(!app.track_cache.contains_key(&track.uri));
+    assert!(!app.soundcloud_pages.contains_key("youtube:likes"));
+    app.youtube_likes_received("bob", app.youtube.generation, Ok(Default::default()));
+    app.user = Some(User {
+        id: "alice".into(),
+        ..Default::default()
+    });
+    app.request_youtube_likes();
+    let generation = app.youtube.generation;
+    assert_ne!(generation, old_generation);
+    app.youtube_likes_received(
+        "alice",
+        generation,
+        Ok(crate::youtube::likes::Restored {
+            likes: crate::youtube::likes::Likes {
+                tracks: vec![track.clone()],
+                ..Default::default()
+            },
+            missed_save: true,
+        }),
+    );
+    assert_eq!(
+        app.soundcloud_pages["youtube:likes"].error.as_deref(),
+        Some(crate::youtube::likes::RESTORE_WARNING)
+    );
+    app.youtube.write_revision = 9;
+    app.handle_backend_events(vec![
+        Event::YouTubeLikesWriteFailed {
+            account: "alice".into(),
+            generation: old_generation,
+            revision: 9,
+        },
+        Event::YouTubeLikesWriteFailed {
+            account: "bob".into(),
+            generation,
+            revision: 9,
+        },
+        Event::YouTubeLikesWriteFailed {
+            account: "alice".into(),
+            generation,
+            revision: 8,
+        },
+    ]);
+    assert_eq!(
+        app.soundcloud_pages["youtube:likes"].error.as_deref(),
+        Some(crate::youtube::likes::RESTORE_WARNING)
+    );
+    assert_eq!(app.youtube_likes().unwrap(), std::slice::from_ref(&track));
+    app.handle_backend_events(vec![Event::YouTubeLikesWriteFailed {
+        account: "alice".into(),
+        generation,
+        revision: 9,
+    }]);
+    assert_eq!(
+        app.soundcloud_pages["youtube:likes"].error.as_deref(),
+        Some(crate::youtube::likes::SAVE_ERROR)
+    );
+    assert_eq!(app.youtube_likes().unwrap(), std::slice::from_ref(&track));
+    app.backend.shutdown();
+}
+
+#[test]
+fn youtube_likes_failed_save_keeps_optimistic_rows_and_reopening_retries_them() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+
+    let mut app = hybrid_fixture();
+    let scratch = std::env::current_dir()
+        .unwrap()
+        .join("target")
+        .join(format!("youtube-save-retry-{:016x}", rand::random::<u64>()));
+    app.dirs.state = scratch.clone();
+    let first = AtomicBool::new(true);
+    app.files = Arc::new(fastframe_file::Writer::with_write(
+        move |path, bytes, access| {
+            if first.swap(false, Ordering::SeqCst) {
+                return Err(std::io::Error::other("injected save failure"));
+            }
+            fastframe_file::write_with(path, access, |file| std::io::Write::write_all(file, bytes))
+        },
+    ));
+    app.user = Some(User {
+        id: "alice".into(),
+        ..Default::default()
+    });
+    app.request_youtube_likes();
+    let generation = app.youtube.generation;
+    app.youtube_likes_received("alice", generation, Ok(Default::default()));
+    let track = youtube_fixture_track();
+    app.cache_soundcloud_tracks(std::slice::from_ref(&track));
+    // The backend remains offline; only this scratch-directory save is real.
+    app.offline = false;
+    app.toggle_youtube_like(&track.uri);
+    let failed_revision = app.youtube.write_revision;
+    assert!(app.files.flush(fastframe_file::FLUSH_TIMEOUT));
+    app.youtube_likes_write_failed("alice", generation, failed_revision);
+    assert_eq!(app.youtube_likes().unwrap(), std::slice::from_ref(&track));
+    assert_eq!(
+        app.soundcloud_pages["youtube:likes"].error.as_deref(),
+        Some(crate::youtube::likes::SAVE_ERROR)
+    );
+
+    app.load_youtube_likes_page();
+    assert_ne!(app.youtube.write_revision, failed_revision);
+    assert!(app.files.flush(fastframe_file::FLUSH_TIMEOUT));
+    assert!(app.soundcloud_pages["youtube:likes"].error.is_none());
+    assert_eq!(app.youtube_likes().unwrap(), std::slice::from_ref(&track));
+    let path = crate::youtube::likes::path(&scratch, "alice");
+    assert_eq!(
+        crate::youtube::likes::Likes::load(&path).unwrap().tracks,
+        vec![track]
+    );
+    // A callback already queued before the retry must not reinstate its error.
+    app.youtube_likes_write_failed("alice", generation, failed_revision);
+    assert!(app.soundcloud_pages["youtube:likes"].error.is_none());
+    assert!(!crate::youtube::likes::path(&scratch, "bob").exists());
+    app.backend.shutdown();
+    std::fs::remove_dir_all(scratch).unwrap();
 }
 
 #[test]

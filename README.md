@@ -310,4 +310,6 @@ YouTube audio support uses the installed Siphon helper's yt-dlp and the same
 local mixed queue as SoundCloud. Public/unlisted links, local YouTube Likes,
 source metadata and supported-error states are documented in
 [YouTube audio](docs/_reference/youtube.md), including the remaining Windows
-helper and live-playback validation.
+helper and live-playback validation. Local likes wait for pending saves when an
+account is restored; failed saves keep current edits visible and can be retried
+by reopening YouTube Likes.

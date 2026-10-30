@@ -1,12 +1,16 @@
 //! Local YouTube library state and stale-result guards for the existing views.
 use super::*;
-use crate::youtube::likes::Likes;
+use crate::youtube::likes::{Likes, Restored, Writes};
 
 #[derive(Default)]
 pub(super) struct State {
     pub generation: u64,
     account: Option<String>,
     likes: Loadable<Likes>,
+    writes: std::sync::Arc<Writes>,
+    pub(super) write_revision: u64,
+    save_error: bool,
+    restore_warning: bool,
 }
 
 impl App {
@@ -16,6 +20,8 @@ impl App {
         self.youtube.generation = self.youtube.generation.wrapping_add(1);
         self.youtube.account = self.user_id().map(str::to_owned);
         self.youtube.likes = likes;
+        self.youtube.save_error = false;
+        self.youtube.restore_warning = false;
         self.refresh_youtube_likes_page();
     }
 
@@ -33,7 +39,12 @@ impl App {
         self.youtube.generation = self.youtube.generation.wrapping_add(1);
         self.youtube.account = None;
         self.youtube.likes = Loadable::NotLoaded;
+        self.youtube.write_revision = 0;
+        self.youtube.save_error = false;
+        self.youtube.restore_warning = false;
         self.soundcloud_pages.remove("youtube:likes");
+        self.table_rows
+            .remove(&Page::SoundCloud("youtube:likes".into()));
         self.track_cache.retain(|uri, track| {
             !crate::youtube::is_track_uri(uri) && !crate::youtube::is_track_uri(&track.uri)
         });
@@ -55,6 +66,8 @@ impl App {
         self.backend.send(Command::YouTubeLikes {
             account,
             generation: self.youtube.generation,
+            files: self.files.clone(),
+            writes: self.youtube.writes.clone(),
         });
     }
 
@@ -62,16 +75,24 @@ impl App {
         &mut self,
         account: &str,
         generation: u64,
-        result: Result<Likes, String>,
+        result: Result<Restored, String>,
     ) {
-        if generation != self.youtube.generation || self.user_id() != Some(account) {
+        if generation != self.youtube.generation
+            || self.user_id() != Some(account)
+            || self.youtube.account.as_deref() != Some(account)
+            || !self.youtube.likes.is_loading()
+        {
             return;
         }
-        self.youtube.likes = Loadable::from_result(result);
+        self.youtube.restore_warning = result.as_ref().is_ok_and(|restored| restored.missed_save);
+        self.youtube.likes = Loadable::from_result(result.map(|restored| restored.likes));
         self.refresh_youtube_likes_page();
     }
 
     pub(super) fn load_youtube_likes_page(&mut self) {
+        if self.youtube.save_error && self.youtube.likes.get().is_some() {
+            self.save_youtube_likes();
+        }
         self.request_youtube_likes();
         self.refresh_youtube_likes_page();
     }
@@ -87,6 +108,10 @@ impl App {
         page.error = match &self.youtube.likes {
             Loadable::Failed(error) => Some(error.clone()),
             _ if self.user.is_none() => Some("Sign in to see your local YouTube likes.".into()),
+            _ if self.youtube.save_error => Some(crate::youtube::likes::SAVE_ERROR.into()),
+            _ if self.youtube.restore_warning => {
+                Some(crate::youtube::likes::RESTORE_WARNING.into())
+            }
             _ => None,
         };
         page.content = Loadable::Loaded(SoundCloudCollection {
@@ -117,17 +142,63 @@ impl App {
         } else {
             return;
         }
-        let bytes = likes.encode();
-        if !self.offline {
-            match bytes {
-                Ok(bytes) => self.files.write(
-                    &crate::youtube::likes::path(&self.dirs.state, &account),
-                    bytes,
-                    fastframe_file::Access::Private,
-                ),
-                Err(_) => self.toast_error("Could not save YouTube likes. Try again."),
-            }
+        self.save_youtube_likes();
+        self.refresh_youtube_likes_page();
+    }
+
+    fn save_youtube_likes(&mut self) {
+        let Some(account) = self.user_id().map(str::to_owned) else {
+            return;
+        };
+        if self.youtube.account.as_deref() != Some(account.as_str()) {
+            return;
         }
+        let Some(likes) = self.youtube.likes.get() else {
+            return;
+        };
+        self.youtube.save_error = false;
+        self.youtube.restore_warning = false;
+        if self.offline {
+            return;
+        }
+        let revision = self.youtube.writes.begin(&account);
+        self.youtube.write_revision = revision;
+        let Ok(bytes) = likes.encode() else {
+            self.youtube.writes.failed(&account, revision);
+            self.youtube.save_error = true;
+            self.toast_error(crate::youtube::likes::SAVE_ERROR);
+            return;
+        };
+        self.files.write_or(
+            &crate::youtube::likes::path(&self.dirs.state, &account),
+            bytes,
+            fastframe_file::Access::Private,
+            self.backend.youtube_likes_write_failure(
+                account,
+                self.youtube.generation,
+                revision,
+                self.youtube.writes.clone(),
+            ),
+        );
+    }
+
+    pub(super) fn youtube_likes_write_failed(
+        &mut self,
+        account: &str,
+        generation: u64,
+        revision: u64,
+    ) {
+        if generation != self.youtube.generation
+            || self.user_id() != Some(account)
+            || self.youtube.account.as_deref() != Some(account)
+            || revision != self.youtube.write_revision
+        {
+            return;
+        }
+        // Keep the listener's edits visible and retry the same snapshot when
+        // they reopen Likes. Never turn a failed save into an empty library.
+        self.youtube.save_error = true;
+        self.toast_error(crate::youtube::likes::SAVE_ERROR);
         self.refresh_youtube_likes_page();
     }
 

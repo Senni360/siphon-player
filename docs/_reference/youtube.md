@@ -51,10 +51,21 @@ the artist name. Thumbnail URLs are limited to YouTube's image hosts.
 **YouTube Likes** uses the existing collection rows and sidebar navigation.
 The row/player heart writes only Siphon's local library, with no Google API.
 Likes live in private, atomically replaced `state/youtube-likes/<account-hash>.json`
-files. They load on the backend after the Spotify account is known. Switching
-accounts clears visible state and pending metadata; generation/account checks
-reject old completions. Existing unreadable or future-version files are kept
-and cannot be overwritten through a disabled like action. The earlier WIP
+files. They load on a blocking backend worker after the Spotify account is known
+and after pending writes finish, so a quick account switch cannot restore an
+older snapshot over recent likes. The app and restore worker share the existing
+file writer and its suspend/exit flush. A flush timeout gives a retryable error.
+Switching accounts clears visible state and pending metadata; generation/account
+and save-revision checks reject old completions.
+
+Failed saves keep current edits visible and report the failure. Opening YouTube
+Likes again retries that snapshot. If the listener switched accounts before a
+failed save completed, returning to the original account shows its last durable
+likes with a warning. Unsaved track snapshots are not kept across sign-out.
+On restart, only the last successfully replaced file is restored. Existing
+unreadable, partial, invalid-track or future-version files are kept and cannot
+be overwritten through a disabled like action. Reads and encoded saves share a
+16 MiB limit. The earlier WIP
 `Settings.youtube_likes` field was removed before release. No published-state
 migration from that unshipped field is claimed.
 
@@ -67,7 +78,8 @@ without Spotify matching or changing playback provenance.
 
 Validation is account-free: deterministic video metadata, malformed links,
 source provenance, cache/likes persistence, process argument/timeout/cancel/
-lock/output-limit fixtures, and mixed queue/stale-account regressions. Existing
+lock/output-limit fixtures, delayed/failed atomic writes, account round trips,
+duplicate load completions, and mixed queue/stale-account regressions. Existing
 external-engine range/seek/URL-refresh tests cover the shared transport.
 These fixtures do not prove live YouTube extraction, Windows helper updates,
 real output-device playback, or audible cross-source transitions. Those are
