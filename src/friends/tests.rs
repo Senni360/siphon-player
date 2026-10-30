@@ -37,6 +37,7 @@ fn shares_three_sources_without_losing_private_soundcloud_links() {
     );
     assert!(NewPost::from_item(&item("youtube:video:bad/id", None)).is_err());
     assert!(NewPost::from_item(&item("spotify:local:a:b:c:1", None)).is_err());
+    assert!(!format!("{post:?}").contains("s-private"));
     assert!(
         !format!(
             "{:?}",
@@ -116,6 +117,7 @@ async fn client_speaks_the_service_contract_and_never_exposes_error_bodies() {
         (200, json!({"user_id":"a","display_name":"B"})),
         (200, json!({"ok":true})),
         (429, json!({"error":secret})),
+        (200, json!({"ok":true})),
     ])
     .await;
     let identity = client.join("test-invite", "A").await.unwrap();
@@ -136,6 +138,7 @@ async fn client_speaks_the_service_contract_and_never_exposes_error_bodies() {
     client.delete(&identity, &post.id).await.unwrap();
     let error = client.feed(&identity, None).await.unwrap_err();
     assert!(!error.contains(&identity.secret));
+    client.leave(&identity).await.unwrap();
     let requests = task.await.unwrap();
     assert!(requests[0].starts_with("POST /api/join "));
     assert!(!requests[0].contains("authorization:"));
@@ -147,6 +150,7 @@ async fn client_speaks_the_service_contract_and_never_exposes_error_bodies() {
     assert!(requests[4].contains("cursor=cursor%2B%26%3D"));
     assert!(requests[5].starts_with(&format!("PUT /api/posts/{}/like ", post.id)));
     assert!(requests[6].starts_with(&format!("DELETE /api/posts/{}/like ", post.id)));
+    assert!(requests[10].starts_with("DELETE /api/me "));
 }
 
 #[tokio::test]
@@ -241,6 +245,142 @@ fn refresh_errors_preserve_feed_and_back_off_while_hidden_never_polls() {
     assert!(!model.poll_due(true));
 }
 
+#[test]
+fn replacing_identity_clears_private_rows_and_ignores_previous_request_events() {
+    use super::state::Update;
+    let post: Post = serde_json::from_value(post_json()).unwrap();
+    let mut model = Model::default();
+    model.profile = Some(Profile {
+        user_id: "a".into(),
+        display_name: "A".into(),
+    });
+    model.posts.push(post.clone());
+    model.next_cursor = Some("old-private-cursor".into());
+    model.recovery_secret = Some("old-secret".into());
+    let first = model.begin(Action::Refresh).unwrap();
+    model.receive(Event {
+        generation: first.generation,
+        result: Ok(Update::Feed(Feed::default(), false)),
+    });
+    model.posts.push(post.clone());
+    let join = model
+        .begin(Action::Join {
+            invite_code: "another-group-invite".into(),
+            display_name: "B".into(),
+        })
+        .unwrap();
+    assert!(model.profile.is_none());
+    assert!(model.posts.is_empty());
+    assert!(model.next_cursor.is_none());
+    assert!(model.recovery_secret.is_none());
+    assert_ne!(join.generation, first.generation);
+    model.receive(Event {
+        generation: first.generation,
+        result: Ok(Update::Opened(
+            Some(Profile {
+                user_id: "a".into(),
+                display_name: "A".into(),
+            }),
+            Feed {
+                posts: vec![post],
+                next_cursor: None,
+            },
+        )),
+    });
+    assert!(model.profile.is_none());
+    assert!(model.posts.is_empty());
+    assert!(model.busy);
+}
+
+#[tokio::test]
+async fn leave_cancels_a_stalled_join_and_revokes_the_saved_identity() {
+    use super::state::Update;
+    use crate::credentials::{Slot, Store};
+    use crate::paths::AppDirs;
+    use std::time::Duration;
+
+    let root = std::env::temp_dir().join(format!(
+        "siphon-friends-cancel-{}-{}",
+        std::process::id(),
+        rand::random::<u64>()
+    ));
+    let dirs = AppDirs {
+        config: root.join("config"),
+        state: root.join("state"),
+        cache: root.join("cache"),
+    };
+    dirs.ensure().unwrap();
+    let credentials = Store::in_memory(dirs);
+    credentials
+        .lease(Slot::Friends)
+        .save_secret(b"old-fixture-identity".to_vec())
+        .await
+        .unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}/api", listener.local_addr().unwrap());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = [0; 4096];
+        assert!(stream.read(&mut bytes).await.unwrap() > 0);
+        started_tx.send(()).unwrap();
+        std::future::pending::<()>().await;
+    });
+    let (events_tx, mut events_rx) = tokio::sync::mpsc::unbounded_channel();
+    let requests = Runtime::spawn_with_client(
+        credentials.clone(),
+        move |event| {
+            let _ = events_tx.send(event);
+        },
+        move |http| Client::new(http, &base),
+    );
+    let http = Http::new(reqwest::Client::builder().no_proxy().build().unwrap());
+    requests
+        .send((
+            Request {
+                generation: 1,
+                action: Action::Join {
+                    invite_code: "fixture-invite".into(),
+                    display_name: "B".into(),
+                },
+            },
+            http.clone(),
+        ))
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(2), started_rx)
+        .await
+        .unwrap()
+        .unwrap();
+    requests
+        .send((
+            Request {
+                generation: 2,
+                action: Action::Leave,
+            },
+            http,
+        ))
+        .unwrap();
+    let event = tokio::time::timeout(Duration::from_secs(2), events_rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(event.generation, 2);
+    assert!(matches!(event.result, Ok(Update::Left)));
+    assert_eq!(
+        credentials
+            .lease(Slot::Friends)
+            .load_secret()
+            .await
+            .unwrap(),
+        None
+    );
+    server.abort();
+    let _ = server.await;
+    drop(requests);
+    drop(credentials);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 /// Explicitly opt in against the disposable local Node runner, never the
 /// production group. Does not load or write any real app credentials.
 #[tokio::test]
@@ -282,4 +422,6 @@ async fn local_service_round_trip() {
             .iter()
             .all(|p| p.id != post.id)
     );
+    client.leave(&identity).await.unwrap();
+    assert!(client.profile(&identity).await.is_err());
 }

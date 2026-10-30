@@ -25,7 +25,8 @@ npm test
 To use the local service in the player, set
 `SIPHON_FRIENDS_URL=http://127.0.0.1:8787/api` in the player's environment.
 Use a disposable demo profile. The default URL in `src/friends/client.rs` is an
-intentional `.invalid` placeholder; configure the real deployment before use.
+intentional `.invalid` placeholder; the client reports that configuration is
+missing without contacting it. Configure the real deployment before use.
 
 The opt-in Rust integration test talks to this runner without touching any app
 profile, credential store, or playback process. From the repository root:
@@ -46,8 +47,9 @@ cargo test --locked --features demo friends::tests::local_service_round_trip -- 
    never in git. The same invite joins the single group at this deployment.
 4. Deploy, then set the player's `SIPHON_FRIENDS_URL` to the deployed HTTPS URL
    including `/api` (or replace `DEFAULT_BASE_URL` for a distributed build).
-5. Verify join, a post, a heart, a rename and own-post deletion. Verify posts
-   survive a redeployment. Rotate the invite if it escapes the group.
+5. Verify join, a post, a heart, a rename, own-post deletion and membership
+   revocation. Verify posts survive a redeployment. Rotate the invite if it
+   escapes the group.
 
 Environment variables:
 
@@ -63,6 +65,9 @@ Production refuses to start without both Redis values. It never falls back to
 ephemeral memory on Vercel or with `NODE_ENV=production`. Keep Vercel deployment
 protection disabled for the API's production hostname, or the native client will
 receive a login page. The API itself authenticates every feed request.
+If either `KV_REST_API_*` value is supplied, both must be supplied. The adapter
+never pairs a KV URL with an Upstash token (or the reverse). Missing/malformed
+Redis replies fail closed; only an explicit Redis `null` means an empty group.
 
 ## API
 
@@ -77,6 +82,7 @@ Never log request bodies, Authorization headers, invites, or private share URLs.
 | `POST /api/join` | `{invite_code, display_name}` -> `201 {user_id, secret}` |
 | `GET /api/me` | `{user_id, display_name}` |
 | `PATCH /api/me` | `{display_name}` -> profile. Renames also appear on old posts. |
+| `DELETE /api/me` | Revoke membership and its bearer secret -> `{ok:true}`. Shared posts remain attributed to `Former member`; this member's hearts are removed. |
 | `POST /api/posts` | Post payload -> `201` post with author and heart fields. |
 | `GET /api/posts?limit=30&cursor=…` | `{posts, next_cursor}`. Newest first; limit 1 to 100. Cursor is opaque. |
 | `DELETE /api/posts/:id` | Delete own post -> `{ok:true}`. Other authors receive 403. |
@@ -109,8 +115,18 @@ expiring rate counters, under `siphon:friends:v1:*`. This deliberately favors
 the owner's small group over an indexed public social network. Concurrent writes
 retry only the storage CAS, never external requests. The group is capped at 500
 identities and 5,000 posts; delete old posts before the feed fills. Back up Redis
-and monitor its quota. There is no admin UI, account deletion or token recovery
-endpoint. Leaving the player removes this device's identity, not shared posts.
+and monitor its quota. There is no admin UI or token recovery endpoint. Former
+members' retained posts need administrator storage maintenance if they must be
+removed later. Delete your posts before leaving if you want them removed.
+
+**Leave group** calls `DELETE /me`, revokes the secret and then removes the
+device credential. Previously shared private SoundCloud links remain visible
+to the group. All mutations recheck membership inside each compare-and-set
+attempt, so a request authenticated before leaving cannot commit afterward.
+**Forget this device** removes only the local credential and works offline;
+it does not revoke the server membership or remove posts. A failed online leave
+keeps the protected identity for an explicit retry. Neither writes nor joins
+are automatically retried after an uncertain network response.
 
 ## Player integration API
 
@@ -119,7 +135,8 @@ endpoint. Leaving the player removes this device's identity, not shared posts.
 should read `App::friends_feed` and emit `model::Action::Friends(...)`:
 
 - `Open`, `Refresh`, `More`, `Join { invite_code, display_name }`, `Rename(name)`,
-  `Leave`, `Share(NewPost)`, `Like { id, liked }`, `Delete(id)`, `DismissSecret`.
+  `Leave` (local forget), `LeaveGroup` (remote revocation), `Share(NewPost)`,
+  `Like { id, liked }`, `Delete(id)`, `DismissSecret`.
 - `NewPost::from_item(&PlayableItem)` maps Spotify tracks, complete SoundCloud
   external links and `youtube:video:<id>` tracks. `NewPost::from_url` supports
   albums, playlists and sets with unknown duration.
@@ -127,7 +144,9 @@ should read `App::friends_feed` and emit `model::Action::Friends(...)`:
   an allowlisted YouTube web URL opens externally until native link handling
   lands from the YouTube worker.
 - `Model::begin` applies optimistic writes and blocks overlapping operations.
-  `Model::receive` ignores old-generation events after leave. Errors preserve
+  Sign-out can interrupt pending work. Every request has a new generation;
+  joining or leaving clears the previous feed, cursor and one-time secret.
+  `Model::receive` ignores old-generation events. Errors preserve
   existing rows. Refresh is explicit after an uncertain mutation; writes are
   never automatically retried.
 - Automatic reads happen only with the panel and window visible, at most once
@@ -138,3 +157,20 @@ should read `App::friends_feed` and emit `model::Action::Friends(...)`:
   is bound to its service base URL, preventing a dev override from leaking a
   production secret to another server. Network operations use the configured
   proxy, a deadline, no redirects and no automatic transport retries.
+
+## Validation coverage
+
+`npm test` exercises in-memory lifecycle/authorization, private-link validation,
+pagination, limits, concurrent mutations and membership revocation races. A
+local HTTP test runs the real Node adapter with streamed and pre-parsed Buffer
+bodies through join/share/heart/rename/delete/leave. Redis REST tests use an
+isolated fake transport, including two service instances sharing a simulated
+persisted document, CAS conflicts, expiration commands, invalid replies and
+configuration failures. These tests do not claim a live Upstash or Vercel run.
+
+Rust's `friends::tests` covers the fake-server protocol, secrets redaction,
+account-switch generations and cancellation of a stalled join using a disposable
+in-memory credential backend. The ignored `local_service_round_trip` runs the
+Rust client against the loopback Node service, without app credentials. Native
+Windows credential storage and a reviewed production deployment still require
+the local coordinator's validation.

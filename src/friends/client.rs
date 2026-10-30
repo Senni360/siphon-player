@@ -31,7 +31,7 @@ pub enum Source {
     Youtube,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct NewPost {
     pub url: String,
     pub source: Source,
@@ -41,6 +41,16 @@ pub struct NewPost {
     pub duration_ms: u32,
     #[serde(default)]
     pub note: String,
+}
+
+// Private SoundCloud URLs and their artwork can carry bearer-like tokens.
+impl std::fmt::Debug for NewPost {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NewPost")
+            .field("source", &self.source)
+            .field("duration_ms", &self.duration_ms)
+            .finish_non_exhaustive()
+    }
 }
 
 impl NewPost {
@@ -137,10 +147,11 @@ pub struct Client {
 
 impl Client {
     pub fn configured(http: Http) -> Result<Self, String> {
-        Self::new(
-            http,
-            &std::env::var("SIPHON_FRIENDS_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
-        )
+        let base = std::env::var("SIPHON_FRIENDS_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
+        if base == DEFAULT_BASE_URL {
+            return Err("The Friends service has not been configured.".into());
+        }
+        Self::new(http, &base)
     }
 
     pub fn new(http: Http, base: &str) -> Result<Self, String> {
@@ -245,7 +256,10 @@ impl Client {
             .await?;
         if joined.user_id.is_empty()
             || joined.secret.len() != 64
-            || !joined.secret.bytes().all(|b| b.is_ascii_hexdigit())
+            || !joined
+                .secret
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
         {
             return Err("Friends returned an invalid identity.".into());
         }
@@ -267,6 +281,12 @@ impl Client {
             None,
         )
         .await
+    }
+    pub async fn leave(&self, id: &Identity) -> Result<(), String> {
+        let _: serde_json::Value = self
+            .request(Method::DELETE, "/me", Some(id), None, None)
+            .await?;
+        Ok(())
     }
     pub async fn feed(&self, id: &Identity, cursor: Option<&str>) -> Result<Feed, String> {
         self.request(Method::GET, "/posts", Some(id), None, cursor)

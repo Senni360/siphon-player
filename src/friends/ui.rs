@@ -38,9 +38,9 @@ pub fn draw(ui: &mut egui::Ui, model: &Model) -> Vec<AppAction> {
                 if ui.button("Rename").clicked() {
                     actions.push(AppAction::Friends(Action::Rename(draft.name.trim().into())));
                 }
-                ui.label("Leave removes this device's saved identity. Keep your secret first.");
-                if ui.button("Leave group on this device").clicked() {
-                    actions.push(AppAction::Friends(Action::Leave));
+                ui.label("Leaving revokes your secret. Shared posts remain as Former member.");
+                if ui.button("Leave group").clicked() {
+                    actions.push(AppAction::Friends(Action::LeaveGroup));
                     draft = Draft::default();
                 }
             });
@@ -189,6 +189,14 @@ pub fn draw(ui: &mut egui::Ui, model: &Model) -> Vec<AppAction> {
             }
         }
     });
+    // Sign-out must remain available while a join or feed request is pending.
+    if model.profile.is_some() || model.busy {
+        ui.label("Forgetting removes only this device's saved identity.");
+        if ui.button("Forget this device").clicked() {
+            actions.push(AppAction::Friends(Action::Leave));
+            draft = Draft::default();
+        }
+    }
     if model.busy {
         ui.spinner();
     }

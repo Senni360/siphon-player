@@ -263,7 +263,13 @@ out, or a reconnection that gives up stops it.
   prefixes refresh through the existing Web API grant, one page at a time,
   while the saved rows remain visible. Manual refresh starts immediately.
   Like and Unlike are kept over lagging reads until Spotify confirms them.
-- Siphon has no telemetry, analytics, or hosted service. When the lyrics
+- Siphon has no telemetry or analytics. An optional owner-configured private
+  Friends service receives explicitly shared metadata and source links,
+  including private SoundCloud tokens when those links are shared. It receives
+  no Spotify or SoundCloud account grants. The group bearer uses an independent
+  protected credential slot. See the repository's `services/friends/README.md`
+  for its API, deployment setup, membership revocation and local-forget rules.
+  When the lyrics
   panel is open and neither Spotify nor a local file has lyrics, it sends
   the track's artist, title, album, and length to
   [lrclib.net](https://lrclib.net). It also checks
