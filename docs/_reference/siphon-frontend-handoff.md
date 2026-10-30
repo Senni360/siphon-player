@@ -13,7 +13,7 @@ report and its interface requirements. It does not replace the backend's
 `docs/_reference/siphon-integration-contract.md`; where the two disagree, the
 backend contract wins on behaviour and this file is updated to match.
 
-## Status (2026-10-30, 18:20 Amsterdam)
+## Status (2026-10-30, 18:40 Amsterdam)
 
 - Direction **D (Hybrid)** is approved and recorded in `DESIGN.md`.
 - **Frontend branch:** `claude/focused-rubin-pxfk32`. It stays append-only
@@ -22,8 +22,8 @@ backend contract wins on behaviour and this file is updated to match.
 - **For `siphon/evening-candidate`:** it already carries the frontend through
   `0d2943a`. Cherry-pick the frontend commits after `0d2943a`, in order:
   `git cherry-pick 0d2943a..origin/claude/focused-rubin-pxfk32`. Rehearsed
-  at 18:10 on `1823bf6` with the frontend at `9fab9be`: two conflicts, both
-  in `src/demo.rs`.
+  on `1823bf6` with the frontend at `7060b8c`: two conflicts, both in
+  `src/demo.rs`; every other commit applies cleanly.
   1. At `f5341e4` (player island): four hunks in the SoundCloud source
      tests the evening branch already rewrote. Keep the evening side of
      every hunk, then make one change: the player-bar part of
@@ -36,13 +36,16 @@ backend contract wins on behaviour and this file is updated to match.
      both, the helper first.
 
   The rehearsed result: clippy (`--no-default-features --features demo
-  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,896
-  library tests passed. One backend test,
+  --all-targets -D warnings`) clean, `cargo fmt --check` clean, 1,898
+  library tests passed (`RUST_BACKTRACE=0`). One backend test,
   `cast::media::tests::errors_and_statuses_cannot_expose_signed_urls`,
   fails only when `RUST_BACKTRACE=1` is set: anyhow's `Debug` output then
   includes backtrace frames named `anyhow::__private`, which contain the
   word the test forbids. It passes with backtraces off. Backend owner:
   consider checking `Display` (`{error:#}`) instead.
+- **Against `main`:** `main` through `2a2affe` (shared media and upload
+  work) touches none of the frontend's files; `git merge-tree` of it and
+  the frontend head reports no conflict.
 - **Review fixes (PR 7 comment):** the last-used playlist and the island's
   song snapshots belong to the signed-in account, and sign-out forgets them
   and closes Now playing (`another_account_never_sees_the_last_playlist`).
@@ -242,6 +245,13 @@ Spotify's own shelves follow unchanged.
 See the review fixes above. A playlist in a 1280 window keeps its album
 column beside the tools, narrowed when needed; below about 870 px of list
 width the album gives way to the tools rather than squeezing the title.
+
+### 9. Smaller fixes after the review (`cd1539c`, `3efbe6d`, `7060b8c`)
+
+The sidebar's edge handle fades under the revealed card. `DESIGN.md` gains
+a table of what is built tonight against the target. A song that cannot
+play shakes its title when double-clicked or when its play control is
+clicked, instead of doing nothing (no movement under reduced motion).
 
 ### Windows preview of the demo (`76d2805`)
 
