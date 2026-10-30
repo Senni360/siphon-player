@@ -422,6 +422,113 @@ pub async fn write(path: &std::path::Path, cache: &Cache) -> std::io::Result<()>
 }
 
 #[cfg(test)]
+mod performance_tests {
+    use super::*;
+    use crate::api::models::{Album, ArtistRef, Image};
+    use std::time::{Duration, Instant};
+
+    fn library_track(index: usize) -> SavedTrack {
+        SavedTrack {
+            added_at: Some("2026-10-01T12:00:00Z".into()),
+            track: Track {
+                id: Some(format!("fixture{index:015}")),
+                uri: format!("spotify:track:fixture{index:015}"),
+                name: format!("Library recording {index:05} (Studio Version)"),
+                duration_ms: 210_000,
+                artists: vec![ArtistRef {
+                    name: format!("Fixture artist {}", index % 800),
+                    ..Default::default()
+                }],
+                album: Some(Album {
+                    name: format!("Fixture album {}", index / 12),
+                    images: vec![Image {
+                        url: format!("https://i.scdn.co/image/fixture-artwork-{:032}", index / 12),
+                        width: Some(300),
+                        height: Some(300),
+                    }],
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        }
+    }
+
+    fn workload(rows: usize, edits: usize) -> LikedSongs {
+        let mut songs = LikedSongs {
+            generation: 1,
+            ..Default::default()
+        };
+        songs
+            .server
+            .restore_cached((0..rows).map(library_track).collect(), rows as u32, None);
+        for index in 0..edits {
+            let saved = index % 2 != 0;
+            let item = if saved {
+                library_track(rows + index)
+            } else {
+                songs.server.items[index * rows / edits].clone()
+            };
+            songs.changes.insert(
+                item.track.uri.clone(),
+                Change {
+                    saved,
+                    item,
+                    confirmed: true,
+                    confirmed_generation: 0,
+                    server_origin: !saved,
+                },
+            );
+        }
+        songs
+    }
+
+    fn median(samples: &mut [Duration]) -> Duration {
+        samples.sort_unstable();
+        samples[samples.len() / 2]
+    }
+
+    /// Run the same optimized test profile on baseline and candidate commits.
+    /// Timing is evidence only: this test has no machine-dependent thresholds.
+    #[test]
+    #[ignore = "deterministic large-library timing workload; run explicitly"]
+    fn large_library_optimistic_edits() {
+        for (rows, edits) in [(10_000, 0), (10_000, 100), (50_000, 1_000)] {
+            let mut songs = workload(rows, edits);
+            let mut rebuilds = Vec::new();
+            let mut refreshes = Vec::new();
+            for _ in 0..3 {
+                let mut view = PagedList::default();
+                songs.synced = None;
+                let started = Instant::now();
+                songs.sync_view(std::hint::black_box(&mut view));
+                rebuilds.push(started.elapsed());
+                assert_eq!(view.items.len(), rows);
+                std::hint::black_box(&view.items);
+                drop(view);
+
+                let page = Page {
+                    items: songs.server.items.clone(),
+                    offset: 0,
+                    limit: rows as u32,
+                    total: rows as u32,
+                    next: None,
+                };
+                songs.start_refresh(songs.generation + 1);
+                let started = Instant::now();
+                assert!(!songs.absorb(0, std::hint::black_box(page), 20_000));
+                refreshes.push(started.elapsed());
+                assert_eq!(songs.changes.len(), edits, "lagging reads retain edits");
+            }
+            eprintln!(
+                "liked-library rows={rows} edits={edits} samples=3 rebuild_median_us={} refresh_median_us={}",
+                median(&mut rebuilds).as_micros(),
+                median(&mut refreshes).as_micros(),
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
