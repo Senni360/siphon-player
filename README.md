@@ -65,16 +65,32 @@ public URL lookup; SoundCloud search needs no account connection. Connect a
 public profile from the sidebar or account menu to browse cached Likes,
 playlists, uploads and followed artists. Advanced session connections include
 your private playlists and uploads, and allow liking and unliking tracks.
+Session connections also support reposting tracks and sets from their menus.
+The secondary following feed is exposed to the application API for the
+upcoming redesign. SoundCloud track data retains release dates, play counts
+and publisher metadata, with 500px artwork for large covers. See the
+[social and track-data contract](docs/_reference/soundcloud-social.md).
 Tokens stay in protected storage. Expired sessions offer a reconnect prompt
 while public browsing remains available. The
 [SoundCloud reference](docs/_reference/soundcloud.md) describes connections
 and playback limits. SoundCloud items use their real SoundCloud links;
-Spotify saves, radio, album navigation, lyrics and remote Spotify outputs
+Spotify saves, radio, album navigation and remote Spotify outputs
 are unavailable for them.
+SoundCloud lyrics use an exact ISRC recording match when available, then a
+strict artist/title/duration match. Source-provided credits and cancellable
+per-track requests are documented in the
+[track-details reference](docs/_reference/track-details.md).
 SoundCloud search offers **Retry** when it fails, keeps successful results
 visible, and shows short recovery messages instead of HTTP or network details.
 Known previews are marked **Preview only** in song rows, the queue and the
 player bar.
+
+The optional private **Friends** group shares Spotify, SoundCloud (including
+private links), and YouTube finds behind an invite code. The owner must first
+configure the service; no production endpoint is bundled. **Leave group**
+revokes membership while retaining shared posts; **Forget this device** only
+removes its saved identity and works offline. See the
+[service setup and integration contract](services/friends/README.md).
 
 The owner's browser extension can open **Add to playlist** with
 `siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,
@@ -93,7 +109,7 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 
 </details>
 
-[Features](#your-music-on-your-desktop) · [Install](#install) · [First playback](#start-listening) · [Mini player](#the-winamp-mini-player) · [MilkDrop](#music-in-motion) · [Help](#guides-and-help)
+[Features](#your-music-on-your-desktop) · [Install](#install) · [First playback](#start-listening) · [Mini player](#the-winamp-mini-player) · [Help](#guides-and-help)
 
 ## Your music, on your desktop
 
@@ -106,7 +122,6 @@ https://github.com/user-attachments/assets/a5f669ce-b3b7-4f8e-9933-976a78876c7e
 | **Themes** | Choose light, dark, system appearance, or custom colours, with one theme for light mode and one for dark mode that switch with the system. On Omarchy, follow your desktop theme. |
 | **Desktop controls** | Use keyboard shortcuts and media keys. Keep music playing from the tray when supported by your desktop and settings, and start Siphon with your computer, with its window or in the tray. |
 | **Winamp mini player** | Use classic skins with an equalizer, playlist, and animated sound displays. |
-| **MilkDrop** | Watch music-reactive visuals in a separate window or full screen. See platform availability below. |
 
 ## Save audio with the Siphon helper
 
@@ -186,16 +201,11 @@ window sizes, controls, and the return to the main player.
 
 ## Music in motion
 
-MilkDrop reacts to music playing on this computer, with more than 10,000
-presets downloaded on first use. Open it from the visualiser button,
-Settings, or the mini player's **V** menu.
 
-![MilkDrop visualiser displaying coloured concentric patterns in Siphon](docs/assets/images/milkdrop-poster.jpg)
 
-Included on **Linux**, **macOS**, and **Windows Intel/AMD** builds.
-It is not included in the Windows on ARM download.
-[Read the MilkDrop guide](https://spotifast.rocks/milkdrop/) for presets,
-controls, and fullscreen mode.
+
+
+
 
 ## Guides and help
 
@@ -253,6 +263,10 @@ the complete mixed queue and restores it paused. Paste a SoundCloud song or
 playlist link into search and press Enter to resolve and play it.
 
 SoundCloud uses the existing local audio output, EQ, visualizers and volume.
+The existing **Normalisation** setting also matches external audio to Spotify's
+track loudness reference. First plays use R128 measurement and a conservative
+starting gain; later plays reuse a local per-track measurement. See
+[Loudness Matching](docs/_reference/loudness.md) for the method and limits.
 
 Mixed playback keeps manual additions, including albums and Spotify episodes,
 across local context changes. Next consumes known queued rows even while a
@@ -297,3 +311,11 @@ Licensed under the [MIT License](LICENSE).
     <img alt="Upstream Spotifast GitHub stars over time" src="https://api.star-history.com/chart?repos=crmne/spotifast&amp;type=date">
   </picture>
 </a>
+
+YouTube audio support uses the installed Siphon helper's yt-dlp and the same
+local mixed queue as SoundCloud. Public/unlisted links, local YouTube Likes,
+source metadata and supported-error states are documented in
+[YouTube audio](docs/_reference/youtube.md), including the remaining Windows
+helper and live-playback validation. Local likes wait for pending saves when an
+account is restored; failed saves keep current edits visible and can be retried
+by reopening YouTube Likes.

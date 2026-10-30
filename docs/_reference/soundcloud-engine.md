@@ -135,6 +135,17 @@ Route volume through the existing Spotify mixer commands for either source.
 
 ## Commands and events
 
+The backend retains one active stream-resolution task and one lookahead task
+per external source, plus one catalogue-context task. Replacing a request
+aborts its previous HTTP future; Stop cancels active/preload stream work,
+while Release, account changes, sign-out and backend shutdown also cancel
+abandoned catalogue work. Pause cancels source
+lookahead while keeping the current track load, and Play requests lookahead
+again. Starting a known manual row or stopping audio while Next waits for
+the unresolved context retains that context, as required by the queue contract.
+Late replies still pass the existing tag
+and account-generation checks.
+
 `Engine::command` queues `Load`, `Play`, `Pause`, `Toggle`, `Seek`, `Stop`,
 `Preload`, `Refresh` or `Shutdown`. It returns false after the worker exits.
 It never waits for HTTP, decoding or device work. `state()` clones the latest
@@ -156,6 +167,8 @@ preload work and HLS lookahead. Preload intent is retained, and requests made
 while paused are deferred until Play. Explicit paused loads/seeks may
 prepare their decoder, but a paused engine has no background decoding,
 network lookahead, polling or device callbacks.
+Seeking after EOF prepares the requested position paused; Play resumes that
+suffix without resetting its position or marking it as a full loudness sample.
 
 HTTP 403 or 404 on any range, playlist, initialization object or segment emits
 `RefreshRequired { request_id, uri, position_ms }`. Resolve a fresh stream and
@@ -163,6 +176,8 @@ reply with `Refresh { request_id, stream }`. Matching replies resume at the
 retained position and preserve play/pause intent. Replies for older requests
 or another URI are ignored. Stop or a new Load invalidates the request.
 Other failures emit `Error` and pause with a readable error in state.
+If one parallel initialization/segment request fails, its sibling is cancelled
+immediately so a known expired URL can be refreshed without waiting its deadline.
 
 ## Network and format limits
 
@@ -170,9 +185,19 @@ All requests use the app's configured HTTP client and proxy on its Tokio
 runtime, with a 15-second request deadline. A separate feeder performs
 blocking demuxing and decoding; it never runs on the UI thread. Transport
 commands cancel outstanding HTTP requests. Progressive audio uses 32 KiB
-byte ranges rather than downloading a whole track. HLS follows up to four
+byte ranges rather than downloading a whole track. Range replies must agree
+with the requested offset, declared end and actual body length; changing
+object lengths fail playback instead of splicing different representations.
+A 416 response is EOF only with a valid `Content-Range: bytes */length`
+proving the requested position is at or beyond that length. Malformed or
+truncated replies produce a playback error and cannot advance the queue as
+if the song finished. Small complete 200 responses, including chunked bodies,
+are accepted without a redundant EOF request. HLS follows up to four
 master/media playlist levels and fetches one compressed segment ahead, with
-a 16 MiB limit per object. Nothing is written to disk.
+a 16 MiB limit per object. Compressed audio is not written to disk. With
+normalisation enabled, decoded loudness measurements are cached locally;
+see [Loudness Matching](/loudness/), including the external source API and
+the bounded decode-ahead pass used before an uncached track's first write.
 
 Symphonia decodes MP3, AAC ADTS and AAC fragmented MP4, including progressive
 AAC when no preferred MP3 or HLS stream is offered. The stream resolver

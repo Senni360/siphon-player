@@ -192,6 +192,11 @@ use authorized `/users/<id>/track_likes` and `/users/<id>/tracks`.
 Private `secret_token` values returned with catalogue items stay in memory
 for playlist hydration, fresh track lookup and stream resolution. They are
 scoped to the connection and never saved in library or session snapshots.
+When you import a private set link, each saved row keeps that original link
+with its set identity in the album metadata. After restart, playback can resolve
+the link again and verify the selected song is still in that set. The track's
+own permalink stays unchanged. Revoked links and removed members fail normally;
+this does not create per-track secret links or save returned access tokens.
 
 Disconnecting forgets the local account and token. It does not call remote
 session sign-out, which could also sign out the browser using the same

@@ -66,11 +66,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libpipewire-0.3-dev libxkbcommon-dev \
             libwayland-dev libgl1-mesa-dev cmake libclang-dev
-      # libprojectM reads OpenGL through GLEW on Windows; projectm-sys builds
-      # against vcpkg's static-CRT triplet, matching .cargo/config.toml.
-      - name: GLEW for libprojectM
-        if: runner.os == 'Windows' && matrix.features == ''
-        run: vcpkg install glew:${{ matrix.vcpkg-triplet }}
       # projectm-sys asks CMake for the Visual Studio generator, which the
       # runner image no longer satisfies; Ninja inside the MSVC environment
       # builds the same thing without caring which Visual Studio is on. Both

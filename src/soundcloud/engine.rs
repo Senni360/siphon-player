@@ -80,9 +80,9 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported(s) => write!(f, "Unsupported SoundCloud stream: {s}"),
+            Self::Unsupported(s) => write!(f, "Unsupported audio stream: {s}"),
             Self::Network(s) | Self::Decode(s) | Self::Output(s) => f.write_str(s),
-            Self::Expired => f.write_str("The SoundCloud stream URL expired"),
+            Self::Expired => f.write_str("The audio stream URL expired"),
             Self::Cancelled => f.write_str("Playback request cancelled"),
         }
     }
@@ -236,6 +236,12 @@ impl Drop for Engine {
 /// Narrow test seam. The production implementation always writes through
 /// the shared output, never opens an independent device or bypasses EQ.
 trait Output: Send {
+    fn begin_track(&mut self, _uri: &str, _from_start: bool) {}
+    fn needs_loudness_lookahead(&self) -> bool {
+        false
+    }
+    fn prime_loudness(&mut self, _pcm: &[f64]) {}
+    fn finish_track(&mut self, _complete: bool) {}
     fn claim(&mut self) -> Result<(), Error>;
     fn start(&mut self) -> Result<(), Error>;
     fn pause(&mut self) -> Result<(), Error>;
@@ -246,6 +252,18 @@ trait Output: Send {
 }
 
 impl Output for ExternalOutput {
+    fn begin_track(&mut self, uri: &str, from_start: bool) {
+        ExternalOutput::begin_track(self, uri, from_start);
+    }
+    fn needs_loudness_lookahead(&self) -> bool {
+        ExternalOutput::needs_loudness_lookahead(self)
+    }
+    fn prime_loudness(&mut self, pcm: &[f64]) {
+        ExternalOutput::prime_loudness(self, pcm);
+    }
+    fn finish_track(&mut self, complete: bool) {
+        ExternalOutput::finish_track(self, complete);
+    }
     fn claim(&mut self) -> Result<(), Error> {
         ExternalOutput::claim(self).map_err(|e| Error::Output(e.to_string()))
     }
@@ -432,8 +450,10 @@ impl Worker {
                 start_position_ms,
                 autoplay,
             } => {
-                if !super::is_track_uri(&stream.uri) {
-                    return Err(Error::Unsupported("Expected a SoundCloud track URI".into()));
+                if !crate::youtube::is_external(&stream.uri) {
+                    return Err(Error::Unsupported(
+                        "Expected a SoundCloud or YouTube track URI".into(),
+                    ));
                 }
                 if !self.claimed {
                     self.output.claim()?;
@@ -452,6 +472,7 @@ impl Worker {
                 self.decoder = None;
                 self.refresh = None;
                 self.start_ms = clamp_position(&stream, start_position_ms);
+                self.output.begin_track(&stream.uri, self.start_ms == 0);
                 self.submitted = 0;
                 self.playing = autoplay;
                 self.state = LocalState {
@@ -507,7 +528,16 @@ impl Worker {
                     self.output.pause()?;
                     self.decoder = None;
                     self.start_ms = clamp_position(self.stream.as_ref().unwrap(), position);
+                    self.output
+                        .begin_track(&self.stream.as_ref().unwrap().uri, self.start_ms == 0);
                     self.submitted = 0;
+                    if self.state.playback == Playback::Stopped {
+                        // A seek after EOF prepares that position, paused.
+                        // Leaving Stopped would make Play reset the position
+                        // and loudness identity while reusing this decoder's
+                        // already-seeked suffix.
+                        self.state.playback = Playback::Paused;
+                    }
                     self.state.seek_sequence += 1;
                     self.state.loading = true;
                     self.anchor();
@@ -563,6 +593,8 @@ impl Worker {
                         track.duration_ms = self.stream.as_ref().unwrap().duration_ms;
                     }
                     self.refresh = None;
+                    self.output
+                        .begin_track(&self.stream.as_ref().unwrap().uri, false);
                     if self.playing {
                         self.ensure_decoder()?;
                         self.output.start()?;
@@ -626,6 +658,8 @@ impl Worker {
             self.output.reset();
             self.output.pause()?;
             self.start_ms = 0;
+            self.output
+                .begin_track(&self.stream.as_ref().unwrap().uri, true);
             self.submitted = 0;
         }
         self.playing = true;
@@ -667,6 +701,9 @@ impl Worker {
         let Some(decoder) = &mut self.decoder else {
             return self.ended();
         };
+        if self.output.needs_loudness_lookahead() {
+            self.output.prime_loudness(&decoder.loudness_lookahead()?);
+        }
         match decoder.next()? {
             Some(pcm) => {
                 let frames = pcm.len() as u64 / 2;
@@ -685,6 +722,7 @@ impl Worker {
     }
 
     fn ended(&mut self) -> Result<(), Error> {
+        self.output.finish_track(true);
         self.tail = self.output.pending_ms() > 0
             && self.preload.as_ref().is_some_and(|p| p.task.is_finished());
         if !self.tail {
@@ -714,6 +752,9 @@ impl Worker {
                 let _ = self.output.pause();
             }
             self.start_ms = self.position();
+            if let Some(stream) = &self.stream {
+                self.output.begin_track(&stream.uri, false);
+            }
             self.submitted = 0;
             return;
         }
@@ -723,6 +764,9 @@ impl Worker {
             let _ = self.output.pause();
         }
         self.start_ms = self.position();
+        if let Some(stream) = &self.stream {
+            self.output.begin_track(&stream.uri, false);
+        }
         self.submitted = 0;
         self.decoder = None;
         self.state.position_ms = self.start_ms;

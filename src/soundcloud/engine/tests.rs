@@ -6,6 +6,145 @@ use tokio::net::TcpListener;
 const MP3: &[u8] = include_bytes!("../../testdata/soundcloud/tone.mp3");
 const AAC: &[u8] = include_bytes!("../../testdata/soundcloud/tone.aac");
 
+async fn reply_server(replies: Vec<Vec<u8>>) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!(
+        "http://{}/audio?secret=fixture",
+        listener.local_addr().unwrap()
+    );
+    let task = tokio::spawn(async move {
+        for reply in replies {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+                let byte = socket.read_u8().await.unwrap();
+                request.push(byte);
+                assert!(request.len() < 8192);
+            }
+            let _ = socket.write_all(&reply).await;
+        }
+    });
+    (url, task)
+}
+
+#[tokio::test]
+async fn malformed_range_responses_fail_without_claiming_a_track_finished() {
+    let cases = [
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 1-3/4\r\nContent-Length: 3\r\n\r\nbcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-4/5\r\nContent-Length: 5\r\n\r\nabcde",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/3\r\nContent-Length: 4\r\n\r\nabcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/+4\r\nContent-Length: 4\r\n\r\nabcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Length: 4\r\n\r\nabcd",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 3\r\n\r\nabc",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 5\r\n\r\nabcde",
+        "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n0\r\n\r\n",
+        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */10\r\nContent-Length: 0\r\n\r\n",
+        "HTTP/1.1 204 No Content\r\n\r\n",
+    ];
+    for response in cases {
+        let (url, server) = reply_server(vec![response.as_bytes().to_vec()]).await;
+        let (worker, _, _) = worker();
+        let result = worker.fetch.get(&url, Some((0, 3))).await;
+        let error = match result {
+            Ok(_) => panic!("accepted malformed response: {response}"),
+            Err(error) => error,
+        };
+        assert!(matches!(error, Error::Network(_)), "{error}");
+        assert!(!error.to_string().contains("secret"));
+        assert!(!error.to_string().contains("fixture"));
+        server.await.unwrap();
+    }
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */0\r\nContent-Length: 0\r\n\r\n".to_vec(),
+    ]).await;
+    let (worker, _, _) = worker();
+    assert!(
+        worker.fetch.get(&url, None).await.is_err(),
+        "HLS 416 is not EOF"
+    );
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn range_source_accepts_proven_eof_and_complete_chunked_responses() {
+    for replies in [
+        vec![b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\nabcd\r\n0\r\n\r\n".to_vec()],
+        vec![
+            b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/*\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+            b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */4\r\nContent-Length: 0\r\n\r\n".to_vec(),
+        ],
+    ] {
+        let (url, server) = reply_server(replies).await;
+        let (worker, _, _) = worker();
+        tokio::task::spawn_blocking(move || {
+            use symphonia::core::io::MediaSource;
+            let mut source = source::RangeSource::new(worker.fetch, url, Arc::new(Mutex::new(None))).unwrap();
+            let mut body = Vec::new();
+            source.read_to_end(&mut body).unwrap();
+            assert_eq!(body, b"abcd");
+            assert_eq!(source.byte_len(), Some(4));
+            let mut extra = [0; 1];
+            assert_eq!(source.read(&mut extra).unwrap(), 0);
+        }).await.unwrap();
+        server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn changed_stream_lengths_and_cached_read_cancellation_are_not_eof() {
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/8\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 4-7/9\r\nContent-Length: 4\r\n\r\nefgh".to_vec(),
+    ]).await;
+    let (first_worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let error = Arc::new(Mutex::new(None));
+        let mut source =
+            source::RangeSource::new(first_worker.fetch, url, Arc::clone(&error)).unwrap();
+        assert!(source.read_to_end(&mut Vec::new()).is_err());
+        assert!(matches!(*error.lock().unwrap(), Some(Error::Network(_))));
+    })
+    .await
+    .unwrap();
+    server.await.unwrap();
+
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/4\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+    ]).await;
+    let (worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let error = Arc::new(Mutex::new(None));
+        let interrupt = Arc::clone(&worker.fetch.interrupt);
+        let mut source = source::RangeSource::new(worker.fetch, url, Arc::clone(&error)).unwrap();
+        interrupt.revision.store(1, Ordering::SeqCst);
+        assert!(source.read(&mut [0; 1]).is_err());
+        assert_eq!(*error.lock().unwrap(), Some(Error::Cancelled));
+    })
+    .await
+    .unwrap();
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_range_endpoint_that_cannot_advance_the_cursor_is_rejected() {
+    let (url, server) = reply_server(vec![
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-3/*\r\nContent-Length: 4\r\n\r\nabcd".to_vec(),
+        b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 18446744073709551615-18446744073709551615/*\r\nContent-Length: 1\r\n\r\nx".to_vec(),
+    ]).await;
+    let (worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let error = Arc::new(Mutex::new(None));
+        let mut source = source::RangeSource::new(worker.fetch, url, Arc::clone(&error)).unwrap();
+        source.seek(SeekFrom::Start(u64::MAX)).unwrap();
+        assert!(source.read(&mut [0; 1]).is_err());
+        assert!(matches!(*error.lock().unwrap(), Some(Error::Network(_))));
+    })
+    .await
+    .unwrap();
+    server.await.unwrap();
+}
+
 struct Server {
     base: String,
     requests: Arc<Mutex<Vec<String>>>,
@@ -46,23 +185,58 @@ impl Server {
                     let path = request.split_whitespace().nth(1).unwrap();
                     requests.lock().unwrap().push(path.to_string());
                     notify.notify_one();
-                    if path == "/slow.mp3" {
+                    if path == "/slow.mp3" || path == "/bad-init/aac0.m4s" {
                         // Do not respond. Cancellation must close the HTTP
                         // request rather than wait for the 15-second deadline.
                         let _ = socket.read(&mut buffer).await;
-                        requests.lock().unwrap().push("/cancelled".into());
+                        requests.lock().unwrap().push(if path == "/slow.mp3" {
+                            "/cancelled".into()
+                        } else {
+                            format!("{path}/cancelled")
+                        });
                         notify.notify_one();
+                        return;
+                    }
+                    if path == "/bad-init/init.mp4" {
+                        // Ensure both requests are actually in flight before
+                        // the initialization request fails.
+                        tokio::time::timeout(Duration::from_secs(3), async {
+                            loop {
+                                let changed = notify.notified();
+                                if requests
+                                    .lock()
+                                    .unwrap()
+                                    .iter()
+                                    .any(|path| path == "/bad-init/aac0.m4s")
+                                {
+                                    break;
+                                }
+                                changed.await;
+                            }
+                        })
+                        .await
+                        .unwrap();
+                        let _ = socket.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await;
                         return;
                     }
                     // A virtual large object exercises more than the first
                     // range without committing another binary fixture.
                     let large = MP3.repeat(16);
+                    let m4a = [
+                        include_bytes!("../../testdata/soundcloud/init.mp4").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac0.m4s").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac1.m4s").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac2.m4s").as_slice(),
+                        include_bytes!("../../testdata/soundcloud/aac3.m4s").as_slice(),
+                    ]
+                    .concat();
                     let bytes: &[u8] = match path {
                         "/large.mp3" | "/expires-on-range.mp3" => &large,
                         "/tone.mp3" | "/next.mp3" => MP3,
                         "/range-only.mp3" if request.to_ascii_lowercase().contains("range: bytes=") => MP3,
                         "/tone.aac" => AAC,
-                        "/aac.m3u8" | "/fresh/aac.m3u8" | "/expired/aac.m3u8" => include_bytes!("../../testdata/soundcloud/aac.m3u8"),
+                        "/tone.m4a" => &m4a,
+                        "/aac.m3u8" | "/fresh/aac.m3u8" | "/expired/aac.m3u8" | "/bad-init/aac.m3u8" => include_bytes!("../../testdata/soundcloud/aac.m3u8"),
                         "/master.m3u8" => b"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=32000,CODECS=\"mp4a.40.2\"\naac.m3u8\n",
                         "/adts.m3u8" => b"#EXTM3U\n#EXTINF:0.441179,\ntone.aac\n#EXTINF:0.441179,\ntone.aac\n#EXT-X-ENDLIST\n",
                         "/mp3.m3u8" => b"#EXTM3U\n#EXTINF:1.2,\ntone.mp3\n#EXTINF:1.2,\nnext.mp3\n#EXT-X-ENDLIST\n",
@@ -166,6 +340,7 @@ struct Recorded {
     pending_ms: u32,
     pauses: usize,
     resets: usize,
+    tracks: Vec<(String, bool)>,
 }
 
 struct TestOutput(Arc<Mutex<Recorded>>);
@@ -203,6 +378,9 @@ impl Output for TestOutput {
     }
     fn pending_ms(&self) -> u32 {
         self.0.lock().unwrap().pending_ms
+    }
+    fn begin_track(&mut self, uri: &str, from_start: bool) {
+        self.0.lock().unwrap().tracks.push((uri.into(), from_start));
     }
 }
 
@@ -320,6 +498,54 @@ async fn progressive_aac_decodes_to_non_silent_pcm() {
 }
 
 #[tokio::test]
+async fn canonical_youtube_and_soundcloud_m4a_use_the_same_pcm_path() {
+    let server = Server::new().await;
+    let mut stream = server.stream("/tone.m4a", Protocol::Progressive, 1223);
+    stream.mime = "audio/mp4".into();
+    let (mut worker, recorded, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        load(&mut worker, stream.clone(), 0, true);
+        finish(&mut worker);
+        let soundcloud_pcm = std::mem::take(&mut recorded.lock().unwrap().pcm);
+        assert!(soundcloud_pcm.iter().any(|sample| sample.abs() > 0.01));
+        stream.uri = "youtube:video:dQw4w9WgXcQ".into();
+        load(&mut worker, stream, 0, true);
+        finish(&mut worker);
+        assert_eq!(recorded.lock().unwrap().pcm, soundcloud_pcm);
+        assert_eq!(
+            worker.state.track.as_ref().unwrap().uri,
+            "youtube:video:dQw4w9WgXcQ"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn loudness_lookahead_replays_exactly_the_same_pcm_once() {
+    let server = Server::new().await;
+    let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);
+    let (worker, _, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        let mut ordinary = Decoder::open(worker.fetch.clone(), &stream, 0).unwrap();
+        let mut expected = Vec::new();
+        while let Some(pcm) = ordinary.next().unwrap() {
+            expected.extend(pcm);
+        }
+        let mut ahead = Decoder::open(worker.fetch.clone(), &stream, 0).unwrap();
+        let primed = ahead.loudness_lookahead().unwrap();
+        assert!(expected.starts_with(&primed));
+        let mut replayed = Vec::new();
+        while let Some(pcm) = ahead.next().unwrap() {
+            replayed.extend(pcm);
+        }
+        assert_eq!(replayed, expected);
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn progressive_load_pause_resume_seek_and_end() {
     let server = Server::new().await;
     let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);
@@ -414,6 +640,41 @@ async fn hls_seek_starts_at_the_later_segment_and_decodes_forward() {
             frames,
             53 * 1024 - 900 * 44_100 / 1_000,
             "seeking skips precisely 900 ms of the 53 AAC frames"
+        );
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn seeking_after_eof_resumes_the_suffix_and_preserves_its_loudness_identity() {
+    let server = Server::new().await;
+    let stream = server.stream("/aac.m3u8", Protocol::Hls, 1223);
+    let (mut worker, recorded, _) = worker();
+    tokio::task::spawn_blocking(move || {
+        load(&mut worker, stream, 0, true);
+        finish(&mut worker);
+        assert_eq!(worker.state.playback, Playback::Stopped);
+        let full_length = recorded.lock().unwrap().pcm.len();
+        worker.apply(Command::Seek(900)).unwrap();
+        assert_eq!(worker.state.playback, Playback::Paused);
+        assert_eq!(worker.state.seek_sequence, 1);
+        assert_eq!(worker.state.position_ms, 900);
+        worker.apply(Command::Play).unwrap();
+        assert_eq!(worker.state.position_ms, 900);
+        finish(&mut worker);
+        let recorded = recorded.lock().unwrap();
+        assert_eq!(
+            recorded.pcm.len() - full_length,
+            2 * (53 * 1024 - 900 * 44_100 / 1_000)
+        );
+        assert_eq!(
+            recorded.tracks,
+            [
+                ("soundcloud:track:1".into(), true),
+                ("soundcloud:track:1".into(), false),
+            ],
+            "resuming a sought suffix must not mark it as a complete track measurement"
         );
     })
     .await
@@ -517,6 +778,20 @@ async fn expired_hls_url_requests_refresh_and_resumes_the_same_position() {
     })
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn expired_hls_initialization_cancels_a_stalled_audio_sibling() {
+    let server = Server::new().await;
+    let stream = server.stream("/bad-init/aac.m3u8", Protocol::Hls, 1223);
+    let (worker, _, _) = worker();
+    let opening = tokio::task::spawn_blocking(move || Decoder::open(worker.fetch, &stream, 0));
+    let result = tokio::time::timeout(Duration::from_secs(3), opening)
+        .await
+        .expect("a known expired URL must not wait for the sibling's 15-second deadline")
+        .unwrap();
+    assert!(matches!(result, Err(Error::Expired)));
+    server.wait_for("/bad-init/aac0.m4s/cancelled").await;
 }
 
 #[tokio::test]

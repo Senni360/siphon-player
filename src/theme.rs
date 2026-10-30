@@ -39,46 +39,50 @@ pub struct Palette {
 }
 
 impl Palette {
+    /// Siphon's dark theme: a neutral zinc ramp. The only hues in the
+    /// chrome are the source colours on titles (`ui::kit::source`), so the
+    /// accent is the text colour itself rather than a brand green.
     pub fn dark() -> Self {
         Self {
             dark: true,
-            window: Color32::from_rgb(0x0f, 0x11, 0x14),
-            panel: Color32::from_rgb(0x15, 0x18, 0x1c),
-            surface: Color32::from_rgb(0x1d, 0x21, 0x27),
-            surface_hover: Color32::from_rgb(0x26, 0x2b, 0x33),
-            surface_active: Color32::from_rgb(0x2f, 0x35, 0x3f),
-            outline: Color32::from_rgb(0x2a, 0x30, 0x38),
-            text: Color32::from_rgb(0xf2, 0xf4, 0xf6),
-            secondary: Color32::from_rgb(0xa9, 0xb1, 0xbc),
-            dim: Color32::from_rgb(0x6e, 0x77, 0x84),
-            accent: Color32::from_rgb(0x1e, 0xd7, 0x60),
-            accent_hover: Color32::from_rgb(0x3c, 0xe8, 0x7a),
-            on_accent: Color32::from_rgb(0x0a, 0x14, 0x0e),
+            window: Color32::from_rgb(0x0b, 0x0b, 0x0c),
+            panel: Color32::from_rgb(0x12, 0x12, 0x14),
+            surface: Color32::from_rgb(0x17, 0x17, 0x1a),
+            surface_hover: Color32::from_rgb(0x1f, 0x1f, 0x23),
+            surface_active: Color32::from_rgb(0x28, 0x28, 0x2d),
+            outline: Color32::from_rgb(0x23, 0x23, 0x27),
+            text: Color32::from_rgb(0xed, 0xed, 0xef),
+            secondary: Color32::from_rgb(0xa1, 0xa1, 0xaa),
+            dim: Color32::from_rgb(0x8a, 0x8a, 0x93),
+            accent: Color32::from_rgb(0xfa, 0xfa, 0xfa),
+            accent_hover: Color32::WHITE,
+            on_accent: Color32::from_rgb(0x09, 0x09, 0x0b),
             danger: Color32::from_rgb(0xf5, 0x71, 0x7f),
             warning: Color32::from_rgb(0xf2, 0xb8, 0x5c),
-            overlay: Color32::from_rgb(0x22, 0x27, 0x2e),
+            overlay: Color32::from_rgb(0x18, 0x18, 0x1b),
             shadow: Color32::from_black_alpha(140),
             tint: Color32::TRANSPARENT,
         }
     }
 
+    /// Siphon's light theme, the same ramp from the other end.
     pub fn light() -> Self {
         Self {
             dark: false,
-            window: Color32::from_rgb(0xf8, 0xf9, 0xfb),
+            window: Color32::from_rgb(0xf6, 0xf6, 0xf7),
             panel: Color32::from_rgb(0xff, 0xff, 0xff),
-            surface: Color32::from_rgb(0xee, 0xf0, 0xf3),
-            surface_hover: Color32::from_rgb(0xe3, 0xe6, 0xeb),
-            surface_active: Color32::from_rgb(0xd7, 0xdb, 0xe1),
-            outline: Color32::from_rgb(0xdd, 0xe1, 0xe6),
-            text: Color32::from_rgb(0x14, 0x17, 0x1a),
-            secondary: Color32::from_rgb(0x53, 0x5b, 0x66),
-            dim: Color32::from_rgb(0x8b, 0x93, 0x9e),
-            accent: Color32::from_rgb(0x15, 0xa6, 0x4a),
-            accent_hover: Color32::from_rgb(0x12, 0x8f, 0x40),
-            on_accent: Color32::WHITE,
+            surface: Color32::from_rgb(0xef, 0xef, 0xf1),
+            surface_hover: Color32::from_rgb(0xe7, 0xe7, 0xea),
+            surface_active: Color32::from_rgb(0xde, 0xde, 0xe2),
+            outline: Color32::from_rgb(0xe4, 0xe4, 0xe7),
+            text: Color32::from_rgb(0x09, 0x09, 0x0b),
+            secondary: Color32::from_rgb(0x52, 0x52, 0x5b),
+            dim: Color32::from_rgb(0x6b, 0x6b, 0x73),
+            accent: Color32::from_rgb(0x18, 0x18, 0x1b),
+            accent_hover: Color32::from_rgb(0x27, 0x27, 0x2a),
+            on_accent: Color32::from_rgb(0xfa, 0xfa, 0xfa),
             danger: Color32::from_rgb(0xd6, 0x3b, 0x4c),
-            warning: Color32::from_rgb(0xb8, 0x7a, 0x14),
+            warning: Color32::from_rgb(0x9a, 0x64, 0x00),
             overlay: Color32::from_rgb(0xff, 0xff, 0xff),
             shadow: Color32::from_black_alpha(50),
             tint: Color32::TRANSPARENT,
@@ -444,6 +448,7 @@ fastframe_icons::icons! {
     pub enum Icon {
         prefix: "spotifast-icon-",
         directory: "../assets/icons/",
+        Activity => "activity",
         ArrowLeft => lucide "arrow-left",
         ArrowRight => "arrow-right",
         AudioLines => "audio-lines",
@@ -472,6 +477,7 @@ fastframe_icons::icons! {
         Eye => "eye",
         EyeOff => "eye-off",
         ExternalLink => lucide "external-link",
+        FileText => "file-text",
         Gamepad => "gamepad-2",
         Globe => "globe",
         GripVertical => "grip-vertical",

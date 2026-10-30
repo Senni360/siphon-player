@@ -48,7 +48,8 @@ pub(super) struct HybridPlayback {
     tag: Option<PlaybackTag>,
     state: LocalState,
     loaded: bool,
-    seek_pending: Option<(u32, u64)>,
+    load_settled: bool,
+    seek_pending: Option<PendingSeek>,
     // Child snapshots report observations, never the user's transport intent.
     play_intent: bool,
     transport_sequence: u64,
@@ -56,6 +57,15 @@ pub(super) struct HybridPlayback {
     audible: bool,
     failed_occurrences: HashSet<crate::hybrid_queue::EntryId>,
     last_added: HashMap<String, Instant>,
+}
+
+#[derive(Clone, Copy)]
+struct PendingSeek {
+    position_ms: u32,
+    sequence: u64,
+    // While loading, the backend or librespot may fold the requested
+    // position into Load rather than issue a numbered seek to a decoder.
+    allow_load_position_ack: bool,
 }
 
 impl Default for HybridPlayback {
@@ -68,6 +78,7 @@ impl Default for HybridPlayback {
             tag: None,
             state: LocalState::default(),
             loaded: false,
+            load_settled: false,
             seek_pending: None,
             playing_pending: None,
             play_intent: false,
@@ -184,6 +195,11 @@ impl App {
     /// in a view, media-key adapter or platform integration.
     pub(super) fn dispatch_hybrid_action(&mut self, action: &Action) -> bool {
         let start = match action {
+            Action::Search(text) if crate::youtube::parse(text).is_some() => Some((
+                PlayRequest::context(crate::youtube::parse(text).unwrap()),
+                false,
+                None,
+            )),
             Action::Search(text) if crate::link::soundcloud_url(text).is_some() => Some((
                 PlayRequest::context(crate::link::soundcloud_url(text).unwrap()),
                 false,
@@ -310,9 +326,7 @@ impl App {
             _ => None,
         };
         if let Some((tracks, position)) = additions {
-            let foreign = tracks
-                .iter()
-                .any(|t| crate::soundcloud::is_track_uri(&t.uri));
+            let foreign = tracks.iter().any(|t| crate::youtube::is_external(&t.uri));
             if !self.hybrid_owned() && !foreign {
                 return false;
             }
@@ -452,7 +466,7 @@ impl App {
     pub fn cache_soundcloud_tracks(&mut self, tracks: &[Track]) {
         for track in tracks
             .iter()
-            .filter(|t| crate::soundcloud::is_track_uri(&t.uri))
+            .filter(|t| crate::youtube::is_external(&t.uri))
         {
             self.track_cache.insert(track.uri.clone(), track.clone());
             self.track_used.insert(track.uri.clone(), Instant::now());
@@ -474,6 +488,8 @@ impl App {
             .or_else(|| request.context_uri.clone())
             .unwrap_or_default();
         let special = context_uri.starts_with(crate::mixed_playlists::PLAYLIST_PREFIX)
+            || crate::youtube::is_track_uri(&context_uri)
+            || context_uri == "youtube:likes"
             || crate::soundcloud::is_uri(&context_uri)
             || crate::link::soundcloud_url(&context_uri).is_some()
             || context_uri
@@ -483,7 +499,7 @@ impl App {
             .uris
             .iter()
             .chain(request.offset_uri.iter())
-            .any(|uri| crate::soundcloud::is_track_uri(uri));
+            .any(|uri| crate::youtube::is_external(uri));
         // Keep manual occurrences across a new context, including when its
         // current row happens to be Spotify. Pure starts with no manual rows
         // return to the unchanged Connect path.
@@ -695,6 +711,7 @@ impl App {
         let pending = self.hybrid.pending.take().unwrap();
         match result {
             Ok(mut context) => {
+                self.cache_soundcloud_tracks(&context.tracks);
                 if self.own_soundcloud_likes_context(&context.uri) {
                     self.overlay_soundcloud_likes(&mut context.tracks);
                 }
@@ -785,6 +802,13 @@ impl App {
     }
 
     fn loaded_hybrid_context(&self, uri: &str) -> Option<Context> {
+        if uri == "youtube:likes" {
+            return Some(Context {
+                uri: uri.into(),
+                name: "YouTube Likes".into(),
+                tracks: self.youtube_likes()?.to_vec(),
+            });
+        }
         if self.own_soundcloud_likes_context(uri) {
             return (self.soundcloud_library.snapshot.likes_loaded
                 && self.soundcloud_library.snapshot.next_likes.is_none())
@@ -818,7 +842,7 @@ impl App {
                 tracks: playlist.to_tracks(),
             });
         }
-        if crate::soundcloud::is_track_uri(uri) {
+        if crate::youtube::is_external(uri) {
             let track = self.hybrid_cached_track(uri)?;
             return Some(Context {
                 uri: uri.into(),
@@ -894,6 +918,9 @@ impl App {
     }
 
     fn hybrid_context_name(&self, uri: &str) -> String {
+        if uri == "youtube:likes" {
+            return "YouTube Likes".into();
+        }
         if uri.starts_with("soundcloud:likes:") {
             return gettext(self.locale, "SoundCloud Likes").into_owned();
         }
@@ -954,6 +981,14 @@ impl App {
     }
 
     pub(super) fn hybrid_cached_track(&self, uri: &str) -> Option<Track> {
+        if let Some(track) = self
+            .youtube_likes()
+            .unwrap_or_default()
+            .iter()
+            .find(|track| track.uri == uri)
+        {
+            return Some(track.clone());
+        }
         self.hybrid
             .queue
             .current()
@@ -1162,6 +1197,7 @@ impl App {
         self.hybrid.seek_pending = None;
         self.hybrid.playing_pending = None;
         self.hybrid.loaded = false;
+        self.hybrid.load_settled = false;
         self.hybrid.play_intent = play;
         self.hybrid.audible = false;
         if let Some(pending) = &mut self.hybrid.pending {
@@ -1282,11 +1318,13 @@ impl App {
                 }) {
                     return;
                 }
-                if let Some((position, sequence)) = self.hybrid.seek_pending {
-                    if state.seek_sequence < sequence
-                        && (state.loading || state.position_ms.abs_diff(position) > 1_000)
-                    {
-                        state.position_ms = position;
+                self.hybrid.load_settled |= !state.loading;
+                if let Some(pending) = self.hybrid.seek_pending {
+                    let load_position_ack = pending.allow_load_position_ack
+                        && !state.loading
+                        && state.position_ms.abs_diff(pending.position_ms) <= 1_000;
+                    if state.seek_sequence < pending.sequence && !load_position_ack {
+                        state.position_ms = pending.position_ms;
                         state.position_at = None;
                     } else {
                         self.hybrid.seek_pending = None;
@@ -1320,8 +1358,12 @@ impl App {
             }
             HybridEvent::EndOfTrack => {
                 let play = self.hybrid.play_intent;
-                if let Some((position, _)) = self.hybrid.seek_pending {
-                    self.hybrid_transition(Transition::Restart(tag.occurrence), position, play);
+                if let Some(pending) = self.hybrid.seek_pending {
+                    self.hybrid_transition(
+                        Transition::Restart(tag.occurrence),
+                        pending.position_ms,
+                        play,
+                    );
                     return;
                 }
                 self.hybrid.tag = None;
@@ -1480,9 +1522,16 @@ impl App {
         let sequence = self
             .hybrid
             .seek_pending
-            .map_or(self.hybrid.state.seek_sequence, |(_, sequence)| sequence)
+            .map_or(self.hybrid.state.seek_sequence, |pending| pending.sequence)
             .wrapping_add(1);
-        self.hybrid.seek_pending = Some((position_ms, sequence));
+        // Decoder reopen/buffering after a seek is not an initial Load. Once
+        // this generation has settled, every newer seek needs its sequence.
+        let allow_load_position_ack = !self.hybrid.load_settled;
+        self.hybrid.seek_pending = Some(PendingSeek {
+            position_ms,
+            sequence,
+            allow_load_position_ack,
+        });
         if let Some(tag) = self.hybrid.tag {
             self.backend
                 .send(Command::Hybrid(HybridCommand::Seek { tag, position_ms }));
