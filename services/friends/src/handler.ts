@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { configuredStorage } from './storage.ts';
 import { createService } from './service.ts';
+import { createJev } from './jev.ts';
 
 export function createHandler(env: NodeJS.ProcessEnv) {
   let service: ReturnType<typeof createService> | undefined;
@@ -13,7 +14,7 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     res.once('close', closed);
     try {
       if (req.aborted || res.destroyed) abort();
-      service ??= createService(configuredStorage(env), env.SIPHON_FRIENDS_INVITE_CODE ?? '');
+      service ??= createService(configuredStorage(env), env.SIPHON_FRIENDS_INVITE_CODE ?? '', createJev(env));
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) if (value) headers.set(key, Array.isArray(value) ? value.join(',') : value);
       // Vercel may have parsed the body before invoking the Node handler.

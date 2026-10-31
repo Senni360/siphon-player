@@ -58,6 +58,8 @@ Environment variables:
 | `SIPHON_FRIENDS_INVITE_CODE` | Required group invite. Minimum 12 characters. |
 | `KV_REST_API_URL`, `KV_REST_API_TOKEN` | Vercel integration's Redis REST endpoint and read/write token. |
 | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` | Alternative Redis REST credentials. KV names take precedence. |
+| `TYPESAFE_API_KEY` | Optional. TypeSafe key for Jev; the service calls `api.typesafe.ai` with it. |
+| `AI_GATEWAY_API_KEY` | Optional. Without a TypeSafe key, Jev goes through Vercel AI Gateway with this key, or with the deployment's own OIDC token. |
 | `PORT` | Local runner port, default 8787. |
 | `SIPHON_FRIENDS_URL` | **Player-side only.** Base service URL including `/api`. |
 
@@ -91,6 +93,28 @@ Never log request bodies, Authorization headers, invites, or private share URLs.
 | `GET /api/members` | `{members: [{user_id, display_name}]}`, for choosing who a share goes to. |
 | `POST /api/posts/:id/replies` | `{text}` (1 to 500 characters) -> `201 {id, author_id, author_name, created_at, text}`. |
 | `DELETE /api/posts/:id/replies/:reply` | Delete own reply -> `{ok:true}`. Other authors receive 403. |
+| `POST /api/jev/next` | `{recent: [{title, artists}] (1 to 10), candidates: [{id, title, artists}] (2 to 255)}` -> `{probabilities: {id: p} \| null}`. |
+| `POST /api/jev/titles` | `{uploads: [{title, uploader}] (1 to 50)}` -> `{readings: [{artist, title} \| null]}`, in order. |
+
+### Jev
+
+The service asks TypeSafe AI's Jev decision model (pinned to `jev-1.14.0`)
+typed questions and uses the probabilities quietly; no answer is ever shown
+as a verdict, and a missing, slow (2.5 s) or failed answer reads as no
+opinion. Without `TYPESAFE_API_KEY`, `AI_GATEWAY_API_KEY` or a Vercel OIDC
+token, every question goes unanswered and the feed works as before.
+
+- `GET /api/posts` adds `affinity` to each post: the reader's estimated
+  probability, 0 to 1, of enjoying a friend's share, from their own 15 newest
+  shares and hearts; `null` for their own shares or until they have two. Each
+  share is scored once per reader and kept with the post.
+- `POST /api/jev/next` ranks candidates as what should follow `recent`.
+- `POST /api/jev/titles` splits upload titles into readings here and lets
+  Jev pick one; only a pick of at least 0.6 is returned.
+
+Every member may ask 30 Jev questions a minute and 3000 a day, on top of the
+request limits above. Only titles, artist and uploader names and the
+reader's own taste leave the service.
 
 Payload: `{url, source, title, artists, artwork_url, duration_ms, note?, to?}`.
 `to` is an optional list of up to 20 member ids. A share with recipients is

@@ -19,6 +19,8 @@ export interface Post extends Payload {
   created_at: number;
   likes: string[];
   replies?: Reply[];
+  /** Jev's estimate, by member id, that the member will enjoy this song. */
+  affinity?: Record<string, number>;
 }
 export interface State { revision: number; users: User[]; posts: Post[] }
 export const empty = (): State => ({ revision: 0, users: [], posts: [] });
@@ -62,7 +64,9 @@ function storedState(value: unknown): State {
       (p.to === undefined || Array.isArray(p.to) && p.to.length <= MAX_RECIPIENTS && new Set(p.to).size === p.to.length && p.to.every(id)) &&
       (p.replies === undefined || Array.isArray(p.replies) && p.replies.length <= MAX_REPLIES &&
         p.replies.every(r => r && id(r.id) && id(r.author_id) && Number.isSafeInteger(r.created_at) && r.created_at >= 0 && text(r.text, 500)) &&
-        new Set(p.replies.map(r => r.id)).size === p.replies.length)) ||
+        new Set(p.replies.map(r => r.id)).size === p.replies.length) &&
+      (p.affinity === undefined || !!p.affinity && typeof p.affinity === 'object' && !Array.isArray(p.affinity) &&
+        Object.keys(p.affinity).length <= MAX_USERS && Object.entries(p.affinity).every(([key, value]) => id(key) && typeof value === 'number' && value >= 0 && value <= 1))) ||
       new Set(state.posts.map(p => p.id)).size !== state.posts.length) throw new Error('Invalid stored group');
   return state;
 }

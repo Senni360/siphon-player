@@ -3,6 +3,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.ts';
 import { httpsUrl, sourceUrl } from './urls.ts';
 import type { Payload, Post, State, Storage, User } from './storage.ts';
+import { describe, noJev, titleReadings, type Ask, type Track } from './jev.ts';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 class HttpError extends Error { constructor(public status: number, message: string, public retryAfter?: number) { super(message); } }
@@ -42,9 +43,9 @@ function recipients(value: unknown): string[] {
 export function visible(post: Post, reader: string): boolean {
   return !post.to?.length || post.author_id === reader || post.to.includes(reader);
 }
-async function body(request: Request, signal: AbortSignal): Promise<Record<string, unknown>> {
+async function body(request: Request, signal: AbortSignal, max = 16384): Promise<Record<string, unknown>> {
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') fail(415, 'Use application/json');
-  if (Number(request.headers.get('content-length')) > 16384) fail(413, 'Request too large');
+  if (Number(request.headers.get('content-length')) > max) fail(413, 'Request too large');
   const reader = request.body?.getReader();
   if (!reader) return fail(400, 'Expected JSON object');
   let size = 0;
@@ -58,7 +59,7 @@ async function body(request: Request, signal: AbortSignal): Promise<Record<strin
       signal.throwIfAborted();
       if (part.done) break;
       size += part.value.length;
-      if (size > 16384) { await reader.cancel(); return fail(413, 'Request too large'); }
+      if (size > max) { await reader.cancel(); return fail(413, 'Request too large'); }
       chunks.push(part.value);
     }
   } finally { signal.removeEventListener('abort', cancel); reader.releaseLock(); }
@@ -94,7 +95,58 @@ function memberChange<T>(storage: Storage, secretHash: string, update: (state: S
   return change(storage, state => update(state, member(state, secretHash)), signal);
 }
 
-export function createService(storage: Storage, inviteCode: string) {
+function track(value: unknown, name: string): Track {
+  if (!value || typeof value !== 'object') return fail(400, `Invalid ${name}`);
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.artists) || raw.artists.length > 5) fail(400, `Invalid ${name}`);
+  return { title: text(raw.title, 'title', 300), artists: (raw.artists as unknown[]).map(a => text(a, 'artist', 200)) };
+}
+function list(value: unknown, name: string, min: number, max: number): unknown[] {
+  if (!Array.isArray(value) || value.length < min || value.length > max) fail(400, `Invalid ${name}`);
+  return value as unknown[];
+}
+/** A member's taste: their own shares and hearts, newest first. */
+function favourites(state: State, userId: string): string[] {
+  return state.posts.filter(p => p.author_id === userId || p.likes.includes(userId))
+    .sort((a, b) => b.created_at - a.created_at).slice(0, 15).map(describe);
+}
+// Jev runs on the maintainer's key for the whole group. Bound each member so
+// a runaway client cannot spend it; a refusal reads as "no opinion".
+async function jevAllowed(storage: Storage, userId: string, signal: AbortSignal): Promise<boolean> {
+  return await storage.limit(`jev:${userId}:minute`, 30, 60, signal) && await storage.limit(`jev:${userId}:day`, 3000, 86400, signal);
+}
+
+export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev) {
+  /**
+   * Scores shares the reader has not rated yet against their taste, once per
+   * share and reader. The scores are a cache: losing a write only means
+   * asking again on the next read.
+   */
+  async function affinities(state: State, user: User, page: Post[], headers: Headers, signal: AbortSignal): Promise<Map<string, number>> {
+    const pending = page.filter(p => p.author_id !== user.user_id && p.affinity?.[user.user_id] === undefined).slice(0, 24);
+    const taste = favourites(state, user.user_id);
+    if (!pending.length || taste.length < 2 || !await jevAllowed(storage, user.user_id, signal)) return new Map();
+    const answers = await ask(`A listener's recent favourites, newest first:\n${taste.join('\n')}`,
+      Object.fromEntries(pending.map((p, i) => [`p${i}`, { type: 'noul' as const, instructions: `Would this listener enjoy ${describe(p)}?` }])), headers, signal);
+    const scores = new Map<string, number>();
+    pending.forEach((p, i) => {
+      const answer = answers?.[`p${i}`];
+      if (answer?.type === 'noul') scores.set(p.id, Math.round(answer.probability * 100) / 100);
+    });
+    if (scores.size) {
+      try {
+        await change(storage, s => {
+          if (!s.users.some(u => u.user_id === user.user_id)) return;
+          for (const post of s.posts) {
+            const score = scores.get(post.id);
+            if (score !== undefined) (post.affinity ??= {})[user.user_id] = score;
+          }
+        }, signal);
+      } catch { /* a cache write; the reader still gets this answer */ }
+    }
+    return scores;
+  }
+
   return async (request: Request, clientIp = 'local'): Promise<Response> => {
     try {
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(12000)]);
@@ -136,7 +188,10 @@ export function createService(storage: Storage, inviteCode: string) {
       if (path === '/me' && method === 'DELETE') {
         await memberChange(storage, secret_hash, (s, current) => {
           s.users = s.users.filter(u => u.user_id !== current.user_id);
-          for (const post of s.posts) post.likes = post.likes.filter(id => id !== current.user_id);
+          for (const post of s.posts) {
+            post.likes = post.likes.filter(id => id !== current.user_id);
+            if (post.affinity) delete post.affinity[current.user_id];
+          }
         }, signal);
         return json({ ok: true });
       }
@@ -158,12 +213,14 @@ export function createService(storage: Storage, inviteCode: string) {
         const page = posts.slice(0, limit);
         const last = page.at(-1);
         const authors = new Map(state.users.map(u => [u.user_id, u.display_name]));
+        const scored = await affinities(state, user, page, request.headers, signal);
         return json({ posts: page.map(p => ({
           id: p.id, author_id: p.author_id, created_at: p.created_at,
           url: p.url, source: p.source, title: p.title, artists: p.artists,
           artwork_url: p.artwork_url, duration_ms: p.duration_ms, note: p.note ?? '',
           author_name: authors.get(p.author_id) ?? 'Former member', like_count: p.likes.length, liked: p.likes.includes(user.user_id),
           to: p.to ?? [],
+          affinity: scored.get(p.id) ?? p.affinity?.[user.user_id] ?? null,
           replies: (p.replies ?? []).map(r => ({ id: r.id, author_id: r.author_id, author_name: authors.get(r.author_id) ?? 'Former member', created_at: r.created_at, text: r.text })),
         })),
           next_cursor: posts.length > limit && last ? Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString('base64url') : null });
@@ -183,6 +240,43 @@ export function createService(storage: Storage, inviteCode: string) {
         }, signal);
         const { likes, ...result } = post;
         return json({ ...result, to: post.to ?? [], replies: [], author_name, like_count: likes.length, liked: false }, 201);
+      }
+      if (path === '/jev/next' && method === 'POST') {
+        // Which candidate best continues what just played. The player uses
+        // the order to fill autoplay and to warm the likeliest next song.
+        const input = await body(request, signal, 131072);
+        const recent = list(input.recent, 'recent', 1, 10).map(t => track(t, 'recent'));
+        const candidates = list(input.candidates, 'candidates', 2, 255).map(c => {
+          const id = (c as Record<string, unknown> | null)?.id;
+          if (typeof id !== 'string' || !/^[\w:.-]{1,80}$/.test(id)) fail(400, 'Invalid candidates');
+          return { id: id as string, ...track(c, 'candidates') };
+        });
+        if (new Set(candidates.map(c => c.id)).size !== candidates.length) fail(400, 'Invalid candidates');
+        if (!await jevAllowed(storage, user.user_id, signal)) return json({ probabilities: null });
+        const answers = await ask(`Songs just played in this listening session, newest first:\n${recent.map(describe).join('\n')}`, {
+          next: { type: 'choice', instructions: 'Which song should play next so the session keeps its flow?', criteria: Object.fromEntries(candidates.map(c => [c.id, describe(c)])) },
+        }, request.headers, signal);
+        const next = answers?.next;
+        return json({ probabilities: next?.type === 'choice' && Object.keys(next.probabilities).length ? next.probabilities : null });
+      }
+      if (path === '/jev/titles' && method === 'POST') {
+        // Splits messy upload titles into artist and song. Jev only picks
+        // between readings made here; a weak pick leaves the title alone.
+        const uploads = list((await body(request, signal, 65536)).uploads, 'uploads', 1, 50).map(u => {
+          const raw = (u && typeof u === 'object' ? u : {}) as Record<string, unknown>;
+          return { title: text(raw.title, 'title', 300), uploader: text(raw.uploader, 'uploader', 200, true) };
+        });
+        const readings = uploads.map(u => titleReadings(u.title, u.uploader));
+        const open = readings.flatMap((r, i) => r.length > 1 ? [i] : []);
+        const answers = open.length && await jevAllowed(storage, user.user_id, signal) ? await ask('Uploads on a music site, by title and uploader:\n' +
+          open.map(i => `u${i}: "${uploads[i].title}" uploaded by "${uploads[i].uploader || 'unknown'}"`).join('\n'),
+          Object.fromEntries(open.map(i => [`u${i}`, { type: 'choice' as const, instructions: `For upload u${i}, which reading names its performing artist and song title correctly?`,
+            criteria: Object.fromEntries(readings[i].map((r, j) => [`r${j}`, `Artist: ${r.artist}; Song: ${r.title}`])) }])), request.headers, signal) : null;
+        return json({ readings: readings.map((r, i) => {
+          if (r.length < 2) return r[0] ?? null;
+          const answer = answers?.[`u${i}`];
+          return answer?.type === 'choice' && (answer.probabilities[answer.choice] ?? 0) >= 0.6 ? r[Number(answer.choice.slice(1))] ?? null : null;
+        }) });
       }
       const replies = /^\/posts\/([a-f0-9-]{36})\/replies(?:\/([a-f0-9-]{36}))?$/.exec(path);
       if (replies && method === 'POST' && !replies[2]) {
