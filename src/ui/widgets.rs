@@ -3109,13 +3109,21 @@ pub fn card(
     let mut play = false;
     if ui.is_rect_visible(rect) {
         let hovered = ui.rect_contains_pointer(rect);
-        if hovered {
+        // The card lights and its play button rises in as the pointer
+        // arrives, and both settle away as it leaves.
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            hovered || response.has_focus(),
+            super::kit::motion::FEEDBACK,
+        );
+        if lit > 0.0 {
             ui.painter().rect_filled(
                 rect,
                 CornerRadius::same(theme::RADIUS),
                 palette
                     .surface_hover
-                    .gamma_multiply(if palette.dark { 0.8 } else { 1.0 }),
+                    .gamma_multiply(if palette.dark { 0.8 } else { 1.0 } * lit),
             );
         }
         let image_rect = Rect::from_min_size(rect.min + vec2(PAD, PAD), Vec2::splat(image_size));
@@ -3162,9 +3170,12 @@ pub fn card(
         ui.painter()
             .galley(subtitle_pos, subtitle_galley, palette.secondary);
 
-        if playable && hovered {
+        if playable && (hovered || lit > 0.01) {
             let button_rect = Rect::from_center_size(
-                pos2(image_rect.right() - 26.0, image_rect.bottom() - 26.0),
+                pos2(
+                    image_rect.right() - 26.0,
+                    image_rect.bottom() - 26.0 + 8.0 * (1.0 - lit),
+                ),
                 Vec2::splat(44.0),
             );
             let mut child = ui.new_child(
@@ -3172,6 +3183,7 @@ pub fn card(
                     .max_rect(button_rect)
                     .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
             );
+            child.multiply_opacity(lit);
             play = theme::circle_button(
                 &mut child,
                 if playing {

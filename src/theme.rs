@@ -785,19 +785,29 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let radius = rect.height() / 2.0;
+        use crate::ui::kit::motion;
+        let lit = motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            response.hovered(),
+            motion::FEEDBACK,
+        );
+        let pressed = motion::toward(
+            ui.ctx(),
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            motion::PRESS,
+        );
+        let shown =
+            egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * pressed));
+        let radius = shown.height() / 2.0;
         if primary {
-            let fill = if hovered {
-                palette.accent_hover
-            } else {
-                palette.accent
-            };
-            ui.painter().rect_filled(rect, radius, fill);
+            let fill = crate::ui::blend(palette.accent, palette.accent_hover, lit);
+            ui.painter().rect_filled(shown, radius, fill);
         } else {
-            let stroke_color = if hovered { palette.text } else { palette.dim };
+            let stroke_color = crate::ui::blend(palette.dim, palette.text, lit);
             ui.painter().rect_stroke(
-                rect,
+                shown,
                 radius,
                 Stroke::new(1.0, stroke_color),
                 egui::StrokeKind::Inside,
@@ -883,15 +893,24 @@ fn soft_button_inner(
         .as_ref()
         .is_some_and(|dismiss| dismiss.hovered() || dismiss.has_focus());
     if ui.is_rect_visible(rect) {
+        use crate::ui::kit::motion;
         let hovered = response.hovered() || over_dismiss;
-        let fill = if active {
-            palette.text
-        } else if hovered {
-            palette.surface_hover
-        } else {
-            palette.surface
-        };
-        ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+        // Turning on fills the button in; pointing lightens it; pressing
+        // presses it in a little.
+        let on = motion::toward(ui.ctx(), response.id.with("on"), active, motion::FEEDBACK);
+        let lit = motion::toward(ui.ctx(), response.id.with("lit"), hovered, motion::FEEDBACK);
+        let pressed = motion::toward(
+            ui.ctx(),
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            motion::PRESS,
+        );
+        let rest = crate::ui::blend(palette.surface, palette.surface_hover, lit);
+        let fill = crate::ui::blend(rest, palette.text, on);
+        let color = crate::ui::blend(palette.text, palette.window, on);
+        let shown =
+            egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * pressed));
+        ui.painter().rect_filled(shown, shown.height() / 2.0, fill);
         let mut x = rect.left() + padding.x;
         if let Some(icon) = icon {
             let icon = if dismiss.is_some() && hovered {
@@ -903,7 +922,8 @@ fn soft_button_inner(
             x += icon_width;
         }
         let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
-        ui.painter().galley(pos, galley, color);
+        ui.painter()
+            .galley_with_override_text_color(pos, galley, color);
     }
     focus_ring(ui, &response);
     if let Some(dismiss) = dismiss {
