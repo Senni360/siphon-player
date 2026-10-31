@@ -504,6 +504,8 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     if enter < 1.0 {
                         ui.multiply_opacity(0.2 + 0.8 * enter);
                     }
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::new("rows-enter"), true));
                     ui.with_visual_transform(
                         egui::emath::TSTransform::from_translation(offset),
                         |ui| {
@@ -545,6 +547,8 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                 });
                         },
                     );
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::new("rows-enter"), false));
                     if app.dialog.is_none() && !app.show_devices {
                         keys::scroll_page(ui);
                     }
@@ -560,6 +564,54 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                 egui::StrokeKind::Inside,
             );
         });
+}
+
+fn page_opened_id() -> Id {
+    Id::new("page-opened-at")
+}
+
+/// Eased progress of something on the page entering `delay` seconds after
+/// the page was opened. Only navigation starts it: the first page after
+/// start, and anything once its entrance is over, are simply there.
+pub(crate) fn entering(ctx: &Context, delay: f32) -> f32 {
+    let Some(opened) = ctx.data(|data| data.get_temp::<f64>(page_opened_id())) else {
+        return 1.0;
+    };
+    let length = crate::motion::seconds(ctx, kit::motion::ENTER);
+    if length <= 0.0 {
+        return 1.0;
+    }
+    let elapsed = (ctx.input(|input| input.time) - opened) as f32 - delay;
+    let t = kit::motion::ease(elapsed / length);
+    if t < 1.0 {
+        ctx.request_repaint();
+    }
+    t
+}
+
+/// Draws a section of a page that rises into place, `index` steps behind
+/// the first, when the page is opened.
+pub(crate) fn rise<R>(ui: &mut egui::Ui, index: usize, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let t = entering(ui.ctx(), kit::motion::stagger(index));
+    if t >= 1.0 {
+        return add(ui);
+    }
+    ui.scope(|ui| {
+        ui.multiply_opacity(t);
+        ui.with_visual_transform(
+            egui::emath::TSTransform::from_translation(vec2(0.0, (1.0 - t) * 12.0)),
+            add,
+        )
+        .inner
+    })
+    .inner
+}
+
+/// Whether lists drawn now belong to the page, whose first rows enter when
+/// it opens; the sidebar's and panels' lists never do.
+pub(crate) fn rows_enter(ctx: &Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(Id::new("rows-enter")))
+        .unwrap_or(false)
 }
 
 /// How long a page takes to come in.
@@ -581,6 +633,8 @@ fn page_entrance(ctx: &Context, page: &Page, history_index: usize) -> (f32, f32)
                 std::cmp::Ordering::Equal => 0.0,
             };
             kit::motion::begin(ctx, id.with("transition"), PAGE_ENTER);
+            let now = ctx.input(|input| input.time);
+            ctx.data_mut(|data| data.insert_temp(page_opened_id(), now));
             side
         }
         None => 0.0,

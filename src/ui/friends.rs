@@ -34,8 +34,19 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
         .size_range(fit.range.clone())
         .show_separator_line(false)
         .frame(super::side_card_frame(&palette));
+    let layer = ui.layer_id();
+    let start = super::kit::motion::mark(ui.ctx(), layer);
     let response = panel.show(ui, |ui| {
         super::side_card(ui, &palette);
+        // Opening, its contents slide in from the right edge.
+        let enter = super::kit::motion::opening(
+            ui.ctx(),
+            egui::Id::new("friends-panel-enter"),
+            super::kit::motion::ENTER,
+        );
+        if enter < 1.0 {
+            ui.multiply_opacity(enter);
+        }
         // The panel sits where the Queue would, under the same controls.
         let window_controls =
             super::window_controls_reservation(ui.ctx(), true, false, ui.available_width());
@@ -68,6 +79,17 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
             .auto_shrink([false, false])
             .show(ui, |ui| contents(app, ui));
     });
+    let enter = super::kit::motion::opening(
+        ui.ctx(),
+        egui::Id::new("friends-panel-slide"),
+        super::kit::motion::ENTER,
+    );
+    super::kit::motion::shift_since(
+        ui.ctx(),
+        layer,
+        start,
+        egui::vec2((1.0 - enter) * 32.0, 0.0),
+    );
     // The Listening activity panel shares the Queue panel's width, so switching
     // between the two never moves the page.
     let width = response.response.rect.width();

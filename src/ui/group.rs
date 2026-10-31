@@ -120,7 +120,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     ui.add_space(margin);
     ui.vertical(|ui| {
         ui.set_width(width);
-        header(app, ui);
+        super::rise(ui, 0, |ui| header(app, ui));
         ui.add_space(16.0);
 
         let feed = &app.friends_feed;
@@ -147,10 +147,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             recovery(ui, &palette, &secret, &mut actions);
             ui.add_space(16.0);
         }
-        composer(app, ui, &me, &mut actions);
+        super::rise(ui, 1, |ui| composer(app, ui, &me, &mut actions));
         ui.add_space(20.0);
 
-        let filter = filters(ui, &palette);
+        let filter = super::rise(ui, 2, |ui| filters(ui, &palette));
         ui.add_space(12.0);
 
         let feed = &app.friends_feed;
@@ -1590,14 +1590,8 @@ fn song(
         },
     );
     // Six dots burst out of a heart as it is given.
-    if liked && pop < 1.0 {
-        let spread = motion::ease(pop);
-        for dot in 0..6 {
-            let angle = dot as f32 / 6.0 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
-            let at = r.center() + Vec2::angled(angle) * (8.0 + 10.0 * spread);
-            ui.painter()
-                .circle_filled(at, 1.6 * (1.0 - spread), palette.text);
-        }
+    if liked {
+        motion::burst(ui.painter(), r.center(), pop, palette.text);
     }
     if post.like_count > 0 {
         motion::rolling_count(

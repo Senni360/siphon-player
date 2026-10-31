@@ -88,9 +88,16 @@ fn soundcloud_connect(app: &mut App, ui: &mut egui::Ui) {
 }
 
 pub fn show(app: &mut App, ctx: &egui::Context) {
+    let open_id = egui::Id::new("dialog-was-open");
     let Some(dialog) = app.dialog.clone() else {
+        ctx.data_mut(|data| data.remove::<bool>(open_id));
         return;
     };
+    // A dialog that just opened grows out of a slightly smaller self.
+    if ctx.data(|data| data.get_temp::<bool>(open_id)).is_none() {
+        ctx.data_mut(|data| data.insert_temp(open_id, true));
+        super::kit::motion::begin(ctx, open_id.with("enter"), super::kit::motion::POPOVER);
+    }
     if let Dialog::CoverArt { url, shown, title } = &dialog {
         cover_art(app, ctx, url, shown.as_deref(), title);
         return;
@@ -349,6 +356,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
             }
         });
     app.dialog_rect = Some(response.response.rect);
+    grow_in(ctx, &response.response);
     if response.should_close() && !playlist_link_selected {
         app.actions.push(Action::CloseDialog);
     }
@@ -888,6 +896,22 @@ mod tests {
     }
 }
 
+/// Scales a dialog that is opening from 96% about its centre and lifts it
+/// the last 8 points into place.
+fn grow_in(ctx: &egui::Context, response: &egui::Response) {
+    let Some(t) = super::kit::motion::running(ctx, egui::Id::new("dialog-was-open").with("enter"))
+    else {
+        return;
+    };
+    let scale = 0.96 + 0.04 * t;
+    let center = response.rect.center().to_vec2();
+    let transform = egui::emath::TSTransform::new(
+        center * (1.0 - scale) + egui::vec2(0.0, 8.0 * (1.0 - t)),
+        scale,
+    );
+    ctx.transform_layer_shapes(response.layer_id, transform);
+}
+
 /// A page's header cover, as large as the window allows, over the dimmed
 /// page. A click anywhere, on the cover or around it, or Esc closes it.
 fn cover_art(app: &mut App, ctx: &egui::Context, url: &str, shown: Option<&str>, title: &str) {
@@ -925,6 +949,7 @@ fn cover_art(app: &mut App, ctx: &egui::Context, url: &str, shown: Option<&str>,
             cover.clicked()
         });
     app.dialog_rect = Some(response.response.rect);
+    grow_in(ctx, &response.response);
     if response.inner || response.should_close() {
         app.actions.push(Action::CloseDialog);
     }

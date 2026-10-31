@@ -118,6 +118,52 @@ pub fn appear(ctx: &Context, id: Id, duration: f32, delay: f32) -> f32 {
         .progress(ctx)
 }
 
+/// Eased progress, from 0 to 1, of something drawn again after not being
+/// drawn (a panel opened, a section shown): it enters over `duration`
+/// every time it comes back.
+pub fn opening(ctx: &Context, id: Id, duration: f32) -> f32 {
+    let frame = ctx.cumulative_frame_nr();
+    let last = ctx.data(|data| data.get_temp::<u64>(id.with("drawn")));
+    ctx.data_mut(|data| data.insert_temp(id.with("drawn"), frame));
+    if last.is_none_or(|last| frame.saturating_sub(last) > 1) {
+        begin(ctx, id.with("opening"), duration);
+    }
+    running(ctx, id.with("opening")).unwrap_or(1.0)
+}
+
+/// Where the next shape painted in `layer` will go, to move what is
+/// painted after it with [`shift_since`].
+pub fn mark(ctx: &Context, layer: egui::LayerId) -> egui::layers::ShapeIdx {
+    ctx.graphics(|graphics| {
+        graphics
+            .get(layer)
+            .map_or(egui::layers::ShapeIdx(0), |list| list.next_idx())
+    })
+}
+
+/// Moves everything painted in `layer` since `start` by `offset`, for
+/// something sliding into place. Only what is seen moves, not where it is
+/// clicked, which the slide is too short to matter for.
+pub fn shift_since(
+    ctx: &Context,
+    layer: egui::LayerId,
+    start: egui::layers::ShapeIdx,
+    offset: egui::Vec2,
+) {
+    if offset == egui::Vec2::ZERO {
+        return;
+    }
+    ctx.graphics_mut(|graphics| {
+        let list = graphics.entry(layer);
+        let end = list.next_idx();
+        list.transform_range(
+            start,
+            end,
+            egui::emath::TSTransform::from_translation(offset),
+        );
+    });
+}
+
 /// Eased progress toward `on`, from 0 (off) to 1 (on), over `duration`.
 /// The first frame shows the state as it is, without moving.
 pub fn toward(ctx: &Context, id: Id, on: bool, duration: f32) -> f32 {
@@ -242,6 +288,20 @@ pub fn press_scale(ctx: &Context, response: &egui::Response) -> f32 {
             response.is_pointer_button_down_on(),
             PRESS,
         )
+}
+
+/// Six dots bursting out of `center` as something is given, at the pop's
+/// progress `t`: they fly out and shrink away. Nothing is drawn at rest.
+pub fn burst(painter: &egui::Painter, center: egui::Pos2, t: f32, color: egui::Color32) {
+    if t <= 0.0 || t >= 1.0 {
+        return;
+    }
+    let spread = ease(t);
+    for dot in 0..6 {
+        let angle = dot as f32 / 6.0 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+        let at = center + egui::Vec2::angled(angle) * (8.0 + 10.0 * spread);
+        painter.circle_filled(at, 1.6 * (1.0 - spread), color);
+    }
 }
 
 /// How long a heart pops when it is given.

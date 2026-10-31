@@ -94,10 +94,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             vec2(card_width, CARD_HEIGHT),
         );
         // Shares arrive one after another the first time Home shows them.
-        let arrive = ui.ctx().animate_bool_with_time(
+        let arrive = super::kit::motion::appear(
+            ui.ctx(),
             egui::Id::new(("group-share-arrive", &post.id)),
-            true,
-            crate::motion::seconds(ui.ctx(), super::kit::motion::ENTER + index as f32 * 0.06),
+            super::kit::motion::ENTER,
+            super::kit::motion::stagger(index),
         );
         let rect = rect.translate(vec2(0.0, (1.0 - super::kit::motion::ease(arrive)) * 10.0));
         card(app, ui, rect, post, arrive);
@@ -281,6 +282,14 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
         palette.secondary
     };
     theme::paint_icon(ui, icon, heart, 16.0 * swell, color.gamma_multiply(alpha));
+    if liked {
+        super::kit::motion::burst(
+            ui.painter(),
+            heart.center(),
+            pop,
+            color.gamma_multiply(alpha),
+        );
+    }
     if post.like_count > 0 {
         painter.text(
             pos2(heart.left() - 2.0, heart.center().y),

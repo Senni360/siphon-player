@@ -385,14 +385,35 @@ pub fn virtual_rows(
     if first > 0 {
         ui.allocate_space(vec2(width, first as f32 * row_height));
     }
+    // The first rows of the page's lists come in one after another when
+    // the page opens; rows scrolled to later are simply there.
+    let entering = super::rows_enter(ui.ctx());
     for index in first..last {
+        let t = if entering && index < ENTERING_ROWS {
+            super::entering(ui.ctx(), index as f32 * 0.03)
+        } else {
+            1.0
+        };
+        if t >= 1.0 {
+            row(ui, index);
+            continue;
+        }
+        let opacity = ui.opacity();
+        ui.multiply_opacity(t);
+        let layer = ui.layer_id();
+        let start = super::kit::motion::mark(ui.ctx(), layer);
         row(ui, index);
+        super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 8.0));
+        ui.set_opacity(opacity);
     }
     if last < count {
         ui.allocate_space(vec2(width, (count - last) as f32 * row_height));
     }
     ui.spacing_mut().item_spacing = previous_spacing;
 }
+
+/// How many of a list's first rows enter one after another.
+const ENTERING_ROWS: usize = 10;
 
 /// A wrapping grid of cards, laid out row by row so only visible cards are
 /// measured and painted.
@@ -1928,14 +1949,24 @@ fn track_row_contents(
                 .secondary
                 .gamma_multiply(if hovered { 0.30 } else { 0.20 }),
         );
-    } else if hovered {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(6),
-            palette
-                .surface_hover
-                .gamma_multiply(if palette.dark { 0.7 } else { 1.0 }),
+    } else {
+        // The hover fill eases in and out, so moving down a list reads as
+        // one light passing over the rows.
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("hover"),
+            hovered,
+            super::kit::motion::FEEDBACK,
         );
+        if lit > 0.0 {
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(6),
+                palette
+                    .surface_hover
+                    .gamma_multiply(if palette.dark { 0.7 } else { 1.0 } * lit),
+            );
+        }
     }
     if let Some(t) = super::kit::motion::running(ui.ctx(), response.id.with("played")) {
         paint_sweep(ui.painter(), rect, t, palette.text);
@@ -2398,7 +2429,11 @@ fn track_row_contents(
             } else {
                 16.0
             };
-            if theme::icon_button(&mut child, icon, size, color, hover, &tooltip).clicked() {
+            let heart = theme::icon_button(&mut child, icon, size, color, hover, &tooltip);
+            if given {
+                super::kit::motion::burst(child.painter(), heart.rect.center(), pop, color);
+            }
+            if heart.clicked() {
                 app.actions
                     .push(if crate::soundcloud::is_track_uri(row.item.uri()) {
                         Action::ToggleSoundCloudLike(row.item.uri().to_owned())
@@ -5355,7 +5390,10 @@ mod tests {
                     output.textures_delta.clear();
                     output
                 };
-                draw();
+                // A focus highlight eases in; let it settle before looking.
+                for _ in 0..30 {
+                    draw();
+                }
                 let output = draw();
                 let fills: Vec<_> = output
                     .shapes
