@@ -361,6 +361,35 @@ pub fn paint_vertical_gradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color3
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
+/// Covers what lies outside `rect`'s rounded corners with `color`, the
+/// colour around it, so whatever was painted inside it (a cover's wash, a
+/// hovered row) ends in a curve. Paint it after the contents.
+pub fn round_corners(ui: &Ui, rect: Rect, radius: f32, color: Color32) {
+    let steps = 10;
+    let corners = [
+        (rect.left_top(), egui::vec2(1.0, 1.0)),
+        (rect.right_top(), egui::vec2(-1.0, 1.0)),
+        (rect.right_bottom(), egui::vec2(-1.0, -1.0)),
+        (rect.left_bottom(), egui::vec2(1.0, -1.0)),
+    ];
+    let mut mesh = egui::Mesh::default();
+    for (corner, inward) in corners {
+        let center = corner + inward * radius;
+        let first = mesh.vertices.len() as u32;
+        mesh.colored_vertex(corner, color);
+        for step in 0..=steps {
+            // From the edge beside the corner, round to the other edge.
+            let angle = step as f32 / steps as f32 * std::f32::consts::FRAC_PI_2;
+            let offset = egui::vec2(-inward.x * angle.cos(), -inward.y * angle.sin()) * radius;
+            mesh.colored_vertex(center + offset, color);
+        }
+        for step in 0..steps {
+            mesh.add_triangle(first, first + 1 + step, first + 2 + step);
+        }
+    }
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
 /// Lays out only the rows that intersect the visible area of the enclosing
 /// scroll view. Every row must occupy exactly `row_height`.
 pub fn virtual_rows(
@@ -3537,27 +3566,55 @@ pub fn thin_slider(
             node.add_action(Action::Increment);
         }
     });
+    // A click glides the fill to where it landed rather than jumping, so
+    // the eye follows the seek; a drag follows the pointer exactly.
+    if response.clicked()
+        && let SliderEvent::Committed(_) = event
+    {
+        ui.data_mut(|data| data.insert_temp(id.with("jump-from"), value));
+        super::kit::motion::begin(ui.ctx(), id.with("jump"), super::kit::motion::POPOVER);
+    }
+    let shown = match super::kit::motion::running(ui.ctx(), id.with("jump")) {
+        Some(t) => {
+            let from = ui
+                .data(|data| data.get_temp::<f32>(id.with("jump-from")))
+                .unwrap_or(shown);
+            from + (shown - from) * t
+        }
+        None => shown,
+    };
     if ui.is_rect_visible(rect) {
         let active = response.hovered()
             || response.has_focus()
             || response.dragged()
             || dragging_value.is_some();
-        let bar = Rect::from_center_size(rect.center(), vec2(rect.width(), 4.0));
+        // Pointing at it thickens the bar and grows its knob in.
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            id.with("lit"),
+            active,
+            super::kit::motion::FEEDBACK,
+        );
+        let thickness = 4.0 + 2.0 * lit;
+        let bar = Rect::from_center_size(rect.center(), vec2(rect.width(), thickness));
         let track_color = if palette.dark {
             Color32::from_white_alpha(50)
         } else {
             Color32::from_black_alpha(40)
         };
-        ui.painter().rect_filled(bar, 2.0, track_color);
+        ui.painter().rect_filled(bar, thickness / 2.0, track_color);
         let filled = Rect::from_min_max(
             bar.min,
             pos2(bar.left() + bar.width() * shown.clamp(0.0, 1.0), bar.max.y),
         );
-        let fill = if active { palette.accent } else { palette.text };
-        ui.painter().rect_filled(filled, 2.0, fill);
-        if active {
-            ui.painter()
-                .circle_filled(pos2(filled.right(), bar.center().y), 6.0, palette.text);
+        let fill = super::blend(palette.text, palette.accent, lit);
+        ui.painter().rect_filled(filled, thickness / 2.0, fill);
+        if lit > 0.0 {
+            ui.painter().circle_filled(
+                pos2(filled.right(), bar.center().y),
+                6.0 * lit,
+                palette.text,
+            );
         }
     }
     event

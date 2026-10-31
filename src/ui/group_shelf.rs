@@ -229,8 +229,10 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
             Sense::click(),
         )
         .on_hover_text(gettext(locale, "Play"));
+    // Named for its song, so a screen reader tells the cards apart.
+    let play_label = format!("{} {}", gettext(locale, "Play"), post.item.title);
     play_response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, gettext(locale, "Play"))
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, play_label.clone())
     });
     painter.circle_filled(play.center(), 16.0, palette.accent.gamma_multiply(alpha));
     theme::paint_icon(ui, Icon::PlayFilled, play, 14.0, palette.on_accent);
@@ -253,8 +255,9 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
             Sense::click(),
         )
         .on_hover_text(label.as_ref());
+    let heart_label = format!("{label} {}", post.item.title);
     heart_response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, liked, label.as_ref())
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, liked, heart_label.clone())
     });
     // A heart pops when it is given.
     let pop = ui.ctx().animate_bool_with_time(

@@ -600,17 +600,23 @@ pub fn icon_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
     });
     if ui.is_rect_visible(rect) {
-        let tint = if response.hovered() || response.has_focus() {
-            hover
-        } else {
-            color
-        };
-        let scale = if response.is_pointer_button_down_on() {
-            0.92
-        } else {
-            1.0
-        };
-        paint_icon(ui, icon, rect, size * scale, tint);
+        // The colour eases to its hover shade, and a press sinks the icon
+        // and lets it spring back on release.
+        let motion = crate::ui::kit::motion::FEEDBACK;
+        let lit = crate::ui::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            response.hovered() || response.has_focus(),
+            motion,
+        );
+        let tint = crate::ui::blend(color, hover, lit);
+        let press = crate::ui::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            crate::ui::kit::motion::PRESS,
+        );
+        paint_icon(ui, icon, rect, size * (1.0 - 0.1 * press), tint);
     }
     focus_ring(ui, &response);
     if tooltip.is_empty() {
@@ -678,16 +684,50 @@ pub fn circle_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
     });
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let grow = if hovered { 1.05 } else { 1.0 };
-        let radius = diameter / 2.0 * grow;
-        let fill = if hovered { fill_hover } else { fill };
+        use crate::ui::kit::motion;
+        let ctx = ui.ctx();
+        // The disc swells a little under the pointer and dips when pressed.
+        let hovered = motion::toward(
+            ctx,
+            response.id.with("hover"),
+            response.hovered(),
+            motion::FEEDBACK,
+        );
+        let pressed = motion::toward(
+            ctx,
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            motion::PRESS,
+        );
+        let radius = diameter / 2.0 * (1.0 + 0.05 * hovered - 0.06 * pressed);
+        let fill = crate::ui::blend(fill, fill_hover, hovered);
         ui.painter().circle_filled(rect.center(), radius, fill);
+        // A new icon (Play becoming Pause) grows in while the old one
+        // shrinks away, so the change reads as the press taking effect.
+        let swap_id = response.id.with("icon");
+        let previous = ctx.data(|data| data.get_temp::<Icon>(swap_id));
+        if previous.is_some_and(|previous| previous != icon) {
+            ctx.data_mut(|data| data.insert_temp(swap_id.with("from"), previous));
+            motion::begin(ctx, swap_id.with("swap"), motion::FEEDBACK * 1.6);
+        }
+        ctx.data_mut(|data| data.insert_temp(swap_id, icon));
         let icon_size = diameter * 0.46;
-        let offset = play_glyph_offset(icon, icon_size);
-        let icon_rect =
-            egui::Rect::from_center_size(rect.center() + offset, Vec2::splat(icon_size));
-        icon.image(icon_color, icon_size).paint_at(ui, icon_rect);
+        let paint = |icon: Icon, scale: f32, alpha: f32| {
+            let size = icon_size * scale;
+            let offset = play_glyph_offset(icon, size);
+            let icon_rect = egui::Rect::from_center_size(rect.center() + offset, Vec2::splat(size));
+            icon.image(icon_color.gamma_multiply(alpha), size)
+                .paint_at(ui, icon_rect);
+        };
+        match motion::running(ctx, swap_id.with("swap")) {
+            Some(t) => {
+                if let Some(from) = ctx.data(|data| data.get_temp::<Icon>(swap_id.with("from"))) {
+                    paint(from, 1.0 - 0.5 * t, 1.0 - t);
+                }
+                paint(icon, 0.5 + 0.5 * t, t);
+            }
+            None => paint(icon, 1.0 - 0.06 * pressed, 1.0),
+        }
     }
     focus_ring(ui, &response);
     if tooltip.is_empty() {

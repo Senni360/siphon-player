@@ -4930,6 +4930,10 @@ mod tests {
         };
 
         draw(vec![]);
+        // The hover colour eases in; let it settle before looking.
+        for _ in 0..30 {
+            draw(vec![egui::Event::PointerMoved(egui::pos2(87.0, 28.0))]);
+        }
         let tints = draw(vec![egui::Event::PointerMoved(egui::pos2(87.0, 28.0))]);
 
         assert!(

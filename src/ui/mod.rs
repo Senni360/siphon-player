@@ -303,13 +303,54 @@ fn page_tint(app: &mut App) -> Option<Color32> {
     }
 }
 
+/// The gap between the window's edge and its cards (the sidebar, the
+/// page, the side panels), and between neighbouring cards.
+pub(crate) const CARD_GAP: f32 = 8.0;
+/// The corners of the page and side panel cards, the sidebar's too.
+pub(crate) const CARD_RADIUS: f32 = 14.0;
+
+/// A side panel's frame: the window's colour around a card inset by
+/// [`CARD_GAP`], with 12 points between the card's edge and the contents.
+/// Paint the card with [`side_card`] first thing inside the panel.
+pub(crate) fn side_card_frame(palette: &theme::Palette) -> Frame {
+    let gap = CARD_GAP as i8;
+    Frame::new().fill(palette.window).inner_margin(Margin {
+        left: gap + 12,
+        right: gap + 12,
+        top: gap + 12,
+        bottom: gap + 12,
+    })
+}
+
+/// Paints a side panel's card behind its contents. `ui` is the panel's.
+pub(crate) fn side_card(ui: &egui::Ui, palette: &theme::Palette) {
+    ui.painter().rect(
+        ui.max_rect().expand(12.0),
+        CARD_RADIUS,
+        palette.panel,
+        Stroke::new(1.0, palette.outline),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// The page is a card like the sidebar: every edge beside the window or
+/// another card is rounded, and a cover's wash fills it to its corners
+/// instead of ending in a straight cut beside the sidebar.
 fn central(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let tint = page_tint(app);
+    let right_panel = app.show_queue_panel || app.show_lyrics_panel || app.show_friends_panel;
+    let gap = CARD_GAP as i8;
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(palette.window))
+        .frame(Frame::new().fill(palette.window).inner_margin(Margin {
+            left: gap,
+            right: if right_panel { 0 } else { gap },
+            top: gap,
+            bottom: gap,
+        }))
         .show(ui, |ui| {
             let rect = ui.max_rect();
+            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
             let page = app.page().clone();
             let overview = matches!(
                 page,
@@ -341,6 +382,11 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     slow_banner(app, ui);
                 }
             }
+            // A new page rises into place; going back or forward slides it
+            // in from the side travelled toward.
+            let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
+            let rise = ((1.0 - enter) * 10.0).round() as i8;
+            let slide = ((1.0 - enter) * 24.0 * from_side).round() as i8;
             let scroll = crate::autoscroll::show(
                 ui,
                 egui::ScrollArea::vertical()
@@ -348,11 +394,14 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     .auto_shrink([false, false]),
                 egui::Vec2b::new(false, true),
                 |ui| {
+                    if enter < 1.0 {
+                        ui.multiply_opacity(0.2 + 0.8 * enter);
+                    }
                     Frame::new()
                         .inner_margin(Margin {
-                            left: widgets::PAGE_PADDING as i8,
-                            right: widgets::PAGE_PADDING as i8,
-                            top: 4,
+                            left: widgets::PAGE_PADDING as i8 + slide,
+                            right: widgets::PAGE_PADDING as i8 - slide,
+                            top: 4 + rise,
                             bottom: 48,
                         })
                         .show(ui, |ui| {
@@ -387,7 +436,42 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(scrolled_id, scroll.state.offset.y));
             header_shadow(ui, scroll.inner_rect, scroll.state.offset.y, palette.dark);
+            widgets::round_corners(ui, rect, CARD_RADIUS, palette.window);
+            ui.painter().rect_stroke(
+                rect,
+                CARD_RADIUS,
+                Stroke::new(1.0, palette.outline),
+                egui::StrokeKind::Inside,
+            );
         });
+}
+
+/// How long a page takes to come in.
+const PAGE_ENTER: f32 = 0.32;
+
+/// The progress of the open page's entrance, and the side it comes from:
+/// 0 when it rises from below (a page opened anew), 1 from the right
+/// (forward), -1 from the left (back).
+fn page_entrance(ctx: &Context, page: &Page, history_index: usize) -> (f32, f32) {
+    let id = Id::new("page-entrance");
+    let key = page.encode();
+    let last = ctx.data(|data| data.get_temp::<(String, usize, f32)>(id));
+    let side = match &last {
+        Some((last_key, _, side)) if *last_key == key => *side,
+        Some((_, last_index, _)) => {
+            let side = match history_index.cmp(last_index) {
+                std::cmp::Ordering::Less => -1.0,
+                std::cmp::Ordering::Greater => 0.0,
+                std::cmp::Ordering::Equal => 0.0,
+            };
+            kit::motion::begin(ctx, id.with("transition"), PAGE_ENTER);
+            side
+        }
+        None => 0.0,
+    };
+    ctx.data_mut(|data| data.insert_temp(id, (key, history_index, side)));
+    let t = kit::motion::running(ctx, id.with("transition")).unwrap_or(1.0);
+    (t, side)
 }
 
 /// Where the "Why?" link of the slow-app banner leads.

@@ -1,6 +1,6 @@
 //! The words of the playing track, in a side panel that follows the song.
 
-use egui::{Align, Color32, Frame, Layout, Margin, Rect, Sense, UiBuilder, pos2, vec2};
+use egui::{Align, Color32, Frame, Layout, Rect, Sense, UiBuilder, pos2, vec2};
 
 use crate::app::App;
 use crate::i18n::{gettext, pgettext};
@@ -51,12 +51,9 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
         .default_size(app.settings.lyrics_width)
         .size_range(fit.range.clone())
         .show_separator_line(false)
-        .frame(
-            Frame::new()
-                .fill(palette.panel)
-                .inner_margin(Margin::symmetric(12, 12)),
-        );
+        .frame(super::side_card_frame(&palette));
     let response = panel.show(ui, |ui| {
+        super::side_card(ui, &palette);
         let window_controls = super::window_controls_reservation(
             ui.ctx(),
             app.show_queue_panel,

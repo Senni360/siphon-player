@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use egui::{Align, Frame, Layout, Margin, Rect, UiBuilder};
+use egui::{Align, Layout, Rect, UiBuilder};
 
 use crate::api::models::PlayableItem;
 use crate::app::App;
@@ -48,12 +48,9 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
         .default_size(app.settings.queue_width)
         .size_range(fit.range.clone())
         .show_separator_line(false)
-        .frame(
-            Frame::new()
-                .fill(palette.panel)
-                .inner_margin(Margin::symmetric(12, 12)),
-        );
+        .frame(super::side_card_frame(&palette));
     let response = panel.show(ui, |ui| {
+        super::side_card(ui, &palette);
         let window_controls = super::window_controls_reservation(
             ui.ctx(),
             app.show_queue_panel,

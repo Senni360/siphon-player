@@ -1085,7 +1085,16 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         app.actions.push(Action::ToggleShuffle);
     }
 
-    let mut cell = centered(ui, slot(widths[1]));
+    // Shuffle's state dot grows in under it when it turns on.
+    state_dot(ui, shuffle_button.rect, shuffle, &palette, "shuffle-dot");
+
+    // Previous and Next lean the way they skip when pressed.
+    let lean = |ui: &egui::Ui, name: &str, direction: f32| {
+        super::kit::motion::running(ui.ctx(), egui::Id::new(name))
+            .map_or(0.0, |t| super::kit::motion::nudge(t, direction))
+    };
+    let back = slot(widths[1]).translate(vec2(lean(ui, "previous-lean", -1.0), 0.0));
+    let mut cell = centered(ui, back);
     if theme::icon_button(
         &mut cell,
         Icon::SkipBackFilled,
@@ -1096,6 +1105,11 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
     )
     .clicked()
     {
+        super::kit::motion::begin(
+            ui.ctx(),
+            egui::Id::new("previous-lean"),
+            super::kit::motion::NUDGE,
+        );
         app.actions.push(Action::Previous);
     }
 
@@ -1136,7 +1150,8 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         }
     }
 
-    let mut cell = centered(ui, slot(widths[3]));
+    let forward = slot(widths[3]).translate(vec2(lean(ui, "next-lean", 1.0), 0.0));
+    let mut cell = centered(ui, forward);
     if theme::icon_button(
         &mut cell,
         Icon::SkipForwardFilled,
@@ -1147,6 +1162,11 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
     )
     .clicked()
     {
+        super::kit::motion::begin(
+            ui.ctx(),
+            egui::Id::new("next-lean"),
+            super::kit::motion::NUDGE,
+        );
         app.actions.push(Action::Next);
     }
 
@@ -1164,7 +1184,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         ),
     };
     let mut cell = centered(ui, slot(widths[4]));
-    if theme::icon_button(
+    let repeat_button = theme::icon_button(
         &mut cell,
         repeat_icon,
         17.0,
@@ -1175,9 +1195,15 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
             palette.accent_hover
         },
         &tooltip,
-    )
-    .clicked()
-    {
+    );
+    state_dot(
+        ui,
+        repeat_button.rect,
+        repeat != RepeatMode::Off,
+        &palette,
+        "repeat-dot",
+    );
+    if repeat_button.clicked() {
         app.actions.push(Action::CycleRepeat);
     }
 
@@ -1243,6 +1269,24 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         theme::regular(11.5),
         time_color,
     );
+}
+
+/// The small dot under a toggle that is on, growing in as it turns on and
+/// shrinking away as it turns off.
+fn state_dot(ui: &egui::Ui, button: Rect, on: bool, palette: &theme::Palette, name: &str) {
+    let t = super::kit::motion::toward(
+        ui.ctx(),
+        egui::Id::new(name),
+        on,
+        super::kit::motion::POPOVER,
+    );
+    if t > 0.0 {
+        ui.painter().circle_filled(
+            pos2(button.center().x, button.bottom() + 1.0),
+            2.0 * t,
+            palette.accent.gamma_multiply(t),
+        );
+    }
 }
 
 fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_right: f32) {

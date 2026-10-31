@@ -650,9 +650,11 @@ pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
                 .show(ui, |ui| {
                     ui.set_width(FLOATING_WIDTH - 16.0);
                     ui.set_height(rect.height() - 20.0);
-                    // The rows arrive just behind the panel's edge.
-                    ui.multiply_opacity(((open - 0.25) / 0.75).clamp(0.0, 1.0));
+                    // The sidebar comes out in steps: the card, then the
+                    // pages, then the library, then its playlists.
+                    ctx.data_mut(|data| data.insert_temp(reveal_id(), open));
                     contents(app, ui, None);
+                    ctx.data_mut(|data| data.remove::<f32>(reveal_id()));
                 });
         });
 }
@@ -1105,21 +1107,36 @@ fn nav_row(
     label: &str,
     active: bool,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
+    let (rect, response) =
+        ui.allocate_exact_size(vec2(ui.available_width(), NAV_ROW), Sense::click());
     if ui.is_rect_visible(rect) {
-        let color = if active || response.hovered() {
-            palette.text
-        } else {
-            palette.secondary
-        };
-        let icon_rect =
-            Rect::from_center_size(pos2(rect.left() + 22.0, rect.center().y), Vec2::splat(22.0));
-        icon.image(color, 22.0).paint_at(ui, icon_rect);
+        // Pointing lights the row and its label; pressing sinks the icon.
+        let hover = super::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("hover"),
+            response.hovered() && !active,
+            super::kit::motion::FEEDBACK,
+        );
+        if hover > 0.0 {
+            ui.painter()
+                .rect_filled(rect, 8.0, palette.surface_hover.gamma_multiply(hover));
+        }
+        let color = super::blend(
+            palette.secondary,
+            palette.text,
+            if active { 1.0 } else { hover },
+        );
+        let scale = super::kit::motion::press_scale(ui.ctx(), &response);
+        let icon_rect = Rect::from_center_size(
+            pos2(rect.left() + 20.0, rect.center().y),
+            Vec2::splat(18.0 * scale),
+        );
+        icon.image(color, 18.0).paint_at(ui, icon_rect);
         ui.painter().text(
-            pos2(rect.left() + 46.0, rect.center().y),
+            pos2(rect.left() + 40.0 + 2.0 * hover, rect.center().y),
             egui::Align2::LEFT_CENTER,
             label,
-            theme::bold(15.0),
+            theme::medium(14.0),
             color,
         );
     }
@@ -1172,6 +1189,40 @@ fn unread_badge(ui: &egui::Ui, palette: &Palette, row: Rect, count: usize) {
         ui.painter()
             .galley(center - galley.size() / 2.0, galley, palette.window);
     }
+}
+
+/// The height of a navigation row.
+const NAV_ROW: f32 = 36.0;
+
+/// The highlight behind the open page's navigation row, gliding from the
+/// row that was open to the new one. Painted into `slot`, reserved before
+/// the rows so it sits behind them.
+fn nav_highlight(
+    ui: &egui::Ui,
+    palette: &Palette,
+    slot: egui::layers::ShapeIdx,
+    active: Option<Rect>,
+) {
+    let id = egui::Id::new("sidebar-nav-highlight");
+    let ctx = ui.ctx();
+    let shown = super::kit::motion::toward(
+        ctx,
+        id.with("shown"),
+        active.is_some(),
+        super::kit::motion::FEEDBACK,
+    );
+    let Some(target) = active.or_else(|| ctx.data(|data| data.get_temp::<Rect>(id))) else {
+        return;
+    };
+    let top = super::kit::motion::glide(ctx, id.with("top"), target.top(), HIGHLIGHT_SLIDE);
+    let rect = Rect::from_min_size(pos2(target.left(), top), target.size());
+    if active.is_some() {
+        ctx.data_mut(|data| data.insert_temp(id, target));
+    }
+    ui.painter().set(
+        slot,
+        egui::Shape::rect_filled(rect, 8.0, palette.surface_active.gamma_multiply(shown)),
+    );
 }
 
 /// How long the open page's highlight takes to glide to a new row.
@@ -1364,31 +1415,58 @@ fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
 
 /// Draw Library navigation, shelf controls, search, and the visible rows.
 /// Playlist ownership and text filters are applied before ordering and pin placement.
+/// How far the floating sidebar has come out, while it does.
+fn reveal_id() -> egui::Id {
+    egui::Id::new("sidebar-reveal")
+}
+
+/// How far one step of the sidebar coming out has gone: each step starts
+/// when the slide is `start` of the way out and takes the next 45%.
+fn reveal_step(reveal: f32, start: f32) -> f32 {
+    super::kit::motion::ease(((reveal - start) / 0.45).clamp(0.0, 1.0))
+}
+
+/// Starts a step of the sidebar coming out: it fades in and drops the
+/// last 8 points into place.
+fn begin_step(ui: &mut egui::Ui, reveal: f32, start: f32) {
+    let step = reveal_step(reveal, start);
+    ui.set_opacity(step);
+    if step < 1.0 {
+        ui.add_space((1.0 - step) * 8.0);
+    }
+}
+
 fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     let palette = app.palette;
     let page = app.page().clone();
     let locale = app.locale;
+    let reveal = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(reveal_id()))
+        .unwrap_or(1.0);
+    begin_step(ui, reveal, 0.2);
     ui.add_space(4.0);
-    if nav_row(
+    let spacing = ui.spacing().item_spacing.y;
+    ui.spacing_mut().item_spacing.y = 2.0;
+    let highlight = ui.painter().add(egui::Shape::Noop);
+    let home = nav_row(
         ui,
         &palette,
         Icon::House,
         &gettext(locale, "Home"),
         page == Page::Home,
-    )
-    .clicked()
-    {
+    );
+    if home.clicked() {
         app.actions.push(Action::Open(Page::Home));
     }
-    if nav_row(
+    let search = nav_row(
         ui,
         &palette,
         Icon::Search,
         &gettext(locale, "Search"),
         page == Page::Search,
-    )
-    .clicked()
-    {
+    );
+    if search.clicked() {
         app.actions.push(Action::FocusSearch);
     }
     let unread = super::group::unread(app, ui.ctx());
@@ -1403,6 +1481,15 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     if group.clicked() {
         app.actions.push(Action::Open(Page::Group));
     }
+    let active = match page {
+        Page::Home => Some(home.rect),
+        Page::Search => Some(search.rect),
+        Page::Group => Some(group.rect),
+        _ => None,
+    };
+    nav_highlight(ui, &palette, highlight, active);
+    ui.spacing_mut().item_spacing.y = spacing;
+    begin_step(ui, reveal, 0.38);
     ui.add_space(10.0);
     ui.painter().hline(
         ui.max_rect().x_range().shrink(4.0),
@@ -1749,6 +1836,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     let context_playing = app.believed_playing();
     let current_page = app.page().clone();
 
+    begin_step(ui, reveal, 0.55);
     crate::autoscroll::show(
         ui,
         egui::ScrollArea::vertical()
