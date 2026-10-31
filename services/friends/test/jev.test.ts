@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { GATEWAY_ENDPOINT, TYPESAFE_ENDPOINT, createJev, titleReadings, type Ask, type Question } from '../src/jev.ts';
-import { createService } from '../src/service.ts';
-import { MemoryStorage } from '../src/storage.ts';
+import { GATEWAY_ENDPOINT, TYPESAFE_ENDPOINT, createJev, titleReadings, type Ask, type Question } from '../src/jev.js';
+import { createService } from '../src/service.js';
+import { MemoryStorage } from '../src/storage.js';
 
 const never = new AbortController().signal;
 const questions: Record<string, Question> = {

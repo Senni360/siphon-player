@@ -1,9 +1,9 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.ts';
-import { httpsUrl, sourceUrl } from './urls.ts';
-import type { Payload, Post, State, Storage, User } from './storage.ts';
-import { describe, noJev, titleReadings, type Ask, type Track } from './jev.ts';
+import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.js';
+import { httpsUrl, sourceUrl } from './urls.js';
+import type { Payload, Post, State, Storage, User } from './storage.js';
+import { describe, noJev, titleReadings, type Ask, type Track } from './jev.js';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 class HttpError extends Error { constructor(public status: number, message: string, public retryAfter?: number) { super(message); } }

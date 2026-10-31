@@ -1,4 +1,4 @@
-import { httpsUrl, sourceUrl } from './urls.ts';
+import { httpsUrl, sourceUrl } from './urls.js';
 
 export interface User { user_id: string; display_name: string; secret_hash: string }
 export interface Payload {

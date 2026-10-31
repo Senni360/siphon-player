@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createService, hash } from '../src/service.ts';
-import { MAX_STATE_BYTES, MemoryStorage, RedisStorage, type Storage, type State, type Post } from '../src/storage.ts';
+import { createService, hash } from '../src/service.js';
+import { MAX_STATE_BYTES, MemoryStorage, RedisStorage, type Storage, type State, type Post } from '../src/storage.js';
 
 const invite = 'bounded-stress-fixture-invite';
 const payload = { url: 'https://soundcloud.com/fixture/private/s-fixture?secret_token=s-fixture', source: 'soundcloud', title: 'Fixture', artists: ['Fixture artist'], artwork_url: null, duration_ms: 123000, note: 'Fixture only' };

@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
-import { configuredStorage } from './storage.ts';
-import { createService } from './service.ts';
-import { createJev } from './jev.ts';
+import { configuredStorage } from './storage.js';
+import { createService } from './service.js';
+import { createJev } from './jev.js';
 
 export function createHandler(env: NodeJS.ProcessEnv) {
   let service: ReturnType<typeof createService> | undefined;

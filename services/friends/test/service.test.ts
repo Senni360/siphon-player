@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createService, hash, validateUrl } from '../src/service.ts';
-import { MemoryStorage, RedisStorage, configuredStorage, type Storage } from '../src/storage.ts';
+import { createService, hash, validateUrl } from '../src/service.js';
+import { MemoryStorage, RedisStorage, configuredStorage, type Storage } from '../src/storage.js';
 
 const invite = 'a-long-test-invite';
 const post = { url: 'https://soundcloud.com/friend/song/s-private?secret_token=s-private', source: 'soundcloud', title: 'Beat', artists: ['Friend'], artwork_url: null, duration_ms: 12345, note: 'Listen to this' };

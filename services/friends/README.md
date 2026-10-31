@@ -39,7 +39,9 @@ cargo test --locked --features demo friends::tests::local_service_round_trip -- 
 
 1. Create a Vercel project with **Root Directory `services/friends`**, Framework
    Preset **Other**, Node.js **24.x**, no build command and no output directory.
-   `api/[...path].ts` is the Node Function for all `/api/*` routes.
+   `api/index.ts` is the Node Function; `vercel.json` rewrites every `/api/*`
+   route to it. Relative imports name `.js`, which TypeScript resolves to the
+   `.ts` sources, because Vercel compiles each file on its own.
 2. Connect an Upstash Redis database through the Vercel integration. Confirm the
    project environment contains a matching REST URL and read/write token pair.
 3. Set `SIPHON_FRIENDS_INVITE_CODE` to a randomly generated group invite (12 to

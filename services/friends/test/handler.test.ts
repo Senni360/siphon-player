@@ -5,7 +5,7 @@ import type { AddressInfo } from 'node:net';
 
 test('Node HTTP adapter handles streaming and pre-parsed bodies through a complete local lifecycle', async t => {
   const invite = 'local-http-test-invite';
-  const { createHandler } = await import('../src/handler.ts');
+  const { createHandler } = await import('../src/handler.js');
   const handler = createHandler({ SIPHON_FRIENDS_INVITE_CODE: invite });
   const server = createServer(async (req, res) => {
     if (req.headers['x-test-parsed'] === 'buffer') {
@@ -50,7 +50,7 @@ test('Node HTTP adapter handles streaming and pre-parsed bodies through a comple
 });
 
 test('disconnecting a Node HTTP client aborts its pending Redis operation', { timeout: 3000 }, async t => {
-  const { createHandler } = await import('../src/handler.ts');
+  const { createHandler } = await import('../src/handler.js');
   const handler = createHandler({
     SIPHON_FRIENDS_INVITE_CODE: 'disconnect-fixture-invite',
     KV_REST_API_URL: 'https://redis.invalid', KV_REST_API_TOKEN: 'fixture-token',
