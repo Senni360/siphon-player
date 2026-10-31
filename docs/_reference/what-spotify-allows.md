@@ -198,6 +198,15 @@ audio key, nothing in Siphon can fix it; see
 [Spotify refused the audio key](/troubleshooting/#audio-key). The patches are listed in
 `Cargo.toml` and dropped as librespot merges them.
 
+## Optional Soloist playback
+
+[Spotify Soloist](soloist.md) is available from Settings for Spotify-only
+playback. Spotify publishes it for Windows x64, Apple Silicon Macs and Linux.
+Each listener supplies their own key and downloads the player from Spotify;
+Siphon does not redistribute it. It supports lossless playback, but does not
+report the delivered format. Mixed playlists and external sources use the
+built-in player. Soloist does not provide full queue editing or Siphon's EQ.
+
 ## Not available
 
 The Web API and librespot do not provide these features:
@@ -219,16 +228,9 @@ The Web API and librespot do not provide these features:
 - **Spotify DJ.** Its special playlist context does not expose playable tracks
   to librespot, so Siphon leaves its card out of Made for you. See
   [librespot issue #1604](https://github.com/librespot-org/librespot/issues/1604).
-- **Lossless audio.** librespot does not receive lossless streams. Siphon
-  will reconsider this if librespot gains lawful support, but it will not
-  bypass Spotify's DRM.
-- **Soloist as the player.** Spotify's Soloist plays lossless and works with
-  Spotify Connect, but Spotify ships it only for Linux and does not allow apps
-  to bundle it. Each listener would need their own developer key and pairing,
-  builds stop working after 90 days, and it has no API for the library,
-  playlists or search, and no way to feed the equalizer and visualisers.
-  Siphon will reconsider it if Spotify offers a supported desktop path.
-  See [issue #965](https://github.com/crmne/spotifast/issues/965).
+- **Lossless audio.** The built-in librespot player does not receive lossless
+  streams. The optional Soloist player supports them through Spotify's
+  official playback engine; no delivered-format indicator is available.
 - **Local files from Spotify's Local Files playlist.** librespot cannot play
   that playlist; add the songs to another playlist first. Local files on other
   computers or phones are not shared either: Spotify keeps only their names.

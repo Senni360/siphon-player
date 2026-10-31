@@ -32,17 +32,19 @@ pub enum Slot {
     Proxy,
     SoundCloud,
     Friends,
+    Soloist,
 }
 
 impl Slot {
     pub const SPOTIFY: [Self; 3] = [Self::Shared, Self::Personal, Self::Playback];
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Shared,
         Self::Personal,
         Self::Playback,
         Self::Proxy,
         Self::SoundCloud,
         Self::Friends,
+        Self::Soloist,
     ];
     pub(crate) fn index(self) -> usize {
         self as usize
@@ -55,6 +57,7 @@ impl Slot {
             Self::Proxy => "proxy-password",
             Self::SoundCloud => "soundcloud-session",
             Self::Friends => "friends-session",
+            Self::Soloist => "soloist-key",
         }
     }
 }
@@ -65,6 +68,7 @@ pub enum Grant {
     Web(StoredToken),
     Playback(Credentials),
     Proxy(ProxyPassword),
+    Soloist(crate::soloist::Key),
 }
 
 /// No Debug implementation: the password is usable, and the username is private.
@@ -107,6 +111,7 @@ impl Grant {
                     && !credentials.auth_data.is_empty()
             }
             (Slot::Proxy, Self::Proxy(password)) => password.valid(),
+            (Slot::Soloist, Self::Soloist(key)) => key.valid(),
             _ => false,
         }
     }
@@ -827,7 +832,7 @@ impl Store {
 
     pub fn revoke_spotify(&self) -> Result<(), Error> {
         let mut error = None;
-        for slot in Slot::SPOTIFY {
+        for slot in Slot::SPOTIFY.into_iter().chain([Slot::Soloist]) {
             if let Err(failure) = self.revoke(slot) {
                 error = Some(failure);
             }
@@ -877,7 +882,7 @@ impl Store {
     }
 
     fn legacy_paths(&self, slot: Slot) -> Vec<PathBuf> {
-        if matches!(slot, Slot::SoundCloud | Slot::Friends) {
+        if matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::Soloist) {
             return Vec::new();
         }
         if slot == Slot::Proxy {
@@ -892,6 +897,7 @@ impl Store {
             Slot::Proxy => unreachable!("proxy legacy paths handled above"),
             Slot::SoundCloud => unreachable!("SoundCloud has no legacy plaintext grant"),
             Slot::Friends => unreachable!("Friends has no legacy plaintext grant"),
+            Slot::Soloist => unreachable!("Soloist has no legacy files"),
         };
         let mut paths = vec![path.clone(), path.with_extension("json.tmp")];
         if slot != Slot::Playback {
@@ -1524,8 +1530,16 @@ mod tests {
             web("personal-client"),
             playback(),
             proxy_password(),
+            Grant::Soloist(crate::soloist::Key {
+                account: "dummy-account".into(),
+                value: "dummy-key".into(),
+            }),
         ];
-        for (slot, grant) in Slot::ALL.into_iter().zip(&grants) {
+        for (slot, grant) in Slot::ALL
+            .into_iter()
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .zip(&grants)
+        {
             old.store.lease(slot).save(grant.clone()).await.unwrap();
         }
         old.store
@@ -1549,7 +1563,11 @@ mod tests {
                 legacy: Backend(old.fake.clone()),
             }),
         );
-        for (slot, grant) in Slot::ALL.into_iter().zip(grants) {
+        for (slot, grant) in Slot::ALL
+            .into_iter()
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .zip(grants)
+        {
             assert!(store.lease(slot).load().await.unwrap().grant == Some(grant));
         }
         assert_eq!(
@@ -1762,6 +1780,7 @@ mod tests {
             Grant::Web(token) => serde_json::to_vec(token).unwrap(),
             Grant::Playback(credentials) => serde_json::to_vec(credentials).unwrap(),
             Grant::Proxy(password) => password.password.as_bytes().to_vec(),
+            Grant::Soloist(_) => panic!("Soloist has no legacy format"),
         };
         std::fs::write(path, bytes).unwrap();
     }
@@ -2127,8 +2146,16 @@ mod tests {
             web("dummy-personal-client"),
             playback(),
             proxy_password(),
+            Grant::Soloist(crate::soloist::Key {
+                account: "dummy-account".into(),
+                value: "dummy-soloist-key".into(),
+            }),
         ];
-        for (slot, grant) in Slot::ALL.into_iter().zip(grants.iter()) {
+        for (slot, grant) in Slot::ALL
+            .into_iter()
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .zip(grants.iter())
+        {
             store.lease(slot).save(grant.clone()).await.unwrap();
         }
         let restarted = Store::new(f.dirs.clone());
@@ -2141,7 +2168,11 @@ mod tests {
                 .as_deref(),
             Some(b"dummy-soundcloud-session-token".as_slice())
         );
-        for (slot, grant) in Slot::ALL.into_iter().zip(grants) {
+        for (slot, grant) in Slot::ALL
+            .into_iter()
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .zip(grants)
+        {
             assert!(restarted.lease(slot).load().await.unwrap().grant == Some(grant));
         }
         store.revoke_spotify().unwrap();
@@ -2251,13 +2282,25 @@ mod tests {
             web("dummy-personal-client"),
             playback(),
             proxy_password(),
+            Grant::Soloist(crate::soloist::Key {
+                account: "dummy-account".into(),
+                value: "dummy-soloist-key".into(),
+            }),
         ];
-        for (slot, grant) in Slot::ALL.into_iter().zip(grants.iter()) {
+        for (slot, grant) in Slot::ALL
+            .into_iter()
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .zip(grants.iter())
+        {
             store.lease(slot).save(grant.clone()).await.unwrap();
         }
         assert!(f.fake.lock().unwrap().values.is_empty());
         let restarted = with_sealed_copy(&f);
-        for (slot, grant) in Slot::ALL.into_iter().zip(grants) {
+        for (slot, grant) in Slot::ALL
+            .into_iter()
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .zip(grants)
+        {
             let loaded = restarted.lease(slot).load().await.unwrap();
             assert!(loaded.grant == Some(grant));
             assert_eq!(loaded.warning, None);

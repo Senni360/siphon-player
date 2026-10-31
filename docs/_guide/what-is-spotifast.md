@@ -67,7 +67,8 @@ Siphon has a limited scope:
 - Setup asks for two Spotify approvals: one to access your library, another
   to play music on this computer. [How it connects](/how-it-connects/)
   explains why.
-- **Spotify Lossless is not available.** Playback supports up to 320 kbps.
+- **The built-in player supports up to 320 kbps.** Optional
+  [Soloist](/soloist/) supports lossless Spotify playback.
   The playback software Siphon uses, librespot, cannot play Spotify's
   protected lossless audio. Siphon will reconsider this if
   [librespot adds lawful support](https://github.com/librespot-org/librespot/issues/1583).

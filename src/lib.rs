@@ -63,6 +63,7 @@ pub mod shared_media;
 pub mod single_instance;
 pub mod sink;
 pub mod skin;
+pub mod soloist;
 pub mod sonos;
 pub mod soundcloud;
 pub mod system_fonts;

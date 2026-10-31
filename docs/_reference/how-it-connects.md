@@ -806,3 +806,12 @@ session's own authorization. Spotify refuses the change if the playlist
 changed since. The request is sent once, never retried, and has a 20-second
 deadline. A row that is no longer
 in the playlist removes nothing; the playlist reloads and shows the error.
+
+## Optional Soloist player
+
+Enabling [Soloist](soloist.md) downloads directly from
+`soloist-builds.spotifycdn.com` over HTTPS. The owned child process streams
+from Spotify and exposes a loopback-only WebSocket control API. Its device
+must match exactly one device in the signed-in account before control begins.
+Its own streaming connections do not use Siphon's proxy setting. Signing out
+stops it, revokes its key and removes its account pairing files.

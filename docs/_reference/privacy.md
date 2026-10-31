@@ -38,3 +38,11 @@ no analytics.
 ## Questions
 
 Ask on [GitHub](https://github.com/crmne/spotifast/issues).
+
+## Optional Soloist
+
+Soloist is separate Spotify software with its own network traffic and privacy
+policy. It is downloaded only when enabled with a personal key. The key is
+stored in the protected system credential store. Spotify currently requires
+it as a process argument; Siphon does not log the command or child output.
+Its control socket is loopback-only. See [Soloist](soloist.md).

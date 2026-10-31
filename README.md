@@ -319,3 +319,10 @@ source metadata and supported-error states are documented in
 helper and live-playback validation. Local likes wait for pending saves when an
 account is restored; failed saves keep current edits visible and can be retried
 by reopening YouTube Likes.
+
+## Optional Spotify Soloist
+
+Settings → Spotify Soloist installs Spotify's official player after you supply
+your personal Soloist key. Pair once in the Spotify app. Spotify-only playback
+can use Soloist; mixed playlists, SoundCloud and YouTube use the built-in player.
+See [setup, updates and limitations](docs/_reference/soloist.md).

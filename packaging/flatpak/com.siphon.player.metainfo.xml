@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.15.0-pre.2" date="2026-10-31" type="development">
+      <description><p>Add optional Spotify Soloist playback with guided setup and protected key storage.</p></description>
+    </release>
     <release version="0.15.0-pre.1" date="2026-10-30" type="development">
       <url>https://github.com/Senni360/siphon-player/releases/tag/v0.15.0-pre.1</url>
     </release>

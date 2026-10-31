@@ -16,6 +16,8 @@ project.
 Some boundaries come from Spotify or from upstream libraries:
 
 - Local playback requires Spotify Premium because librespot requires it.
+- Optional Soloist playback uses Spotify's separately downloaded official
+  player and each listener's own key. It is never bundled or mirrored.
 - Spotify Lossless is not available through librespot. Siphon will
   reconsider it if librespot gains lawful upstream support; proposals that
   depend on bypassing Spotify's DRM are out of scope.

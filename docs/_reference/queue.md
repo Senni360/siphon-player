@@ -191,3 +191,11 @@ counts once, and the notification reports only the rows actually added.
     rewrites the queue by clearing it and re-adding the rest, so it is
     offered only while this computer is the active player. *Next up* rows
     have no such entry; they play from the current context.
+
+## Optional Soloist
+
+Spotify-only Soloist playback uses the existing remote queue rules: additions
+and reads work; local queue removal, reordering and Play next are unavailable.
+Starting mixed-source playback stops Soloist and restores the existing built-in
+queue path. Enabling Soloist while a mixed queue is active is refused without
+changing that queue. Its saved key is retained for later use.

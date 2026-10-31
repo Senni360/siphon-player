@@ -26,6 +26,7 @@ pub mod search;
 pub mod settings;
 pub mod show;
 pub mod sidebar;
+mod soloist;
 pub(crate) mod soundcloud;
 pub mod topbar;
 mod update;

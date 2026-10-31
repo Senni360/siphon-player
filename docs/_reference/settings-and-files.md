@@ -811,3 +811,12 @@ For a manual installation, remove only
 Packaged launches recreate missing integration files. To disable the hook
 while keeping the package installed, leave that hook file empty instead;
 existing user files are preserved. Selecting Dark or Light is sufficient to stop following Omarchy's colors.
+
+## Spotify Soloist
+
+The optional `soloist_enabled` preference defaults to false. Setup lives in
+Settings → Spotify Soloist. The personal key uses the protected credential
+store; pairing/cache files live under `soloist/accounts/` in the state directory,
+and downloaded executables under `soloist/builds/`. Disabling keeps the key
+and pairing; Spotify sign-out removes them. Builds renew while inactive.
+See [Soloist](soloist.md) for details.

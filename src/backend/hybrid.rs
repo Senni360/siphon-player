@@ -330,6 +330,14 @@ impl Worker {
     pub(super) async fn hybrid_command(&mut self, command: HybridCommand) {
         match command {
             HybridCommand::Claim => {
+                // Also enforce output ownership for restored queues and runtime
+                // callers, independently of the UI's explicit handoff.
+                if self.soloist.is_some() {
+                    self.stop_soloist().await;
+                    self.emit(Event::Soloist(crate::soloist::Update::Status(
+                        crate::soloist::Status::Off,
+                    )));
+                }
                 log::info!(
                     "Playback ownership: hybrid; local_engine_ready={}",
                     self.engine.is_some()

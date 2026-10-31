@@ -883,6 +883,15 @@ pub enum Command {
         generation: u64,
         cursor: Option<String>,
     },
+    Soloist {
+        enabled: bool,
+        key: Option<String>,
+    },
+    SoloistDevice(Option<crate::api::models::Device>),
+    SoloistUpdate {
+        generation: u64,
+        update: crate::soloist::Update,
+    },
     OpenThemesFolder,
     /// Read or change the login registration, off the UI thread: it reads
     /// and writes a file, the registry or D-Bus, and the Flatpak portal may
@@ -1220,6 +1229,7 @@ pub enum Event {
     },
     SoundCloudLibrary(soundcloud_library::Response),
     SoundCloudSaveFailed,
+    Soloist(crate::soloist::Update),
     /// The folder picked in the local files dialog; `None` when cancelled.
     LocalFilesFolderChosen(Option<std::path::PathBuf>),
     /// The songs in `folder`, by the `spotify:local:` URIs they play for.
@@ -2112,6 +2122,8 @@ struct Worker {
     download_jobs: download_jobs::Jobs,
     track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
+    soloist: Option<crate::soloist::Handle>,
+    soloist_generation: u64,
     dirs: AppDirs,
     credentials: CredentialStore,
     web_tokens: [Option<Arc<WebTokens>>; 2],
@@ -2242,6 +2254,8 @@ impl Worker {
             friends_feed: None,
             download_jobs: download_jobs::Jobs::default(),
             track_details: track_details::Jobs::default(),
+            soloist: None,
+            soloist_generation: 0,
             #[cfg(not(test))]
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
@@ -2579,6 +2593,58 @@ impl Worker {
                         self.soundcloud_stream(tag, preload, refresh, result).await;
                     }
                 }
+                Command::Soloist { enabled, key } => {
+                    if enabled && self.hybrid.owned {
+                        self.emit(Event::Soloist(crate::soloist::Update::Status(
+                            crate::soloist::Status::Failed("Mixed playlists use the built-in player. Start a Spotify-only collection before enabling Soloist.".into()),
+                        )));
+                        continue;
+                    }
+                    if enabled
+                        && key.is_none()
+                        && self.soloist.as_ref().is_some_and(|soloist| {
+                            soloist.is_running()
+                                && self
+                                    .api
+                                    .account()
+                                    .as_ref()
+                                    .is_some_and(|account| account.as_str() == soloist.account)
+                        })
+                    {
+                        continue;
+                    }
+                    self.stop_soloist().await;
+                    if !enabled {
+                        self.emit(Event::Soloist(crate::soloist::Update::Status(
+                            crate::soloist::Status::Off,
+                        )));
+                    }
+                    if enabled && let Some(account) = self.api.account() {
+                        let commands = self.commands.clone();
+                        let generation = self.soloist_generation;
+                        let notify = Arc::new(move |update| {
+                            let _ = commands.send(Command::SoloistUpdate { generation, update });
+                        });
+                        self.soloist = Some(crate::soloist::Handle::start(
+                            self.dirs.clone(),
+                            account.as_str().to_owned(),
+                            key,
+                            self.credentials.lease(CredentialSlot::Soloist),
+                            self.http.clone(),
+                            notify,
+                        ));
+                    }
+                }
+                Command::SoloistDevice(device) => {
+                    if let Some(soloist) = &self.soloist {
+                        soloist.client.bind(device);
+                    }
+                }
+                Command::SoloistUpdate { generation, update } => {
+                    if generation == self.soloist_generation {
+                        self.emit(Event::Soloist(update));
+                    }
+                }
                 Command::ListOutputDevices => {
                     let events = self.events.clone();
                     let waker = self.waker.clone();
@@ -2761,7 +2827,11 @@ impl Worker {
                     if self.hybrid.owned {
                         self.hybrid_command(HybridCommand::Release).await;
                     }
+                    self.stop_soloist().await;
                     self.sign_out();
+                    if crate::soloist::forget(&self.dirs).await.is_err() {
+                        self.emit(Event::Error("Could not remove Soloist pairing data. Check the application state directory's permissions.".into()));
+                    }
                     // The account caches go in command order, so nothing a
                     // sign-in after this stores goes with them. This loop
                     // writes the snapshots, so they go now. The playlist
@@ -3457,8 +3527,16 @@ impl Worker {
             engine.shutdown();
         }
         self.stop_kept_player();
+        self.stop_soloist().await;
         drop(cache_writes);
         let _ = cache_writer.await;
+    }
+
+    async fn stop_soloist(&mut self) {
+        self.soloist_generation += 1;
+        if let Some(soloist) = self.soloist.take() {
+            soloist.stop().await;
+        }
     }
 
     // ---- Web API sign-in --------------------------------------------------
@@ -3504,7 +3582,7 @@ impl Worker {
         lease: CredentialLease,
         result: Result<crate::credentials::Loaded, crate::credentials::Error>,
     ) {
-        if slot == CredentialSlot::Proxy {
+        if matches!(slot, CredentialSlot::Proxy | CredentialSlot::Soloist) {
             return;
         }
         if !lease.current() {
@@ -3557,7 +3635,7 @@ impl Worker {
                     }
                 }
             }
-            None | Some(StoredGrant::Proxy(_)) => {}
+            None | Some(StoredGrant::Proxy(_) | StoredGrant::Soloist(_)) => {}
         }
         if slot == CredentialSlot::Playback {
             self.start_prerelease();
@@ -4032,7 +4110,10 @@ impl Worker {
         self.authorizing_source = None;
         self.pending_authorization = None;
         self.api.clear_all();
-        for slot in CredentialSlot::SPOTIFY {
+        for slot in CredentialSlot::SPOTIFY
+            .into_iter()
+            .chain([CredentialSlot::Soloist])
+        {
             self.delete_stored_grant(slot);
         }
         self.emit(Event::Playback(LocalPlayback::Unavailable));
@@ -5406,6 +5487,16 @@ impl Worker {
             ));
             return tokio::spawn(async {}).abort_handle();
         }
+        let soloist = self
+            .soloist
+            .as_ref()
+            .filter(|handle| {
+                self.api
+                    .account()
+                    .as_ref()
+                    .is_some_and(|account| account.as_str() == handle.account)
+            })
+            .map(|handle| handle.client.clone());
         let api = Arc::clone(&self.api);
         let made_for_you = Arc::clone(&self.made_for_you);
         let new_releases = Arc::clone(&self.new_releases);
@@ -5426,6 +5517,9 @@ impl Worker {
             let (response, expired) = tokio::select! {
                 _ = session.changed() => return,
                 result = async {
+                    if let Some(soloist) = soloist && let Some(response) = soloist.dispatch(&request).await {
+                        return (response, Vec::new());
+                    }
                     handle(&api, &made_for_you, &new_releases, &connect, engine.as_deref(), &background_session, request).await
                 } => result,
             };

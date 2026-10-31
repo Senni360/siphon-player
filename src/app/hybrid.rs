@@ -608,6 +608,21 @@ impl App {
     }
 
     fn enter_hybrid(&mut self) {
+        // Soloist cannot consume this app's mixed-source queue. Stop its child
+        // before claiming the shared local output, so two players never overlap.
+        if self.settings.soloist_enabled {
+            self.settings.soloist_enabled = false;
+            self.mark_settings_dirty();
+            self.soloist_select = false;
+            self.soloist_key.clear();
+            self.clear_soloist_target();
+            self.soloist_status = crate::soloist::Status::Off;
+            self.backend.send(Command::Soloist {
+                enabled: false,
+                key: None,
+            });
+            self.toast("Mixed playback uses the built-in player. Your Soloist key is saved.");
+        }
         self.backend.send(Command::Hybrid(HybridCommand::Claim));
         self.playback_owner = PlaybackOwner::Hybrid;
         self.selected_device = None;
