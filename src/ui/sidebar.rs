@@ -2733,10 +2733,12 @@ pub fn liked_cover(ui: &egui::Ui, rect: Rect, radius: f32) {
         .unwrap_or_else(|| {
             let size = 64;
             let lerp = |a: u8, b: u8, t: f32| (a as f32 + (b as f32 - a as f32) * t) as u8;
-            let top_left = [0x45, 0x0a, 0xf5];
-            let top_right = [0x6a, 0x3a, 0xe8];
-            let bottom_left = [0x8e, 0x9f, 0xe5];
-            let bottom_right = [0xc4, 0xef, 0xd9];
+            // A small tone shift inside one graphite, not a purple-to-mint
+            // gradient: the heart carries the meaning, the chrome stays quiet.
+            let top_left = [0x3c, 0x3c, 0x42];
+            let top_right = [0x30, 0x30, 0x35];
+            let bottom_left = [0x26, 0x26, 0x2b];
+            let bottom_right = [0x1b, 0x1b, 0x1f];
             let pixels = (0..size)
                 .flat_map(|y| {
                     let y = y as f32 / (size - 1) as f32;

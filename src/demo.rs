@@ -6824,7 +6824,7 @@ mod tests {
         // #given the dated demo playlist
         let (painted, _) = render("dated-mix", None);
         assert!(
-            left_of(&painted, "DATE ADDED").is_some(),
+            left_of(&painted, "Date added").is_some(),
             "a dated playlist has the column"
         );
 
@@ -6832,8 +6832,8 @@ mod tests {
         let (painted, first_album) = render("undated-mix", Some("undated-mix"));
 
         // #then there is no column, and the album names line up with their heading
-        assert_eq!(left_of(&painted, "DATE ADDED"), None);
-        let heading = left_of(&painted, "ALBUM").expect("the album heading");
+        assert_eq!(left_of(&painted, "Date added"), None);
+        let heading = left_of(&painted, "Album").expect("the album heading");
         let album = left_of(&painted, &first_album).expect("the first song's album");
         assert!(
             (heading - album).abs() < 1.0,

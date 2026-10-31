@@ -1088,7 +1088,8 @@ pub fn link(
 }
 
 pub fn section_title(ui: &mut egui::Ui, palette: &Palette, label: &str) -> Response {
-    text(ui, label, bold(17.0), palette.text)
+    // Hierarchy from size, not weight: 600 at most.
+    text(ui, label, semibold(17.0), palette.text)
 }
 
 pub fn subtle(ui: &mut egui::Ui, palette: &Palette, label: &str) -> Response {

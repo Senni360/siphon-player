@@ -2715,6 +2715,34 @@ pub fn explicit_badge(ui: &mut Ui, palette: &Palette) {
     );
 }
 
+/// A label in Title Case in sentence case, keeping acronyms: "Collaborative
+/// Playlist" reads "Collaborative playlist", "EP" stays "EP".
+pub fn kind_case(text: &str) -> String {
+    text.split(' ')
+        .enumerate()
+        .map(|(index, word)| {
+            let acronym = word.chars().count() > 1 && word.chars().all(|c| !c.is_lowercase());
+            if index == 0 || acronym {
+                word.to_owned()
+            } else {
+                word.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A heading written in capitals, in sentence case: "ADDED BY" reads
+/// "Added by". Column headings stay quiet labels, not shouted ones.
+pub fn sentence_case(text: &str) -> String {
+    let lower = text.to_lowercase();
+    let mut chars = lower.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// The header row above a track table.
 /// The column headings above a track table. Answers with the heading that
 /// was clicked, so the table can sort by it.
@@ -2854,7 +2882,7 @@ pub fn table_header(
     heading(
         ui,
         x,
-        &pgettext(locale, "column heading", "TITLE"),
+        &sentence_case(&pgettext(locale, "column heading", "TITLE")),
         SortColumn::Title,
     );
     let medium = width > 560.0;
@@ -2890,7 +2918,7 @@ pub fn table_header(
         heading(
             ui,
             cx,
-            &pgettext(locale, "column heading", "ALBUM"),
+            &sentence_case(&pgettext(locale, "column heading", "ALBUM")),
             SortColumn::Album,
         );
         cx += album_width;
@@ -2899,7 +2927,7 @@ pub fn table_header(
         heading(
             ui,
             cx,
-            &pgettext(locale, "column heading", "ADDED BY"),
+            &sentence_case(&pgettext(locale, "column heading", "ADDED BY")),
             SortColumn::AddedBy,
         );
         cx += added_by_width;
@@ -2908,7 +2936,7 @@ pub fn table_header(
         heading(
             ui,
             cx,
-            &pgettext(locale, "column heading", "DATE ADDED"),
+            &sentence_case(&pgettext(locale, "column heading", "DATE ADDED")),
             SortColumn::Added,
         );
         cx += added_width;
@@ -2918,7 +2946,7 @@ pub fn table_header(
         ui.painter().text(
             pos2(cx, rect.center().y),
             egui::Align2::LEFT_CENTER,
-            pgettext(locale, "column heading", "PLAYS"),
+            sentence_case(&pgettext(locale, "column heading", "PLAYS")),
             font.clone(),
             color,
         );
