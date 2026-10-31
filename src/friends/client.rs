@@ -6,8 +6,9 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::api::models::PlayableItem;
 use crate::http::Http;
 
-/// Deployment owner replaces this, or supplies SIPHON_FRIENDS_URL including /api.
-pub const DEFAULT_BASE_URL: &str = "https://siphon-friends.example.invalid/api";
+/// Siphon's group, on the owner's Vercel deployment. SIPHON_FRIENDS_URL,
+/// including /api, points a copy at another deployment or a local runner.
+pub const DEFAULT_BASE_URL: &str = "https://siphon-friends.vercel.app/api";
 
 // No Debug: this is the one-time bearer credential, bound to its origin.
 #[derive(Clone, Serialize, Deserialize)]
@@ -192,9 +193,6 @@ pub struct Client {
 impl Client {
     pub fn configured(http: Http) -> Result<Self, String> {
         let base = std::env::var("SIPHON_FRIENDS_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
-        if base == DEFAULT_BASE_URL {
-            return Err("The Friends service has not been configured.".into());
-        }
         Self::new(http, &base)
     }
 

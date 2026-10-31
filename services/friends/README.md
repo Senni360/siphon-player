@@ -2,7 +2,8 @@
 
 Private group feed for Siphon Player. A dependency-free Node service in TypeScript,
 with Vercel Node Functions and an optional Upstash Redis REST adapter. TypeScript,
-Node types and tsx are development tools only. Nothing has been deployed.
+Node types and tsx are development tools only. It runs as the Vercel project
+`siphon-friends`, at `https://siphon-friends.vercel.app/api`.
 
 ## Local development
 
@@ -24,9 +25,8 @@ npm test
 
 To use the local service in the player, set
 `SIPHON_FRIENDS_URL=http://127.0.0.1:8787/api` in the player's environment.
-Use a disposable demo profile. The default URL in `src/friends/client.rs` is an
-intentional `.invalid` placeholder; the client reports that configuration is
-missing without contacting it. Configure the real deployment before use.
+Use a disposable demo profile. Without it, the player uses the deployed group
+named by `DEFAULT_BASE_URL` in `src/friends/client.rs`.
 
 The opt-in Rust integration test talks to this runner without touching any app
 profile, credential store, or playback process. From the repository root:
@@ -48,7 +48,8 @@ cargo test --locked --features demo friends::tests::local_service_round_trip -- 
    256 characters, no control characters). Keep it in Vercel environment settings,
    never in git. The same invite joins the single group at this deployment.
 4. Deploy, then set the player's `SIPHON_FRIENDS_URL` to the deployed HTTPS URL
-   including `/api` (or replace `DEFAULT_BASE_URL` for a distributed build).
+   including `/api`, or replace `DEFAULT_BASE_URL`, which a distributed build
+   uses. Siphon's own group is at `https://siphon-friends.vercel.app/api`.
 5. Verify join, a post, a heart, a rename, own-post deletion and membership
    revocation. Verify posts survive a redeployment. Rotate the invite if it
    escapes the group.

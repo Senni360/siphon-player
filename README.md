@@ -86,8 +86,8 @@ Known previews are marked **Preview only** in song rows, the queue and the
 player bar.
 
 The optional private **Friends** group shares Spotify, SoundCloud (including
-private links), and YouTube finds behind an invite code. The owner must first
-configure the service; no production endpoint is bundled. **Leave group**
+private links), and YouTube finds behind an invite code, through the owner's
+group service at `siphon-friends.vercel.app`. Ask the owner for the invite. **Leave group**
 revokes membership while retaining shared posts; **Forget this device** only
 removes its saved identity and works offline. See the
 [service setup and integration contract](services/friends/README.md).
