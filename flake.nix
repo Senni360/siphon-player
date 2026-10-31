@@ -121,14 +121,6 @@
                 lockFile = ./Cargo.lock;
                 allowBuiltinFetchGit = true;
               };
-              # projectm-sys only searches lib, while CMake may otherwise install to lib64.
-              postPatch = ''
-                substituteInPlace "$cargoDepsCopy"/projectm-sys-*/build.rs \
-                  --replace-fail \
-                  '.define("BUILD_SHARED_LIBS", build_shared_libs)' \
-                  '.define("CMAKE_INSTALL_LIBDIR", "lib").define("BUILD_SHARED_LIBS", build_shared_libs)'
-              '';
-
               nativeBuildInputs =
                 with pkgs;
                 [
