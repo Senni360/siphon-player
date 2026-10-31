@@ -209,14 +209,27 @@ jobs:
           & $iscc "/DVersion=$version" "/DArch=$arch" "/DBinary=$PWD\target\debug\siphon.exe" "/DOutputDir=$env:RUNNER_TEMP\siphon-installer-check" packaging\windows\spotifast.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      # Previews (0.15.0-pre.N) ship only as the portable zip, and Windows
+      # Installer versions accept only alpha, beta and rc labels, so the
+      # package checks run for every other version.
+      - name: Windows Installer applies
+        id: msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages[0].version
+          $build = if ($version -match '-pre\.') { 'false' } else { 'true' }
+          "build=$build" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+          if ($build -eq 'false') { "Skipping the Windows Installer checks for preview $version." }
+
       # The Windows Installer package, which native-packages builds as the
       # release does (native-packages.yaml), from the executable built above.
       - uses: ruby/setup-ruby@v1
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.msi.outputs.build == 'true'
         with:
           ruby-version: '4.0'
       - name: Windows Installer package
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.msi.outputs.build == 'true'
         shell: pwsh
         run: |
           dotnet tool install wix --version 5.0.2 --tool-path "$env:RUNNER_TEMP\wix"
@@ -237,7 +250,7 @@ jobs:
       # an identity of their own: a running copy, a portable copy, and an
       # Inno Setup install it takes over (#766 and the updater's contract).
       - name: Windows Installer install, update and uninstall
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && steps.msi.outputs.build == 'true'
         shell: pwsh
         run: |
           $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
