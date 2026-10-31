@@ -180,3 +180,38 @@ today, on `claude/focused-rubin-pxfk32`; the handoff in
 | Motion not built | Flying thumbnail, download burst, BPM copy float, nudge, search link unfold. |
 | Glass and grain | Not built: panels are flat fills. |
 | Geist | Not bundled; Inter remains. |
+
+## What changed (31 October)
+
+The owner approved two departures from the target above, recorded here
+so the sections above are read with them:
+
+- **Glass and glow, not a header wash.** The playing song's cover colour
+  rises from the bottom of the window around the player island and fades
+  to black toward the top. The sidebar, the page, the side panels and the
+  island are glass over it: their own fill partly see-through, a hairline
+  and a faint sheen on the top edge. No live blur. The glow changes to the
+  next song's colour over 0.9 s; pale covers are lifted to a colour that
+  reads (`glow_color` in `src/ui/mod.rs`). Pages no longer wash their own
+  cover's colour across the header.
+- **The page is a card.** It sits 8 points from the window and from the
+  sidebar and side panels, with 14-point corners, so nothing beside the
+  floating sidebar ends in a straight cut.
+- **More motion than the table above lists**, by the owner's request,
+  still one curve and still only answering something the person did:
+  pages rise in (back slides from the left), sections and the first ten
+  rows enter a beat apart after navigation, the floating sidebar comes out
+  in steps, nav and library highlights glide, the Group badge pops and
+  bumps, hover light and presses ease on every shared button, the play
+  disc cross-grows Play and Pause, Previous and Next lean, Shuffle and
+  Repeat grow a state dot, sliders thicken and glide to a click, hearts
+  burst, covers fly to the playlist or Group row they were sent to,
+  downloads drop into a ring and burst into a check, dialogs grow in,
+  panels slide in, toasts slide out, card play buttons rise, Now playing
+  pills stagger and its sung lyric line brightens.
+
+The Group page (`src/ui/group.rs`) replaces the old friends panel
+controls: a day-grouped feed with threads, a composer that recognises
+pasted links and the playing song, sends to everyone or picked friends,
+and per-share download whose file drags into a DAW on Windows
+(`src/drag_out.rs`).
