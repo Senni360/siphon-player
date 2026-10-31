@@ -1364,7 +1364,7 @@ fn song(
     painter.rect(
         rect,
         12.0,
-        super::blend(palette.surface, palette.surface_hover, hover),
+        super::blend(palette.surface, palette.surface_hover, hover).gamma_multiply(0.8),
         Stroke::new(1.0, palette.outline),
         egui::StrokeKind::Inside,
     );

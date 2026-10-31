@@ -235,6 +235,14 @@ fn finish_entry_interaction(
     custom_order: bool,
     drop_allowed: bool,
 ) {
+    // Songs added to this playlist fly here, and the row pulses as they land.
+    if !entry.uri.is_empty() {
+        super::kit::flight::target(ui.ctx(), &entry.uri, response.rect);
+        if let Some(id) = crate::util::uri_id(&entry.uri) {
+            super::kit::flight::target(ui.ctx(), id, response.rect);
+            super::kit::flight::paint_landing(ui, &app.palette, id, response.rect, 8.0);
+        }
+    }
     if response.hovered()
         && let Some(image) = &entry.image
     {
@@ -637,7 +645,8 @@ pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
         .fixed_pos(rect.min)
         .show(&ctx, |ui| {
             Frame::new()
-                .fill(palette.panel)
+                // Over the page it must stay readable: mostly solid glass.
+                .fill(palette.panel.gamma_multiply(0.94))
                 .corner_radius(CARD_RADIUS)
                 .stroke(egui::Stroke::new(1.0, palette.outline))
                 .shadow(egui::epaint::Shadow {
@@ -688,7 +697,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         // A card floating inside the window, not a slab against its edge:
         // the panel itself is the window's colour and the card is painted
         // inside it, behind the contents.
-        .frame(Frame::new().fill(palette.window).inner_margin(Margin {
+        .frame(Frame::new().inner_margin(Margin {
             left: CARD_GAP + CARD_PAD.left,
             right: CARD_PAD.right,
             top: CARD_GAP + top - 4,
@@ -714,10 +723,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ui.painter().rect(
             card,
             CARD_RADIUS,
-            palette.panel,
+            super::glass_fill(&palette, palette.panel),
             egui::Stroke::new(1.0, palette.outline),
             egui::StrokeKind::Inside,
         );
+        super::glass_sheen(ui, card, f32::from(CARD_RADIUS));
         let art_rect = expanded_art.then(|| expanded_art_rect(ui));
         if let Some(rect) = art_rect.filter(|_| !floating_art) {
             reserve_expanded_art(ui, rect);
@@ -1478,6 +1488,8 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
         page == Page::Group,
     );
     unread_badge(ui, &palette, group.rect, unread);
+    super::kit::flight::target(ui.ctx(), super::kit::flight::GROUP, group.rect);
+    super::kit::flight::paint_landing(ui, &palette, super::kit::flight::GROUP, group.rect, 8.0);
     if group.clicked() {
         app.actions.push(Action::Open(Page::Group));
     }

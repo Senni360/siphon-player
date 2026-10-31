@@ -85,43 +85,130 @@ pub fn button(ui: &mut Ui, palette: &Palette, tool: Tool, state: &State, reveal:
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, state.usable(), state.tip())
     });
+    // Which state the square showed last frame, to move between them:
+    // the arrow drops into a ring, the ring bursts into a check, the check
+    // settles back into the tool.
+    let kind = match state {
+        State::Ready(_) | State::Off(_) => 0u8,
+        State::Running { .. } => 1,
+        State::Done(_) => 2,
+    };
+    let ctx = ui.ctx().clone();
+    let kind_id = response.id.with("state-kind");
+    let last = ctx.data(|data| data.get_temp::<u8>(kind_id));
+    if last.is_some_and(|last| last != kind) {
+        ctx.data_mut(|data| data.insert_temp(kind_id.with("from"), last.unwrap_or(0)));
+        super::motion::begin(&ctx, kind_id.with("change"), super::motion::ENTER);
+    }
+    ctx.data_mut(|data| data.insert_temp(kind_id, kind));
+    let change = super::motion::running(&ctx, kind_id.with("change"));
+    let from = ctx.data(|data| data.get_temp::<u8>(kind_id.with("from")));
     if reveal > 0.0 && ui.is_rect_visible(rect) {
         let rect = rect.translate(vec2((1.0 - reveal) * 6.0, 0.0));
         let painter = ui.painter();
-        let lit = state.usable() && (response.hovered() || response.has_focus());
-        if lit {
+        let lit = super::motion::toward(
+            &ctx,
+            response.id.with("lit"),
+            state.usable() && (response.hovered() || response.has_focus()),
+            super::motion::FEEDBACK,
+        );
+        if lit > 0.0 {
             painter.rect_filled(
                 rect,
                 CornerRadius::same(theme::RADIUS),
-                palette.surface_hover.gamma_multiply(reveal),
+                palette.surface_hover.gamma_multiply(reveal * lit),
             );
         }
-        let base = if lit { palette.text } else { palette.secondary };
+        let base = crate::ui::blend(palette.secondary, palette.text, lit);
         let color = if state.usable() {
             base
         } else {
             base.gamma_multiply(0.38)
         }
         .gamma_multiply(reveal);
-        let pressed = if response.is_pointer_button_down_on() {
-            0.92
-        } else {
-            1.0
-        };
+        let pressed = 1.0
+            - 0.08
+                * super::motion::toward(
+                    &ctx,
+                    response.id.with("press"),
+                    response.is_pointer_button_down_on(),
+                    super::motion::PRESS,
+                );
+        let t = change.unwrap_or(1.0);
         match state {
             State::Running { fraction, .. } => {
-                ring(painter, rect.center(), *fraction, palette, reveal);
+                // The ring's share glides to each new report.
+                let shown = fraction.map(|f| {
+                    super::motion::glide(&ctx, response.id.with("fill"), f, super::motion::ENTER)
+                });
+                let grow = if from == Some(0) && change.is_some() {
+                    t
+                } else {
+                    1.0
+                };
+                ring(
+                    painter,
+                    rect.center(),
+                    shown,
+                    palette,
+                    reveal * grow,
+                    0.6 + 0.4 * grow,
+                );
                 painter.rect_filled(
-                    egui::Rect::from_center_size(rect.center(), Vec2::splat(8.0 * pressed)),
+                    egui::Rect::from_center_size(rect.center(), Vec2::splat(8.0 * pressed * grow)),
                     CornerRadius::same(2),
                     color,
                 );
+                // The arrow that started it drops out of the square.
+                if from == Some(0) && change.is_some() {
+                    theme::paint_icon(
+                        ui,
+                        tool.icon(),
+                        rect.translate(vec2(0.0, 8.0 * t)),
+                        ICON,
+                        color.gamma_multiply(1.0 - t),
+                    );
+                }
             }
             State::Done(_) => {
-                theme::paint_icon(ui, Icon::Check, rect, ICON * pressed, color);
+                if change.is_some() && from == Some(1) {
+                    // The finished ring bursts outward and the check pops in.
+                    let burst = super::motion::ease(t);
+                    painter.circle_stroke(
+                        rect.center(),
+                        10.0 + 6.0 * burst,
+                        Stroke::new(
+                            2.0 * (1.0 - burst),
+                            palette.text.gamma_multiply(reveal * (1.0 - burst)),
+                        ),
+                    );
+                    for dot in 0..6 {
+                        let angle = dot as f32 / 6.0 * std::f32::consts::TAU;
+                        let at = rect.center() + Vec2::angled(angle) * (12.0 + 8.0 * burst);
+                        painter.circle_filled(
+                            at,
+                            1.5 * (1.0 - burst),
+                            palette.text.gamma_multiply(reveal),
+                        );
+                    }
+                }
+                let pop = if change.is_some() {
+                    super::motion::pop(t)
+                } else {
+                    1.0
+                };
+                theme::paint_icon(ui, Icon::Check, rect, ICON * pressed * pop, color);
             }
             State::Ready(_) | State::Off(_) => {
-                theme::paint_icon(ui, tool.icon(), rect, ICON * pressed, color);
+                // Back from a check or a cancelled ring: the tool fades in.
+                let alpha = if change.is_some() { t } else { 1.0 };
+                theme::paint_icon(
+                    ui,
+                    tool.icon(),
+                    rect,
+                    ICON * pressed,
+                    color.gamma_multiply(alpha),
+                );
             }
         }
     }
@@ -174,10 +261,11 @@ fn ring(
     fraction: Option<f32>,
     palette: &Palette,
     alpha: f32,
+    scale: f32,
 ) {
-    const RADIUS: f32 = 10.0;
+    let radius = 10.0 * scale;
     let track = Stroke::new(2.0, palette.outline.gamma_multiply(alpha));
-    painter.circle_stroke(center, RADIUS, track);
+    painter.circle_stroke(center, radius, track);
     let Some(fraction) = fraction.map(|f| f.clamp(0.0, 1.0)) else {
         return;
     };
@@ -189,7 +277,7 @@ fn ring(
         .map(|step| {
             let angle = -std::f32::consts::FRAC_PI_2
                 + std::f32::consts::TAU * fraction * step as f32 / steps as f32;
-            center + vec2(angle.cos(), angle.sin()) * RADIUS
+            center + vec2(angle.cos(), angle.sin()) * radius
         })
         .collect();
     painter.add(egui::Shape::line(

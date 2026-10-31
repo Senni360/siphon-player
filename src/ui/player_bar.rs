@@ -68,11 +68,14 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .exact_size(theme::PLAYER_BAR_HEIGHT)
         .resizable(false)
         .show_separator_line(false)
-        .frame(Frame::new().fill(palette.window))
+        .frame(Frame::new())
         .show(ui, |ui| {
             let island = island_rect(ui.max_rect());
             super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
-            ui.painter().rect_filled(island, ISLAND_RADIUS, fill);
+            // Glass, like the cards: the song's glow around it shows through.
+            ui.painter()
+                .rect_filled(island, ISLAND_RADIUS, super::glass_fill(&palette, fill));
+            super::glass_sheen(ui, island, ISLAND_RADIUS);
             ui.painter().rect_stroke(
                 island,
                 ISLAND_RADIUS,

@@ -361,35 +361,6 @@ pub fn paint_vertical_gradient(ui: &Ui, rect: Rect, top: Color32, bottom: Color3
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
-/// Covers what lies outside `rect`'s rounded corners with `color`, the
-/// colour around it, so whatever was painted inside it (a cover's wash, a
-/// hovered row) ends in a curve. Paint it after the contents.
-pub fn round_corners(ui: &Ui, rect: Rect, radius: f32, color: Color32) {
-    let steps = 10;
-    let corners = [
-        (rect.left_top(), egui::vec2(1.0, 1.0)),
-        (rect.right_top(), egui::vec2(-1.0, 1.0)),
-        (rect.right_bottom(), egui::vec2(-1.0, -1.0)),
-        (rect.left_bottom(), egui::vec2(1.0, -1.0)),
-    ];
-    let mut mesh = egui::Mesh::default();
-    for (corner, inward) in corners {
-        let center = corner + inward * radius;
-        let first = mesh.vertices.len() as u32;
-        mesh.colored_vertex(corner, color);
-        for step in 0..=steps {
-            // From the edge beside the corner, round to the other edge.
-            let angle = step as f32 / steps as f32 * std::f32::consts::FRAC_PI_2;
-            let offset = egui::vec2(-inward.x * angle.cos(), -inward.y * angle.sin()) * radius;
-            mesh.colored_vertex(center + offset, color);
-        }
-        for step in 0..steps {
-            mesh.add_triangle(first, first + 1 + step, first + 2 + step);
-        }
-    }
-    ui.painter().add(egui::Shape::mesh(mesh));
-}
-
 /// Lays out only the rows that intersect the visible area of the enclosing
 /// scroll view. Every row must occupy exactly `row_height`.
 pub fn virtual_rows(

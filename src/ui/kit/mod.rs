@@ -2,6 +2,7 @@
 //! `DESIGN.md` describes them. Views draw with these and report what the
 //! user did; applying it stays with `crate::app`.
 
+pub mod flight;
 pub mod motion;
 pub mod source;
 pub mod tools;
