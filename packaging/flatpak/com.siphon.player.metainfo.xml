@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.15.0-pre.3" date="2026-10-31" type="development">
+      <description><p>Add the Group page, a live group service that learns each member's taste, and self-updating previews.</p></description>
+    </release>
     <release version="0.15.0-pre.2" date="2026-10-31" type="development">
       <description><p>Add optional Spotify Soloist playback with guided setup and protected key storage.</p></description>
     </release>
