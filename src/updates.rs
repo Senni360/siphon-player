@@ -10,7 +10,7 @@ pub use fastframe_update::{
     CHECK_INTERVAL, DownloadState, Installation, Kind, Prepared, Release, Source, Unsupported,
     Updater,
 };
-use fastframe_update::{MacConfig, ReqwestTransport, UpdateConfig};
+use fastframe_update::{MacConfig, Prereleases, ReqwestTransport, UpdateConfig};
 
 pub const CONFIG: UpdateConfig = UpdateConfig {
     macos: MacConfig {
@@ -18,10 +18,12 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
         executable_names: &["Siphon"],
         legacy_bundle_names: &[],
     },
-    // Keep signature verification mandatory. The inherited key remains until
-    // the owner configures a signed private release channel and key rotation;
-    // candidate artifacts are not update releases. See private-updates.md.
+    // Siphon's own release key, which signs every release's checksums.txt.
+    // Verification stays mandatory. See private-updates.md.
     publisher_key: Some(include_str!("../assets/update-public-key.hex")),
+    // A preview hears about the next preview, and a stable copy only about
+    // stable releases.
+    prereleases: Prereleases::WhenRunningPrerelease,
     // Releases build their AppImages before publishing, so the signed
     // checksums.txt lists them (#737): an AppImage replaces itself with the
     // next one.
@@ -70,10 +72,13 @@ mod tests {
                 &self,
                 request: &fastframe_update::Request<'_>,
             ) -> anyhow::Result<fastframe_update::Response> {
-                assert_eq!(
-                    request.url,
+                // A preview lists every release; a stable build reads the latest.
+                let expected = if env!("CARGO_PKG_VERSION").contains('-') {
+                    "https://api.github.com/repos/Senni360/siphon-player/releases?per_page=100&page=1"
+                } else {
                     "https://api.github.com/repos/Senni360/siphon-player/releases/latest"
-                );
+                };
+                assert_eq!(request.url, expected);
                 self.0.fetch_add(1, Ordering::Relaxed);
                 Ok(fastframe_update::Response {
                     status: 404,
@@ -96,6 +101,11 @@ mod tests {
     /// An AppImage may replace itself only because the release workflow
     /// builds the AppImages into the signed checksums.txt;
     /// packaging/test-release-names.py checks that side.
+    #[test]
+    fn previews_follow_the_next_preview() {
+        assert_eq!(CONFIG.prereleases, Prereleases::WhenRunningPrerelease);
+    }
+
     #[test]
     fn appimages_update_themselves() {
         const { assert!(CONFIG.appimage) };
