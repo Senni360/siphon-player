@@ -961,6 +961,33 @@ pub fn populate(app: &mut App) {
             app.track_cache.insert(id.clone(), track.clone());
         }
     }
+    let songs: Vec<_> = tracks
+        .iter()
+        .skip(3)
+        .map(|track| {
+            (
+                format!(
+                    "https://open.spotify.com/track/{}",
+                    track.id.as_deref().unwrap_or_default()
+                ),
+                track.name.clone(),
+                track
+                    .artists
+                    .first()
+                    .map(|artist| artist.name.clone())
+                    .unwrap_or_default(),
+                track
+                    .album
+                    .as_ref()
+                    .and_then(|album| crate::api::models::pick_image(&album.images, 300))
+                    .map(str::to_owned),
+            )
+        })
+        .collect();
+    app.friends_feed = siphon::group(
+        &songs,
+        jiff::Timestamp::now().as_millisecond().max(0) as u64,
+    );
 }
 
 #[cfg(feature = "demo")]
@@ -1495,6 +1522,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.library.filter = "No matching playlist".into();
             }
             "queue" => app.show_queue_panel = true,
+            "sidebar-hidden" => app.settings.sidebar_visible = false,
             "friends" => {
                 app.show_friends_panel = true;
                 app.friends = Loadable::Loaded(demo_friends());
@@ -3052,7 +3080,18 @@ mod tests {
             assert!(app.manual_queue.is_empty());
             assert_eq!(app.queue.get().unwrap().queue, rows[2..]);
             let tree = accessible_frame(&ctx, &mut app, vec![]);
-            let recent = accessible_node(&tree, &gettext(locale, "Recent"), Role::Button);
+            // Some languages name the queue's Recent tab and the
+            // library's Recently played sort alike; take the queue's.
+            let recent = tree
+                .nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.label() == Some(gettext(locale, "Recent").as_ref())
+                        && node.role() == Role::Button
+                        && node.bounds().is_some_and(|bounds| bounds.x0 >= 900.0)
+                })
+                .expect("the queue's Recent tab")
+                .0;
             accessible_frame(
                 &ctx,
                 &mut app,
@@ -6785,7 +6824,7 @@ mod tests {
         // #given the dated demo playlist
         let (painted, _) = render("dated-mix", None);
         assert!(
-            left_of(&painted, "DATE ADDED").is_some(),
+            left_of(&painted, "Date added").is_some(),
             "a dated playlist has the column"
         );
 
@@ -6793,8 +6832,8 @@ mod tests {
         let (painted, first_album) = render("undated-mix", Some("undated-mix"));
 
         // #then there is no column, and the album names line up with their heading
-        assert_eq!(left_of(&painted, "DATE ADDED"), None);
-        let heading = left_of(&painted, "ALBUM").expect("the album heading");
+        assert_eq!(left_of(&painted, "Date added"), None);
+        let heading = left_of(&painted, "Album").expect("the album heading");
         let album = left_of(&painted, &first_album).expect("the first song's album");
         assert!(
             (heading - album).abs() < 1.0,
@@ -10669,7 +10708,8 @@ mod tests {
             &mut app,
             vec![egui::Event::PointerMoved(egui::pos2(
                 start.x,
-                800.0 - crate::theme::PLAYER_BAR_HEIGHT - 14.0,
+                // The queue card's list ends inside its gap and padding.
+                800.0 - crate::theme::PLAYER_BAR_HEIGHT - crate::ui::CARD_GAP - 14.0,
             ))],
         );
         for _ in 0..400 {
@@ -12613,7 +12653,10 @@ mod tests {
                     (bounds.x0 + bounds.x1) as f32 / 2.0,
                     (bounds.y0 + bounds.y1) as f32 / 2.0,
                 );
-                frame(vec![egui::Event::PointerMoved(centre)]);
+                // The hover colour eases in; let it settle before looking.
+                for _ in 0..30 {
+                    frame(vec![egui::Event::PointerMoved(centre)]);
+                }
                 let output = frame(vec![egui::Event::PointerMoved(centre)]);
                 // Icons are textured rects tinted by their fill.
                 let tints: Vec<_> = output

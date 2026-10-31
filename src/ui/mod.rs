@@ -8,6 +8,7 @@ pub(crate) mod devices;
 mod dialogs;
 mod downloads;
 pub(crate) mod friends;
+pub mod group;
 mod group_shelf;
 pub mod home;
 mod keys;
@@ -35,7 +36,6 @@ pub mod winamp;
 
 use egui::{Align2, Color32, Context, CornerRadius, Frame, Id, Margin, Rect, Stroke, vec2};
 
-use crate::api::models::pick_image;
 use crate::app::App;
 use crate::backend::AuthStatus;
 use crate::model::{Action, Loadable, Page, ToastKind};
@@ -77,6 +77,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         );
     }
     let window = ui.max_rect();
+    backdrop(app, ctx);
     player_bar::show(app, ui);
     let content = ui.available_rect_before_wrap();
     if app.lyrics_fullscreen.is_some() {
@@ -111,13 +112,41 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         app.user.as_ref().map(|user| user.id.as_str()),
         &app.actions,
     );
+    launch_flights(app, ctx);
     devices::popup(app, ctx);
     dialogs::show(app, ctx);
     update::show(app, ctx);
     widgets::drag_ghost(ctx, &app.palette, app.locale);
+    kit::flight::paint(ctx, &app.palette);
     toasts(app, ctx, theme::PLAYER_BAR_HEIGHT + 16.0);
     caption_buttons(ui, &app.palette, app.locale);
     fastframe_titlebar::resize(ui);
+}
+
+/// Sends a cover flying from the pointer to where a song went this frame:
+/// the playlist it was added to, or the Group row for a share.
+fn launch_flights(app: &App, ctx: &Context) {
+    let Some(from) = ctx.input(|input| input.pointer.interact_pos().or(input.pointer.hover_pos()))
+    else {
+        return;
+    };
+    for action in &app.actions {
+        match action {
+            Action::AddToPlaylist {
+                playlist_id, items, ..
+            } => {
+                let art = items
+                    .first()
+                    .and_then(|item| item.image(64))
+                    .map(str::to_owned);
+                kit::flight::launch(ctx, art, from, playlist_id);
+            }
+            Action::Friends(crate::friends::Action::Share(post)) => {
+                kit::flight::launch(ctx, post.artwork_url.clone(), from, kit::flight::GROUP);
+            }
+            _ => {}
+        }
+    }
 }
 
 /// The main window's narrowest width with these panels open: their least
@@ -253,67 +282,188 @@ where
     }
 }
 
-fn page_tint(app: &mut App) -> Option<Color32> {
-    let page = app.page().clone();
-    let image = match &page {
-        Page::Playlist(id) => app
-            .playlist_pages
-            .get(id)
-            .and_then(|page| page.playlist.get())
-            .or_else(|| app.known_playlist(id))
-            .and_then(|playlist| pick_image(&playlist.images, 64))
-            .map(str::to_string),
-        Page::Album(id) => app
-            .album_pages
-            .get(id)
-            .and_then(|page| page.album.get())
-            .or_else(|| app.known_album(id))
-            .and_then(|album| pick_image(&album.images, 64))
-            .map(str::to_string),
-        Page::Artist(id) => app
-            .artist_pages
-            .get(id)
-            .and_then(|page| page.artist.get())
-            .or_else(|| app.known_artist(id))
-            .and_then(|artist| pick_image(&artist.images, 64))
-            .map(str::to_string),
-        Page::Show(id) => app
-            .show_pages
-            .get(id)
-            .and_then(|page| page.show.get())
-            .or_else(|| app.known_show(id))
-            .and_then(|show| pick_image(&show.images, 64))
-            .map(str::to_string),
-        Page::Radio(seed) => pick_image(&app.radio_images(seed), 64).map(str::to_string),
-        Page::LikedSongs => {
-            return app
-                .settings
-                .accent_from_art
-                .then_some(Color32::from_rgb(0x50, 0x38, 0xc8));
-        }
-        _ => None,
-    };
-    if !app.settings.accent_from_art && image.is_some() {
-        return None;
-    }
-    match image {
-        Some(url) => app.tint_for(Some(&url)).or_else(|| app.now_playing_tint()),
-        None => app.now_playing_tint(),
+/// The gap between the window's edge and its cards (the sidebar, the
+/// page, the side panels), and between neighbouring cards.
+pub(crate) const CARD_GAP: f32 = 8.0;
+/// The corners of the page and side panel cards, the sidebar's too.
+pub(crate) const CARD_RADIUS: f32 = 14.0;
+
+/// A side panel's frame: the window's colour around a card inset by
+/// [`CARD_GAP`], with 12 points between the card's edge and the contents.
+/// Paint the card with [`side_card`] first thing inside the panel.
+pub(crate) fn side_card_frame(_palette: &theme::Palette) -> Frame {
+    let gap = CARD_GAP as i8;
+    Frame::new().inner_margin(Margin {
+        left: gap + 12,
+        right: gap + 12,
+        top: gap + 12,
+        bottom: gap + 12,
+    })
+}
+
+/// Paints a side panel's card behind its contents. `ui` is the panel's.
+pub(crate) fn side_card(ui: &egui::Ui, palette: &theme::Palette) {
+    let card = ui.max_rect().expand(12.0);
+    ui.painter().rect(
+        card,
+        CARD_RADIUS,
+        glass_fill(palette, palette.panel),
+        Stroke::new(1.0, palette.outline),
+        egui::StrokeKind::Inside,
+    );
+    glass_sheen(ui, card, CARD_RADIUS);
+}
+
+/// A card's fill as glass: its colour, partly see-through, so the
+/// playing song's glow behind the window shows through it.
+pub(crate) fn glass_fill(palette: &theme::Palette, fill: Color32) -> Color32 {
+    let alpha = if palette.dark { 120 } else { 150 };
+    Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha)
+}
+
+/// The light catching a glass card's top edge: a bright hairline and a
+/// faint sheen just under it.
+pub(crate) fn glass_sheen(ui: &egui::Ui, rect: Rect, radius: f32) {
+    let painter = ui.painter();
+    let inset = radius * 0.6;
+    let width = (rect.width() - inset * 2.0).max(0.0);
+    painter.rect_filled(
+        Rect::from_min_size(rect.min + vec2(inset, 0.0), vec2(width, 1.0)),
+        0.0,
+        Color32::from_white_alpha(28),
+    );
+    // A few faint bands under it, fading down: plain rects, so the sheen
+    // costs no mesh.
+    for band in 0..4u8 {
+        painter.rect_filled(
+            Rect::from_min_size(
+                rect.min + vec2(inset, 1.0 + f32::from(band) * 6.0),
+                vec2(width, 6.0),
+            ),
+            0.0,
+            Color32::from_white_alpha(8 - band * 2),
+        );
     }
 }
 
+/// The colour a cover lends the glow. Pale and greyish cool tones read as
+/// steel rather than colour, so a tint with any real hue is lifted to at
+/// least moderate saturation and brightness; true greys stay grey.
+fn glow_color(tint: Color32) -> Color32 {
+    let mut hsva = egui::ecolor::Hsva::from(tint);
+    if hsva.s >= 0.12 && hsva.s < 0.5 {
+        // A washed-out colour gets its hue back, and is kept deep enough
+        // that the extra saturation reads as colour, not pastel.
+        hsva.s = 0.5;
+        hsva.v = hsva.v.clamp(0.45, 0.62);
+    }
+    hsva.a = 1.0;
+    Color32::from(hsva)
+}
+
+/// How long the glow takes to become the next song's colour.
+const GLOW_CHANGE: f32 = 0.9;
+
+/// The window behind the cards: black (or the light theme's grey) with
+/// the playing song's colour rising from the bottom edge, around the
+/// player island, fading out toward the top. When the song changes, the
+/// glow turns into its colour; with nothing playing it fades away.
+fn backdrop(app: &mut App, ctx: &Context) {
+    let palette = app.palette;
+    let screen = ctx.content_rect();
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    painter.rect_filled(screen, 0.0, palette.window);
+    let art = if app.settings.accent_from_art {
+        app.now_playing()
+            .and_then(|now| now.art_small.or(now.art_url))
+    } else {
+        None
+    };
+    let target = app
+        .tint_for(art.as_deref())
+        .map(glow_color)
+        .unwrap_or(Color32::TRANSPARENT);
+    let id = Id::new("backdrop-glow");
+    let (from, to) = ctx
+        .data(|data| data.get_temp::<(Color32, Color32)>(id))
+        .unwrap_or((target, target));
+    let (from, to) = if to == target {
+        (from, to)
+    } else {
+        // Turn from what is shown now toward the new song's colour.
+        let shown = kit::motion::running(ctx, id.with("change")).map_or(to, |t| mix(from, to, t));
+        kit::motion::begin(ctx, id.with("change"), GLOW_CHANGE);
+        (shown, target)
+    };
+    ctx.data_mut(|data| data.insert_temp(id, (from, to)));
+    let glow = kit::motion::running(ctx, id.with("change")).map_or(to, |t| mix(from, to, t));
+    if glow.a() == 0 {
+        return;
+    }
+    let [r, g, b, alpha] = glow.to_srgba_unmultiplied();
+    let solid = Color32::from_rgb(r, g, b);
+    let lift = |strength: f32| {
+        let color = blend(palette.window, solid, strength);
+        Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), alpha)
+    };
+    let strong = lift(if palette.dark { 0.95 } else { 0.7 });
+    let middle = lift(if palette.dark { 0.45 } else { 0.3 });
+    let height = screen.height();
+    let mut mesh = egui::Mesh::default();
+    for (y, color) in [
+        (screen.top() + height * 0.2, Color32::TRANSPARENT),
+        (screen.top() + height * 0.65, middle),
+        (screen.bottom(), strong),
+    ] {
+        mesh.colored_vertex(egui::pos2(screen.left(), y), color);
+        mesh.colored_vertex(egui::pos2(screen.right(), y), color);
+    }
+    for band in 0..2u32 {
+        let i = band * 2;
+        mesh.add_triangle(i, i + 1, i + 3);
+        mesh.add_triangle(i, i + 3, i + 2);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// `a` turned `t` of the way to `b`, alpha included, so a glow can fade
+/// from nothing.
+fn mix(a: Color32, b: Color32, t: f32) -> Color32 {
+    let mut from = a.to_srgba_unmultiplied();
+    let mut to = b.to_srgba_unmultiplied();
+    // A transparent end takes the other end's colour, so it only fades.
+    if from[3] == 0 {
+        from = [to[0], to[1], to[2], 0];
+    }
+    if to[3] == 0 {
+        to = [from[0], from[1], from[2], 0];
+    }
+    let channel =
+        |i: usize| (f32::from(from[i]) + (f32::from(to[i]) - f32::from(from[i])) * t).round() as u8;
+    Color32::from_rgba_unmultiplied(channel(0), channel(1), channel(2), channel(3))
+}
+
+/// The page is a card like the sidebar: every edge beside the window or
+/// another card is rounded, and a cover's wash fills it to its corners
+/// instead of ending in a straight cut beside the sidebar.
 fn central(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
-    let tint = page_tint(app);
+    let right_panel = app.show_queue_panel || app.show_lyrics_panel || app.show_friends_panel;
+    let gap = CARD_GAP as i8;
     egui::CentralPanel::default()
-        .frame(Frame::new().fill(palette.window))
+        .frame(Frame::new().inner_margin(Margin {
+            left: gap,
+            right: if right_panel { 0 } else { gap },
+            top: gap,
+            bottom: gap,
+        }))
         .show(ui, |ui| {
             let rect = ui.max_rect();
+            ui.painter()
+                .rect_filled(rect, CARD_RADIUS, glass_fill(&palette, palette.window));
+            glass_sheen(ui, rect, CARD_RADIUS);
+            ui.set_clip_rect(rect.intersect(ui.clip_rect()));
             let page = app.page().clone();
-            let overview = matches!(
-                page,
-                Page::Home | Page::Search | Page::Settings | Page::Queue
-            );
             // The wash belongs to the page's hero, so it scrolls away with
             // it. The page's offset is known once it has been laid out, so
             // the previous frame's serves.
@@ -322,7 +472,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                 .ctx()
                 .data(|data| data.get_temp::<f32>(scrolled_id))
                 .unwrap_or(0.0);
-            if let Some((top, bottom)) = header_wash(&palette, overview, tint) {
+            if let Some((top, bottom)) = header_wash(&palette) {
                 widgets::paint_vertical_gradient(ui, header_rect(rect, scrolled), top, bottom);
             }
             ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
@@ -340,6 +490,10 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     slow_banner(app, ui);
                 }
             }
+            // A new page rises into place; going back or forward slides it
+            // in from the side travelled toward.
+            let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
+            let offset = vec2((1.0 - enter) * 24.0 * from_side, (1.0 - enter) * 10.0);
             let scroll = crate::autoscroll::show(
                 ui,
                 egui::ScrollArea::vertical()
@@ -347,36 +501,54 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     .auto_shrink([false, false]),
                 egui::Vec2b::new(false, true),
                 |ui| {
-                    Frame::new()
-                        .inner_margin(Margin {
-                            left: widgets::PAGE_PADDING as i8,
-                            right: widgets::PAGE_PADDING as i8,
-                            top: 4,
-                            bottom: 48,
-                        })
-                        .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            match page {
-                                Page::Home => home::show(app, ui),
-                                Page::TopSongs => collection::top_songs(app, ui),
-                                Page::NewReleases => new_releases::page(app, ui),
-                                Page::Search => search::show(app, ui),
-                                Page::LikedSongs => collection::liked(app, ui),
-                                Page::SoundCloudLikes => soundcloud::show(app, ui, page),
-                                Page::Albums | Page::Artists | Page::Podcasts | Page::Episodes => {
-                                    library::show(app, ui, page)
-                                }
-                                Page::Playlist(id) => collection::playlist(app, ui, &id),
-                                Page::MixedPlaylist(id) => collection::mixed_playlist(app, ui, &id),
-                                Page::SoundCloud(uri) => collection::soundcloud(app, ui, &uri),
-                                Page::Album(id) => collection::album(app, ui, &id),
-                                Page::Artist(id) => artist::show(app, ui, &id),
-                                Page::Show(id) => show::show(app, ui, &id),
-                                Page::Radio(seed) => radio::radio(app, ui, &seed),
-                                Page::Queue => queue::page(app, ui),
-                                Page::Settings => settings::show(app, ui),
-                            }
-                        });
+                    if enter < 1.0 {
+                        ui.multiply_opacity(0.2 + 0.8 * enter);
+                    }
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::new("rows-enter"), true));
+                    ui.with_visual_transform(
+                        egui::emath::TSTransform::from_translation(offset),
+                        |ui| {
+                            Frame::new()
+                                .inner_margin(Margin {
+                                    left: widgets::PAGE_PADDING as i8,
+                                    right: widgets::PAGE_PADDING as i8,
+                                    top: 4,
+                                    bottom: 48,
+                                })
+                                .show(ui, |ui| {
+                                    ui.set_min_width(ui.available_width());
+                                    match page {
+                                        Page::Home => home::show(app, ui),
+                                        Page::TopSongs => collection::top_songs(app, ui),
+                                        Page::NewReleases => new_releases::page(app, ui),
+                                        Page::Search => search::show(app, ui),
+                                        Page::LikedSongs => collection::liked(app, ui),
+                                        Page::SoundCloudLikes => soundcloud::show(app, ui, page),
+                                        Page::Albums
+                                        | Page::Artists
+                                        | Page::Podcasts
+                                        | Page::Episodes => library::show(app, ui, page),
+                                        Page::Playlist(id) => collection::playlist(app, ui, &id),
+                                        Page::MixedPlaylist(id) => {
+                                            collection::mixed_playlist(app, ui, &id)
+                                        }
+                                        Page::SoundCloud(uri) => {
+                                            collection::soundcloud(app, ui, &uri)
+                                        }
+                                        Page::Album(id) => collection::album(app, ui, &id),
+                                        Page::Artist(id) => artist::show(app, ui, &id),
+                                        Page::Show(id) => show::show(app, ui, &id),
+                                        Page::Radio(seed) => radio::radio(app, ui, &seed),
+                                        Page::Queue => queue::page(app, ui),
+                                        Page::Settings => settings::show(app, ui),
+                                        Page::Group => group::show(app, ui),
+                                    }
+                                });
+                        },
+                    );
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(Id::new("rows-enter"), false));
                     if app.dialog.is_none() && !app.show_devices {
                         keys::scroll_page(ui);
                     }
@@ -385,7 +557,91 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(scrolled_id, scroll.state.offset.y));
             header_shadow(ui, scroll.inner_rect, scroll.state.offset.y, palette.dark);
+            ui.painter().rect_stroke(
+                rect,
+                CARD_RADIUS,
+                Stroke::new(1.0, palette.outline),
+                egui::StrokeKind::Inside,
+            );
         });
+}
+
+fn page_opened_id() -> Id {
+    Id::new("page-opened-at")
+}
+
+/// Eased progress of something on the page entering `delay` seconds after
+/// the page was opened. Only navigation starts it: the first page after
+/// start, and anything once its entrance is over, are simply there.
+pub(crate) fn entering(ctx: &Context, delay: f32) -> f32 {
+    let Some(opened) = ctx.data(|data| data.get_temp::<f64>(page_opened_id())) else {
+        return 1.0;
+    };
+    let length = crate::motion::seconds(ctx, kit::motion::ENTER);
+    if length <= 0.0 {
+        return 1.0;
+    }
+    let elapsed = (ctx.input(|input| input.time) - opened) as f32 - delay;
+    let t = kit::motion::ease(elapsed / length);
+    if t < 1.0 {
+        ctx.request_repaint();
+    }
+    t
+}
+
+/// Draws a section of a page that rises into place, `index` steps behind
+/// the first, when the page is opened.
+pub(crate) fn rise<R>(ui: &mut egui::Ui, index: usize, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    let t = entering(ui.ctx(), kit::motion::stagger(index));
+    if t >= 1.0 {
+        return add(ui);
+    }
+    ui.scope(|ui| {
+        ui.multiply_opacity(t);
+        ui.with_visual_transform(
+            egui::emath::TSTransform::from_translation(vec2(0.0, (1.0 - t) * 12.0)),
+            add,
+        )
+        .inner
+    })
+    .inner
+}
+
+/// Whether lists drawn now belong to the page, whose first rows enter when
+/// it opens; the sidebar's and panels' lists never do.
+pub(crate) fn rows_enter(ctx: &Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(Id::new("rows-enter")))
+        .unwrap_or(false)
+}
+
+/// How long a page takes to come in.
+const PAGE_ENTER: f32 = 0.32;
+
+/// The progress of the open page's entrance, and the side it comes from:
+/// 0 when it rises from below (a page opened anew), 1 from the right
+/// (forward), -1 from the left (back).
+fn page_entrance(ctx: &Context, page: &Page, history_index: usize) -> (f32, f32) {
+    let id = Id::new("page-entrance");
+    let key = page.encode();
+    let last = ctx.data(|data| data.get_temp::<(String, usize, f32)>(id));
+    let side = match &last {
+        Some((last_key, _, side)) if *last_key == key => *side,
+        Some((_, last_index, _)) => {
+            let side = match history_index.cmp(last_index) {
+                std::cmp::Ordering::Less => -1.0,
+                std::cmp::Ordering::Greater => 0.0,
+                std::cmp::Ordering::Equal => 0.0,
+            };
+            kit::motion::begin(ctx, id.with("transition"), PAGE_ENTER);
+            let now = ctx.input(|input| input.time);
+            ctx.data_mut(|data| data.insert_temp(page_opened_id(), now));
+            side
+        }
+        None => 0.0,
+    };
+    ctx.data_mut(|data| data.insert_temp(id, (key, history_index, side)));
+    let t = kit::motion::running(ctx, id.with("transition")).unwrap_or(1.0);
+    (t, side)
 }
 
 /// Where the "Why?" link of the slow-app banner leads.
@@ -532,19 +788,11 @@ fn banner(
         });
 }
 
-/// The gradient behind a page's header, top to bottom: the art's colour
-/// blended into the window, stronger on a cover's own page than on an
-/// overview, or else the palette's `tint` fading out, whose alpha is its
-/// strength. `None` leaves the plain window.
-fn header_wash(
-    palette: &theme::Palette,
-    overview: bool,
-    art: Option<Color32>,
-) -> Option<(Color32, Color32)> {
-    if let Some(art) = art {
-        let strength = if overview { 0.45 } else { 0.85 };
-        return Some((blend(palette.window, art, strength), palette.window));
-    }
+/// The gradient behind a page's header, top to bottom: a custom palette's
+/// `tint` fading out, whose alpha is its strength. `None` leaves the plain
+/// card. Cover colour no longer washes the header: the playing song's
+/// colour rises from the bottom of the window instead ([`backdrop`]).
+fn header_wash(palette: &theme::Palette) -> Option<(Color32, Color32)> {
     (palette.tint.a() > 0).then_some((palette.tint, Color32::TRANSPARENT))
 }
 
@@ -718,57 +966,92 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
     egui::Area::new(egui::Id::new("toasts"))
         .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset + lift))
         .order(egui::Order::Tooltip)
-        .interactable(!app.downloads.active.is_empty())
+        .interactable(
+            !app.downloads.active.is_empty() || app.toasts.iter().any(|t| t.action.is_some()),
+        )
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             downloads::show(app, ui);
+            let mut chosen = None;
             for toast in &app.toasts {
                 let age = toast.created.elapsed().as_secs_f32();
+                let life = toast.lifetime().as_secs_f32();
                 let alpha = if age < 0.15 {
                     age / 0.15
-                } else if age > 2.8 {
-                    ((3.2 - age) / 0.4).clamp(0.0, 1.0)
+                } else if age > life - 0.4 {
+                    ((life - age) / 0.4).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
                 ui.set_opacity(alpha);
-                Frame::new()
-                    .fill(palette.overlay)
-                    .stroke(Stroke::new(1.0, palette.outline))
-                    .corner_radius(CornerRadius::same(theme::RADIUS))
-                    .inner_margin(Margin::symmetric(14, 10))
-                    .shadow(egui::epaint::Shadow {
-                        offset: [0, 4],
-                        blur: 16,
-                        spread: 0,
-                        color: palette.shadow,
-                    })
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let (icon, color) = match toast.kind {
-                                ToastKind::Info => (Icon::CircleCheck, palette.accent),
-                                ToastKind::Error => (Icon::CircleAlert, palette.danger),
-                            };
-                            theme::icon(ui, icon, 16.0, color);
-                            // Laid out at its own width. The area
-                            // remembers its size, so after a short toast a
-                            // label left to wrap at the area's width broke
-                            // long messages on every word.
-                            let galley = ui.painter().layout(
-                                match toast.kind {
-                                    ToastKind::Error => {
-                                        widgets::sanitize_error_message(&toast.message, app.locale)
-                                            .into_owned()
+                // A toast leaving slides out to the right as it fades.
+                let leaving = if age > life - 0.4 {
+                    (age - (life - 0.4)) / 0.4
+                } else {
+                    0.0
+                };
+                ui.with_visual_transform(
+                    egui::emath::TSTransform::from_translation(vec2(
+                        24.0 * kit::motion::ease(leaving.clamp(0.0, 1.0)),
+                        0.0,
+                    )),
+                    |ui| {
+                        Frame::new()
+                            .fill(palette.overlay)
+                            .stroke(Stroke::new(1.0, palette.outline))
+                            .corner_radius(CornerRadius::same(theme::RADIUS))
+                            .inner_margin(Margin::symmetric(14, 10))
+                            .shadow(egui::epaint::Shadow {
+                                offset: [0, 4],
+                                blur: 16,
+                                spread: 0,
+                                color: palette.shadow,
+                            })
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let (icon, color) = match toast.kind {
+                                        ToastKind::Info => (Icon::CircleCheck, palette.accent),
+                                        ToastKind::Error => (Icon::CircleAlert, palette.danger),
+                                    };
+                                    theme::icon(ui, icon, 16.0, color);
+                                    // Laid out at its own width. The area
+                                    // remembers its size, so after a short toast a
+                                    // label left to wrap at the area's width broke
+                                    // long messages on every word.
+                                    let galley = ui.painter().layout(
+                                        match toast.kind {
+                                            ToastKind::Error => widgets::sanitize_error_message(
+                                                &toast.message,
+                                                app.locale,
+                                            )
+                                            .into_owned(),
+                                            ToastKind::Info => toast.message.clone(),
+                                        },
+                                        theme::medium(13.5),
+                                        palette.text,
+                                        280.0,
+                                    );
+                                    ui.add(egui::Label::new(galley));
+                                    if let Some((label, action)) = &toast.action {
+                                        ui.add_space(4.0);
+                                        if theme::link(
+                                            ui,
+                                            label.as_str(),
+                                            theme::medium(13.5),
+                                            palette.text,
+                                        )
+                                        .clicked()
+                                        {
+                                            chosen = Some(action.clone());
+                                        }
                                     }
-                                    ToastKind::Info => toast.message.clone(),
-                                },
-                                theme::medium(13.5),
-                                palette.text,
-                                280.0,
-                            );
-                            ui.add(egui::Label::new(galley));
-                        });
-                    });
+                                });
+                            });
+                    },
+                );
+            }
+            if let Some(action) = chosen {
+                app.actions.push(action);
             }
         });
 }
@@ -853,30 +1136,46 @@ mod window_chrome_tests {
 mod tests {
     use super::*;
 
-    /// A page fades from its cover's colour while art tints the interface,
-    /// otherwise from the palette's own wash, and from nothing when the
-    /// palette has none.
+    /// A custom palette's wash fades in at the top of a page; the plain
+    /// palettes leave the card clear (the song's colour rises from the
+    /// bottom of the window instead).
     #[test]
-    fn the_header_fades_from_the_art_or_the_palettes_wash() {
+    fn the_header_fades_only_from_the_palettes_wash() {
         let mut palette = theme::Palette::dark();
-        assert_eq!(header_wash(&palette, false, None), None);
-
-        let art = Color32::from_rgb(0x50, 0x38, 0xc8);
-        let (page, _) = header_wash(&palette, false, Some(art)).unwrap();
-        let (overview, _) = header_wash(&palette, true, Some(art)).unwrap();
-        assert_eq!(page, blend(palette.window, art, 0.85));
-        assert_eq!(overview, blend(palette.window, art, 0.45));
-
+        assert_eq!(header_wash(&palette), None);
         palette.tint = Color32::from_black_alpha(24);
         assert_eq!(
-            header_wash(&palette, false, None),
+            header_wash(&palette),
             Some((palette.tint, Color32::TRANSPARENT))
         );
-        assert_eq!(
-            header_wash(&palette, false, Some(art)).unwrap().0,
-            page,
-            "art wins over the wash"
-        );
+    }
+
+    /// Pale cool covers glow as colour, not steel; greys stay grey and
+    /// already vivid colours keep their hue.
+    #[test]
+    fn the_glow_lifts_pale_colours_and_leaves_greys() {
+        let steel = Color32::from_rgb(0x8a, 0x98, 0xa8);
+        let lifted = egui::ecolor::Hsva::from(glow_color(steel));
+        assert!(lifted.s >= 0.5 - 1e-3, "{lifted:?}");
+        let grey = Color32::from_rgb(0x80, 0x80, 0x80);
+        assert_eq!(glow_color(grey), grey);
+        let ember = Color32::from_rgb(0xc0, 0x50, 0x10);
+        let kept = egui::ecolor::Hsva::from(glow_color(ember));
+        let original = egui::ecolor::Hsva::from(ember);
+        assert!((kept.h - original.h).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_glow_fades_in_from_nothing_in_its_own_colour() {
+        let blue = Color32::from_rgb(0x20, 0x40, 0xc0);
+        let [r, g, b, a] = mix(Color32::TRANSPARENT, blue, 0.5).to_srgba_unmultiplied();
+        // Colours are stored premultiplied, so a half-faded one may round
+        // a step off.
+        for (got, want) in [(r, 0x20u8), (g, 0x40), (b, 0xc0)] {
+            assert!(got.abs_diff(want) <= 1, "{got} vs {want}");
+        }
+        assert!(a > 100 && a < 140);
+        assert_eq!(mix(blue, Color32::TRANSPARENT, 1.0).a(), 0);
     }
 
     /// The wash sits at the top of an unscrolled page and leaves with the

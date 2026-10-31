@@ -31,9 +31,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 palette.secondary,
             )
             .clicked()
-                && !app.show_friends_panel
             {
-                app.actions.push(Action::ToggleFriendsPanel);
+                app.actions.push(Action::Open(crate::model::Page::Group));
             }
         });
     });
@@ -51,7 +50,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             Some(gettext(locale, "Join").into_owned()),
         );
         if join {
-            app.actions.push(Action::ToggleFriendsPanel);
+            app.actions.push(Action::Open(crate::model::Page::Group));
         }
         return;
     }
@@ -95,10 +94,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             vec2(card_width, CARD_HEIGHT),
         );
         // Shares arrive one after another the first time Home shows them.
-        let arrive = ui.ctx().animate_bool_with_time(
+        let arrive = super::kit::motion::appear(
+            ui.ctx(),
             egui::Id::new(("group-share-arrive", &post.id)),
-            true,
-            crate::motion::seconds(ui.ctx(), super::kit::motion::ENTER + index as f32 * 0.06),
+            super::kit::motion::ENTER,
+            super::kit::motion::stagger(index),
         );
         let rect = rect.translate(vec2(0.0, (1.0 - super::kit::motion::ease(arrive)) * 10.0));
         card(app, ui, rect, post, arrive);
@@ -230,8 +230,10 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
             Sense::click(),
         )
         .on_hover_text(gettext(locale, "Play"));
+    // Named for its song, so a screen reader tells the cards apart.
+    let play_label = format!("{} {}", gettext(locale, "Play"), post.item.title);
     play_response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, gettext(locale, "Play"))
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, play_label.clone())
     });
     painter.circle_filled(play.center(), 16.0, palette.accent.gamma_multiply(alpha));
     theme::paint_icon(ui, Icon::PlayFilled, play, 14.0, palette.on_accent);
@@ -254,8 +256,9 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
             Sense::click(),
         )
         .on_hover_text(label.as_ref());
+    let heart_label = format!("{label} {}", post.item.title);
     heart_response.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, liked, label.as_ref())
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, liked, heart_label.clone())
     });
     // A heart pops when it is given.
     let pop = ui.ctx().animate_bool_with_time(
@@ -279,6 +282,14 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
         palette.secondary
     };
     theme::paint_icon(ui, icon, heart, 16.0 * swell, color.gamma_multiply(alpha));
+    if liked {
+        super::kit::motion::burst(
+            ui.painter(),
+            heart.center(),
+            pop,
+            color.gamma_multiply(alpha),
+        );
+    }
     if post.like_count > 0 {
         painter.text(
             pos2(heart.left() - 2.0, heart.center().y),
@@ -299,7 +310,7 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
 }
 
 /// "12 min ago" and friends, from the service's millisecond timestamp.
-fn ago(locale: crate::i18n::Locale, created_at_ms: u64) -> String {
+pub(super) fn ago(locale: crate::i18n::Locale, created_at_ms: u64) -> String {
     let now = jiff::Timestamp::now().as_millisecond().max(0) as u64;
     let minutes = now.saturating_sub(created_at_ms) / 60_000;
     if minutes < 1 {

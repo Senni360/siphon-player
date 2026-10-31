@@ -536,6 +536,9 @@ fastframe_icons::icons! {
         Tv => "tv",
         User => lucide "user",
         Users => lucide "users",
+        MessageCircle => "message-circle",
+        Send => "send",
+        FileAudio => "grip-file",
         Volume => "volume",
         Volume1 => "volume-1",
         Volume2 => lucide "volume-2",
@@ -597,17 +600,23 @@ pub fn icon_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
     });
     if ui.is_rect_visible(rect) {
-        let tint = if response.hovered() || response.has_focus() {
-            hover
-        } else {
-            color
-        };
-        let scale = if response.is_pointer_button_down_on() {
-            0.92
-        } else {
-            1.0
-        };
-        paint_icon(ui, icon, rect, size * scale, tint);
+        // The colour eases to its hover shade, and a press sinks the icon
+        // and lets it spring back on release.
+        let motion = crate::ui::kit::motion::FEEDBACK;
+        let lit = crate::ui::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            response.hovered() || response.has_focus(),
+            motion,
+        );
+        let tint = crate::ui::blend(color, hover, lit);
+        let press = crate::ui::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            crate::ui::kit::motion::PRESS,
+        );
+        paint_icon(ui, icon, rect, size * (1.0 - 0.1 * press), tint);
     }
     focus_ring(ui, &response);
     if tooltip.is_empty() {
@@ -675,16 +684,50 @@ pub fn circle_button(
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), tooltip)
     });
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let grow = if hovered { 1.05 } else { 1.0 };
-        let radius = diameter / 2.0 * grow;
-        let fill = if hovered { fill_hover } else { fill };
+        use crate::ui::kit::motion;
+        let ctx = ui.ctx();
+        // The disc swells a little under the pointer and dips when pressed.
+        let hovered = motion::toward(
+            ctx,
+            response.id.with("hover"),
+            response.hovered(),
+            motion::FEEDBACK,
+        );
+        let pressed = motion::toward(
+            ctx,
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            motion::PRESS,
+        );
+        let radius = diameter / 2.0 * (1.0 + 0.05 * hovered - 0.06 * pressed);
+        let fill = crate::ui::blend(fill, fill_hover, hovered);
         ui.painter().circle_filled(rect.center(), radius, fill);
+        // A new icon (Play becoming Pause) grows in while the old one
+        // shrinks away, so the change reads as the press taking effect.
+        let swap_id = response.id.with("icon");
+        let previous = ctx.data(|data| data.get_temp::<Icon>(swap_id));
+        if previous.is_some_and(|previous| previous != icon) {
+            ctx.data_mut(|data| data.insert_temp(swap_id.with("from"), previous));
+            motion::begin(ctx, swap_id.with("swap"), motion::FEEDBACK * 1.6);
+        }
+        ctx.data_mut(|data| data.insert_temp(swap_id, icon));
         let icon_size = diameter * 0.46;
-        let offset = play_glyph_offset(icon, icon_size);
-        let icon_rect =
-            egui::Rect::from_center_size(rect.center() + offset, Vec2::splat(icon_size));
-        icon.image(icon_color, icon_size).paint_at(ui, icon_rect);
+        let paint = |icon: Icon, scale: f32, alpha: f32| {
+            let size = icon_size * scale;
+            let offset = play_glyph_offset(icon, size);
+            let icon_rect = egui::Rect::from_center_size(rect.center() + offset, Vec2::splat(size));
+            icon.image(icon_color.gamma_multiply(alpha), size)
+                .paint_at(ui, icon_rect);
+        };
+        match motion::running(ctx, swap_id.with("swap")) {
+            Some(t) => {
+                if let Some(from) = ctx.data(|data| data.get_temp::<Icon>(swap_id.with("from"))) {
+                    paint(from, 1.0 - 0.5 * t, 1.0 - t);
+                }
+                paint(icon, 0.5 + 0.5 * t, t);
+            }
+            None => paint(icon, 1.0 - 0.06 * pressed, 1.0),
+        }
     }
     focus_ring(ui, &response);
     if tooltip.is_empty() {
@@ -742,19 +785,29 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
     });
     if ui.is_rect_visible(rect) {
-        let hovered = response.hovered();
-        let radius = rect.height() / 2.0;
+        use crate::ui::kit::motion;
+        let lit = motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            response.hovered(),
+            motion::FEEDBACK,
+        );
+        let pressed = motion::toward(
+            ui.ctx(),
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            motion::PRESS,
+        );
+        let shown =
+            egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * pressed));
+        let radius = shown.height() / 2.0;
         if primary {
-            let fill = if hovered {
-                palette.accent_hover
-            } else {
-                palette.accent
-            };
-            ui.painter().rect_filled(rect, radius, fill);
+            let fill = crate::ui::blend(palette.accent, palette.accent_hover, lit);
+            ui.painter().rect_filled(shown, radius, fill);
         } else {
-            let stroke_color = if hovered { palette.text } else { palette.dim };
+            let stroke_color = crate::ui::blend(palette.dim, palette.text, lit);
             ui.painter().rect_stroke(
-                rect,
+                shown,
                 radius,
                 Stroke::new(1.0, stroke_color),
                 egui::StrokeKind::Inside,
@@ -840,15 +893,24 @@ fn soft_button_inner(
         .as_ref()
         .is_some_and(|dismiss| dismiss.hovered() || dismiss.has_focus());
     if ui.is_rect_visible(rect) {
+        use crate::ui::kit::motion;
         let hovered = response.hovered() || over_dismiss;
-        let fill = if active {
-            palette.text
-        } else if hovered {
-            palette.surface_hover
-        } else {
-            palette.surface
-        };
-        ui.painter().rect_filled(rect, rect.height() / 2.0, fill);
+        // Turning on fills the button in; pointing lightens it; pressing
+        // presses it in a little.
+        let on = motion::toward(ui.ctx(), response.id.with("on"), active, motion::FEEDBACK);
+        let lit = motion::toward(ui.ctx(), response.id.with("lit"), hovered, motion::FEEDBACK);
+        let pressed = motion::toward(
+            ui.ctx(),
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            motion::PRESS,
+        );
+        let rest = crate::ui::blend(palette.surface, palette.surface_hover, lit);
+        let fill = crate::ui::blend(rest, palette.text, on);
+        let color = crate::ui::blend(palette.text, palette.window, on);
+        let shown =
+            egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * pressed));
+        ui.painter().rect_filled(shown, shown.height() / 2.0, fill);
         let mut x = rect.left() + padding.x;
         if let Some(icon) = icon {
             let icon = if dismiss.is_some() && hovered {
@@ -860,7 +922,8 @@ fn soft_button_inner(
             x += icon_width;
         }
         let pos = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
-        ui.painter().galley(pos, galley, color);
+        ui.painter()
+            .galley_with_override_text_color(pos, galley, color);
     }
     focus_ring(ui, &response);
     if let Some(dismiss) = dismiss {
@@ -1025,7 +1088,8 @@ pub fn link(
 }
 
 pub fn section_title(ui: &mut egui::Ui, palette: &Palette, label: &str) -> Response {
-    text(ui, label, bold(17.0), palette.text)
+    // Hierarchy from size, not weight: 600 at most.
+    text(ui, label, semibold(17.0), palette.text)
 }
 
 pub fn subtle(ui: &mut egui::Ui, palette: &Palette, label: &str) -> Response {

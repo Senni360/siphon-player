@@ -41,24 +41,28 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     ui.add_space(6.0);
     let greeting = crate::util::greeting(app.locale);
-    theme::text(ui, greeting.as_ref(), theme::bold(30.0), palette.text);
+    theme::text(ui, greeting.as_ref(), theme::medium(28.0), palette.text);
     ui.add_space(12.0);
+    // Each shelf rises in a beat behind the one above it, on every visit.
+    use super::rise;
     // The group's own shares come before anything a service suggests.
-    super::group_shelf::show(app, ui);
-    quick_access(app, ui);
+    rise(ui, 0, |ui| super::group_shelf::show(app, ui));
+    rise(ui, 1, |ui| quick_access(app, ui));
     ui.add_space(16.0);
 
     if app.settings.home.made_for_you.visible {
-        made_for_you(app, ui);
-        top_mixes(app, ui);
+        rise(ui, 2, |ui| {
+            made_for_you(app, ui);
+            top_mixes(app, ui);
+        });
     }
-    new_releases(app, ui);
-    recently_played(app, ui);
-    podcasts(app, ui);
-    top_artists(app, ui);
-    top_tracks(app, ui);
+    rise(ui, 3, |ui| new_releases(app, ui));
+    rise(ui, 4, |ui| recently_played(app, ui));
+    rise(ui, 5, |ui| podcasts(app, ui));
+    rise(ui, 6, |ui| top_artists(app, ui));
+    rise(ui, 7, |ui| top_tracks(app, ui));
     if app.settings.home.recommendations.visible {
-        recommendations(app, ui);
+        rise(ui, 8, |ui| recommendations(app, ui));
     }
 }
 

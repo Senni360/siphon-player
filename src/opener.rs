@@ -50,3 +50,25 @@ pub fn open(target: impl AsRef<OsStr>) -> io::Result<()> {
         Err(io::Error::last_os_error())
     }
 }
+
+/// Shows a file in its folder: selected in Explorer on Windows, the folder
+/// opened elsewhere. Spawns and returns at once.
+pub fn reveal(path: &std::path::Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // explorer.exe parses its own command line, so the path is passed
+        // raw, quoted, after /select.
+        let mut argument = std::ffi::OsString::from("/select,\"");
+        argument.push(path.as_os_str());
+        argument.push("\"");
+        std::process::Command::new("explorer.exe")
+            .raw_arg(argument)
+            .spawn()
+            .map(drop)
+    }
+    #[cfg(not(windows))]
+    {
+        open(path.parent().unwrap_or(path))
+    }
+}

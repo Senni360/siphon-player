@@ -220,7 +220,14 @@ fn body(app: &mut App, ui: &mut Ui, inner: Rect, t: f32) {
     // Tools as pills.
     let pills_top = title_pos.y + title_height + 36.0;
     let item = app.now_playing_item();
-    pills(app, ui, pos2(text_left, pills_top), item.as_ref(), &now.uri);
+    pills(
+        app,
+        ui,
+        pos2(text_left, pills_top),
+        item.as_ref(),
+        &now.uri,
+        t,
+    );
 
     if panel {
         let rect = Rect::from_min_max(
@@ -246,7 +253,10 @@ fn pill(
     label: &str,
     tip: &str,
     enabled: bool,
+    shown: f32,
 ) -> (egui::Response, f32) {
+    // Each pill rises the last 8 points into place as Now playing opens.
+    let at = at + vec2(0.0, (1.0 - shown) * 8.0);
     let galley =
         ui.painter()
             .layout_no_wrap(label.to_owned(), theme::regular(13.0), Color32::WHITE);
@@ -261,19 +271,21 @@ fn pill(
         },
     );
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label));
-    let fill = if enabled && response.hovered() {
-        Color32::from_white_alpha(40)
-    } else {
-        Color32::from_white_alpha(24)
-    };
+    let lit = motion::toward(
+        ui.ctx(),
+        response.id.with("lit"),
+        enabled && response.hovered(),
+        motion::FEEDBACK,
+    );
+    let fill = Color32::from_white_alpha(24 + (16.0 * lit) as u8).gamma_multiply(shown);
     ui.painter().rect(
         rect,
         10.0,
         fill,
-        egui::Stroke::new(1.0, Color32::from_white_alpha(30)),
+        egui::Stroke::new(1.0, Color32::from_white_alpha(30).gamma_multiply(shown)),
         egui::StrokeKind::Inside,
     );
-    let alpha = if enabled { 235 } else { 110 };
+    let alpha = ((if enabled { 235.0 } else { 110.0 }) * shown) as u8;
     theme::paint_icon(
         ui,
         icon,
@@ -290,8 +302,17 @@ fn pill(
     (response.on_hover_text(tip), rect.width())
 }
 
-fn pills(app: &mut App, ui: &mut Ui, at: egui::Pos2, item: Option<&PlayableItem>, uri: &str) {
+fn pills(
+    app: &mut App,
+    ui: &mut Ui,
+    at: egui::Pos2,
+    item: Option<&PlayableItem>,
+    uri: &str,
+    t: f32,
+) {
     let locale = app.locale;
+    // The pills follow the title in, one after another.
+    let shown = |index: usize| ((t - 0.3 - index as f32 * 0.1) / 0.3).clamp(0.0, 1.0);
     let mut x = at.x;
     let downloadable =
         app.downloads.available && item.is_some_and(|item| app.download_source(item).is_some());
@@ -307,6 +328,7 @@ fn pills(app: &mut App, ui: &mut Ui, at: egui::Pos2, item: Option<&PlayableItem>
         &gettext(locale, "Download"),
         &download_tip,
         downloadable,
+        shown(0),
     );
     if response.clicked()
         && let Some(item) = item
@@ -324,6 +346,7 @@ fn pills(app: &mut App, ui: &mut Ui, at: egui::Pos2, item: Option<&PlayableItem>
             "BPM and key arrive with the Siphon helper's analysis",
         ),
         false,
+        shown(1),
     );
     x += width + 8.0;
     let (response, width) = pill(
@@ -333,6 +356,7 @@ fn pills(app: &mut App, ui: &mut Ui, at: egui::Pos2, item: Option<&PlayableItem>
         &gettext(locale, "Credits"),
         &gettext(locale, "Credits"),
         true,
+        shown(2),
     );
     if response.clicked() {
         ui.ctx()
@@ -349,6 +373,7 @@ fn pills(app: &mut App, ui: &mut Ui, at: egui::Pos2, item: Option<&PlayableItem>
         &gettext(locale, "Share with group"),
         &gettext(locale, "Share with group"),
         item.is_some(),
+        shown(3),
     );
     if response.clicked()
         && let Some(item) = item
@@ -606,20 +631,32 @@ fn lyrics(app: &mut App, ui: &mut Ui, uri: &str, position_ms: u32) {
             let current = lyrics.active_line(position_ms);
             for (index, line) in lyrics.lines.iter().take(40).enumerate() {
                 let lit = current == Some(index) || !lyrics.synced;
-                let color = Color32::from_white_alpha(if lit { 250 } else { 110 });
+                // The sung line brightens and steps in as the song reaches
+                // it, and the one before dims back as it leaves.
+                let glow = motion::toward(
+                    ui.ctx(),
+                    Id::new(("now-playing-lyric", uri, index)),
+                    lit,
+                    motion::POPOVER,
+                );
+                let color = Color32::from_white_alpha((110.0 + 140.0 * glow) as u8);
                 let galley = super::widgets::ellipsized(
                     ui,
                     &line.text,
                     theme::semibold(17.0),
                     color,
-                    ui.available_width(),
+                    ui.available_width() - 6.0,
                     3,
                 );
                 let (rect, _) = ui.allocate_exact_size(
                     vec2(ui.available_width(), galley.size().y + 6.0),
                     Sense::hover(),
                 );
-                ui.painter().galley(rect.min, galley, color);
+                ui.painter().galley_with_override_text_color(
+                    rect.min + vec2(6.0 * glow, 0.0),
+                    galley,
+                    color,
+                );
             }
         }
         (Loadable::Loading, true) => {

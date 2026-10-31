@@ -212,6 +212,7 @@ fn optimistic_state_does_not_accept_stale_events_after_leave() {
             Feed {
                 posts: vec![post],
                 next_cursor: None,
+                members: None,
             },
             false,
         )),
@@ -284,6 +285,7 @@ fn replacing_identity_clears_private_rows_and_ignores_previous_request_events() 
             Feed {
                 posts: vec![post],
                 next_cursor: None,
+                members: None,
             },
         )),
     });
@@ -473,6 +475,24 @@ async fn local_service_round_trip() {
     client.like(&identity, &post.id, true).await.unwrap();
     let page = client.feed(&identity, None).await.unwrap();
     assert!(page.posts.iter().any(|p| p.id == post.id && p.liked));
+    // Threads and members.
+    let members = client.members(&identity).await.unwrap();
+    assert!(members.iter().any(|m| m.user_id == identity.user_id));
+    let reply = client.reply(&identity, &post.id, "what key").await.unwrap();
+    assert_eq!(reply.author_name, "Rust end-to-end");
+    let page = client.feed(&identity, None).await.unwrap();
+    let shared = page.posts.iter().find(|p| p.id == post.id).unwrap();
+    assert_eq!(shared.replies[0].text, "what key");
+    client
+        .delete_reply(&identity, &post.id, &reply.id)
+        .await
+        .unwrap();
+    // A share sent to yourself only comes back to you.
+    let mut direct = payload.clone();
+    direct.to = vec![identity.user_id.clone()];
+    let direct = client.share(&identity, &direct).await.unwrap();
+    assert_eq!(direct.item.to, vec![identity.user_id.clone()]);
+    client.delete(&identity, &direct.id).await.unwrap();
     client.rename(&identity, "Renamed Rust").await.unwrap();
     client.like(&identity, &post.id, false).await.unwrap();
     client.delete(&identity, &post.id).await.unwrap();
@@ -487,4 +507,139 @@ async fn local_service_round_trip() {
     );
     client.leave(&identity).await.unwrap();
     assert!(client.profile(&identity).await.is_err());
+}
+
+fn joined_model() -> (Model, Post) {
+    let post: Post = serde_json::from_value(post_json()).unwrap();
+    let mut model = Model::default();
+    model.profile = Some(Profile {
+        user_id: "a".into(),
+        display_name: "A".into(),
+    });
+    model.posts.push(post.clone());
+    (model, post)
+}
+
+#[test]
+fn a_write_replaces_a_running_read_and_waits_behind_another_write() {
+    use super::state::Update;
+    let (mut model, post) = joined_model();
+    let read = model.begin(Action::Refresh).unwrap();
+    // A heart while the feed is being read goes out at once.
+    let like = model
+        .begin(Action::Like {
+            id: post.id.clone(),
+            liked: true,
+        })
+        .unwrap();
+    assert_ne!(like.generation, read.generation);
+    // A reply while the heart is in flight is shown and waits its turn.
+    assert!(
+        model
+            .begin(Action::Reply {
+                post: post.id.clone(),
+                text: "nice".into(),
+            })
+            .is_none()
+    );
+    assert_eq!(model.posts[0].replies.len(), 1);
+    assert!(
+        model.next_request().is_none(),
+        "the heart is still in flight"
+    );
+    model.receive(Event {
+        generation: like.generation,
+        result: Ok(Update::Changed),
+    });
+    let reply = model.next_request().expect("the reply goes out next");
+    assert!(matches!(reply.action, Action::Reply { .. }));
+    // The service's answer takes the optimistic row's place.
+    model.receive(Event {
+        generation: reply.generation,
+        result: Ok(Update::Replied {
+            post: post.id.clone(),
+            reply: Reply {
+                id: "00000000-0000-4000-8000-0000000000aa".into(),
+                author_id: "a".into(),
+                author_name: "A".into(),
+                created_at: 5,
+                text: "nice".into(),
+            },
+        }),
+    });
+    assert_eq!(model.posts[0].replies.len(), 1);
+    assert_eq!(
+        model.posts[0].replies[0].id,
+        "00000000-0000-4000-8000-0000000000aa"
+    );
+    assert!(model.next_request().is_none());
+}
+
+#[test]
+fn a_reply_the_service_refused_is_taken_back() {
+    let (mut model, post) = joined_model();
+    let request = model
+        .begin(Action::Reply {
+            post: post.id.clone(),
+            text: "lost".into(),
+        })
+        .unwrap();
+    assert_eq!(model.posts[0].replies.len(), 1);
+    model.receive(Event {
+        generation: request.generation,
+        result: Err("offline".into()),
+    });
+    assert!(model.posts[0].replies.is_empty());
+    assert_eq!(model.error.as_deref(), Some("offline"));
+}
+
+#[test]
+fn unread_counts_only_what_others_wrote_since_the_last_visit() {
+    let (mut model, mut post) = joined_model();
+    post.created_at = 100;
+    post.author_id = "b".into();
+    post.replies = vec![
+        Reply {
+            id: "r1".into(),
+            author_id: "a".into(),
+            author_name: "A".into(),
+            created_at: 200,
+            text: "mine".into(),
+        },
+        Reply {
+            id: "r2".into(),
+            author_id: "c".into(),
+            author_name: "C".into(),
+            created_at: 300,
+            text: "theirs".into(),
+        },
+    ];
+    model.posts = vec![post];
+    assert_eq!(model.unread_since(50), 2);
+    assert_eq!(model.unread_since(150), 1);
+    assert_eq!(model.unread_since(300), 0);
+    assert_eq!(model.newest(), 300);
+}
+
+#[test]
+fn shares_and_replies_read_back_with_recipients_and_threads() {
+    let mut json = post_json();
+    json["to"] = serde_json::json!(["00000000-0000-4000-8000-000000000001"]);
+    json["replies"] = serde_json::json!([{
+        "id": "00000000-0000-4000-8000-000000000002",
+        "author_id": "00000000-0000-4000-8000-000000000003",
+        "author_name": "Teo",
+        "created_at": 7,
+        "text": "what key"
+    }]);
+    let post: Post = serde_json::from_value(json).unwrap();
+    assert_eq!(post.item.to.len(), 1);
+    assert_eq!(post.replies[0].text, "what key");
+    // An open share sends no recipients at all.
+    let open = NewPost::from_url(
+        "https://youtu.be/dQw4w9WgXcQ".into(),
+        super::Source::Youtube,
+        "t".into(),
+    );
+    assert!(serde_json::to_value(&open).unwrap().get("to").is_none());
 }

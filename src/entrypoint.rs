@@ -734,6 +734,15 @@ pub(crate) fn run() -> eframe::Result<()> {
             }
             app.attach(&cc.egui_ctx);
             #[cfg(windows)]
+            {
+                use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+                if let Ok(handle) = cc.window_handle()
+                    && let RawWindowHandle::Win32(window) = handle.as_raw()
+                {
+                    spotifast::drag_out::set_window(window.hwnd.get());
+                }
+            }
+            #[cfg(windows)]
             let thumbbar = {
                 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
                 let mut toolbar = spotifast::thumbbar::ThumbBar::new();

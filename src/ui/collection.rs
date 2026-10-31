@@ -158,13 +158,14 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
             let width = ui.available_width();
             ui.set_width(width);
             ui.spacing_mut().item_spacing.y = 6.0;
-            ui.add_space(cover_size * 0.08);
-            theme::text(ui, hero.kind.as_ref(), theme::medium(12.5), palette.text);
-            let mut size = if cover_size > 200.0 { 56.0 } else { 40.0 };
+            ui.add_space(cover_size * 0.14);
+            // The title carries the page; what kind of thing it is sits in
+            // the byline under it, not as a label above it.
+            let mut size = if cover_size > 200.0 { 52.0 } else { 38.0 };
             loop {
                 let galley = ui.painter().layout_no_wrap(
                     hero.title.to_string(),
-                    theme::bold(size),
+                    theme::semibold(size),
                     palette.text,
                 );
                 if galley.size().x <= width || size <= 22.0 {
@@ -172,7 +173,7 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                 }
                 size -= 6.0;
             }
-            theme::text(ui, hero.title, theme::bold(size), palette.text);
+            theme::text(ui, hero.title, theme::semibold(size), palette.text);
             if let Some(description) = &hero.description
                 && !description.is_empty()
             {
@@ -185,6 +186,15 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
             }
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
+                if !hero.kind.is_empty() {
+                    theme::text(
+                        ui,
+                        widgets::kind_case(hero.kind.as_ref()),
+                        theme::regular(13.5),
+                        palette.secondary,
+                    );
+                    theme::text(ui, "•", theme::regular(13.5), palette.secondary);
+                }
                 if let Some(avatar) = &hero.avatar {
                     let size = 18.0;
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
@@ -4930,6 +4940,10 @@ mod tests {
         };
 
         draw(vec![]);
+        // The hover colour eases in; let it settle before looking.
+        for _ in 0..30 {
+            draw(vec![egui::Event::PointerMoved(egui::pos2(87.0, 28.0))]);
+        }
         let tints = draw(vec![egui::Event::PointerMoved(egui::pos2(87.0, 28.0))]);
 
         assert!(

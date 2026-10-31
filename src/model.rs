@@ -156,6 +156,8 @@ pub enum Page {
     Radio(String),
     Queue,
     Settings,
+    /// The Siphon group: what friends shared, threads and the composer.
+    Group,
 }
 
 impl Page {
@@ -180,6 +182,7 @@ impl Page {
             Page::Radio(seed) => format!("radio:{seed}"),
             Page::Queue => "queue".into(),
             Page::Settings => "settings".into(),
+            Page::Group => "group".into(),
         }
     }
 
@@ -204,6 +207,7 @@ impl Page {
             "podcasts" => Page::Podcasts,
             "episodes" => Page::Episodes,
             "queue" => Page::Queue,
+            "group" => Page::Group,
             "settings" => Page::Settings,
             other => {
                 let (kind, id) = other.split_once(':')?;
@@ -1297,12 +1301,34 @@ pub struct Toast {
     pub message: String,
     pub kind: ToastKind,
     pub created: Instant,
+    /// At most one follow-up, like Show in folder or Undo, drawn as a
+    /// button on the toast. A toast with one stays a little longer.
+    pub action: Option<(String, Action)>,
+}
+
+impl Toast {
+    /// How long this toast stays on screen.
+    pub fn lifetime(&self) -> std::time::Duration {
+        if self.action.is_some() {
+            std::time::Duration::from_millis(6_000)
+        } else {
+            std::time::Duration::from_millis(3_200)
+        }
+    }
 }
 
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
     Friends(crate::friends::Action),
+    /// Download a song a friend shared, by the share's id, so it lands as
+    /// a file ready to drag into a DAW.
+    DownloadShare(String),
+    /// Show a downloaded file in its folder.
+    RevealFile(std::path::PathBuf),
+    /// Drag a downloaded file out of the window, into a DAW or a folder.
+    /// Falls back to showing it where dragging out is not supported.
+    DragFileOut(std::path::PathBuf),
     Download(Vec<PlayableItem>),
     DownloadAll {
         uri: String,

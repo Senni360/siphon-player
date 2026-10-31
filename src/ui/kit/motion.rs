@@ -107,6 +107,203 @@ pub fn running(ctx: &Context, id: Id) -> Option<f32> {
     Some(transition.progress(ctx))
 }
 
+/// Eased progress, from 0 to 1, of something drawn for the first time
+/// under `id`: it starts the first frame it is asked for, waits `delay`
+/// seconds, then takes `duration`. Under less motion it is 1 at once.
+pub fn appear(ctx: &Context, id: Id, duration: f32, delay: f32) -> f32 {
+    let now = ctx.input(|input| input.time);
+    let started = ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(id, || now));
+    Transition::at(started, crate::motion::seconds(ctx, duration))
+        .delayed(delay)
+        .progress(ctx)
+}
+
+/// Eased progress, from 0 to 1, of something drawn again after not being
+/// drawn (a panel opened, a section shown): it enters over `duration`
+/// every time it comes back.
+pub fn opening(ctx: &Context, id: Id, duration: f32) -> f32 {
+    let frame = ctx.cumulative_frame_nr();
+    let last = ctx.data(|data| data.get_temp::<u64>(id.with("drawn")));
+    ctx.data_mut(|data| data.insert_temp(id.with("drawn"), frame));
+    if last.is_none_or(|last| frame.saturating_sub(last) > 1) {
+        begin(ctx, id.with("opening"), duration);
+    }
+    running(ctx, id.with("opening")).unwrap_or(1.0)
+}
+
+/// Where the next shape painted in `layer` will go, to move what is
+/// painted after it with [`shift_since`].
+pub fn mark(ctx: &Context, layer: egui::LayerId) -> egui::layers::ShapeIdx {
+    ctx.graphics(|graphics| {
+        graphics
+            .get(layer)
+            .map_or(egui::layers::ShapeIdx(0), |list| list.next_idx())
+    })
+}
+
+/// Moves everything painted in `layer` since `start` by `offset`, for
+/// something sliding into place. Only what is seen moves, not where it is
+/// clicked, which the slide is too short to matter for.
+pub fn shift_since(
+    ctx: &Context,
+    layer: egui::LayerId,
+    start: egui::layers::ShapeIdx,
+    offset: egui::Vec2,
+) {
+    if offset == egui::Vec2::ZERO {
+        return;
+    }
+    ctx.graphics_mut(|graphics| {
+        let list = graphics.entry(layer);
+        let end = list.next_idx();
+        list.transform_range(
+            start,
+            end,
+            egui::emath::TSTransform::from_translation(offset),
+        );
+    });
+}
+
+/// Eased progress toward `on`, from 0 (off) to 1 (on), over `duration`.
+/// The first frame shows the state as it is, without moving.
+pub fn toward(ctx: &Context, id: Id, on: bool, duration: f32) -> f32 {
+    ctx.animate_bool_with_time_and_easing(id, on, crate::motion::seconds(ctx, duration), ease)
+}
+
+/// An eased number that glides to `target` over `duration` seconds.
+pub fn glide(ctx: &Context, id: Id, target: f32, duration: f32) -> f32 {
+    ctx.animate_value_with_time(id, target, crate::motion::seconds(ctx, duration))
+}
+
+/// How long a changed count takes to roll to its new value.
+pub const ROLL: f32 = 0.32;
+
+/// A count that rolls when it changes: the old figure slides out upward
+/// (downward when it fell) and the new one slides in behind it. Paints
+/// `value` with its left edge at `pos`'s x and its vertical centre at
+/// `pos`'s y, and returns the width it took.
+pub fn rolling_count(
+    ui: &egui::Ui,
+    id: Id,
+    pos: egui::Pos2,
+    value: u64,
+    font: egui::FontId,
+    color: egui::Color32,
+) -> f32 {
+    #[derive(Clone, Copy)]
+    struct Roll {
+        from: u64,
+        to: u64,
+        transition: Transition,
+    }
+    let ctx = ui.ctx();
+    let roll = ctx.data_mut(|data| {
+        let roll = data.get_temp_mut_or_insert_with(id, || Roll {
+            from: value,
+            to: value,
+            transition: Transition::at(f64::NEG_INFINITY, 0.0),
+        });
+        if roll.to != value {
+            *roll = Roll {
+                from: roll.to,
+                to: value,
+                transition: Transition::start(ctx, ROLL),
+            };
+        }
+        *roll
+    });
+    let painter = ui.painter();
+    let galley = painter.layout_no_wrap(value.to_string(), font.clone(), color);
+    let height = galley.size().y;
+    let t = roll.transition.progress(ctx);
+    let width = galley.size().x;
+    if t >= 1.0 || roll.from == roll.to {
+        painter.galley(pos - egui::vec2(0.0, height / 2.0), galley, color);
+        return width;
+    }
+    let up = if roll.to > roll.from { 1.0 } else { -1.0 };
+    let distance = height * 0.7;
+    let clip = egui::Rect::from_min_size(
+        pos - egui::vec2(0.0, height / 2.0 + 1.0),
+        egui::vec2(width.max(24.0) + 8.0, height + 2.0),
+    );
+    let painter = painter.with_clip_rect(clip.intersect(ui.clip_rect()));
+    let old = painter.layout_no_wrap(roll.from.to_string(), font, color.gamma_multiply(1.0 - t));
+    painter.galley(
+        pos - egui::vec2(0.0, height / 2.0 + up * distance * t),
+        old,
+        color,
+    );
+    painter.galley(
+        pos - egui::vec2(0.0, height / 2.0 - up * distance * (1.0 - t)),
+        galley.clone(),
+        color.gamma_multiply(t),
+    );
+    width
+}
+
+/// How long a sent thing takes to fly off.
+pub const FLY: f32 = 0.5;
+
+/// Where a "sent" icon is at progress `t`: it leaves up and to the right,
+/// shrinking and fading, then comes back in from below. Returns the
+/// offset, the scale and the opacity.
+pub fn fly_off(t: f32) -> (egui::Vec2, f32, f32) {
+    let t = t.clamp(0.0, 1.0);
+    if t < 0.55 {
+        let out = ease(t / 0.55);
+        (
+            egui::vec2(18.0 * out, -18.0 * out),
+            1.0 - 0.4 * out,
+            1.0 - out,
+        )
+    } else {
+        let back = ease((t - 0.55) / 0.45);
+        (
+            egui::vec2(0.0, 8.0 * (1.0 - back)),
+            0.85 + 0.15 * back,
+            back,
+        )
+    }
+}
+
+/// How long a refused press nudges.
+pub const NUDGE: f32 = 0.24;
+
+/// The sideways offset of a control nudging at progress `t`: out 4 points
+/// in `direction` and back, once.
+pub fn nudge(t: f32, direction: f32) -> f32 {
+    4.0 * direction * (t.clamp(0.0, 1.0) * std::f32::consts::PI).sin()
+}
+
+/// How long a pressed control takes to settle back.
+pub const PRESS: f32 = 0.12;
+
+/// The scale of a control while pressed: 0.97, easing back on release.
+pub fn press_scale(ctx: &Context, response: &egui::Response) -> f32 {
+    1.0 - 0.03
+        * toward(
+            ctx,
+            response.id.with("press"),
+            response.is_pointer_button_down_on(),
+            PRESS,
+        )
+}
+
+/// Six dots bursting out of `center` as something is given, at the pop's
+/// progress `t`: they fly out and shrink away. Nothing is drawn at rest.
+pub fn burst(painter: &egui::Painter, center: egui::Pos2, t: f32, color: egui::Color32) {
+    if t <= 0.0 || t >= 1.0 {
+        return;
+    }
+    let spread = ease(t);
+    for dot in 0..6 {
+        let angle = dot as f32 / 6.0 * std::f32::consts::TAU - std::f32::consts::FRAC_PI_2;
+        let at = center + egui::Vec2::angled(angle) * (8.0 + 10.0 * spread);
+        painter.circle_filled(at, 1.6 * (1.0 - spread), color);
+    }
+}
+
 /// How long a heart pops when it is given.
 pub const POP: f32 = 0.3;
 

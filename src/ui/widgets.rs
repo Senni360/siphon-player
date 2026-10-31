@@ -385,14 +385,35 @@ pub fn virtual_rows(
     if first > 0 {
         ui.allocate_space(vec2(width, first as f32 * row_height));
     }
+    // The first rows of the page's lists come in one after another when
+    // the page opens; rows scrolled to later are simply there.
+    let entering = super::rows_enter(ui.ctx());
     for index in first..last {
+        let t = if entering && index < ENTERING_ROWS {
+            super::entering(ui.ctx(), index as f32 * 0.03)
+        } else {
+            1.0
+        };
+        if t >= 1.0 {
+            row(ui, index);
+            continue;
+        }
+        let opacity = ui.opacity();
+        ui.multiply_opacity(t);
+        let layer = ui.layer_id();
+        let start = super::kit::motion::mark(ui.ctx(), layer);
         row(ui, index);
+        super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 8.0));
+        ui.set_opacity(opacity);
     }
     if last < count {
         ui.allocate_space(vec2(width, (count - last) as f32 * row_height));
     }
     ui.spacing_mut().item_spacing = previous_spacing;
 }
+
+/// How many of a list's first rows enter one after another.
+const ENTERING_ROWS: usize = 10;
 
 /// A wrapping grid of cards, laid out row by row so only visible cards are
 /// measured and painted.
@@ -1928,14 +1949,24 @@ fn track_row_contents(
                 .secondary
                 .gamma_multiply(if hovered { 0.30 } else { 0.20 }),
         );
-    } else if hovered {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(6),
-            palette
-                .surface_hover
-                .gamma_multiply(if palette.dark { 0.7 } else { 1.0 }),
+    } else {
+        // The hover fill eases in and out, so moving down a list reads as
+        // one light passing over the rows.
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("hover"),
+            hovered,
+            super::kit::motion::FEEDBACK,
         );
+        if lit > 0.0 {
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(6),
+                palette
+                    .surface_hover
+                    .gamma_multiply(if palette.dark { 0.7 } else { 1.0 } * lit),
+            );
+        }
     }
     if let Some(t) = super::kit::motion::running(ui.ctx(), response.id.with("played")) {
         paint_sweep(ui.painter(), rect, t, palette.text);
@@ -2398,7 +2429,11 @@ fn track_row_contents(
             } else {
                 16.0
             };
-            if theme::icon_button(&mut child, icon, size, color, hover, &tooltip).clicked() {
+            let heart = theme::icon_button(&mut child, icon, size, color, hover, &tooltip);
+            if given {
+                super::kit::motion::burst(child.painter(), heart.rect.center(), pop, color);
+            }
+            if heart.clicked() {
                 app.actions
                     .push(if crate::soundcloud::is_track_uri(row.item.uri()) {
                         Action::ToggleSoundCloudLike(row.item.uri().to_owned())
@@ -2680,6 +2715,34 @@ pub fn explicit_badge(ui: &mut Ui, palette: &Palette) {
     );
 }
 
+/// A label in Title Case in sentence case, keeping acronyms: "Collaborative
+/// Playlist" reads "Collaborative playlist", "EP" stays "EP".
+pub fn kind_case(text: &str) -> String {
+    text.split(' ')
+        .enumerate()
+        .map(|(index, word)| {
+            let acronym = word.chars().count() > 1 && word.chars().all(|c| !c.is_lowercase());
+            if index == 0 || acronym {
+                word.to_owned()
+            } else {
+                word.to_lowercase()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A heading written in capitals, in sentence case: "ADDED BY" reads
+/// "Added by". Column headings stay quiet labels, not shouted ones.
+pub fn sentence_case(text: &str) -> String {
+    let lower = text.to_lowercase();
+    let mut chars = lower.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
 /// The header row above a track table.
 /// The column headings above a track table. Answers with the heading that
 /// was clicked, so the table can sort by it.
@@ -2819,7 +2882,7 @@ pub fn table_header(
     heading(
         ui,
         x,
-        &pgettext(locale, "column heading", "TITLE"),
+        &sentence_case(&pgettext(locale, "column heading", "TITLE")),
         SortColumn::Title,
     );
     let medium = width > 560.0;
@@ -2855,7 +2918,7 @@ pub fn table_header(
         heading(
             ui,
             cx,
-            &pgettext(locale, "column heading", "ALBUM"),
+            &sentence_case(&pgettext(locale, "column heading", "ALBUM")),
             SortColumn::Album,
         );
         cx += album_width;
@@ -2864,7 +2927,7 @@ pub fn table_header(
         heading(
             ui,
             cx,
-            &pgettext(locale, "column heading", "ADDED BY"),
+            &sentence_case(&pgettext(locale, "column heading", "ADDED BY")),
             SortColumn::AddedBy,
         );
         cx += added_by_width;
@@ -2873,7 +2936,7 @@ pub fn table_header(
         heading(
             ui,
             cx,
-            &pgettext(locale, "column heading", "DATE ADDED"),
+            &sentence_case(&pgettext(locale, "column heading", "DATE ADDED")),
             SortColumn::Added,
         );
         cx += added_width;
@@ -2883,7 +2946,7 @@ pub fn table_header(
         ui.painter().text(
             pos2(cx, rect.center().y),
             egui::Align2::LEFT_CENTER,
-            pgettext(locale, "column heading", "PLAYS"),
+            sentence_case(&pgettext(locale, "column heading", "PLAYS")),
             font.clone(),
             color,
         );
@@ -3074,13 +3137,21 @@ pub fn card(
     let mut play = false;
     if ui.is_rect_visible(rect) {
         let hovered = ui.rect_contains_pointer(rect);
-        if hovered {
+        // The card lights and its play button rises in as the pointer
+        // arrives, and both settle away as it leaves.
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            hovered || response.has_focus(),
+            super::kit::motion::FEEDBACK,
+        );
+        if lit > 0.0 {
             ui.painter().rect_filled(
                 rect,
                 CornerRadius::same(theme::RADIUS),
                 palette
                     .surface_hover
-                    .gamma_multiply(if palette.dark { 0.8 } else { 1.0 }),
+                    .gamma_multiply(if palette.dark { 0.8 } else { 1.0 } * lit),
             );
         }
         let image_rect = Rect::from_min_size(rect.min + vec2(PAD, PAD), Vec2::splat(image_size));
@@ -3127,9 +3198,12 @@ pub fn card(
         ui.painter()
             .galley(subtitle_pos, subtitle_galley, palette.secondary);
 
-        if playable && hovered {
+        if playable && (hovered || lit > 0.01) {
             let button_rect = Rect::from_center_size(
-                pos2(image_rect.right() - 26.0, image_rect.bottom() - 26.0),
+                pos2(
+                    image_rect.right() - 26.0,
+                    image_rect.bottom() - 26.0 + 8.0 * (1.0 - lit),
+                ),
                 Vec2::splat(44.0),
             );
             let mut child = ui.new_child(
@@ -3137,6 +3211,7 @@ pub fn card(
                     .max_rect(button_rect)
                     .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
             );
+            child.multiply_opacity(lit);
             play = theme::circle_button(
                 &mut child,
                 if playing {
@@ -3537,27 +3612,55 @@ pub fn thin_slider(
             node.add_action(Action::Increment);
         }
     });
+    // A click glides the fill to where it landed rather than jumping, so
+    // the eye follows the seek; a drag follows the pointer exactly.
+    if response.clicked()
+        && let SliderEvent::Committed(_) = event
+    {
+        ui.data_mut(|data| data.insert_temp(id.with("jump-from"), value));
+        super::kit::motion::begin(ui.ctx(), id.with("jump"), super::kit::motion::POPOVER);
+    }
+    let shown = match super::kit::motion::running(ui.ctx(), id.with("jump")) {
+        Some(t) => {
+            let from = ui
+                .data(|data| data.get_temp::<f32>(id.with("jump-from")))
+                .unwrap_or(shown);
+            from + (shown - from) * t
+        }
+        None => shown,
+    };
     if ui.is_rect_visible(rect) {
         let active = response.hovered()
             || response.has_focus()
             || response.dragged()
             || dragging_value.is_some();
-        let bar = Rect::from_center_size(rect.center(), vec2(rect.width(), 4.0));
+        // Pointing at it thickens the bar and grows its knob in.
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            id.with("lit"),
+            active,
+            super::kit::motion::FEEDBACK,
+        );
+        let thickness = 4.0 + 2.0 * lit;
+        let bar = Rect::from_center_size(rect.center(), vec2(rect.width(), thickness));
         let track_color = if palette.dark {
             Color32::from_white_alpha(50)
         } else {
             Color32::from_black_alpha(40)
         };
-        ui.painter().rect_filled(bar, 2.0, track_color);
+        ui.painter().rect_filled(bar, thickness / 2.0, track_color);
         let filled = Rect::from_min_max(
             bar.min,
             pos2(bar.left() + bar.width() * shown.clamp(0.0, 1.0), bar.max.y),
         );
-        let fill = if active { palette.accent } else { palette.text };
-        ui.painter().rect_filled(filled, 2.0, fill);
-        if active {
-            ui.painter()
-                .circle_filled(pos2(filled.right(), bar.center().y), 6.0, palette.text);
+        let fill = super::blend(palette.text, palette.accent, lit);
+        ui.painter().rect_filled(filled, thickness / 2.0, fill);
+        if lit > 0.0 {
+            ui.painter().circle_filled(
+                pos2(filled.right(), bar.center().y),
+                6.0 * lit,
+                palette.text,
+            );
         }
     }
     event
@@ -5327,7 +5430,10 @@ mod tests {
                     output.textures_delta.clear();
                     output
                 };
-                draw();
+                // A focus highlight eases in; let it settle before looking.
+                for _ in 0..30 {
+                    draw();
+                }
                 let output = draw();
                 let fills: Vec<_> = output
                     .shapes

@@ -279,3 +279,51 @@ test('requests authenticated before leave cannot commit a mutation after revocat
     assert.equal(state.users.length, 0);
   }
 });
+
+test('direct shares reach only their recipients and the author', async () => {
+  const { call, join } = fixture();
+  const a = await join('Alice');
+  const b = await join('Bob');
+  const c = await join('Cleo');
+  const members = await call('/members', 'GET', undefined, c.secret);
+  assert.deepEqual(members.body.members.map((m: any) => m.display_name), ['Alice', 'Bob', 'Cleo']);
+  assert(!JSON.stringify(members.body).includes('secret'));
+  const sent = await call('/posts', 'POST', { ...post, to: [b.user_id] }, a.secret);
+  assert.equal(sent.status, 201);
+  assert.deepEqual(sent.body.to, [b.user_id]);
+  const titles = async (secret: string) => (await call('/posts', 'GET', undefined, secret)).body.posts.map((p: any) => p.id);
+  assert.deepEqual(await titles(a.secret), [sent.body.id]);
+  assert.deepEqual(await titles(b.secret), [sent.body.id]);
+  assert.deepEqual(await titles(c.secret), []);
+  assert.equal((await call(`/posts/${sent.body.id}/like`, 'PUT', undefined, c.secret)).status, 404);
+  assert.equal((await call(`/posts/${sent.body.id}/replies`, 'POST', { text: 'hi' }, c.secret)).status, 404);
+  assert.equal((await call('/posts', 'POST', { ...post, to: ['00000000-0000-0000-0000-000000000000'] }, a.secret)).status, 400);
+  assert.equal((await call('/posts', 'POST', { ...post, to: 'everyone' }, a.secret)).status, 400);
+  const open = await call('/posts', 'POST', { ...post, to: [] }, a.secret);
+  assert.deepEqual(open.body.to, []);
+  assert.deepEqual(await titles(c.secret), [open.body.id]);
+});
+
+test('replies thread under a share, keep their author and can be removed by them', async () => {
+  const { call, join, store } = fixture();
+  const a = await join('Alice');
+  const b = await join('Bob');
+  const shared = await call('/posts', 'POST', post, a.secret);
+  const reply = await call(`/posts/${shared.body.id}/replies`, 'POST', { text: 'That snare though' }, b.secret);
+  assert.equal(reply.status, 201);
+  assert.equal(reply.body.author_name, 'Bob');
+  assert.equal((await call(`/posts/${shared.body.id}/replies`, 'POST', { text: '' }, b.secret)).status, 400);
+  assert.equal((await call(`/posts/${shared.body.id}/replies`, 'POST', { text: 'x'.repeat(501) }, b.secret)).status, 400);
+  let feed = (await call('/posts', 'GET', undefined, a.secret)).body.posts;
+  assert.deepEqual(feed[0].replies.map((r: any) => [r.author_name, r.text]), [['Bob', 'That snare though']]);
+  assert.equal((await call(`/posts/${shared.body.id}/replies/${reply.body.id}`, 'DELETE', undefined, a.secret)).status, 403);
+  await call('/me', 'DELETE', undefined, b.secret);
+  feed = (await call('/posts', 'GET', undefined, a.secret)).body.posts;
+  assert.equal(feed[0].replies[0].author_name, 'Former member');
+  // The stored document still validates after a member with replies left.
+  await store.read();
+  const own = await call(`/posts/${shared.body.id}/replies`, 'POST', { text: 'mine' }, a.secret);
+  assert.equal((await call(`/posts/${shared.body.id}/replies/${own.body.id}`, 'DELETE', undefined, a.secret)).status, 200);
+  feed = (await call('/posts', 'GET', undefined, a.secret)).body.posts;
+  assert.equal(feed[0].replies.length, 1);
+});

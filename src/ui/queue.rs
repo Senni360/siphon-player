@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use egui::{Align, Frame, Layout, Margin, Rect, UiBuilder};
+use egui::{Align, Layout, Rect, UiBuilder};
 
 use crate::api::models::PlayableItem;
 use crate::app::App;
@@ -48,12 +48,20 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
         .default_size(app.settings.queue_width)
         .size_range(fit.range.clone())
         .show_separator_line(false)
-        .frame(
-            Frame::new()
-                .fill(palette.panel)
-                .inner_margin(Margin::symmetric(12, 12)),
-        );
+        .frame(super::side_card_frame(&palette));
+    let layer = ui.layer_id();
+    let start = super::kit::motion::mark(ui.ctx(), layer);
     let response = panel.show(ui, |ui| {
+        super::side_card(ui, &palette);
+        // Opening, its contents slide in from the right edge.
+        let enter = super::kit::motion::opening(
+            ui.ctx(),
+            egui::Id::new("queue-panel-enter"),
+            super::kit::motion::ENTER,
+        );
+        if enter < 1.0 {
+            ui.multiply_opacity(enter);
+        }
         let window_controls = super::window_controls_reservation(
             ui.ctx(),
             app.show_queue_panel,
@@ -133,6 +141,17 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
             },
         );
     });
+    let enter = super::kit::motion::opening(
+        ui.ctx(),
+        egui::Id::new("queue-panel-slide"),
+        super::kit::motion::ENTER,
+    );
+    super::kit::motion::shift_since(
+        ui.ctx(),
+        layer,
+        start,
+        egui::vec2((1.0 - enter) * 32.0, 0.0),
+    );
     let width = response.response.rect.width();
     // Adopt the drawn width only from the person's own drag. The panel
     // also draws clamped copies of widths chosen elsewhere (the
