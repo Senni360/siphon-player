@@ -3,7 +3,7 @@
 
 use crate::api::models::{Artist, ArtistRef, ExternalUrls, Track};
 use crate::credits::{Credit, Credits};
-use crate::friends::{Feed, Model, NewPost, Post, Profile, Source};
+use crate::friends::{Feed, Model, NewPost, Post, Profile, Reply, Source};
 use crate::lyrics::{Line, Lyrics};
 use crate::model::Loadable;
 use crate::soundcloud::following;
@@ -139,7 +139,9 @@ pub fn fixture(scenario: Scenario) -> Fixture {
                 artwork_url: None,
                 duration_ms: track.duration_ms,
                 note: "Fictional sharing example".into(),
+                to: Vec::new(),
             },
+            replies: Vec::new(),
         })
         .collect();
     let friends = match scenario {
@@ -151,6 +153,7 @@ pub fn fixture(scenario: Scenario) -> Fixture {
         _ => Loadable::Loaded(Feed {
             posts,
             next_cursor: None,
+            members: None,
         }),
     };
     let following = match scenario {
@@ -183,6 +186,94 @@ pub fn fixture(scenario: Scenario) -> Fixture {
         friends,
         following,
     }
+}
+
+/// The demo's group: four invented friends sharing songs from the main
+/// demo's catalogue, with a thread and one song sent only to the viewer.
+/// `songs` are (url, title, artist, artwork) in the order they were shared,
+/// newest first.
+pub fn group(songs: &[(String, String, String, Option<String>)], now_ms: u64) -> Model {
+    const VIEWER: &str = "00000000-0000-4000-8000-000000000001";
+    const PEOPLE: [(&str, &str); 3] = [
+        ("00000000-0000-4000-8000-000000000002", "Maya"),
+        ("00000000-0000-4000-8000-000000000003", "Jonas"),
+        ("00000000-0000-4000-8000-000000000004", "Teo"),
+    ];
+    let notes = [
+        "that bassline at 1:12 is going straight into a flip",
+        "",
+        "slowed this down 8% and it sits perfect at 92",
+        "for the sunday session",
+        "",
+        "chops on this are unreal",
+    ];
+    let minute = 60_000;
+    let ages = [4, 38, 95, 60 * 5, 60 * 26, 60 * 50];
+    let mut model = Model::default();
+    model.restored = true;
+    model.profile = Some(Profile {
+        user_id: VIEWER.into(),
+        display_name: "You".into(),
+    });
+    model.members = std::iter::once((VIEWER, "You"))
+        .chain(PEOPLE)
+        .map(|(id, name)| Profile {
+            user_id: id.into(),
+            display_name: name.into(),
+        })
+        .collect();
+    model.posts = songs
+        .iter()
+        .take(ages.len())
+        .enumerate()
+        .map(|(index, (url, title, artist, artwork))| {
+            let (author_id, author_name) = if index == 3 {
+                (VIEWER, "You")
+            } else {
+                PEOPLE[index % PEOPLE.len()]
+            };
+            let created_at = now_ms.saturating_sub(ages[index] * minute);
+            let reply = |n: u64, who: usize, text: &str| Reply {
+                id: format!("00000000-0000-4000-9000-{:012}", index as u64 * 10 + n),
+                author_id: if who == 9 { VIEWER } else { PEOPLE[who].0 }.into(),
+                author_name: if who == 9 { "You" } else { PEOPLE[who].1 }.into(),
+                created_at: created_at + (n + 1) * 3 * minute,
+                text: text.into(),
+            };
+            Post {
+                id: format!("00000000-0000-4000-a000-{index:012}"),
+                author_id: author_id.into(),
+                author_name: author_name.into(),
+                created_at,
+                like_count: [2, 0, 3, 1, 0, 1][index],
+                liked: index == 2,
+                replies: match index {
+                    0 => vec![
+                        reply(0, 1, "send stems when you have them"),
+                        reply(1, 9, "same, want to try it at 140"),
+                    ],
+                    2 => vec![reply(0, 0, "what key is this in")],
+                    _ => Vec::new(),
+                },
+                item: NewPost {
+                    url: url.clone(),
+                    source: Source::Spotify,
+                    title: title.clone(),
+                    artists: vec![artist.clone()],
+                    artwork_url: artwork.clone(),
+                    duration_ms: 200_000,
+                    note: notes[index].into(),
+                    // Jonas sent the second one to the viewer only.
+                    to: if index == 1 {
+                        vec![VIEWER.into()]
+                    } else {
+                        Vec::new()
+                    },
+                },
+            }
+        })
+        .collect();
+    model
 }
 
 /// Populate existing surfaces without choosing a new layout or visual system.

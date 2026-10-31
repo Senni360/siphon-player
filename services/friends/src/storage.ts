@@ -9,17 +9,23 @@ export interface Payload {
   artwork_url: string | null;
   duration_ms: number;
   note?: string;
+  /** Member ids a share was sent to. Absent or empty: the whole group. */
+  to?: string[];
 }
+export interface Reply { id: string; author_id: string; created_at: number; text: string }
 export interface Post extends Payload {
   id: string;
   author_id: string;
   created_at: number;
   likes: string[];
+  replies?: Reply[];
 }
 export interface State { revision: number; users: User[]; posts: Post[] }
 export const empty = (): State => ({ revision: 0, users: [], posts: [] });
 export const MAX_USERS = 500;
 export const MAX_POSTS = 5000;
+export const MAX_REPLIES = 200;
+export const MAX_RECIPIENTS = 20;
 export const MAX_STATE_BYTES = 8 * 1024 * 1024;
 // A REST provider may encode a stored character as six ASCII bytes (\uXXXX).
 const MAX_RESPONSE_BYTES = MAX_STATE_BYTES * 6 + 1024;
@@ -52,7 +58,11 @@ function storedState(value: unknown): State {
       (p.artwork_url === null || httpsUrl(p.artwork_url) !== null) &&
       Number.isSafeInteger(p.duration_ms) && p.duration_ms >= 0 && p.duration_ms <= 604800000 &&
       (p.note === undefined || text(p.note, 280, true)) && Array.isArray(p.likes) &&
-      p.likes.length <= MAX_USERS && new Set(p.likes).size === p.likes.length && p.likes.every(id => members.has(id))) ||
+      p.likes.length <= MAX_USERS && new Set(p.likes).size === p.likes.length && p.likes.every(id => members.has(id)) &&
+      (p.to === undefined || Array.isArray(p.to) && p.to.length <= MAX_RECIPIENTS && new Set(p.to).size === p.to.length && p.to.every(id)) &&
+      (p.replies === undefined || Array.isArray(p.replies) && p.replies.length <= MAX_REPLIES &&
+        p.replies.every(r => r && id(r.id) && id(r.author_id) && Number.isSafeInteger(r.created_at) && r.created_at >= 0 && text(r.text, 500)) &&
+        new Set(p.replies.map(r => r.id)).size === p.replies.length)) ||
       new Set(state.posts.map(p => p.id)).size !== state.posts.length) throw new Error('Invalid stored group');
   return state;
 }

@@ -88,12 +88,20 @@ Never log request bodies, Authorization headers, invites, or private share URLs.
 | `DELETE /api/posts/:id` | Delete own post -> `{ok:true}`. Other authors receive 403. |
 | `PUT /api/posts/:id/like` | Set heart, idempotent -> `{ok:true}`. |
 | `DELETE /api/posts/:id/like` | Remove heart, idempotent -> `{ok:true}`. |
+| `GET /api/members` | `{members: [{user_id, display_name}]}`, for choosing who a share goes to. |
+| `POST /api/posts/:id/replies` | `{text}` (1 to 500 characters) -> `201 {id, author_id, author_name, created_at, text}`. |
+| `DELETE /api/posts/:id/replies/:reply` | Delete own reply -> `{ok:true}`. Other authors receive 403. |
 
-Payload: `{url, source, title, artists, artwork_url, duration_ms, note?}`.
+Payload: `{url, source, title, artists, artwork_url, duration_ms, note?, to?}`.
+`to` is an optional list of up to 20 member ids. A share with recipients is
+seen only by them and its author; everyone else gets 404 for it, including for
+hearts and replies. Absent or empty means the whole group. Each share holds up
+to 200 replies; a reply by a member who later leaves stays, as Former member.
 `source` is `spotify`, `soundcloud` or `youtube`; `artists` is an array of names,
 `artwork_url` may be null, and `duration_ms` is an integer (zero means unknown).
 Post fields also include `id`, `author_id`, `author_name`, `created_at` (Unix
-milliseconds), `like_count`, and `liked` for the authenticated reader.
+milliseconds), `like_count`, `liked` for the authenticated reader, `to`, and
+`replies` (oldest first, each with its author's current name).
 
 Only HTTPS links from the requested source are accepted: Spotify tracks, albums
 and playlists; SoundCloud tracks and sets, with private `s-` paths/query tokens

@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
-import { MAX_POSTS, MAX_USERS, StorageFullError } from './storage.ts';
+import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.ts';
 import { httpsUrl, sourceUrl } from './urls.ts';
-import type { Payload, State, Storage, User } from './storage.ts';
+import type { Payload, Post, State, Storage, User } from './storage.ts';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 class HttpError extends Error { constructor(public status: number, message: string, public retryAfter?: number) { super(message); } }
@@ -28,7 +28,19 @@ function payload(body: Record<string, unknown>): Payload {
   const artists = (body.artists as unknown[]).map(a => text(a, 'artist', 200));
   if (!Number.isSafeInteger(body.duration_ms) || Number(body.duration_ms) < 0 || Number(body.duration_ms) > 604800000) fail(400, 'Invalid duration_ms');
   const artwork = body.artwork_url == null || body.artwork_url === '' ? null : https(body.artwork_url).toString();
-  return { url, source, title: text(body.title, 'title', 300), artists, artwork_url: artwork, duration_ms: Number(body.duration_ms), note: text(body.note, 'note', 280, true) };
+  const to = recipients(body.to);
+  return { url, source, title: text(body.title, 'title', 300), artists, artwork_url: artwork, duration_ms: Number(body.duration_ms), note: text(body.note, 'note', 280, true), ...(to.length ? { to } : {}) };
+}
+const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
+/** Who a share goes to: absent or empty means the whole group. */
+function recipients(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > MAX_RECIPIENTS || !value.every(id => typeof id === 'string' && UUID.test(id)) || new Set(value).size !== value.length) fail(400, 'Invalid recipients');
+  return value as string[];
+}
+/** A share sent to some members is seen only by them and its author. */
+export function visible(post: Post, reader: string): boolean {
+  return !post.to?.length || post.author_id === reader || post.to.includes(reader);
 }
 async function body(request: Request, signal: AbortSignal): Promise<Record<string, unknown>> {
   if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') fail(415, 'Use application/json');
@@ -141,7 +153,7 @@ export function createService(storage: Storage, inviteCode: string) {
             if (!cursor || !Number.isSafeInteger(cursor.created_at) || typeof cursor.id !== 'string' || !/^[\w-]{36}$/.test(cursor.id)) throw new Error();
           } catch { return fail(400, 'Invalid cursor'); }
         }
-        const posts = state.posts.filter(p => !cursor || p.created_at < cursor.created_at || p.created_at === cursor.created_at && p.id < cursor.id)
+        const posts = state.posts.filter(p => visible(p, user.user_id)).filter(p => !cursor || p.created_at < cursor.created_at || p.created_at === cursor.created_at && p.id < cursor.id)
           .sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id));
         const page = posts.slice(0, limit);
         const last = page.at(-1);
@@ -151,25 +163,57 @@ export function createService(storage: Storage, inviteCode: string) {
           url: p.url, source: p.source, title: p.title, artists: p.artists,
           artwork_url: p.artwork_url, duration_ms: p.duration_ms, note: p.note ?? '',
           author_name: authors.get(p.author_id) ?? 'Former member', like_count: p.likes.length, liked: p.likes.includes(user.user_id),
+          to: p.to ?? [],
+          replies: (p.replies ?? []).map(r => ({ id: r.id, author_id: r.author_id, author_name: authors.get(r.author_id) ?? 'Former member', created_at: r.created_at, text: r.text })),
         })),
           next_cursor: posts.length > limit && last ? Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString('base64url') : null });
+      }
+      if (path === '/members' && method === 'GET') {
+        return json({ members: state.users.map(u => ({ user_id: u.user_id, display_name: u.display_name })) });
       }
       if (path === '/posts' && method === 'POST') {
         const input = payload(await body(request, signal));
         const post = { ...input, id: randomUUID(), author_id: user.user_id, created_at: Date.now(), likes: [] as string[] };
         const author_name = await memberChange(storage, secret_hash, (s, current) => {
           if (s.posts.length >= MAX_POSTS) fail(409, 'Feed is full, delete older posts');
+          // Recipients must be members when the share is sent.
+          if (post.to?.some(id => !s.users.some(u => u.user_id === id))) fail(400, 'Invalid recipients');
           s.posts.push(post);
           return current.display_name;
         }, signal);
         const { likes, ...result } = post;
-        return json({ ...result, author_name, like_count: likes.length, liked: false }, 201);
+        return json({ ...result, to: post.to ?? [], replies: [], author_name, like_count: likes.length, liked: false }, 201);
+      }
+      const replies = /^\/posts\/([a-f0-9-]{36})\/replies(?:\/([a-f0-9-]{36}))?$/.exec(path);
+      if (replies && method === 'POST' && !replies[2]) {
+        const reply_text = text((await body(request, signal)).text, 'text', 500);
+        const reply = { id: randomUUID(), author_id: user.user_id, created_at: Date.now(), text: reply_text };
+        const author_name = await memberChange(storage, secret_hash, (s, current) => {
+          const post = s.posts.find(p => p.id === replies[1]);
+          if (!post || !visible(post, current.user_id)) return fail(404, 'Post not found');
+          post.replies ??= [];
+          if (post.replies.length >= MAX_REPLIES) fail(409, 'This thread is full');
+          post.replies.push(reply);
+          return current.display_name;
+        }, signal);
+        return json({ ...reply, author_name }, 201);
+      }
+      if (replies && method === 'DELETE' && replies[2]) {
+        await memberChange(storage, secret_hash, (s, current) => {
+          const post = s.posts.find(p => p.id === replies[1]);
+          if (!post || !visible(post, current.user_id)) return fail(404, 'Post not found');
+          const reply = post.replies?.find(r => r.id === replies[2]);
+          if (!reply) return fail(404, 'Reply not found');
+          if (reply.author_id !== current.user_id) return fail(403, 'You can only delete your own reply');
+          post.replies = post.replies!.filter(r => r.id !== reply.id);
+        }, signal);
+        return json({ ok: true });
       }
       const match = /^\/posts\/([a-f0-9-]{36})(\/like)?$/.exec(path);
       if (match && (method === 'DELETE' || match[2] && method === 'PUT')) {
         await memberChange(storage, secret_hash, s => {
           const post = s.posts.find(p => p.id === match[1]);
-          if (!post) return fail(404, 'Post not found');
+          if (!post || !visible(post, user.user_id)) return fail(404, 'Post not found');
           if (match[2]) {
             post.likes = post.likes.filter(id => id !== user.user_id);
             if (method === 'PUT') post.likes.push(user.user_id);

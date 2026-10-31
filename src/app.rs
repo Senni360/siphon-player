@@ -75,7 +75,6 @@ const ROOTLIST_REFRESH: Duration = Duration::from_secs(5);
 /// matching what librespot does during playback.
 const RESTART_BEFORE_PREVIOUS: u32 = 3_000;
 
-const TOAST_LIFETIME: Duration = Duration::from_millis(3200);
 /// Match other interface animations. egui subtracts the predicted frame time
 /// from delayed repaints, so 33 ms drives roughly one frame per 16 ms.
 const TOAST_FRAME: Duration = Duration::from_millis(33);
@@ -613,6 +612,14 @@ pub struct App {
     /// What friends last played. A refresh keeps the last answer on screen.
     pub friends: Loadable<Vec<crate::session_reads::FriendActivity>>,
     pub friends_feed: crate::friends::Model,
+    /// Downloads in flight that stand for one song, by download id: the
+    /// song's link or URI.
+    pub(crate) download_keys: HashMap<u64, String>,
+    /// Whether the group's saved identity was asked for since start.
+    group_opened: bool,
+    /// Files downloaded this session, by the song's link or URI, so the
+    /// song can offer its file to drag into a DAW.
+    pub downloaded_files: HashMap<String, std::path::PathBuf>,
     friends_in_flight: bool,
     friends_fetched_at: Option<Instant>,
     /// Bumped when the account changes, so an answer for the last one is
@@ -1269,6 +1276,9 @@ impl App {
             show_friends_panel: false,
             friends: Loadable::NotLoaded,
             friends_feed: crate::friends::Model::default(),
+            download_keys: HashMap::new(),
+            group_opened: false,
+            downloaded_files: HashMap::new(),
             friends_in_flight: false,
             friends_fetched_at: None,
             friends_generation: 0,
@@ -2777,7 +2787,13 @@ impl App {
                 continue;
             }
             match event {
-                Event::Friends(event) => self.friends_feed.receive(event),
+                Event::Friends(event) => {
+                    self.friends_feed.receive(event);
+                    // A write made while another ran goes out now.
+                    if let Some(request) = self.friends_feed.next_request() {
+                        self.backend.send(Command::Friends(request));
+                    }
+                }
                 Event::PlaylistLinkResolved { request, result } => {
                     self.playlist_link_resolved(request, result);
                 }
@@ -3364,6 +3380,7 @@ impl App {
                 }
             }
             Page::MixedPlaylist(_) | Page::SoundCloud(_) | Page::SoundCloudLikes => {}
+            Page::Group => self.open_group_feed(),
             Page::Search => {}
             Page::LikedSongs => {
                 if !self.liked_songs.cache_checked {
@@ -4366,10 +4383,26 @@ impl App {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
-        let feed_visible = self.show_friends_panel
+        // The group is read while something shows it: its page, Home's
+        // shelf, the friends panel, or the sidebar's unread count.
+        let feed_visible = (self.show_friends_panel
+            || matches!(self.page(), Page::Group | Page::Home)
+            || self.settings.sidebar_visible)
             && !self.offline
             && self.budget != crate::power::Budget::Background
             && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        // The saved identity is read once after sign-in, so Home and the
+        // sidebar know about the group without opening it first.
+        if !self.friends_feed.restored
+            && !self.friends_feed.busy
+            && !self.group_opened
+            && !self.offline
+            && self.user.is_some()
+        {
+            self.group_opened = true;
+            self.actions
+                .push(Action::Friends(crate::friends::Action::Open));
+        }
         if self.friends_feed.poll_due(feed_visible) {
             self.actions
                 .push(Action::Friends(crate::friends::Action::Refresh));
@@ -4411,7 +4444,7 @@ impl App {
             self.settings_dirty = true;
         }
         self.toasts
-            .retain(|toast| toast.created.elapsed() < TOAST_LIFETIME);
+            .retain(|toast| toast.created.elapsed() < toast.lifetime());
         // The chosen row stays marked only while its song is the current
         // one; a later return to that song may be another copy.
         if self
@@ -5682,6 +5715,7 @@ impl App {
                 }
             }
             Page::MixedPlaylist(_) | Page::SoundCloud(_) => {}
+            Page::Group => self.open_group_feed(),
             Page::Search => {}
             Page::LikedSongs => self.ensure_liked_songs(),
             Page::Albums => {
@@ -11846,6 +11880,20 @@ impl App {
                     self.backend.send(Command::Friends(request));
                 }
             }
+            Action::DownloadShare(id) => self.download_share(&id),
+            Action::RevealFile(path) => {
+                if crate::opener::reveal(&path).is_err() {
+                    self.toast_error("The file's folder could not be opened.");
+                }
+            }
+            Action::DragFileOut(path) => {
+                if !path.is_file() {
+                    self.downloaded_files.retain(|_, file| *file != path);
+                    self.toast_error("That file was moved or deleted. Download it again.");
+                } else if !crate::drag_out::start(&path) {
+                    let _ = crate::opener::reveal(&path);
+                }
+            }
             Action::Download(items) => self.download_items(items),
             Action::DownloadAll { uri, name } => self.download_all(uri, name),
             Action::CancelDownload(id) => {
@@ -13501,8 +13549,37 @@ impl App {
             message: message.into(),
             kind: ToastKind::Info,
             created: Instant::now(),
+            action: None,
         });
         self.toasts.truncate(4);
+    }
+
+    /// Reads the group: the saved identity and feed the first time, the
+    /// newest shares after that.
+    fn open_group_feed(&mut self) {
+        let action = if self.friends_feed.restored {
+            crate::friends::Action::Refresh
+        } else {
+            crate::friends::Action::Open
+        };
+        self.actions.push(Action::Friends(action));
+    }
+
+    /// A toast with one follow-up button, like Show in folder.
+    pub fn toast_with(
+        &mut self,
+        message: impl Into<String>,
+        label: impl Into<String>,
+        action: Action,
+    ) {
+        self.toasts.push(Toast {
+            message: message.into(),
+            kind: ToastKind::Info,
+            created: Instant::now(),
+            action: Some((label.into(), action)),
+        });
+        let excess = self.toasts.len().saturating_sub(4);
+        drop(self.toasts.drain(..excess));
     }
 
     pub fn toast_error(&mut self, message: impl Into<String>) {
@@ -13512,6 +13589,7 @@ impl App {
             message,
             kind: ToastKind::Error,
             created: Instant::now(),
+            action: None,
         });
     }
 

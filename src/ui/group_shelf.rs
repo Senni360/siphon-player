@@ -31,9 +31,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 palette.secondary,
             )
             .clicked()
-                && !app.show_friends_panel
             {
-                app.actions.push(Action::ToggleFriendsPanel);
+                app.actions.push(Action::Open(crate::model::Page::Group));
             }
         });
     });
@@ -51,7 +50,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             Some(gettext(locale, "Join").into_owned()),
         );
         if join {
-            app.actions.push(Action::ToggleFriendsPanel);
+            app.actions.push(Action::Open(crate::model::Page::Group));
         }
         return;
     }
@@ -299,7 +298,7 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
 }
 
 /// "12 min ago" and friends, from the service's millisecond timestamp.
-fn ago(locale: crate::i18n::Locale, created_at_ms: u64) -> String {
+pub(super) fn ago(locale: crate::i18n::Locale, created_at_ms: u64) -> String {
     let now = jiff::Timestamp::now().as_millisecond().max(0) as u64;
     let minutes = now.saturating_sub(created_at_ms) / 60_000;
     if minutes < 1 {

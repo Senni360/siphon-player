@@ -961,6 +961,33 @@ pub fn populate(app: &mut App) {
             app.track_cache.insert(id.clone(), track.clone());
         }
     }
+    let songs: Vec<_> = tracks
+        .iter()
+        .skip(3)
+        .map(|track| {
+            (
+                format!(
+                    "https://open.spotify.com/track/{}",
+                    track.id.as_deref().unwrap_or_default()
+                ),
+                track.name.clone(),
+                track
+                    .artists
+                    .first()
+                    .map(|artist| artist.name.clone())
+                    .unwrap_or_default(),
+                track
+                    .album
+                    .as_ref()
+                    .and_then(|album| crate::api::models::pick_image(&album.images, 300))
+                    .map(str::to_owned),
+            )
+        })
+        .collect();
+    app.friends_feed = siphon::group(
+        &songs,
+        jiff::Timestamp::now().as_millisecond().max(0) as u64,
+    );
 }
 
 #[cfg(feature = "demo")]

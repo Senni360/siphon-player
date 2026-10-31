@@ -41,6 +41,9 @@ pub struct NewPost {
     pub duration_ms: u32,
     #[serde(default)]
     pub note: String,
+    /// The members a share was sent to. Empty: the whole group.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub to: Vec<String>,
 }
 
 // Private SoundCloud URLs and their artwork can carry bearer-like tokens.
@@ -104,6 +107,7 @@ impl NewPost {
             artwork_url: item.image(300).map(str::to_owned),
             duration_ms: item.duration_ms(),
             note: String::new(),
+            to: Vec::new(),
         })
     }
 
@@ -117,8 +121,19 @@ impl NewPost {
             artwork_url: None,
             duration_ms: 0,
             note: String::new(),
+            to: Vec::new(),
         }
     }
+}
+
+/// A message in a share's thread.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Reply {
+    pub id: String,
+    pub author_id: String,
+    pub author_name: String,
+    pub created_at: u64,
+    pub text: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -129,6 +144,8 @@ pub struct Post {
     pub created_at: u64,
     pub like_count: u32,
     pub liked: bool,
+    #[serde(default)]
+    pub replies: Vec<Reply>,
     #[serde(flatten)]
     pub item: NewPost,
 }
@@ -137,6 +154,9 @@ pub struct Post {
 pub struct Feed {
     pub posts: Vec<Post>,
     pub next_cursor: Option<String>,
+    /// The group's members, when this read asked for them too.
+    #[serde(skip)]
+    pub members: Option<Vec<Profile>>,
 }
 
 #[derive(Clone)]
@@ -302,6 +322,42 @@ impl Client {
         )
         .await
     }
+    pub async fn members(&self, id: &Identity) -> Result<Vec<Profile>, String> {
+        #[derive(Deserialize)]
+        struct Members {
+            members: Vec<Profile>,
+        }
+        let members: Members = self
+            .request(Method::GET, "/members", Some(id), None, None)
+            .await?;
+        Ok(members.members)
+    }
+    pub async fn reply(
+        &self,
+        identity: &Identity,
+        post: &str,
+        text: &str,
+    ) -> Result<Reply, String> {
+        valid_id(post)?;
+        self.request(
+            Method::POST,
+            &format!("/posts/{post}/replies"),
+            Some(identity),
+            Some(serde_json::json!({ "text": text })),
+            None,
+        )
+        .await
+    }
+    pub async fn delete_reply(
+        &self,
+        identity: &Identity,
+        post: &str,
+        reply: &str,
+    ) -> Result<(), String> {
+        valid_id(reply)?;
+        self.mutate_post(identity, post, &format!("/replies/{reply}"), Method::DELETE)
+            .await
+    }
     pub async fn like(&self, identity: &Identity, id: &str, liked: bool) -> Result<(), String> {
         self.mutate_post(
             identity,
@@ -321,9 +377,7 @@ impl Client {
         suffix: &str,
         method: Method,
     ) -> Result<(), String> {
-        if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
-            return Err("Invalid post id.".into());
-        }
+        valid_id(id)?;
         let _: serde_json::Value = self
             .request(
                 method,
@@ -335,4 +389,13 @@ impl Client {
             .await?;
         Ok(())
     }
+}
+
+/// Post and reply ids are the service's UUIDs; anything else never reaches
+/// a request path.
+fn valid_id(id: &str) -> Result<(), String> {
+    if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
+        return Err("Invalid post id.".into());
+    }
+    Ok(())
 }

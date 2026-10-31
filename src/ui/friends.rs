@@ -83,10 +83,23 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
 }
 
 fn contents(app: &mut App, ui: &mut egui::Ui) {
-    let actions = crate::friends::ui::draw(ui, &app.friends_feed);
-    app.actions.extend(actions);
-    ui.separator();
-    ui.collapsing("Spotify listening activity", |ui| spotify_contents(app, ui));
+    // The group has its own page; this panel is what people play on
+    // Spotify, with the way to the group on top.
+    let palette = app.palette;
+    let unread = super::group::unread(app, ui.ctx());
+    let label = if unread > 0 {
+        format!(
+            "{} · {unread} new",
+            gettext(app.locale, "Open the Siphon group")
+        )
+    } else {
+        gettext(app.locale, "Open the Siphon group").into_owned()
+    };
+    if theme::soft_button(ui, &palette, Some(Icon::Users), &label, false).clicked() {
+        app.actions.push(Action::Open(Page::Group));
+    }
+    ui.add_space(12.0);
+    spotify_contents(app, ui);
 }
 
 fn spotify_contents(app: &mut App, ui: &mut egui::Ui) {

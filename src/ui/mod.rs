@@ -8,6 +8,7 @@ pub(crate) mod devices;
 mod dialogs;
 mod downloads;
 pub(crate) mod friends;
+pub mod group;
 mod group_shelf;
 pub mod home;
 mod keys;
@@ -375,6 +376,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                 Page::Radio(seed) => radio::radio(app, ui, &seed),
                                 Page::Queue => queue::page(app, ui),
                                 Page::Settings => settings::show(app, ui),
+                                Page::Group => group::show(app, ui),
                             }
                         });
                     if app.dialog.is_none() && !app.show_devices {
@@ -718,16 +720,20 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
     egui::Area::new(egui::Id::new("toasts"))
         .anchor(Align2::RIGHT_BOTTOM, vec2(-20.0, -bottom_offset + lift))
         .order(egui::Order::Tooltip)
-        .interactable(!app.downloads.active.is_empty())
+        .interactable(
+            !app.downloads.active.is_empty() || app.toasts.iter().any(|t| t.action.is_some()),
+        )
         .show(ctx, |ui| {
             ui.spacing_mut().item_spacing.y = 8.0;
             downloads::show(app, ui);
+            let mut chosen = None;
             for toast in &app.toasts {
                 let age = toast.created.elapsed().as_secs_f32();
+                let life = toast.lifetime().as_secs_f32();
                 let alpha = if age < 0.15 {
                     age / 0.15
-                } else if age > 2.8 {
-                    ((3.2 - age) / 0.4).clamp(0.0, 1.0)
+                } else if age > life - 0.4 {
+                    ((life - age) / 0.4).clamp(0.0, 1.0)
                 } else {
                     1.0
                 };
@@ -767,8 +773,24 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                                 280.0,
                             );
                             ui.add(egui::Label::new(galley));
+                            if let Some((label, action)) = &toast.action {
+                                ui.add_space(4.0);
+                                if theme::link(
+                                    ui,
+                                    label.as_str(),
+                                    theme::medium(13.5),
+                                    palette.text,
+                                )
+                                .clicked()
+                                {
+                                    chosen = Some(action.clone());
+                                }
+                            }
                         });
                     });
+            }
+            if let Some(action) = chosen {
+                app.actions.push(action);
             }
         });
 }

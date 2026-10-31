@@ -1130,6 +1130,50 @@ fn nav_row(
     response
 }
 
+/// The number of new shares and replies at the right of the Group row. It
+/// pops in when the first arrives, bumps on each new one, and shrinks away
+/// once they are read.
+fn unread_badge(ui: &egui::Ui, palette: &Palette, row: Rect, count: usize) {
+    let id = egui::Id::new("group-unread-badge");
+    let ctx = ui.ctx();
+    let shown = super::kit::motion::toward(ctx, id, count > 0, super::kit::motion::POPOVER);
+    // The count that was last drawn, so a new arrival can bump the badge.
+    let last = ctx
+        .data(|data| data.get_temp::<usize>(id.with("count")))
+        .unwrap_or(0);
+    if count > last {
+        super::kit::motion::begin(ctx, id.with("bump"), super::kit::motion::POP);
+    }
+    if count != last && count > 0 {
+        ctx.data_mut(|data| data.insert_temp(id.with("count"), count));
+    } else if count == 0 && shown <= 0.0 {
+        ctx.data_mut(|data| data.remove::<usize>(id.with("count")));
+    }
+    if shown <= 0.0 {
+        return;
+    }
+    let figure = last.max(count);
+    let bump =
+        super::kit::motion::running(ctx, id.with("bump")).map_or(1.0, super::kit::motion::pop);
+    let text = if figure > 99 {
+        "99+".to_owned()
+    } else {
+        figure.to_string()
+    };
+    let galley = ui
+        .painter()
+        .layout_no_wrap(text, theme::medium(11.0), palette.window);
+    let size = vec2((galley.size().x + 10.0).max(18.0), 18.0) * (shown * bump);
+    let center = pos2(row.right() - 12.0 - 9.0, row.center().y);
+    let badge = Rect::from_center_size(center, size);
+    ui.painter()
+        .rect_filled(badge, badge.height() / 2.0, palette.text);
+    if shown > 0.6 {
+        ui.painter()
+            .galley(center - galley.size() / 2.0, galley, palette.window);
+    }
+}
+
 /// How long the open page's highlight takes to glide to a new row.
 const HIGHLIGHT_SLIDE: f32 = 0.22;
 
@@ -1346,6 +1390,18 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     .clicked()
     {
         app.actions.push(Action::FocusSearch);
+    }
+    let unread = super::group::unread(app, ui.ctx());
+    let group = nav_row(
+        ui,
+        &palette,
+        Icon::Users,
+        &gettext(locale, "Group"),
+        page == Page::Group,
+    );
+    unread_badge(ui, &palette, group.rect, unread);
+    if group.clicked() {
+        app.actions.push(Action::Open(Page::Group));
     }
     ui.add_space(10.0);
     ui.painter().hline(

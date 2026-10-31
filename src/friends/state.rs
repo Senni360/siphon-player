@@ -1,9 +1,15 @@
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 use crate::credentials::{Slot, Store as CredentialStore};
 use crate::http::Http;
 
-use super::{Client, Feed, Identity, NewPost, Post, Profile};
+use super::{Client, Feed, Identity, NewPost, Post, Profile, Reply};
+
+/// The id an optimistic share carries until the service names it.
+pub const PENDING_SHARE: &str = "pending-share";
+/// The prefix of an optimistic reply's id until the service names it.
+pub const PENDING_REPLY: &str = "pending-reply";
 
 #[derive(Clone)]
 pub enum Action {
@@ -25,7 +31,37 @@ pub enum Action {
         liked: bool,
     },
     Delete(String),
+    /// Add a message to a share's thread.
+    Reply {
+        post: String,
+        text: String,
+    },
+    /// Remove one of your own messages from a share's thread.
+    DeleteReply {
+        post: String,
+        reply: String,
+    },
     DismissSecret,
+}
+
+impl Action {
+    /// Reads can be dropped or superseded; writes are what the person did
+    /// and are never lost while another request runs.
+    fn is_read(&self) -> bool {
+        matches!(self, Self::Open | Self::Refresh | Self::More)
+    }
+
+    fn is_queueable_write(&self) -> bool {
+        matches!(
+            self,
+            Self::Share(_)
+                | Self::Like { .. }
+                | Self::Delete(_)
+                | Self::Rename(_)
+                | Self::Reply { .. }
+                | Self::DeleteReply { .. }
+        )
+    }
 }
 
 // Parent Action/Command enums use Debug. Do not expose invites, URLs (private
@@ -43,6 +79,8 @@ impl std::fmt::Debug for Action {
             Self::Share(_) => "Friends::Share",
             Self::Like { .. } => "Friends::Like",
             Self::Delete(_) => "Friends::Delete",
+            Self::Reply { .. } => "Friends::Reply",
+            Self::DeleteReply { .. } => "Friends::DeleteReply",
             Self::DismissSecret => "Friends::DismissSecret",
         })
     }
@@ -72,6 +110,7 @@ pub enum Update {
     Left,
     Feed(Feed, bool),
     Shared(Post),
+    Replied { post: String, reply: Reply },
     Changed,
 }
 
@@ -79,6 +118,8 @@ pub enum Update {
 pub struct Model {
     pub profile: Option<Profile>,
     pub posts: Vec<Post>,
+    /// Everyone in the group, for sending a share to some of them.
+    pub members: Vec<Profile>,
     pub next_cursor: Option<String>,
     pub busy: bool,
     pub error: Option<String>,
@@ -89,6 +130,14 @@ pub struct Model {
     next_poll: Option<Instant>,
     failures: u32,
     optimistic: bool,
+    /// Whether the request in flight only reads, so a write may replace it.
+    reading: bool,
+    /// Writes made while another write was in flight, already shown, with
+    /// the optimistic reply row each one stands for.
+    queued: VecDeque<(Action, Option<String>)>,
+    /// The optimistic reply row the request in flight will replace.
+    in_flight_reply: Option<String>,
+    pending_replies: u64,
 }
 
 impl Model {
@@ -97,12 +146,27 @@ impl Model {
             self.recovery_secret = None;
             return None;
         }
+        let pending = self.apply_optimistic(&action);
         if self.busy && !matches!(action, Action::Leave | Action::LeaveGroup) {
-            return None;
+            // A write never waits on a read: it replaces it, and the read
+            // runs again after it. A write behind another write waits its
+            // turn, already shown.
+            if self.reading && !action.is_read() {
+                self.next_poll = Some(Instant::now());
+            } else {
+                if action.is_queueable_write() {
+                    self.queued.push_back((action, pending));
+                }
+                return None;
+            }
         }
         if matches!(action, Action::More) && self.next_cursor.is_none() {
             return None;
         }
+        Some(self.request(action, pending))
+    }
+
+    fn request(&mut self, action: Action, pending: Option<String>) -> Request {
         let generation = self.generation.wrapping_add(1);
         if matches!(
             action,
@@ -115,9 +179,20 @@ impl Model {
             };
         }
         self.generation = generation;
+        self.in_flight_reply = pending;
         self.busy = true;
+        self.reading = action.is_read();
         self.error = None;
-        match &action {
+        Request {
+            generation: self.generation,
+            action,
+        }
+    }
+
+    /// Shows a write at once, before the service has it. Returns the id
+    /// of an optimistic reply row, which the service's answer replaces.
+    fn apply_optimistic(&mut self, action: &Action) -> Option<String> {
+        match action {
             Action::Like { id, liked } => {
                 if let Some(post) = self.posts.iter_mut().find(|p| p.id == *id)
                     && post.liked != *liked
@@ -151,24 +226,55 @@ impl Model {
                     self.posts.insert(
                         0,
                         Post {
-                            id: "pending-share".into(),
+                            id: PENDING_SHARE.into(),
                             author_id: profile.user_id.clone(),
                             author_name: profile.display_name.clone(),
-                            created_at: 0,
+                            created_at: jiff::Timestamp::now().as_millisecond().max(0) as u64,
                             like_count: 0,
                             liked: false,
+                            replies: Vec::new(),
                             item: item.clone(),
                         },
                     );
                 }
                 self.optimistic = true;
             }
+            Action::Reply { post, text } => {
+                self.pending_replies = self.pending_replies.wrapping_add(1);
+                let pending = format!("{PENDING_REPLY}-{}", self.pending_replies);
+                if let Some(profile) = &self.profile
+                    && let Some(target) = self.posts.iter_mut().find(|p| p.id == *post)
+                {
+                    target.replies.push(Reply {
+                        id: pending.clone(),
+                        author_id: profile.user_id.clone(),
+                        author_name: profile.display_name.clone(),
+                        created_at: jiff::Timestamp::now().as_millisecond().max(0) as u64,
+                        text: text.clone(),
+                    });
+                }
+                self.optimistic = true;
+                return Some(pending);
+            }
+            Action::DeleteReply { post, reply } => {
+                if let Some(target) = self.posts.iter_mut().find(|p| p.id == *post) {
+                    target.replies.retain(|r| r.id != *reply);
+                }
+                self.optimistic = true;
+            }
             _ => {}
         }
-        Some(Request {
-            generation: self.generation,
-            action,
-        })
+        None
+    }
+
+    /// The next write made while another was in flight, once that one has
+    /// answered. Call after `receive`.
+    pub fn next_request(&mut self) -> Option<Request> {
+        if self.busy {
+            return None;
+        }
+        let (action, pending) = self.queued.pop_front()?;
+        Some(self.request(action, pending))
     }
 
     pub fn poll_due(&self, visible: bool) -> bool {
@@ -179,17 +285,49 @@ impl Model {
             && self.next_poll.is_none_or(|at| Instant::now() >= at)
     }
 
+    /// Shares and replies newer than `seen` (milliseconds) that someone
+    /// else wrote, for the unread badge.
+    pub fn unread_since(&self, seen: u64) -> usize {
+        let me = self.profile.as_ref().map(|p| p.user_id.as_str());
+        self.posts
+            .iter()
+            .map(|post| {
+                usize::from(post.created_at > seen && Some(post.author_id.as_str()) != me)
+                    + post
+                        .replies
+                        .iter()
+                        .filter(|r| r.created_at > seen && Some(r.author_id.as_str()) != me)
+                        .count()
+            })
+            .sum()
+    }
+
+    /// The newest moment anything in the feed happened, in milliseconds.
+    pub fn newest(&self) -> u64 {
+        self.posts
+            .iter()
+            .flat_map(|p| {
+                std::iter::once(p.created_at).chain(p.replies.iter().map(|r| r.created_at))
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn receive(&mut self, event: Event) {
         if event.generation != self.generation {
             return;
         }
         self.busy = false;
+        self.reading = false;
         match event.result {
             Ok(update) => {
                 self.failures = 0;
-                self.optimistic = false;
+                self.optimistic = !self.queued.is_empty();
                 match update {
                     Update::Opened(profile, feed) => {
+                        if let Some(members) = feed.members {
+                            self.members = members;
+                        }
                         self.restored = true;
                         self.profile = profile;
                         self.posts = feed.posts;
@@ -208,10 +346,20 @@ impl Model {
                                 post.author_name.clone_from(&profile.display_name);
                             }
                         }
+                        if let Some(member) = self
+                            .members
+                            .iter_mut()
+                            .find(|m| m.user_id == profile.user_id)
+                        {
+                            member.display_name.clone_from(&profile.display_name);
+                        }
                         self.profile = Some(profile);
                     }
                     Update::Left => {}
                     Update::Feed(feed, append) => {
+                        if let Some(members) = feed.members {
+                            self.members = members;
+                        }
                         if append {
                             for post in feed.posts {
                                 if !self.posts.iter().any(|p| p.id == post.id) {
@@ -224,15 +372,51 @@ impl Model {
                         self.next_cursor = feed.next_cursor;
                     }
                     Update::Shared(post) => {
-                        self.posts
-                            .retain(|p| p.id != "pending-share" && p.id != post.id);
-                        self.posts.insert(0, post);
+                        if let Some(index) = self.posts.iter().position(|p| p.id == PENDING_SHARE) {
+                            self.posts[index] = post.clone();
+                        } else {
+                            self.posts.insert(0, post.clone());
+                        }
+                        let mut seen = false;
+                        self.posts.retain(|p| {
+                            if p.id != post.id {
+                                return true;
+                            }
+                            !std::mem::replace(&mut seen, true)
+                        });
+                    }
+                    Update::Replied { post, reply } => {
+                        let pending = self.in_flight_reply.take();
+                        if let Some(target) = self.posts.iter_mut().find(|p| p.id == post) {
+                            match target
+                                .replies
+                                .iter_mut()
+                                .find(|r| Some(&r.id) == pending.as_ref())
+                            {
+                                Some(row) => *row = reply,
+                                None => target.replies.push(reply),
+                            }
+                        }
                     }
                     Update::Changed => {}
                 }
             }
             Err(error) => {
                 self.failures = self.failures.saturating_add(1);
+                // An optimistic share or reply that failed is taken back,
+                // so nothing stays on screen that the group never got.
+                if !self
+                    .queued
+                    .iter()
+                    .any(|(action, _)| matches!(action, Action::Share(_)))
+                {
+                    self.posts.retain(|p| p.id != PENDING_SHARE);
+                }
+                if let Some(pending) = self.in_flight_reply.take() {
+                    for post in &mut self.posts {
+                        post.replies.retain(|r| r.id != pending);
+                    }
+                }
                 self.error = Some(error);
             }
         }
@@ -249,6 +433,7 @@ pub struct Runtime {
     identity: Option<Identity>,
     loaded: bool,
     cursor: Option<String>,
+    members_read: Option<Instant>,
 }
 
 impl Runtime {
@@ -373,19 +558,40 @@ impl Runtime {
         let update = match action {
             Action::Open => {
                 let profile = client.profile(identity).await?;
-                let feed = client.feed(identity, None).await?;
+                let mut feed = client.feed(identity, None).await?;
+                // Members only decide who a share can be sent to; a feed
+                // without them still opens.
+                feed.members = client.members(identity).await.ok();
+                self.members_read = Some(Instant::now());
                 self.cursor.clone_from(&feed.next_cursor);
                 Update::Opened(Some(profile), feed)
             }
             Action::Refresh | Action::More => {
                 let more = matches!(action, Action::More);
-                let feed = client
+                let mut feed = client
                     .feed(identity, if more { self.cursor.as_deref() } else { None })
                     .await?;
+                // Someone may have joined; ask again now and then.
+                if !more
+                    && self
+                        .members_read
+                        .is_none_or(|at| at.elapsed() > Duration::from_secs(5 * 60))
+                {
+                    feed.members = client.members(identity).await.ok();
+                    self.members_read = Some(Instant::now());
+                }
                 self.cursor.clone_from(&feed.next_cursor);
                 Update::Feed(feed, more)
             }
             Action::Rename(name) => Update::Renamed(client.rename(identity, &name).await?),
+            Action::Reply { post, text } => {
+                let reply = client.reply(identity, &post, &text).await?;
+                Update::Replied { post, reply }
+            }
+            Action::DeleteReply { post, reply } => {
+                client.delete_reply(identity, &post, &reply).await?;
+                Update::Changed
+            }
             Action::Share(post) => Update::Shared(client.share(identity, &post).await?),
             Action::Like { id, liked } => {
                 client.like(identity, &id, liked).await?;

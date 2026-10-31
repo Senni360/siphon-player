@@ -17,6 +17,7 @@ pub mod credits;
 pub mod demo;
 pub mod device_history;
 pub mod downloads;
+pub mod drag_out;
 pub mod emoji;
 pub mod eq;
 pub mod extension_bridge;
