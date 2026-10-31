@@ -58,6 +58,7 @@ pub mod playlist_overlay;
 pub mod power;
 pub mod prerelease;
 pub mod resample;
+pub mod retitle;
 pub mod session_reads;
 pub mod settings;
 pub mod shared_media;

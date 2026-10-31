@@ -4,6 +4,7 @@
 //! edits; `Model::receive` consumes runtime events. Nothing here logs secrets.
 
 mod client;
+pub mod pick;
 mod state;
 
 pub use client::{Client, DEFAULT_BASE_URL, Feed, Identity, NewPost, Post, Profile, Reply, Source};

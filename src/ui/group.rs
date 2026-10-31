@@ -2167,6 +2167,7 @@ mod tests {
             like_count: 0,
             liked: false,
             replies: Vec::new(),
+            affinity: None,
             item: NewPost {
                 to: to.iter().map(|s| (*s).to_owned()).collect(),
                 ..NewPost::from_url(

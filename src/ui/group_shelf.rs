@@ -83,7 +83,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     }
 
-    let posts: Vec<Post> = feed.posts.iter().take(SHOWN).cloned().collect();
+    let posts: Vec<Post> = feed.picks(SHOWN).into_iter().cloned().collect();
     let width = ui.available_width();
     let columns = if width > 900.0 { SHOWN } else { 2 }.min(posts.len());
     let card_width = (width - GAP * (columns as f32 - 1.0)) / columns as f32;

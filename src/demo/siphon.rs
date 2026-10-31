@@ -131,6 +131,7 @@ pub fn fixture(scenario: Scenario) -> Fixture {
             created_at: 1_793_361_600_000,
             like_count: 0,
             liked: false,
+            affinity: None,
             item: NewPost {
                 url: track.external_urls.spotify.clone().unwrap(),
                 source: [Source::Spotify, Source::Soundcloud, Source::Youtube][index],
@@ -255,6 +256,7 @@ pub fn group(songs: &[(String, String, String, Option<String>)], now_ms: u64) ->
                     2 => vec![reply(0, 0, "what key is this in")],
                     _ => Vec::new(),
                 },
+                affinity: None,
                 item: NewPost {
                     url: url.clone(),
                     source: Source::Spotify,

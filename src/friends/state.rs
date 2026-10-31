@@ -10,6 +10,13 @@ use super::{Client, Feed, Identity, NewPost, Post, Profile, Reply};
 pub const PENDING_SHARE: &str = "pending-share";
 /// The prefix of an optimistic reply's id until the service names it.
 pub const PENDING_REPLY: &str = "pending-reply";
+/// Below this estimated affinity, in percent, a group share does not raise
+/// the unread badge.
+const QUIET_BELOW: u8 = 35;
+/// From this estimated affinity, in percent, a recent share leads Home.
+const LOVED_FROM: u8 = 70;
+/// How far back in the feed Home looks for shares to lead with.
+const PICK_FROM: usize = 10;
 
 #[derive(Clone)]
 pub enum Action {
@@ -233,6 +240,7 @@ impl Model {
                             like_count: 0,
                             liked: false,
                             replies: Vec::new(),
+                            affinity: None,
                             item: item.clone(),
                         },
                     );
@@ -286,13 +294,17 @@ impl Model {
     }
 
     /// Shares and replies newer than `seen` (milliseconds) that someone
-    /// else wrote, for the unread badge.
+    /// else wrote, for the unread badge. A share to the whole group that the
+    /// reader will probably not care about arrives quietly; one sent to them
+    /// always counts.
     pub fn unread_since(&self, seen: u64) -> usize {
         let me = self.profile.as_ref().map(|p| p.user_id.as_str());
         self.posts
             .iter()
             .map(|post| {
-                usize::from(post.created_at > seen && Some(post.author_id.as_str()) != me)
+                let quiet = post.affinity.is_some_and(|p| p < QUIET_BELOW)
+                    && !me.is_some_and(|me| post.item.to.iter().any(|to| to == me));
+                usize::from(post.created_at > seen && Some(post.author_id.as_str()) != me && !quiet)
                     + post
                         .replies
                         .iter()
@@ -300,6 +312,16 @@ impl Model {
                         .count()
             })
             .sum()
+    }
+
+    /// The shares Home leads with: of the newest few, the ones the reader
+    /// will probably love come first, each group still newest first.
+    pub fn picks(&self, count: usize) -> Vec<&Post> {
+        let mut recent: Vec<&Post> = self.posts.iter().take(PICK_FROM).collect();
+        recent
+            .sort_by_key(|post| std::cmp::Reverse(post.affinity.is_some_and(|p| p >= LOVED_FROM)));
+        recent.truncate(count);
+        recent
     }
 
     /// The newest moment anything in the feed happened, in milliseconds.

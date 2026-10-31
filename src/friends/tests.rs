@@ -643,3 +643,145 @@ fn shares_and_replies_read_back_with_recipients_and_threads() {
     );
     assert!(serde_json::to_value(&open).unwrap().get("to").is_none());
 }
+
+#[test]
+fn a_share_the_reader_will_not_care_about_arrives_quietly() {
+    let (mut model, _) = joined_model();
+    let share = |id: &str, created_at: u64, affinity: Option<f64>, to: &[&str]| {
+        let mut json = post_json();
+        json["id"] = id.into();
+        json["author_id"] = "b".into();
+        json["created_at"] = created_at.into();
+        json["affinity"] = affinity.map_or(serde_json::Value::Null, Into::into);
+        json["to"] = to
+            .iter()
+            .map(|&id| id.to_owned())
+            .collect::<Vec<_>>()
+            .into();
+        serde_json::from_value::<Post>(json).unwrap()
+    };
+    let quiet = share("q", 100, Some(0.2), &[]);
+    assert_eq!(quiet.affinity, Some(20));
+    let direct = share("d", 101, Some(0.1), &["a"]);
+    let unknown = share("u", 102, None, &[]);
+    let loved = share("l", 103, Some(0.91), &[]);
+    model.posts = vec![loved, unknown, direct, quiet];
+    // The quiet group share is the only one that does not count.
+    assert_eq!(model.unread_since(50), 3);
+    // Home leads with the loved share, then keeps the feed's order.
+    let picks: Vec<&str> = model.picks(3).iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(picks, ["l", "u", "d"]);
+    model.posts[0].affinity = Some(40);
+    let picks: Vec<&str> = model.picks(2).iter().map(|p| p.id.as_str()).collect();
+    assert_eq!(picks, ["l", "u"]);
+}
+
+#[test]
+fn an_out_of_range_affinity_is_ignored() {
+    let mut json = post_json();
+    json["affinity"] = 1.5.into();
+    assert_eq!(serde_json::from_value::<Post>(json).unwrap().affinity, None);
+    assert_eq!(
+        serde_json::from_value::<Post>(post_json())
+            .unwrap()
+            .affinity,
+        None
+    );
+}
+
+#[test]
+fn autoplay_picks_only_friends_spotify_songs_it_has_not_just_played() {
+    use super::pick::{Song, candidates, choose, track_uri};
+    let post = |id: &str, author: &str, url: &str, source: &str, affinity: Option<f64>| {
+        let mut json = post_json();
+        json["id"] = id.into();
+        json["author_id"] = author.into();
+        json["url"] = url.into();
+        json["source"] = source.into();
+        json["title"] = format!("Song {id}").into();
+        json["artists"] = json!(["", "Artist\u{7}"]);
+        json["affinity"] = affinity.map_or(serde_json::Value::Null, Into::into);
+        serde_json::from_value::<Post>(json).unwrap()
+    };
+    let posts = vec![
+        post(
+            "1",
+            "b",
+            "https://open.spotify.com/intl-nl/track/AAA",
+            "spotify",
+            None,
+        ),
+        post(
+            "2",
+            "a",
+            "https://open.spotify.com/track/BBB",
+            "spotify",
+            None,
+        ),
+        post(
+            "3",
+            "b",
+            "https://open.spotify.com/album/CCC",
+            "spotify",
+            None,
+        ),
+        post("4", "b", "https://soundcloud.com/x/y", "soundcloud", None),
+        post(
+            "5",
+            "c",
+            "https://open.spotify.com/track/DDD",
+            "spotify",
+            Some(0.1),
+        ),
+        post(
+            "6",
+            "c",
+            "https://open.spotify.com/track/EEE",
+            "spotify",
+            Some(0.8),
+        ),
+        post(
+            "7",
+            "c",
+            "https://open.spotify.com/track/AAA",
+            "spotify",
+            None,
+        ),
+        post(
+            "8",
+            "c",
+            "https://open.spotify.com/track/FFF",
+            "spotify",
+            None,
+        ),
+    ];
+    assert_eq!(track_uri(&posts[0]).as_deref(), Some("spotify:track:AAA"));
+    assert_eq!(track_uri(&posts[2]), None);
+    // Not my own share, not an album, not SoundCloud, not a quiet one, no
+    // repeats, and nothing already in the list.
+    let picked = candidates(&posts, "a", &["spotify:track:FFF"]);
+    let ids: Vec<&str> = picked.iter().map(|c| c.id.as_str()).collect();
+    assert_eq!(ids, ["spotify:track:AAA", "spotify:track:EEE"]);
+    assert_eq!(picked[0].artists, ["Artist"]);
+
+    let ranked = |pairs: &[(&str, f64)]| {
+        pairs
+            .iter()
+            .map(|(id, p)| ((*id).to_owned(), *p))
+            .collect::<std::collections::HashMap<_, _>>()
+    };
+    assert_eq!(
+        choose(&ranked(&[("x", 0.8), ("y", 0.15), ("z", 0.05)]), 3).as_deref(),
+        Some("x")
+    );
+    // A close call or a weak favourite leaves Spotify's autoplay alone.
+    assert_eq!(choose(&ranked(&[("x", 0.55), ("y", 0.45)]), 2), None);
+    assert_eq!(choose(&ranked(&[("x", 0.4), ("y", 0.1)]), 2), None);
+    assert_eq!(choose(&ranked(&[("x", 0.6), ("y", 0.1)]), 2), None);
+    assert_eq!(choose(&ranked(&[]), 2), None);
+
+    let long = "\u{1F3B5}".repeat(200);
+    let song = Song::new(&long, ["  ", "Name"].into_iter());
+    assert_eq!(song.title.encode_utf16().count(), 300);
+    assert_eq!(song.artists, ["Name"]);
+}

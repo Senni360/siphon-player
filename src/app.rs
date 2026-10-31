@@ -659,6 +659,11 @@ pub struct App {
     /// Last list sent to local playback. Used for autoplay because librespot
     /// cannot continue a list without a context URI.
     local_list: Option<Vec<String>>,
+    /// The friend's share Jev picked to follow the list ending on the first
+    /// URI; None while the group is still being asked.
+    group_pick: Option<(String, Option<String>)>,
+    /// Artwork to fetch ahead for that share, on the next frame.
+    group_pick_art: Option<String>,
     /// Activated receiver waiting to appear in Spotify's device list.
     pending_transfer_to: Option<(String, Instant)>,
     /// When to take a confirming look at remote playback after a command.
@@ -822,6 +827,8 @@ pub struct App {
     /// A newer release than this build, once GitHub has said so.
     pub update: Option<crate::updates::Release>,
     last_update_check: Option<Instant>,
+    /// When upload titles were last sent to be read.
+    last_retitle: Option<Instant>,
     pub update_checking: bool,
     pub show_update: bool,
     pub update_download: crate::updates::DownloadState,
@@ -1006,6 +1013,9 @@ impl App {
         // settings beside it until migration binds that password in the store.
         settings.proxy_password_legacy |= dirs.proxy_secret_file().try_exists().unwrap_or(true);
         let plays = crate::history::History::load(&dirs.history_file());
+        if let Ok(bytes) = std::fs::read(dirs.retitles_file()) {
+            crate::retitle::load(&bytes);
+        }
         let tap = crate::vis::AudioTap::new();
         let eq = crate::eq::shared();
         if let Ok(mut shared) = eq.lock() {
@@ -1304,6 +1314,8 @@ impl App {
             pending_play_at: None,
             queued_play: None,
             local_list: None,
+            group_pick: None,
+            group_pick_art: None,
             pending_transfer_to: None,
             remote_recheck_at: None,
             seek_preview: None,
@@ -1388,6 +1400,7 @@ impl App {
             collapsed_folders: session.collapsed_folders.clone(),
             update: None,
             last_update_check: None,
+            last_retitle: None,
             update_checking: false,
             show_update: false,
             update_download: crate::updates::DownloadState::Idle,
@@ -2787,6 +2800,18 @@ impl App {
                 continue;
             }
             match event {
+                Event::GroupPick { seed, pick } => {
+                    if self.group_pick.as_ref().is_some_and(|(asked, _)| *asked == seed) {
+                        self.group_pick_art = pick.as_ref().and_then(|uri| {
+                            self.friends_feed
+                                .posts
+                                .iter()
+                                .find(|post| crate::friends::pick::track_uri(post).as_ref() == Some(uri))
+                                .and_then(|post| post.item.artwork_url.clone())
+                        });
+                        self.group_pick = Some((seed, pick));
+                    }
+                }
                 Event::Friends(event) => {
                     self.friends_feed.receive(event);
                     // A write made while another ran goes out now.
@@ -3744,6 +3769,9 @@ impl App {
             &self.local,
             &state,
         ) {
+            // A friend's share Jev picked carries the session on, and
+            // Spotify's autoplay follows it in turn.
+            let seed = continue_from(seed, self.group_pick.take());
             log::info!("the list ended; playing what Spotify follows {seed} with");
             self.local_list = None;
             self.backend.player(PlayerCommand::Load(LoadSpec {
@@ -3772,6 +3800,7 @@ impl App {
         }
         if track_changed {
             self.frame_now = None;
+            self.ask_group_pick();
             self.on_now_playing_changed();
             if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
                 // Metadata can arrive without changing the URI or occurrence.
@@ -4073,6 +4102,64 @@ impl App {
                 self.backend.api(ApiRequest::Track { id });
             }
         }
+    }
+
+    /// When the last song of a list starts, asks Jev, through the group,
+    /// which friend's share should carry the session on once it ends. See
+    /// [`crate::friends::pick`].
+    fn ask_group_pick(&mut self) {
+        use crate::friends::pick::{RECENT, Song, candidates};
+        let Some(track) = self.local.track.as_ref() else {
+            return;
+        };
+        let Some(list) = self.local_list.as_deref() else {
+            return;
+        };
+        if !self.settings.autoplay
+            || self.offline
+            || list.last() != Some(&track.uri)
+            || self
+                .group_pick
+                .as_ref()
+                .is_some_and(|(seed, _)| *seed == track.uri)
+        {
+            return;
+        }
+        let Some(me) = self.friends_feed.profile.as_ref() else {
+            return;
+        };
+        let skip: Vec<&str> = list.iter().map(String::as_str).collect();
+        let candidates = candidates(&self.friends_feed.posts, &me.user_id, &skip);
+        if candidates.len() < 2 {
+            return;
+        }
+        let mut recent = vec![Song::new(
+            &track.title,
+            track.artists.iter().map(|a| a.name.as_str()),
+        )];
+        recent.extend(
+            self.plays
+                .plays()
+                .iter()
+                .filter(|play| play.track.uri != track.uri)
+                .take(RECENT - 1)
+                .map(|play| {
+                    Song::new(
+                        &play.track.name,
+                        play.track.artists.iter().map(|a| a.name.as_str()),
+                    )
+                }),
+        );
+        recent.retain(|song| !song.title.is_empty());
+        if recent.is_empty() {
+            return;
+        }
+        self.group_pick = Some((track.uri.clone(), None));
+        self.backend.send(Command::GroupPick {
+            seed: track.uri.clone(),
+            recent,
+            candidates,
+        });
     }
 
     fn on_now_playing_changed(&mut self) {
@@ -13841,6 +13928,20 @@ impl App {
         }
         self.handle_control_commands();
         self.handle_events();
+        if let Some(url) = self.group_pick_art.take() {
+            self.backend.art().prefetch(ctx, &url);
+        }
+        // Group members' messy upload titles go to be read in batches.
+        if self.friends_feed.profile.is_some()
+            && !self.offline
+            && self
+                .last_retitle
+                .is_none_or(|at| at.elapsed() > Duration::from_secs(15))
+            && crate::retitle::has_pending()
+        {
+            self.last_retitle = Some(Instant::now());
+            self.backend.send(Command::Retitle);
+        }
         self.open_pending_link();
         self.start_pending_playlist_link();
         self.handle_media_commands();
@@ -14851,6 +14952,15 @@ fn autoplay_seed(
     }
     let near_end = before.position_now() + 3_000 >= track.duration_ms;
     near_end.then(|| track.uri.clone())
+}
+
+/// What autoplay continues from when a list ends on `seed`: the friend's
+/// share Jev picked for this list's ending, or the last song itself.
+fn continue_from(seed: String, pick: Option<(String, Option<String>)>) -> String {
+    match pick {
+        Some((list_end, Some(share))) if list_end == seed => share,
+        _ => seed,
+    }
 }
 
 /// Caps large track lists at 500 items starting from the selected row.
@@ -32235,6 +32345,22 @@ mod tests {
 
     /// A plain list that plays out seeds autoplay with its last song; a
     /// stop anywhere else, a dropped session, or autoplay off does not.
+    #[test]
+    fn a_picked_share_carries_on_only_the_list_it_was_picked_for() {
+        let seed = || "spotify:track:last".to_owned();
+        let share = "spotify:track:share".to_owned();
+        assert_eq!(
+            continue_from(seed(), Some((seed(), Some(share.clone())))),
+            share
+        );
+        assert_eq!(continue_from(seed(), None), seed());
+        assert_eq!(continue_from(seed(), Some((seed(), None))), seed());
+        assert_eq!(
+            continue_from(seed(), Some(("spotify:track:other".into(), Some(share)))),
+            seed()
+        );
+    }
+
     #[test]
     fn a_list_that_ends_seeds_autoplay_with_its_last_song() {
         let track = |uri: &str| {

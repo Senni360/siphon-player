@@ -245,6 +245,11 @@ impl AppDirs {
         self.state.join("history.json")
     }
 
+    /// Upload titles Jev read as artist and song. See [`crate::retitle`].
+    pub fn retitles_file(&self) -> PathBuf {
+        self.state.join("retitles.json")
+    }
+
     /// Playlists stored only on this computer, containing either source.
     pub fn mixed_playlists_file(&self) -> PathBuf {
         self.state.join("mixed-playlists.json")

@@ -802,6 +802,15 @@ pub use hybrid::HybridCommand;
 
 pub enum Command {
     Friends(crate::friends::Request),
+    /// Ask the group to read waiting upload titles. See [`crate::retitle`].
+    Retitle,
+    /// Ask the group which friend's share should follow the list ending
+    /// on `seed`. See [`crate::friends::pick`].
+    GroupPick {
+        seed: String,
+        recent: Vec<crate::friends::pick::Song>,
+        candidates: Vec<crate::friends::pick::Candidate>,
+    },
     YouTubeTrack {
         uri: String,
         generation: u64,
@@ -1168,6 +1177,11 @@ pub struct LyricsRequest {
 
 pub enum Event {
     Friends(crate::friends::Event),
+    /// The share to follow the list ending on `seed`, if Jev picked one.
+    GroupPick {
+        seed: String,
+        pick: Option<String>,
+    },
     Credits {
         uri: String,
         request: u64,
@@ -2499,6 +2513,52 @@ impl Worker {
                         .map(Http::new)
                         .unwrap_or_else(Http::unavailable);
                     let _ = tx.send((request, http));
+                }
+                Command::GroupPick {
+                    seed,
+                    recent,
+                    candidates,
+                } => {
+                    let credentials = self.credentials.clone();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    let http = crate::http::build_collection_client(&self.engine_config.proxy)
+                        .map(Http::new)
+                        .unwrap_or_else(Http::unavailable);
+                    tokio::spawn(async move {
+                        let pick =
+                            crate::friends::pick::ask(&credentials, http, &recent, &candidates)
+                                .await;
+                        let _ = events.send(Event::GroupPick { seed, pick });
+                        waker.wake();
+                    });
+                }
+                Command::Retitle => {
+                    let credentials = self.credentials.clone();
+                    let path = self.dirs.retitles_file();
+                    let http = crate::http::build_collection_client(&self.engine_config.proxy)
+                        .map(Http::new)
+                        .unwrap_or_else(Http::unavailable);
+                    tokio::spawn(async move {
+                        let uploads = crate::retitle::take_pending();
+                        if uploads.is_empty() {
+                            return;
+                        }
+                        let answers = match crate::friends::pick::connect(&credentials, http).await
+                        {
+                            Some((client, identity)) => {
+                                client.titles(&identity, &uploads).await.ok()
+                            }
+                            None => None,
+                        };
+                        crate::retitle::record(uploads, answers);
+                        if let Some(bytes) = crate::retitle::take_snapshot() {
+                            let _ = tokio::task::spawn_blocking(move || {
+                                fastframe_file::write(&path, bytes)
+                            })
+                            .await;
+                        }
+                    });
                 }
                 Command::DiscoverDownloadHelper => self.discover_download_helper(),
                 Command::Download(request) => self.start_download(request),

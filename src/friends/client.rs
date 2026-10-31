@@ -146,8 +146,32 @@ pub struct Post {
     pub liked: bool,
     #[serde(default)]
     pub replies: Vec<Reply>,
+    /// How likely, in percent, the reader is to enjoy this share, as the
+    /// service's Jev estimated from their own shares and hearts. None when
+    /// nothing was estimated.
+    #[serde(default, with = "percent")]
+    pub affinity: Option<u8>,
     #[serde(flatten)]
     pub item: NewPost,
+}
+
+/// The service sends a probability from 0 to 1; the player keeps a percent
+/// so a post stays comparable for equality.
+mod percent {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &Option<u8>, serializer: S) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(percent) => serializer.serialize_f32(f32::from(*percent) / 100.0),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u8>, D::Error> {
+        Ok(Option::<f64>::deserialize(deserializer)?
+            .filter(|p| p.is_finite() && (0.0..=1.0).contains(p))
+            .map(|p| (p * 100.0).round() as u8))
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -321,6 +345,51 @@ impl Client {
             None,
         )
         .await
+    }
+    /// Jev's probabilities over `candidates` as what follows `recent`.
+    /// None when the service had no opinion.
+    pub async fn next(
+        &self,
+        id: &Identity,
+        recent: &[super::pick::Song],
+        candidates: &[super::pick::Candidate],
+    ) -> Result<Option<std::collections::HashMap<String, f64>>, String> {
+        #[derive(Deserialize)]
+        struct Ranked {
+            probabilities: Option<std::collections::HashMap<String, f64>>,
+        }
+        let ranked: Ranked = self
+            .request(
+                Method::POST,
+                "/jev/next",
+                Some(id),
+                Some(serde_json::json!({ "recent": recent, "candidates": candidates })),
+                None,
+            )
+            .await?;
+        Ok(ranked.probabilities)
+    }
+    /// Jev's readings of upload titles as artist and song, in order; None
+    /// where no reading was confident.
+    pub async fn titles(
+        &self,
+        id: &Identity,
+        uploads: &[crate::retitle::Upload],
+    ) -> Result<Vec<Option<crate::retitle::Reading>>, String> {
+        #[derive(Deserialize)]
+        struct Read {
+            readings: Vec<Option<crate::retitle::Reading>>,
+        }
+        let read: Read = self
+            .request(
+                Method::POST,
+                "/jev/titles",
+                Some(id),
+                Some(serde_json::json!({ "uploads": uploads })),
+                None,
+            )
+            .await?;
+        Ok(read.readings)
     }
     pub async fn members(&self, id: &Identity) -> Result<Vec<Profile>, String> {
         #[derive(Deserialize)]

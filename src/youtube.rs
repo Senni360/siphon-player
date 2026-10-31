@@ -156,7 +156,7 @@ impl Video {
                 }]
             })
             .unwrap_or_default();
-        Ok(Track {
+        let mut track = Track {
             id: Some(self.id.clone()),
             uri: format!("youtube:video:{}", self.id),
             name: self.title.clone(),
@@ -186,7 +186,9 @@ impl Video {
             },
             is_playable: Some(true),
             ..Default::default()
-        })
+        };
+        crate::retitle::apply(&mut track);
+        Ok(track)
     }
 }
 

@@ -92,6 +92,16 @@ revokes membership while retaining shared posts; **Forget this device** only
 removes its saved identity and works offline. See the
 [service setup and integration contract](services/friends/README.md).
 
+For group members, the group's service also asks TypeSafe AI's Jev decision
+model a few quiet questions, on the owner's key: which friends' shares you
+will probably like (those lead Home's group shelf, and a group share you
+probably won't care about does not raise the unread badge), which friend's
+Spotify share best continues a list that is ending (autoplay then flows into
+it), and how to read messy SoundCloud and YouTube titles such as
+"Artist - Song [FREE DL]" as artist and song. Song titles, artist and
+uploader names, and your own shares and hearts are all that is sent; nothing
+is asked outside a group, and a slow or failed answer changes nothing.
+
 The owner's browser extension can open **Add to playlist** with
 `siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,
 or a SoundCloud track or set. The player comes forward and asks for a

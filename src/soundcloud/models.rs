@@ -149,7 +149,7 @@ impl Track {
                         .and_then(|user| user.avatar_url.as_deref())
                 }),
         );
-        app::Track {
+        let mut track = app::Track {
             id: Some(self.id.to_string()),
             name: self.title.clone().unwrap_or_default(),
             uri: track_uri(self.id),
@@ -198,7 +198,9 @@ impl Track {
             preview_only: self.is_preview(),
             external_urls: external_urls(self.permalink_url.as_deref()),
             ..Default::default()
-        }
+        };
+        crate::retitle::apply(&mut track);
+        track
     }
 }
 
