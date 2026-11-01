@@ -11518,8 +11518,11 @@ mod tests {
                     let row = row_rect(&format!("Destination {}", position.min(3)));
                     let end = egui::pos2(
                         row.left() + 130.0,
+                        // The row's lower half means after it. Not its very edge:
+                        // macOS's title bar inset pushes that edge of this last
+                        // row past where the page's scrolling area ends.
                         if position == 4 {
-                            row.bottom() - 1.0
+                            row.center().y + row.height() / 4.0
                         } else {
                             row.top() + 1.0
                         },
