@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.15.0-pre.5" date="2026-11-01" type="development">
+      <description><p>Spotify-based group accounts, groups you can run, parties with a host, background playlists and shared playlists.</p></description>
+    </release>
     <release version="0.15.0-pre.4" date="2026-11-01" type="development">
       <description><p>See what friends play, join them, share channels, and see listening stats.</p></description>
     </release>
