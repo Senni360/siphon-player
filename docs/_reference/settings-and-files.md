@@ -475,6 +475,7 @@ main fields are:
 | `bitrate` | `320` | 96, 160, or 320 kbps |
 | `normalisation` | `false` | Volume normalisation |
 | `autoplay` | `true` | Keep playing similar music at the end |
+| `group_sharing` | none | Whether the group sees what you play. Until you answer, nothing is shared |
 | `gapless` | `true` | Gapless playback |
 | `audio_device` | `null` | The output local playback uses, by the id of a device **Audio output** in the device picker lists: PipeWire's or PulseAudio's node name or an ALSA PCM on Linux, the WASAPI endpoint id on Windows, the CoreAudio UID on macOS. `null` is the system default. A device that is not there plays through the default. A name saved by 0.13.3 or earlier opens the output that still has it and is replaced by its id once music plays there; any other name plays through the default and is kept until another choice. The `audio_backend` older versions saved is ignored and no longer written |
 | `audio_cache_mb` | `1024` | On-disk audio cache budget |

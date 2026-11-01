@@ -380,6 +380,15 @@ impl App {
                             }
                         }
                     }
+                    // Songs dragged to the queue; a position in this player's
+                    // own queue means nothing to the channel's.
+                    Action::InsertInQueue { items, .. } => {
+                        for item in items {
+                            if let Ok(item) = NewPost::from_item(item) {
+                                self.live_add(&me, item, Place::End, now);
+                            }
+                        }
+                    }
                     _ => return false,
                 }
                 true
