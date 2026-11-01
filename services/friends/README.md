@@ -99,6 +99,34 @@ Never log request bodies, Authorization headers, invites, or private share URLs.
 | `POST /api/jev/next` | `{recent: [{title, artists}] (1 to 10), candidates: [{id, title, artists}] (2 to 255)}` -> `{probabilities: {id: p} \| null}`. |
 | `POST /api/jev/titles` | `{uploads: [{title, uploader}] (1 to 50)}` -> `{readings: [{artist, title} \| null]}`, in order. |
 
+### Listening together
+
+Live state sits in its own expiring Redis keys beside the group's document, so
+a live read is one `MGET`. Who belongs is remembered per instance for 60 seconds:
+a removed member keeps live access for at most that long, and a known member's
+live request costs no document read and no Redis rate-limit call. Each member may
+make 120 live reads and 60 live writes a minute per instance.
+
+| Method and route | Body / result |
+| --- | --- |
+| `GET /api/live` | `{now, presence: [{user_id, item, position_ms, playing, at, following}], channels: [Channel]}`. |
+| `PUT /api/live/presence` | `{item \| null, position_ms, playing, following?}` -> `{now}`. Expires after 200 s without another. |
+| `DELETE /api/live/presence` | Stop appearing at once -> `{now}`. |
+| `POST /api/live/channels` | `{name, item?, position_ms?, playing?}` -> `201 {now, channel}`. The creator joins it. |
+| `POST /api/live/channels/:id/join`, `/leave` | -> `{now, channel}`. A member is in one channel at a time. |
+| `POST /api/live/channels/:id/playback` | `{playing, position_ms}` -> `{now, channel}`. |
+| `POST /api/live/channels/:id/next` | `{from?, to?}` -> `{now, channel}`. `from` is ignored unless it is still the current entry, so every listener can report a song's end and it moves on once. `to` skips to a queue entry and drops the rows above it. |
+| `POST /api/live/channels/:id/queue` | `{item, where?: "end" \| "next" \| "now"}` -> `201 {now, channel}`. Holds up to 200. |
+| `DELETE /api/live/channels/:id/queue/:entry` | -> `{now, channel}`. |
+| `POST /api/live/channels/:id/queue/:entry/move` | `{index}` -> `{now, channel}`. |
+
+`item` is one playable song, the share payload without album or playlist links.
+Positions are extrapolated by clients from `at` against `now`. A channel is
+`{id, name, host_id, created_at, members, current, position_ms, playing, at, queue}`,
+and any of its members may change any of it; there is no owner. Its members are
+those with live presence, so a channel ends about 200 seconds after its last
+member closes the app. Up to 10 channels exist at once.
+
 ### Jev
 
 The service asks TypeSafe AI's Jev decision model (pinned to `jev-1.14.0`)

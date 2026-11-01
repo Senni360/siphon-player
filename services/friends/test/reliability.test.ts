@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createService, hash } from '../src/service.js';
 import { MAX_STATE_BYTES, MemoryStorage, RedisStorage, type Storage, type State, type Post } from '../src/storage.js';
+const liveOf = (m: MemoryStorage) => ({ liveRead: m.liveRead.bind(m), livePut: m.livePut.bind(m), liveDelete: m.liveDelete.bind(m), liveCas: m.liveCas.bind(m) });
 
 const invite = 'bounded-stress-fixture-invite';
 const payload = { url: 'https://soundcloud.com/fixture/private/s-fixture?secret_token=s-fixture', source: 'soundcloud', title: 'Fixture', artists: ['Fixture artist'], artwork_url: null, duration_ms: 123000, note: 'Fixture only' };
@@ -33,6 +34,7 @@ test('bounded six-client burst keeps all 48 posts and idempotent hearts without 
   let attempts = 0;
   let conflicts = 0;
   const storage: Storage = {
+    ...liveOf(memory),
     async read() { await tick(); return memory.read(); },
     async compareAndSet(previous, next) {
       await tick();
@@ -100,6 +102,7 @@ test('CAS exhaustion and ambiguous committed failures never retry the external m
   let mode: 'normal' | 'conflict' | 'commit-then-fail' = 'normal';
   let calls = 0;
   const storage: Storage = {
+    ...liveOf(memory),
     read: () => memory.read(),
     async compareAndSet(previous, next) {
       calls++;
@@ -175,6 +178,7 @@ test('abort before a mutation or during conflict retry prevents subsequent CAS w
     let reads = 0;
     let attempts = 0;
     const storage: Storage = {
+      ...liveOf(memory),
       async read(signal) {
         const state = await memory.read(signal);
         if (active && ++reads === 2 && mode === 'read') controller.abort();

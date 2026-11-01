@@ -1,27 +1,12 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.js';
-import { httpsUrl, sourceUrl } from './urls.js';
+import { HttpError, body, fail, https, json, text, validateUrl } from './http.js';
+import { createLive } from './live.js';
 import type { Payload, Post, State, Storage, User } from './storage.js';
 import { describe, noJev, titleReadings, type Ask, type Track } from './jev.js';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
-class HttpError extends Error { constructor(public status: number, message: string, public retryAfter?: number) { super(message); } }
-const fail = (status: number, message: string, retryAfter?: number): never => { throw new HttpError(status, message, retryAfter); };
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
-  status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' },
-});
-function text(value: unknown, name: string, max: number, optional = false): string {
-  if (optional && (value === undefined || value === null)) return '';
-  if (typeof value !== 'string' || (!optional && !value.trim()) || value.length > max || /[\x00-\x1f\x7f]/.test(value)) fail(400, `Invalid ${name}`);
-  return (value as string).trim();
-}
-function https(value: unknown): URL {
-  return httpsUrl(value) ?? fail(400, 'Invalid URL');
-}
-export function validateUrl(value: unknown, source: unknown): string {
-  return sourceUrl(value, source) ?? fail(400, 'URL does not match a supported source and playable item');
-}
 function payload(body: Record<string, unknown>): Payload {
   const source = body.source as Payload['source'];
   const url = validateUrl(body.url, source);
@@ -42,32 +27,6 @@ function recipients(value: unknown): string[] {
 /** A share sent to some members is seen only by them and its author. */
 export function visible(post: Post, reader: string): boolean {
   return !post.to?.length || post.author_id === reader || post.to.includes(reader);
-}
-async function body(request: Request, signal: AbortSignal, max = 16384): Promise<Record<string, unknown>> {
-  if (request.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') fail(415, 'Use application/json');
-  if (Number(request.headers.get('content-length')) > max) fail(413, 'Request too large');
-  const reader = request.body?.getReader();
-  if (!reader) return fail(400, 'Expected JSON object');
-  let size = 0;
-  const chunks: Uint8Array[] = [];
-  const cancel = () => { void reader.cancel().catch(() => {}); };
-  signal.addEventListener('abort', cancel, { once: true });
-  try {
-    signal.throwIfAborted();
-    while (true) {
-      const part = await reader.read();
-      signal.throwIfAborted();
-      if (part.done) break;
-      size += part.value.length;
-      if (size > max) { await reader.cancel(); return fail(413, 'Request too large'); }
-      chunks.push(part.value);
-    }
-  } finally { signal.removeEventListener('abort', cancel); reader.releaseLock(); }
-  try {
-    const value: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-    if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
-  } catch { /* fixed error, never echo input */ }
-  return fail(400, 'Expected JSON object');
 }
 async function change<T>(storage: Storage, update: (state: State) => T, signal: AbortSignal): Promise<T> {
   for (let i = 0; i < 20; i++) {
@@ -116,7 +75,43 @@ async function jevAllowed(storage: Storage, userId: string, signal: AbortSignal)
   return await storage.limit(`jev:${userId}:minute`, 30, 60, signal) && await storage.limit(`jev:${userId}:day`, 3000, 86400, signal);
 }
 
-export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev) {
+// A live read comes every few seconds while listening together, so it must not
+// cost the group's whole document each time. Who belongs is remembered briefly
+// per instance; a removed member keeps live access for at most this long.
+const ROSTER_MS = 60000;
+const LIVE_READS_PER_MINUTE = 120;
+const LIVE_WRITES_PER_MINUTE = 60;
+
+export { validateUrl };
+
+export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now) {
+  const live = createLive(storage, clock);
+  let roster: { users: User[]; until: number } | null = null;
+  const liveCalls = new Map<string, { count: number; until: number }>();
+  function liveAllowed(key: string, maximum: number): boolean {
+    const now = clock();
+    for (const [name, value] of liveCalls) if (value.until <= now) liveCalls.delete(name);
+    const bucket = liveCalls.get(key) ?? { count: 0, until: now + 60000 };
+    liveCalls.set(key, bucket);
+    return ++bucket.count <= maximum;
+  }
+  async function liveRoute(request: Request, path: string, clientIp: string, signal: AbortSignal): Promise<Response> {
+    const bearer = request.headers.get('authorization');
+    if (!bearer || !/^Bearer [a-f0-9]{64}$/.test(bearer)) return fail(401, 'Sign in to the group');
+    const secret_hash = hash(bearer.slice(7));
+    let user = roster && roster.until > clock() ? roster.users.find(u => u.secret_hash === secret_hash) : undefined;
+    if (!user) {
+      // Unknown here: as expensive as any other request, and limited as one.
+      if (!await storage.limit(`ip:${hash(clientIp)}`, 180, 60, signal)) return fail(429, 'Too many requests', 60);
+      const state = await storage.read(signal);
+      roster = { users: state.users, until: clock() + ROSTER_MS };
+      user = member(state, secret_hash);
+    }
+    const reads = request.method === 'GET';
+    if (!liveAllowed(`${user.user_id}:${reads ? 'read' : 'write'}`, reads ? LIVE_READS_PER_MINUTE : LIVE_WRITES_PER_MINUTE)) return fail(429, 'Too many requests', 60);
+    return await live.route(request, path, user, roster!.users, signal) ?? fail(404, 'Route not found');
+  }
+
   /**
    * Scores shares the reader has not rated yet against their taste, once per
    * share and reader. The scores are a cache: losing a write only means
@@ -154,6 +149,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       if (inviteCode.length < 12 || inviteCode.length > 256 || inviteCode.trim() !== inviteCode || /[\x00-\x1f\x7f]/.test(inviteCode)) return fail(503, 'Group invite is not configured');
       const path = new URL(request.url).pathname.replace(/^\/api/, '').replace(/\/$/, '');
       const method = request.method;
+      if (path === '/live' || path.startsWith('/live/')) return await liveRoute(request, path, clientIp, signal);
       // IP identifiers are hashed before storage. On Vercel the adapter supplies
       // only the platform-overwritten x-vercel-forwarded-for, never a client header.
       if (!await storage.limit(`ip:${hash(clientIp)}`, 180, 60, signal)) return fail(429, 'Too many requests', 60);
@@ -193,6 +189,9 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
             if (post.affinity) delete post.affinity[current.user_id];
           }
         }, signal);
+        roster = null;
+        // Everything live expires by itself; this only makes it immediate.
+        await live.forget(user, state.users, signal).catch(() => {});
         return json({ ok: true });
       }
       if (path === '/posts' && method === 'GET') {

@@ -78,11 +78,37 @@ export interface Storage {
   read(signal?: AbortSignal): Promise<State>;
   compareAndSet(previous: number, next: State, signal?: AbortSignal): Promise<boolean>;
   limit(key: string, maximum: number, seconds: number, signal?: AbortSignal): Promise<boolean>;
+  // Live keys sit beside the document and expire by themselves.
+  liveRead(keys: string[], signal?: AbortSignal): Promise<(string | null)[]>;
+  livePut(key: string, value: string, seconds: number, signal?: AbortSignal): Promise<void>;
+  liveDelete(key: string, signal?: AbortSignal): Promise<void>;
+  /** Stores `value` if the key's JSON `revision` is still `previous` (0 when absent). */
+  liveCas(key: string, previous: number, value: string, seconds: number, signal?: AbortSignal): Promise<boolean>;
 }
 
 export class MemoryStorage implements Storage {
   private state = empty();
   private limits = new Map<string, { count: number; until: number }>();
+  private live = new Map<string, { value: string; until: number }>();
+  constructor(private clock: () => number = Date.now) {}
+  private liveValue(key: string) {
+    const entry = this.live.get(key);
+    if (entry && entry.until <= this.clock()) this.live.delete(key);
+    return this.live.get(key)?.value ?? null;
+  }
+  async liveRead(keys: string[], signal?: AbortSignal) { signal?.throwIfAborted(); return keys.map(key => this.liveValue(key)); }
+  async livePut(key: string, value: string, seconds: number, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    this.live.set(key, { value, until: this.clock() + seconds * 1000 });
+  }
+  async liveDelete(key: string, signal?: AbortSignal) { signal?.throwIfAborted(); this.live.delete(key); }
+  async liveCas(key: string, previous: number, value: string, seconds: number, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const old = this.liveValue(key);
+    if ((old === null ? 0 : (JSON.parse(old) as { revision: number }).revision) !== previous) return false;
+    await this.livePut(key, value, seconds);
+    return true;
+  }
   async read(signal?: AbortSignal) { signal?.throwIfAborted(); return structuredClone(this.state); }
   async compareAndSet(previous: number, next: State, signal?: AbortSignal) {
     signal?.throwIfAborted();
@@ -106,6 +132,11 @@ local revision = 0
 if old then revision = cjson.decode(old).revision end
 if revision ~= tonumber(ARGV[1]) then return 0 end
 redis.call('SET', KEYS[1], ARGV[2]); return 1`;
+const LIVE_CAS = `local old = redis.call('GET', KEYS[1])
+local revision = 0
+if old then revision = cjson.decode(old).revision end
+if revision ~= tonumber(ARGV[1]) then return 0 end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]); return 1`;
 const LIMIT = `local n = redis.call('INCR', KEYS[1])
 if n == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end
 return n`;
@@ -161,6 +192,21 @@ export class RedisStorage implements Storage {
   async compareAndSet(previous: number, next: State, signal?: AbortSignal) {
     signal?.throwIfAborted();
     const result = await this.command(['EVAL', CAS, 1, `${this.prefix}:state`, previous, encodedState(next)], signal);
+    if (result !== 0 && result !== 1) throw new Error('Storage unavailable');
+    return result === 1;
+  }
+  private liveKey(key: string) { return `${this.prefix}:live:${key}`; }
+  async liveRead(keys: string[], signal?: AbortSignal) {
+    const result = await this.command(['MGET', ...keys.map(key => this.liveKey(key))], signal);
+    if (!Array.isArray(result) || result.length !== keys.length) throw new Error('Storage unavailable');
+    return result.map(value => typeof value === 'string' ? value : null);
+  }
+  async livePut(key: string, value: string, seconds: number, signal?: AbortSignal) {
+    await this.command(['SET', this.liveKey(key), value, 'EX', seconds], signal);
+  }
+  async liveDelete(key: string, signal?: AbortSignal) { await this.command(['DEL', this.liveKey(key)], signal); }
+  async liveCas(key: string, previous: number, value: string, seconds: number, signal?: AbortSignal) {
+    const result = await this.command(['EVAL', LIVE_CAS, 1, this.liveKey(key), previous, value, seconds], signal);
     if (result !== 0 && result !== 1) throw new Error('Storage unavailable');
     return result === 1;
   }
