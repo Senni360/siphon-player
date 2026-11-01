@@ -64,6 +64,7 @@ Environment variables:
 | `TYPESAFE_API_KEY` | Optional. TypeSafe key for Jev; the service calls `api.typesafe.ai` with it. |
 | `AI_GATEWAY_API_KEY` | Optional. Without a TypeSafe key, Jev goes through Vercel AI Gateway with this key, or with the deployment's own OIDC token. |
 | `PORT` | Local runner port, default 8787. |
+| `SIPHON_FRIENDS_OWNER_SPOTIFY_ID` | Optional. The Spotify username that owns the first group. That account takes it over when it next connects. |
 | `SIPHON_FRIENDS_URL` | **Player-side only.** Base service URL including `/api`. |
 
 Production refuses to start without both Redis values. It never falls back to
@@ -99,6 +100,54 @@ Never log request bodies, Authorization headers, invites, or private share URLs.
 | `POST /api/jev/next` | `{recent: [{title, artists}] (1 to 10), candidates: [{id, title, artists}] (2 to 255)}` -> `{probabilities: {id: p} \| null}`. |
 | `POST /api/jev/titles` | `{uploads: [{title, uploader}] (1 to 50)}` -> `{readings: [{artist, title} \| null]}`, in order. |
 
+### Accounts and groups
+
+An account is a Spotify account: `POST /api/auth/spotify` takes `{token, device}`,
+reads the id with `GET https://api.spotify.com/v1/me`, and answers `201 {user_id,
+display_name, secret, created}`. The token is used for that one read and is never
+stored or logged. Each computer gets its own secret, stored hashed. A bearer sent
+along links the identity it names; a second identity of the same person folds into
+the account, and their old secret keeps working as one of its devices.
+
+Every feed, live and playlist request is about one group, named by the
+`X-Siphon-Group` header. Without it a request means the first group, which holds
+everyone from before groups existed, so an older client keeps working unchanged.
+A request for a group the reader is not in gets 403.
+
+| Method and route | Body / result |
+| --- | --- |
+| `GET /api/account` | `{user_id, display_name, spotify_id, soundcloud, devices, groups}`. `invite` shows only to those who may invite; `pending` only to admins. |
+| `DELETE /api/account/devices/:id` | Sign a computer out. |
+| `PUT` / `DELETE /api/account/soundcloud` | `{id, username}`: a label only. |
+| `DELETE /api/account/spotify` | Unlink. New computers cannot find the account until it connects again. |
+| `POST /api/groups` | `{name}` -> the group, with the caller as owner and a fresh invite. |
+| `POST /api/groups/join` | `{code}` -> the group. 403 for a wrong code, or for someone an admin removed. |
+| `PATCH` / `DELETE /api/groups/:id` | Rename (admin); delete (owner). The first group cannot be deleted. |
+| `POST` / `DELETE /api/groups/:id/invite` | New code, ending the old one (needs the invite right); turn codes off (admin). |
+| `POST /api/groups/:id/leave` | The owner's seat falls to the longest-standing admin, else member. The last to leave deletes the group. |
+| `POST /api/groups/:id/owner` | `{user_id}`: hand over (owner). |
+| `POST` / `DELETE /api/groups/:id/members` | `{spotify_id}`, a username or profile link: add, or cancel someone not signed in yet, who joins when they do (admin). |
+| `PATCH /api/groups/:id/members/:user` | `{role?, rights?}`. Only the owner changes admins. |
+| `DELETE /api/groups/:id/members/:user` | Remove. Old invites do not bring them back; adding them does. |
+
+Rights are `{share, host, queue, invite}`, enforced here, not just hidden in the
+app. Owners and admins may also delete anyone's shares and replies in their group.
+
+A removed member's live access lasts at most the 60 seconds another instance may
+remember the roster.
+
+### Shared playlists
+
+| Method and route | Body / result |
+| --- | --- |
+| `GET /api/playlists` | `{playlists: [{id, name, by, by_name, created_at, count, artwork_url, to}]}`. |
+| `POST /api/playlists` | `{name, items (1 to 1000 songs), to?}` -> `201` the row. |
+| `GET /api/playlists/:id` | `{id, name, items}`. Reading keeps it for another 400 days. |
+| `DELETE /api/playlists/:id` | Its sharer or an admin. |
+
+A share is a copy of the list as it was: later edits do not follow. Songs live in
+their own expiring key, so the group's document stays small.
+
 ### Listening together
 
 Live state sits in its own expiring Redis keys beside the group's document, so
@@ -112,13 +161,29 @@ make 120 live reads and 60 live writes a minute per instance.
 | `GET /api/live` | `{now, presence: [{user_id, item, position_ms, playing, at, following}], channels: [Channel]}`. |
 | `PUT /api/live/presence` | `{item \| null, position_ms, playing, following?}` -> `{now}`. Expires after 200 s without another. |
 | `DELETE /api/live/presence` | Stop appearing at once -> `{now}`. |
-| `POST /api/live/channels` | `{name, item?, position_ms?, playing?}` -> `201 {now, channel}`. The creator joins it. |
+| `POST /api/live/channels` | `{name, item?, position_ms?, playing?, locked?}` -> `201 {now, channel}`. The creator joins it. `locked` makes it a party. |
 | `POST /api/live/channels/:id/join`, `/leave` | -> `{now, channel}`. A member is in one channel at a time. |
 | `POST /api/live/channels/:id/playback` | `{playing, position_ms}` -> `{now, channel}`. |
 | `POST /api/live/channels/:id/next` | `{from?, to?}` -> `{now, channel}`. `from` is ignored unless it is still the current entry, so every listener can report a song's end and it moves on once. `to` skips to a queue entry and drops the rows above it. |
 | `POST /api/live/channels/:id/queue` | `{item, where?: "end" \| "next" \| "now"}` -> `201 {now, channel}`. Holds up to 200. |
 | `DELETE /api/live/channels/:id/queue/:entry` | -> `{now, channel}`. |
 | `POST /api/live/channels/:id/queue/:entry/move` | `{index}` -> `{now, channel}`. |
+
+| `POST /api/live/channels/:id/end` | Host only. Ends it for everyone. |
+| `POST /api/live/channels/:id/host` | `{user_id}`: hand over. Host only. |
+| `PUT /api/live/channels/:id/controllers` | `{user_ids}`: who else may move the music. Host only. |
+| `PUT` / `DELETE /api/live/channels/:id/skip-request` | Ask the host to skip this song, or take it back. Moving on clears them. |
+| `PUT /api/live/channels/:id/background` | `{name, items (1 to 1000)}`: what plays, in a loop, when the queue runs out. Only someone at the controls may replace another's. |
+| `DELETE /api/live/channels/:id/background` | Remove it. |
+| `GET /api/open/party/:group/:party` | No sign-in. `302` to `siphon://party/...`, because a Discord button can only open https. It names no song or person, and the app lets in only those already in the group, after asking. |
+
+In a party (`locked`), only the host and the controllers may seek, pause, skip or
+use `where: "now"`; anyone else gets 403. Everyone may change the queue unless an
+admin took that right. A guest's `next` works only with `from` as the current entry
+once its time has really run out, so the music does not depend on the host being
+there at that moment. A party whose host left passes to whoever has been there
+longest. Channels without `locked` come from older clients and stay open to all
+their members.
 
 | `PUT /api/live/stats/month`, `/all` | `{summary}` -> `{now}`. A member's totals: this month's kept 40 days, all time's 400. |
 | `GET /api/live/stats/month`, `/all` | `{now, stats: [{user_id, summary}]}`, for everyone who shared. |
@@ -129,10 +194,10 @@ make 120 live reads and 60 live writes a minute per instance.
 
 `item` is one playable song, the share payload without album or playlist links.
 Positions are extrapolated by clients from `at` against `now`. A channel is
-`{id, name, host_id, created_at, members, current, position_ms, playing, at, queue}`,
-and any of its members may change any of it; there is no owner. Its members are
+`{id, name, host_id, created_at, members, current, position_ms, playing, at, queue,
+locked?, controllers?, skip_requests?, background?}`. Its members are
 those with live presence, so a channel ends about 200 seconds after its last
-member closes the app. Up to 10 channels exist at once.
+member closes the app. Up to 10 channels exist per group at once.
 
 ### Jev
 

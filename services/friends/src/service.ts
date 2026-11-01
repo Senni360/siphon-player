@@ -2,8 +2,9 @@ import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.js';
 import { HttpError, body, fail, https, json, text, validateUrl } from './http.js';
-import { createLive } from './live.js';
-import type { Payload, Post, State, Storage, User } from './storage.js';
+import { createLive, song } from './live.js';
+import { FIRST_GROUP, MAX_DEVICES, admitPending, fullRights, groupById, groupRoute, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
+import type { Payload, Post, SharedPlaylist, State, Storage, User } from './storage.js';
 import { describe, noJev, titleReadings, type Ask, type Track } from './jev.js';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -44,8 +45,10 @@ async function change<T>(storage: Storage, update: (state: State) => T, signal: 
   return fail(503, 'Feed busy, try again');
 }
 
+const holds = (user: User, secretHash: string) => user.secret_hash === secretHash || !!user.devices?.some(d => d.hash === secretHash);
+
 function member(state: State, secretHash: string): User {
-  return state.users.find(user => user.secret_hash === secretHash) ?? fail(401, 'Sign in to the group');
+  return state.users.find(user => holds(user, secretHash)) ?? fail(401, 'Sign in to the group');
 }
 
 function memberChange<T>(storage: Storage, secretHash: string, update: (state: State, user: User) => T, signal: AbortSignal): Promise<T> {
@@ -84,9 +87,25 @@ const LIVE_WRITES_PER_MINUTE = 60;
 
 export { validateUrl };
 
-export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now) {
+/** Who a Spotify token belongs to. The token is used for this one read and goes nowhere else. */
+export type VerifySpotify = (token: string, signal: AbortSignal) => Promise<{ id: string; display_name: string | null }>;
+export const verifySpotify: VerifySpotify = async (token, signal) => {
+  const response = await fetch('https://api.spotify.com/v1/me', { headers: { Authorization: `Bearer ${token}` }, redirect: 'error', signal }).catch(() => fail(502, 'Spotify could not be reached'));
+  if (response.status === 401) return fail(401, 'Spotify did not accept this sign-in');
+  if (!response.ok) return fail(502, 'Spotify could not be reached');
+  const profile = await response.json().catch(() => null) as { id?: unknown; display_name?: unknown } | null;
+  if (typeof profile?.id !== 'string' || !profile.id) return fail(502, 'Spotify could not be reached');
+  return { id: profile.id, display_name: typeof profile.display_name === 'string' ? profile.display_name : null };
+};
+const playlistKey = (id: string) => `playlist:${id}`;
+const PLAYLIST_SECONDS = 400 * 86400;
+const MAX_PLAYLISTS = 1000;
+const MAX_PLAYLIST_SONGS = 1000;
+const seenByReader = (list: SharedPlaylist, reader: string) => !list.to?.length || list.by === reader || list.to.includes(reader);
+
+export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now, verify: VerifySpotify = verifySpotify, ownerSpotify = '') {
   const live = createLive(storage, clock);
-  let roster: { users: User[]; until: number } | null = null;
+  let roster: { state: State; until: number } | null = null;
   const liveCalls = new Map<string, { count: number; until: number }>();
   function liveAllowed(key: string, maximum: number): boolean {
     const now = clock();
@@ -99,17 +118,19 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
     const bearer = request.headers.get('authorization');
     if (!bearer || !/^Bearer [a-f0-9]{64}$/.test(bearer)) return fail(401, 'Sign in to the group');
     const secret_hash = hash(bearer.slice(7));
-    let user = roster && roster.until > clock() ? roster.users.find(u => u.secret_hash === secret_hash) : undefined;
+    let user = roster && roster.until > clock() ? roster.state.users.find(u => holds(u, secret_hash)) : undefined;
     if (!user) {
       // Unknown here: as expensive as any other request, and limited as one.
       if (!await storage.limit(`ip:${hash(clientIp)}`, 180, 60, signal)) return fail(429, 'Too many requests', 60);
       const state = await storage.read(signal);
-      roster = { users: state.users, until: clock() + ROSTER_MS };
+      roster = { state, until: clock() + ROSTER_MS };
       user = member(state, secret_hash);
     }
     const reads = request.method === 'GET';
     if (!liveAllowed(`${user.user_id}:${reads ? 'read' : 'write'}`, reads ? LIVE_READS_PER_MINUTE : LIVE_WRITES_PER_MINUTE)) return fail(429, 'Too many requests', 60);
-    return await live.route(request, path, user, roster!.users, signal) ?? fail(404, 'Route not found');
+    const { group, member: seat } = requestGroup(roster!.state, request.headers.get('x-siphon-group'), user);
+    const here = new Set(group.members.map(m => m.user_id));
+    return await live.route(request, path, user, roster!.state.users.filter(u => here.has(u.user_id)), signal, group.id, seat.rights) ?? fail(404, 'Route not found');
   }
 
   /**
@@ -149,6 +170,10 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       if (inviteCode.length < 12 || inviteCode.length > 256 || inviteCode.trim() !== inviteCode || /[\x00-\x1f\x7f]/.test(inviteCode)) return fail(503, 'Group invite is not configured');
       const path = new URL(request.url).pathname.replace(/^\/api/, '').replace(/\/$/, '');
       const method = request.method;
+      // A Discord button can only open https. This names no song and no person,
+      // and the app only lets in those already in the group.
+      const door = /^\/open\/party\/([a-f0-9-]{36})\/([a-f0-9-]{36})$/.exec(path);
+      if (door && method === 'GET') return new Response(null, { status: 302, headers: { Location: `siphon://party/${door[1]}/${door[2]}`, 'Cache-Control': 'no-store' } });
       if (path === '/live' || path.startsWith('/live/')) return await liveRoute(request, path, clientIp, signal);
       // IP identifiers are hashed before storage. On Vercel the adapter supplies
       // only the platform-overwritten x-vercel-forwarded-for, never a client header.
@@ -163,9 +188,54 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         const user_id = randomUUID();
         await change(storage, state => {
           if (state.users.length >= MAX_USERS) fail(409, 'Group is full');
+          // Before the push: a document from before groups gives everyone so far a seat.
+          withGroups(state);
           state.users.push({ user_id, display_name, secret_hash: hash(secret) });
+          groupById(state, FIRST_GROUP)?.members.push({ user_id, role: 'member', rights: memberRights() });
         }, signal);
         return json({ user_id, secret }, 201);
+      }
+      if (path === '/auth/spotify' && method === 'POST') {
+        // An existing identity may come along: that person's first sign-in on
+        // this account, or a second identity of theirs to fold into it.
+        if (!await storage.limit(`auth:${hash(clientIp)}`, 30, 3600, signal)) return fail(429, 'Too many sign-ins', 3600);
+        const input = await body(request, signal, 8192);
+        const token = text(input.token, 'token', 4096);
+        if (!/^[\w.~+/=-]+$/.test(token)) return fail(400, 'Invalid token');
+        const device = text(input.device, 'device', 60, true) || 'This computer';
+        const held = request.headers.get('authorization');
+        const heldHash = held && /^Bearer [a-f0-9]{64}$/.test(held) ? hash(held.slice(7)) : null;
+        const profile = await verify(token, signal);
+        const secret = randomBytes(32).toString('hex');
+        const answer = await change(storage, state => {
+          withGroups(state);
+          const holder = heldHash ? state.users.find(u => holds(u, heldHash)) : undefined;
+          let account = state.users.find(u => u.spotify_id === profile.id);
+          let created = false;
+          if (holder && account && holder !== account) mergeUsers(state, holder, account);
+          else if (holder && !account) { holder.spotify_id = profile.id; account = holder; }
+          else if (!account) {
+            if (state.users.length >= MAX_USERS) fail(409, 'Group is full');
+            const name = (profile.display_name ?? '').replace(/[\x00-\x1f\x7f]/g, '').trim().slice(0, 40).trim() || 'Listener';
+            account = { user_id: randomUUID(), display_name: name, secret_hash: hash(randomBytes(32).toString('hex')), spotify_id: profile.id };
+            state.users.push(account);
+            created = true;
+          }
+          account.devices = [...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }].slice(-MAX_DEVICES);
+          admitPending(state, account);
+          // The owner the deployment names takes the first group once they prove who they are.
+          const first = groupById(state, FIRST_GROUP);
+          if (first && ownerSpotify && profile.id === ownerSpotify && first.owner_id !== account.user_id && memberOf(first, account.user_id)) {
+            for (const seat of first.members) if (seat.role === 'owner') seat.role = 'admin';
+            first.owner_id = account.user_id;
+            const seat = memberOf(first, account.user_id)!;
+            seat.role = 'owner';
+            seat.rights = fullRights();
+          }
+          return { user_id: account.user_id, display_name: account.display_name, created };
+        }, signal);
+        roster = null;
+        return json({ ...answer, secret }, 201);
       }
       const bearer = request.headers.get('authorization');
       if (!bearer || !/^Bearer [a-f0-9]{64}$/.test(bearer)) return fail(401, 'Sign in to the group');
@@ -175,6 +245,8 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       const reads = method === 'GET';
       if (!await storage.limit(`user:${user.user_id}:${reads ? 'read' : 'write'}`, reads ? 120 : 60, 60, signal)) return fail(429, 'Too many requests', 60);
       signal.throwIfAborted();
+      const scoped = await groupRoute(request, path, user, state, secret_hash, update => memberChange(storage, secret_hash, update, signal).finally(() => { roster = null; }), signal);
+      if (scoped) return scoped;
       if (path === '/me' && method === 'GET') return json({ user_id: user.user_id, display_name: user.display_name });
       if (path === '/me' && method === 'PATCH') {
         const display_name = text((await body(request, signal)).display_name, 'display_name', 40);
@@ -183,6 +255,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       }
       if (path === '/me' && method === 'DELETE') {
         await memberChange(storage, secret_hash, (s, current) => {
+          for (const group of withGroups(s)) if (memberOf(group, current.user_id)) removeMember(s, group, current.user_id);
           s.users = s.users.filter(u => u.user_id !== current.user_id);
           for (const post of s.posts) {
             post.likes = post.likes.filter(id => id !== current.user_id);
@@ -194,6 +267,9 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         await live.forget(user, state.users, signal).catch(() => {});
         return json({ ok: true });
       }
+      // Everything below belongs to one group: the one named, or the first.
+      const { group, member: seat } = requestGroup(state, request.headers.get('x-siphon-group'), user);
+      const inGroup = (post: Post) => (post.group_id ?? FIRST_GROUP) === group.id;
       if (path === '/posts' && method === 'GET') {
         const params = new URL(request.url).searchParams;
         const limit = Number(params.get('limit') ?? 30);
@@ -207,7 +283,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
             if (!cursor || !Number.isSafeInteger(cursor.created_at) || typeof cursor.id !== 'string' || !/^[\w-]{36}$/.test(cursor.id)) throw new Error();
           } catch { return fail(400, 'Invalid cursor'); }
         }
-        const posts = state.posts.filter(p => visible(p, user.user_id)).filter(p => !cursor || p.created_at < cursor.created_at || p.created_at === cursor.created_at && p.id < cursor.id)
+        const posts = state.posts.filter(inGroup).filter(p => visible(p, user.user_id)).filter(p => !cursor || p.created_at < cursor.created_at || p.created_at === cursor.created_at && p.id < cursor.id)
           .sort((a, b) => b.created_at - a.created_at || b.id.localeCompare(a.id));
         const page = posts.slice(0, limit);
         const last = page.at(-1);
@@ -225,19 +301,22 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
           next_cursor: posts.length > limit && last ? Buffer.from(JSON.stringify({ created_at: last.created_at, id: last.id })).toString('base64url') : null });
       }
       if (path === '/members' && method === 'GET') {
-        return json({ members: state.users.map(u => ({ user_id: u.user_id, display_name: u.display_name })) });
+        const names = new Map(state.users.map(u => [u.user_id, u.display_name]));
+        return json({ members: group.members.map(m => ({ user_id: m.user_id, display_name: names.get(m.user_id) ?? 'Former member' })) });
       }
       if (path === '/posts' && method === 'POST') {
+        if (!seat.rights.share) return fail(403, 'An admin turned off sharing for you in this group');
         const input = payload(await body(request, signal));
-        const post = { ...input, id: randomUUID(), author_id: user.user_id, created_at: Date.now(), likes: [] as string[] };
+        const post: Post = { ...input, ...(group.id === FIRST_GROUP ? {} : { group_id: group.id }), id: randomUUID(), author_id: user.user_id, created_at: Date.now(), likes: [] };
         const author_name = await memberChange(storage, secret_hash, (s, current) => {
           if (s.posts.length >= MAX_POSTS) fail(409, 'Feed is full, delete older posts');
           // Recipients must be members when the share is sent.
-          if (post.to?.some(id => !s.users.some(u => u.user_id === id))) fail(400, 'Invalid recipients');
+          const here = groupById(s, group.id) ?? fail(404, 'Group not found');
+          if (post.to?.some(id => !memberOf(here, id))) fail(400, 'Invalid recipients');
           s.posts.push(post);
           return current.display_name;
         }, signal);
-        const { likes, ...result } = post;
+        const { likes, group_id: _group, ...result } = post;
         return json({ ...result, to: post.to ?? [], replies: [], author_name, like_count: likes.length, liked: false }, 201);
       }
       if (path === '/jev/next' && method === 'POST') {
@@ -283,7 +362,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         const reply = { id: randomUUID(), author_id: user.user_id, created_at: Date.now(), text: reply_text };
         const author_name = await memberChange(storage, secret_hash, (s, current) => {
           const post = s.posts.find(p => p.id === replies[1]);
-          if (!post || !visible(post, current.user_id)) return fail(404, 'Post not found');
+          if (!post || !inGroup(post) || !visible(post, current.user_id)) return fail(404, 'Post not found');
           post.replies ??= [];
           if (post.replies.length >= MAX_REPLIES) fail(409, 'This thread is full');
           post.replies.push(reply);
@@ -294,10 +373,10 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       if (replies && method === 'DELETE' && replies[2]) {
         await memberChange(storage, secret_hash, (s, current) => {
           const post = s.posts.find(p => p.id === replies[1]);
-          if (!post || !visible(post, current.user_id)) return fail(404, 'Post not found');
+          if (!post || !inGroup(post) || !visible(post, current.user_id)) return fail(404, 'Post not found');
           const reply = post.replies?.find(r => r.id === replies[2]);
           if (!reply) return fail(404, 'Reply not found');
-          if (reply.author_id !== current.user_id) return fail(403, 'You can only delete your own reply');
+          if (reply.author_id !== current.user_id && !manages(memberOf(groupById(s, group.id) ?? group, current.user_id))) return fail(403, 'You can only delete your own reply');
           post.replies = post.replies!.filter(r => r.id !== reply.id);
         }, signal);
         return json({ ok: true });
@@ -306,15 +385,61 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       if (match && (method === 'DELETE' || match[2] && method === 'PUT')) {
         await memberChange(storage, secret_hash, s => {
           const post = s.posts.find(p => p.id === match[1]);
-          if (!post || !visible(post, user.user_id)) return fail(404, 'Post not found');
+          if (!post || !inGroup(post) || !visible(post, user.user_id)) return fail(404, 'Post not found');
           if (match[2]) {
             post.likes = post.likes.filter(id => id !== user.user_id);
             if (method === 'PUT') post.likes.push(user.user_id);
           } else {
-            if (post.author_id !== user.user_id) return fail(403, 'You can only delete your own post');
+            if (post.author_id !== user.user_id && !manages(memberOf(groupById(s, group.id) ?? group, user.user_id))) return fail(403, 'You can only delete your own post');
             s.posts = s.posts.filter(p => p.id !== post.id);
           }
         }, signal);
+        return json({ ok: true });
+      }
+      if (path === '/playlists' && method === 'GET') {
+        const names = new Map(state.users.map(u => [u.user_id, u.display_name]));
+        return json({ playlists: (state.playlists ?? []).filter(p => p.group_id === group.id && seenByReader(p, user.user_id))
+          .sort((a, b) => b.created_at - a.created_at)
+          .map(p => ({ id: p.id, name: p.name, by: p.by, by_name: names.get(p.by) ?? 'Former member', created_at: p.created_at, count: p.count, artwork_url: p.artwork_url, to: p.to ?? [] })) });
+      }
+      if (path === '/playlists' && method === 'POST') {
+        if (!seat.rights.share) return fail(403, 'An admin turned off sharing for you in this group');
+        const input = await body(request, signal, 768 * 1024);
+        const name = text(input.name, 'name', 100);
+        if (!Array.isArray(input.items) || !input.items.length || input.items.length > MAX_PLAYLIST_SONGS) return fail(400, 'Invalid items');
+        const items = input.items.map(song);
+        const to = recipients(input.to);
+        const id = randomUUID();
+        // The songs first: a list that fails to save must not leave a row pointing at nothing.
+        await storage.livePut(playlistKey(id), JSON.stringify(items), PLAYLIST_SECONDS, signal);
+        const row: SharedPlaylist = { id, group_id: group.id, name, by: user.user_id, created_at: clock(), count: items.length, artwork_url: items.find(i => i.artwork_url)?.artwork_url ?? null, ...(to.length ? { to } : {}) };
+        await memberChange(storage, secret_hash, s => {
+          const here = groupById(s, group.id) ?? fail(404, 'Group not found');
+          if (to.some(other => !memberOf(here, other))) fail(400, 'Invalid recipients');
+          const rows = s.playlists ??= [];
+          if (rows.length >= MAX_PLAYLISTS) fail(409, 'Too many shared playlists, delete older ones');
+          rows.push(row);
+        }, signal);
+        return json({ id, name, by: user.user_id, by_name: user.display_name, created_at: row.created_at, count: row.count, artwork_url: row.artwork_url, to }, 201);
+      }
+      const sharedList = /^\/playlists\/([a-f0-9-]{36})$/.exec(path);
+      if (sharedList && method === 'GET') {
+        const row = (state.playlists ?? []).find(p => p.id === sharedList[1] && p.group_id === group.id);
+        if (!row || !seenByReader(row, user.user_id)) return fail(404, 'Playlist not found');
+        const [stored] = await storage.liveRead([playlistKey(row.id)], signal);
+        if (stored === null) return fail(404, 'Playlist not found');
+        // Being opened keeps a list from expiring.
+        await storage.livePut(playlistKey(row.id), stored, PLAYLIST_SECONDS, signal);
+        return json({ id: row.id, name: row.name, items: JSON.parse(stored) });
+      }
+      if (sharedList && method === 'DELETE') {
+        await memberChange(storage, secret_hash, (s, current) => {
+          const row = (s.playlists ?? []).find(p => p.id === sharedList[1] && p.group_id === group.id);
+          if (!row) return fail(404, 'Playlist not found');
+          if (row.by !== current.user_id && !manages(memberOf(groupById(s, group.id) ?? group, current.user_id))) return fail(403, 'You can only delete your own playlist');
+          s.playlists = s.playlists!.filter(p => p !== row);
+        }, signal);
+        await storage.liveDelete(playlistKey(sharedList[1]), signal);
         return json({ ok: true });
       }
       return fail(404, 'Route not found');

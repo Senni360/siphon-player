@@ -14,7 +14,7 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     res.once('close', closed);
     try {
       if (req.aborted || res.destroyed) abort();
-      service ??= createService(configuredStorage(env), env.SIPHON_FRIENDS_INVITE_CODE ?? '', createJev(env));
+      service ??= createService(configuredStorage(env), env.SIPHON_FRIENDS_INVITE_CODE ?? '', createJev(env), undefined, undefined, env.SIPHON_FRIENDS_OWNER_SPOTIFY_ID ?? '');
       const headers = new Headers();
       for (const [key, value] of Object.entries(req.headers)) if (value) headers.set(key, Array.isArray(value) ? value.join(',') : value);
       // Vercel may have parsed the body before invoking the Node handler.

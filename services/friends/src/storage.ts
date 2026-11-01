@@ -1,6 +1,34 @@
 import { httpsUrl, sourceUrl } from './urls.js';
 
-export interface User { user_id: string; display_name: string; secret_hash: string }
+/** One signed-in computer. The secret it holds is only ever stored hashed. */
+export interface Device { id: string; hash: string; name: string; created_at: number }
+export interface User {
+  user_id: string;
+  display_name: string;
+  /** The first secret of a member from before accounts; unusable random bytes after. */
+  secret_hash: string;
+  /** Who this account is, as Spotify said when the app proved it. */
+  spotify_id?: string;
+  /** A label for friends and new devices. SoundCloud's own grant never leaves the app. */
+  soundcloud?: { id: string; username: string };
+  devices?: Device[];
+}
+export interface Rights { share: boolean; host: boolean; queue: boolean; invite: boolean }
+export interface Member { user_id: string; role: 'owner' | 'admin' | 'member'; rights: Rights }
+export interface Group {
+  id: string;
+  name: string;
+  owner_id: string | null;
+  created_at: number;
+  members: Member[];
+  invite: string | null;
+  /** Spotify ids an admin added who have not signed in yet. */
+  pending: string[];
+  /** Whom an admin removed: an old invite does not bring them back. */
+  removed: string[];
+}
+/** A playlist someone shared. Its songs sit in their own key, to keep this document small. */
+export interface SharedPlaylist { id: string; group_id: string; name: string; by: string; created_at: number; count: number; artwork_url: string | null; to?: string[] }
 export interface Payload {
   url: string;
   source: 'spotify' | 'soundcloud' | 'youtube';
@@ -15,6 +43,8 @@ export interface Payload {
 export interface Reply { id: string; author_id: string; created_at: number; text: string }
 export interface Post extends Payload {
   id: string;
+  /** Absent: the group from before groups. */
+  group_id?: string;
   author_id: string;
   created_at: number;
   likes: string[];
@@ -22,7 +52,7 @@ export interface Post extends Payload {
   /** Jev's estimate, by member id, that the member will enjoy this song. */
   affinity?: Record<string, number>;
 }
-export interface State { revision: number; users: User[]; posts: Post[] }
+export interface State { revision: number; users: User[]; posts: Post[]; groups?: Group[]; playlists?: SharedPlaylist[] }
 export const empty = (): State => ({ revision: 0, users: [], posts: [] });
 export const MAX_USERS = 500;
 export const MAX_POSTS = 5000;
@@ -49,7 +79,13 @@ function storedState(value: unknown): State {
       !Array.isArray(state.users) || state.users.length > MAX_USERS || !Array.isArray(state.posts) || state.posts.length > MAX_POSTS ||
       !state.users.every(u => u && id(u.user_id) && text(u.display_name, 40) && typeof u.secret_hash === 'string' && /^[a-f0-9]{64}$/.test(u.secret_hash)) ||
       new Set(state.users.map(u => u.user_id)).size !== state.users.length ||
-      new Set(state.users.map(u => u.secret_hash)).size !== state.users.length) {
+      new Set(state.users.map(u => u.secret_hash)).size !== state.users.length ||
+      !state.users.every(u => (u.spotify_id === undefined || text(u.spotify_id, 128)) &&
+        (u.soundcloud === undefined || !!u.soundcloud && text(u.soundcloud.id, 40) && text(u.soundcloud.username, 100)) &&
+        (u.devices === undefined || Array.isArray(u.devices) && u.devices.length <= 20 && u.devices.every(d => d && id(d.id) && /^[a-f0-9]{64}$/.test(d.hash) && text(d.name, 60) && Number.isSafeInteger(d.created_at)))) ||
+      new Set(state.users.flatMap(u => u.spotify_id ? [u.spotify_id] : [])).size !== state.users.filter(u => u.spotify_id).length ||
+      (state.groups !== undefined && !(Array.isArray(state.groups) && state.groups.every(g => g && id(g.id) && text(g.name, 60) && Array.isArray(g.members) && g.members.every(m => m && id(m.user_id) && ['owner', 'admin', 'member'].includes(m.role) && m.rights && typeof m.rights === 'object') && Array.isArray(g.pending) && Array.isArray(g.removed)))) ||
+      (state.playlists !== undefined && !(Array.isArray(state.playlists) && state.playlists.every(p => p && id(p.id) && id(p.group_id) && id(p.by) && text(p.name, 100) && Number.isSafeInteger(p.count))))) {
     throw new Error('Invalid stored group');
   }
   const members = new Set(state.users.map(u => u.user_id));
@@ -61,7 +97,7 @@ function storedState(value: unknown): State {
       Number.isSafeInteger(p.duration_ms) && p.duration_ms >= 0 && p.duration_ms <= 604800000 &&
       (p.note === undefined || text(p.note, 280, true)) && Array.isArray(p.likes) &&
       p.likes.length <= MAX_USERS && new Set(p.likes).size === p.likes.length && p.likes.every(id => members.has(id)) &&
-      (p.to === undefined || Array.isArray(p.to) && p.to.length <= MAX_RECIPIENTS && new Set(p.to).size === p.to.length && p.to.every(id)) &&
+      (p.group_id === undefined || id(p.group_id)) && (p.to === undefined || Array.isArray(p.to) && p.to.length <= MAX_RECIPIENTS && new Set(p.to).size === p.to.length && p.to.every(id)) &&
       (p.replies === undefined || Array.isArray(p.replies) && p.replies.length <= MAX_REPLIES &&
         p.replies.every(r => r && id(r.id) && id(r.author_id) && Number.isSafeInteger(r.created_at) && r.created_at >= 0 && text(r.text, 500)) &&
         new Set(p.replies.map(r => r.id)).size === p.replies.length) &&
