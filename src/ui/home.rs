@@ -31,7 +31,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 ui,
                 gettext(
                     app.locale,
-                    "Siphon will reconnect automatically when your connection returns.",
+                    "Encore will reconnect automatically when your connection returns.",
                 ),
                 theme::regular(14.0),
                 palette.secondary,

@@ -3,12 +3,12 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Siphon\n"
+"Project-Id-Version: Encore\n"
 "Report-Msgid-Bugs-To: https://github.com/crmne/spotifast/issues/new?"
 "template=translation.yml\n"
 "POT-Creation-Date: 2026-10-29 21:31+0100\n"
 "PO-Revision-Date: 2026-09-09 13:30+0000\n"
-"Last-Translator: Siphon contributors\n"
+"Last-Translator: Encore contributors\n"
 "Language-Team: Swedish\n"
 "Language: sv\n"
 "MIME-Version: 1.0\n"
@@ -363,8 +363,8 @@ msgid "Mute"
 msgstr "Stäng av ljudet"
 
 #: src/ui/player_bar.rs:1028
-msgid "This device's volume can't be changed from Siphon"
-msgstr "Volymen på den här enheten kan inte ändras från Siphon"
+msgid "This device's volume can't be changed from Encore"
+msgstr "Volymen på den här enheten kan inte ändras från Encore"
 
 #: src/ui/player_bar.rs:1048 src/ui/devices.rs:404
 msgid "Connect to a device"
@@ -482,8 +482,8 @@ msgstr "Du är offline"
 #: src/ui/collection.rs:2191 src/ui/collection.rs:2438 src/ui/home.rs:34
 #: src/ui/library.rs:262 src/ui/show.rs:69 src/ui/show.rs:115
 #: src/ui/show.rs:145
-msgid "Siphon will reconnect automatically when your connection returns."
-msgstr "Siphon ansluter automatiskt igen när din anslutning återställs."
+msgid "Encore will reconnect automatically when your connection returns."
+msgstr "Encore ansluter automatiskt igen när din anslutning återställs."
 
 #. Translators: Keep {error} unchanged. It is the original failure detail.
 #: src/ui/lyrics.rs:182 src/ui/lyrics.rs:463 src/ui/lyrics.rs:699
@@ -842,8 +842,8 @@ msgid "Restoring proxy settings"
 msgstr "Återställer proxyinställningar"
 
 #: src/app.rs:1570
-msgid "Couldn't change how Siphon starts with your computer."
-msgstr "Det gick inte att ändra hur Siphon startar med datorn."
+msgid "Couldn't change how Encore starts with your computer."
+msgstr "Det gick inte att ändra hur Encore startar med datorn."
 
 #. Translators: {name} is the name of a speaker or other playback device.
 #: src/app.rs:2839
@@ -872,12 +872,12 @@ msgstr ""
 #. Translators: {version} is a version number such as 1.4.0.
 #: src/app.rs:3038
 #, rust-format
-msgid "Siphon {version} is available"
-msgstr "Siphon {version} finns tillgänglig"
+msgid "Encore {version} is available"
+msgstr "Encore {version} finns tillgänglig"
 
 #: src/app.rs:3055
-msgid "Siphon is up to date"
-msgstr "Siphon är uppdaterat"
+msgid "Encore is up to date"
+msgstr "Encore är uppdaterat"
 
 #. Translators: {error} is an error message.
 #: src/app.rs:3063
@@ -1110,8 +1110,8 @@ msgid "This song's album is not on Spotify"
 msgstr "Albumet för den här låten finns inte på Spotify"
 
 #: src/app.rs:9229
-msgid "Siphon cannot open this kind of Spotify link"
-msgstr "Siphon kan inte öppna den här typen av Spotify-länk"
+msgid "Encore cannot open this kind of Spotify link"
+msgstr "Encore kan inte öppna den här typen av Spotify-länk"
 
 #: src/app.rs:9481
 msgid "Nothing is playing. Pick something first"
@@ -1407,17 +1407,17 @@ msgstr "Personlig Spotify-app"
 
 #: src/ui/settings.rs:423
 msgid ""
-"You're still signed in through the shared app Siphon used before, which "
+"You're still signed in through the shared app Encore used before, which "
 "Spotify can stop accepting at any time. Set up your own app to keep "
 "listening."
 msgstr ""
-"Du är fortfarande inloggad via den delade appen som Siphon använde tidigare, "
+"Du är fortfarande inloggad via den delade appen som Encore använde tidigare, "
 "och Spotify kan när som helst sluta godta den. Konfigurera din egen app för "
 "att fortsätta lyssna."
 
 #: src/ui/settings.rs:426
-msgid "Siphon signs in through your own free Spotify app."
-msgstr "Siphon loggar in via din egen gratis Spotify-app."
+msgid "Encore signs in through your own free Spotify app."
+msgstr "Encore loggar in via din egen gratis Spotify-app."
 
 #: src/ui/settings.rs:430
 msgid "Create an app"
@@ -1438,8 +1438,8 @@ msgstr ""
 "delade appen."
 
 #: src/ui/settings.rs:445
-msgid "Siphon uses your app for Spotify's Web API."
-msgstr "Siphon använder din app för Spotifys Web API."
+msgid "Encore uses your app for Spotify's Web API."
+msgstr "Encore använder din app för Spotifys Web API."
 
 #: src/ui/settings.rs:450
 msgid "Authorize your personal app"
@@ -1609,15 +1609,15 @@ msgstr "Spelar låtar utan tystnad emellan."
 
 #: src/ui/settings.rs:671
 msgid ""
-"Siphon hides to the system tray. Quit from the tray menu or with Ctrl+Q."
+"Encore hides to the system tray. Quit from the tray menu or with Ctrl+Q."
 msgstr ""
-"Siphon göms i systemfältet. Avsluta från systemfältets meny eller med Ctrl+Q."
+"Encore göms i systemfältet. Avsluta från systemfältets meny eller med Ctrl+Q."
 
 #: src/ui/settings.rs:676
 msgid ""
-"Siphon hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q."
+"Encore hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q."
 msgstr ""
-"Siphon göms i menyraden. Avsluta från symbolen i menyraden eller med Cmd+Q."
+"Encore göms i menyraden. Avsluta från symbolen i menyraden eller med Cmd+Q."
 
 #: src/ui/settings.rs:683
 msgid "Checks GitHub once a day. No personal data is sent."
@@ -1661,10 +1661,10 @@ msgstr "Lokala filer"
 
 #: src/ui/settings.rs:719
 msgid ""
-"When off, Siphon lives in the menu bar and leaves Cmd+Tab. Open it from its "
+"When off, Encore lives in the menu bar and leaves Cmd+Tab. Open it from its "
 "menu-bar icon."
 msgstr ""
-"Av: Siphon finns bara i menyraden och syns inte i Cmd+Tab. Öppna det från "
+"Av: Encore finns bara i menyraden och syns inte i Cmd+Tab. Öppna det från "
 "symbolen i menyraden."
 
 #: src/ui/settings.rs:725
@@ -1830,7 +1830,7 @@ msgstr ""
 
 #: src/ui/settings.rs:1200
 msgid ""
-"Draw Siphon's own title bar and window buttons instead of the desktop's."
+"Draw Encore's own title bar and window buttons instead of the desktop's."
 msgstr ""
 "Rita Siphons egen namnlist och fönsterknappar i stället för "
 "skrivbordsmiljöns."
@@ -2029,36 +2029,36 @@ msgstr "Förinställningar"
 #: src/ui/settings.rs:1873
 #, rust-format
 msgid ""
-"None yet in {folder}. Add .milk files here. Siphon downloads presets when "
+"None yet in {folder}. Add .milk files here. Encore downloads presets when "
 "MilkDrop first opens with an empty folder."
 msgstr ""
-"Inga än i {folder}. Lägg .milk-filer här. Siphon laddar ned förinställningar "
+"Inga än i {folder}. Lägg .milk-filer här. Encore laddar ned förinställningar "
 "när MilkDrop öppnas första gången med en tom mapp."
 
 #. Translators: {folder} is the path of the MilkDrop presets folder.
 #: src/ui/settings.rs:1879
 #, rust-format
 msgid ""
-"One preset in {folder}. Add .milk files here. Siphon downloads presets when "
+"One preset in {folder}. Add .milk files here. Encore downloads presets when "
 "MilkDrop first opens with an empty folder."
 msgstr ""
-"En förinställning i {folder}. Lägg .milk-filer här. Siphon laddar ned "
+"En förinställning i {folder}. Lägg .milk-filer här. Encore laddar ned "
 "förinställningar när MilkDrop öppnas första gången med en tom mapp."
 
 #. Translators: {count} is the number of presets, {folder} the path of the MilkDrop presets folder.
 #: src/ui/settings.rs:1885
 #, rust-format
 msgid ""
-"{count} preset in {folder}. Add .milk files here. Siphon downloads presets "
+"{count} preset in {folder}. Add .milk files here. Encore downloads presets "
 "when MilkDrop first opens with an empty folder."
 msgid_plural ""
-"{count} presets in {folder}. Add .milk files here. Siphon downloads presets "
+"{count} presets in {folder}. Add .milk files here. Encore downloads presets "
 "when MilkDrop first opens with an empty folder."
 msgstr[0] ""
-"{count} förinställning i {folder}. Lägg .milk-filer här. Siphon laddar ned "
+"{count} förinställning i {folder}. Lägg .milk-filer här. Encore laddar ned "
 "förinställningar när MilkDrop öppnas första gången med en tom mapp."
 msgstr[1] ""
-"{count} förinställningar i {folder}. Lägg .milk-filer här. Siphon laddar ned "
+"{count} förinställningar i {folder}. Lägg .milk-filer här. Encore laddar ned "
 "förinställningar när MilkDrop öppnas första gången med en tom mapp."
 
 #: src/ui/settings.rs:1894
@@ -2249,8 +2249,8 @@ msgid "In the tray"
 msgstr "I systemfältet"
 
 #: src/ui/settings.rs:2358
-msgid "Allow Siphon in System Settings, General, Login Items."
-msgstr "Tillåt Siphon i Systeminställningar, Allmänt, Inloggningsobjekt."
+msgid "Allow Encore in System Settings, General, Login Items."
+msgstr "Tillåt Encore i Systeminställningar, Allmänt, Inloggningsobjekt."
 
 #: src/ui/settings.rs:2364
 msgid ""
@@ -2269,12 +2269,12 @@ msgstr ""
 "öppnas fönstret."
 
 #: src/ui/settings.rs:2375
-msgid "Open Siphon when you log in, with its window or in the menu bar."
-msgstr "Öppna Siphon när du loggar in, med fönstret eller i menyraden."
+msgid "Open Encore when you log in, with its window or in the menu bar."
+msgstr "Öppna Encore när du loggar in, med fönstret eller i menyraden."
 
 #: src/ui/settings.rs:2380
-msgid "Open Siphon when you log in, with its window or in the tray."
-msgstr "Öppna Siphon när du loggar in, med fönstret eller i systemfältet."
+msgid "Open Encore when you log in, with its window or in the tray."
+msgstr "Öppna Encore när du loggar in, med fönstret eller i systemfältet."
 
 #: src/ui/settings.rs:2486
 msgctxt "language"
@@ -2701,11 +2701,11 @@ msgstr "Byt till din egen Spotify-app"
 
 #: src/ui/dialogs.rs:134
 msgid ""
-"You're signed in through the shared app Siphon used before. Siphon no longer "
+"You're signed in through the shared app Encore used before. Encore no longer "
 "offers it, and Spotify can stop accepting it at any time. Set up your own "
 "free Spotify app so nothing stops your music. It takes a few minutes."
 msgstr ""
-"Du är inloggad via den delade appen som Siphon använde tidigare. Siphon "
+"Du är inloggad via den delade appen som Encore använde tidigare. Encore "
 "erbjuder den inte längre, och Spotify kan när som helst sluta godta den. "
 "Konfigurera din egen gratis Spotify-app så att inget stoppar din musik. Det "
 "tar några minuter."
@@ -2771,10 +2771,10 @@ msgstr "Det här kontot kan inte spela musik här"
 #: src/ui/dialogs.rs:304
 msgid ""
 "Playback needs Spotify Premium. Free accounts can browse and search, but "
-"cannot play music through Siphon."
+"cannot play music through Encore."
 msgstr ""
 "Uppspelning kräver Spotify Premium. Free-konton kan bläddra och söka men "
-"inte spela musik via Siphon."
+"inte spela musik via Encore."
 
 #: src/ui/dialogs.rs:313
 msgid "OK"
@@ -3143,8 +3143,8 @@ msgstr "Nya album och singlar från artister du följer visas här."
 #. Translators: {version} is the app's version number, such as 1.2.0.
 #: src/ui/login.rs:152
 #, rust-format
-msgid "Siphon {version} • not affiliated with Spotify"
-msgstr "Siphon {version} • inte associerad med Spotify"
+msgid "Encore {version} • not affiliated with Spotify"
+msgstr "Encore {version} • inte associerad med Spotify"
 
 #: src/ui/login.rs:165
 msgid ""
@@ -3172,10 +3172,10 @@ msgstr ""
 
 #: src/ui/login.rs:177
 msgid ""
-"Spotify no longer accepts the shared sign-in Siphon used before. Set up your "
+"Spotify no longer accepts the shared sign-in Encore used before. Set up your "
 "own Spotify app to keep listening."
 msgstr ""
-"Spotify godtar inte längre den delade inloggningen som Siphon använde "
+"Spotify godtar inte längre den delade inloggningen som Encore använde "
 "tidigare. Konfigurera din egen Spotify-app för att fortsätta lyssna."
 
 #: src/ui/login.rs:214
@@ -3205,10 +3205,10 @@ msgstr "Logga in med Spotify"
 
 #: src/ui/login.rs:305
 msgid ""
-"Sign in through your browser. Siphon never sees your password. Local "
+"Sign in through your browser. Encore never sees your password. Local "
 "playback needs Spotify Premium."
 msgstr ""
-"Logga in via webbläsaren. Siphon ser aldrig ditt lösenord. Lokal uppspelning "
+"Logga in via webbläsaren. Encore ser aldrig ditt lösenord. Lokal uppspelning "
 "kräver Spotify Premium."
 
 #: src/ui/login.rs:314
@@ -3231,10 +3231,10 @@ msgstr "Konfigurera din Spotify-app"
 
 #: src/ui/login.rs:444
 msgid ""
-"Siphon signs in through your own free Spotify app. Spotify requires its "
+"Encore signs in through your own free Spotify app. Spotify requires its "
 "owner to have Premium."
 msgstr ""
-"Siphon loggar in via din egen gratis Spotify-app. Spotify kräver att appens "
+"Encore loggar in via din egen gratis Spotify-app. Spotify kräver att appens "
 "ägare har Premium."
 
 #: src/ui/login.rs:454
@@ -3268,10 +3268,10 @@ msgstr "Spotify är långsamt med den delade appen."
 
 #: src/ui/mod.rs:383
 msgid ""
-"Siphon no longer offers the shared app, and Spotify can stop accepting it at "
+"Encore no longer offers the shared app, and Spotify can stop accepting it at "
 "any time. Set up your own free Spotify app and you won't have to wait."
 msgstr ""
-"Siphon erbjuder inte längre den delade appen, och Spotify kan när som helst "
+"Encore erbjuder inte längre den delade appen, och Spotify kan när som helst "
 "sluta godta den. Konfigurera din egen gratis Spotify-app så slipper du vänta."
 
 #. Translators: a button that opens a page explaining why
@@ -3282,11 +3282,11 @@ msgstr "Varför?"
 
 #: src/ui/mod.rs:416
 msgid ""
-"Spotify refused the key that unlocks the audio. Siphon can't fix that, but "
+"Spotify refused the key that unlocks the audio. Encore can't fix that, but "
 "it sometimes clears up on its own. You can still play on your phone or "
 "another Spotify device."
 msgstr ""
-"Spotify nekade nyckeln som låser upp ljudet. Siphon kan inte fixa det, men "
+"Spotify nekade nyckeln som låser upp ljudet. Encore kan inte fixa det, men "
 "ibland löser det sig av sig självt. Du kan fortfarande spela på mobilen "
 "eller en annan Spotify-enhet."
 
@@ -3561,9 +3561,9 @@ msgid "What do you want to play?"
 msgstr "Vad vill du spela?"
 
 #: src/ui/topbar.rs:545
-msgid "Siphon is offline. Reconnecting automatically when connection returns."
+msgid "Encore is offline. Reconnecting automatically when connection returns."
 msgstr ""
-"Siphon är offline. Ansluter automatiskt igen när anslutningen återställs."
+"Encore är offline. Ansluter automatiskt igen när anslutningen återställs."
 
 #: src/ui/topbar.rs:572
 msgid "MilkDrop visualiser (Ctrl+Shift+K)"
@@ -3600,8 +3600,8 @@ msgid "Version {version} is available."
 msgstr "Version {version} finns tillgänglig."
 
 #: src/ui/update.rs:19
-msgid "Update Siphon"
-msgstr "Uppdatera Siphon"
+msgid "Update Encore"
+msgstr "Uppdatera Encore"
 
 #: src/ui/update.rs:51
 msgid "Close update"
@@ -3622,8 +3622,8 @@ msgid "Ready to install"
 msgstr "Redo att installera"
 
 #: src/ui/update.rs:115
-msgid "Music playing on this computer will stop when Siphon restarts."
-msgstr "Musik som spelas på den här datorn stoppas när Siphon startar om."
+msgid "Music playing on this computer will stop when Encore restarts."
+msgstr "Musik som spelas på den här datorn stoppas när Encore startar om."
 
 #: src/ui/update.rs:122
 msgid "Restart to update"
@@ -3953,8 +3953,8 @@ msgstr ""
 "”Håll överst”."
 
 #: src/window.rs:31
-msgid "Siphon cannot open its window"
-msgstr "Siphon kan inte öppna sitt fönster"
+msgid "Encore cannot open its window"
+msgstr "Encore kan inte öppna sitt fönster"
 
 #: src/window.rs:34
 msgid "Open page"
@@ -3962,11 +3962,11 @@ msgstr "Öppna sidan"
 
 #: src/window.rs:51
 msgid ""
-"On Windows on ARM, the OpenGL that Siphon draws with comes from Microsoft's "
+"On Windows on ARM, the OpenGL that Encore draws with comes from Microsoft's "
 "OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft Store page to "
 "install or repair it?"
 msgstr ""
-"I Windows på ARM kommer OpenGL, som Siphon ritar med, från Microsofts "
+"I Windows på ARM kommer OpenGL, som Encore ritar med, från Microsofts "
 "OpenCL, OpenGL & Vulkan Compatibility Pack. Öppna dess sida i Microsoft "
 "Store för att installera eller reparera det?"
 
@@ -3975,11 +3975,11 @@ msgstr ""
 #: src/window.rs:58
 #, rust-format
 msgid ""
-"Siphon needs a graphics driver with OpenGL 2.0 or newer, and this PC or "
+"Encore needs a graphics driver with OpenGL 2.0 or newer, and this PC or "
 "virtual machine does not provide one. Install the graphics driver, or turn "
 "on GPU acceleration for the virtual machine. Open {url} to read more?"
 msgstr ""
-"Siphon behöver en grafikdrivrutin med OpenGL 2.0 eller senare, och den här "
+"Encore behöver en grafikdrivrutin med OpenGL 2.0 eller senare, och den här "
 "datorn eller virtuella maskinen har ingen. Installera grafikdrivrutinen "
 "eller slå på GPU-acceleration för den virtuella maskinen. Öppna {url} för "
 "att läsa mer?"

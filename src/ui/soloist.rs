@@ -55,7 +55,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             }
             ui.label(gettext(locale, "Create a Soloist key in Spotify's developer dashboard. This is separate from your Web API app's Client ID."));
             ui.add_space(8.0);
-            ui.label(egui::RichText::new(gettext(locale, "Soloist makes its own Spotify connections. Siphon's proxy settings do not route its audio traffic.")).small().color(palette.secondary));
+            ui.label(egui::RichText::new(gettext(locale, "Soloist makes its own Spotify connections. Encore's proxy settings do not route its audio traffic.")).small().color(palette.secondary));
             ui.add_space(8.0);
             ui.add(
                 egui::TextEdit::singleline(&mut app.soloist_key)
@@ -122,7 +122,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.label(egui::RichText::new(name).strong());
             ui.label(gettext(
                 locale,
-                "Siphon will notice when pairing finishes. Future starts reconnect automatically.",
+                "Encore will notice when pairing finishes. Future starts reconnect automatically.",
             ));
         }
         Status::Ready { .. } => {
@@ -131,7 +131,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 theme::subtle(ui, &palette, &gettext(locale, "Updates automatically."));
             } else {
                 ui.label(gettext(locale, "Confirming your Spotify account…"));
-                ui.label(gettext(locale, "If this takes a while, make sure Spotify is signed in to the same account as Siphon, then select this device there."));
+                ui.label(gettext(locale, "If this takes a while, make sure Spotify is signed in to the same account as Encore, then select this device there."));
                 if let Status::Ready { name, .. } = &app.soloist_status {
                     ui.label(name);
                 }
@@ -175,7 +175,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 ui.label(gettext(locale, "Version {version} · expires {date}")
                     .replace("{version}", version)
                     .replace("{date}", &date));
-                ui.label(gettext(locale, "Siphon checks daily for a replacement during the last 30 days of each build. Updates wait until Soloist is inactive."));
+                ui.label(gettext(locale, "Encore checks daily for a replacement during the last 30 days of each build. Updates wait until Soloist is inactive."));
                 ui.add_space(8.0);
             }
             ui.label(gettext(locale, "Soloist plays Spotify through your system audio output. Mixed playlists, SoundCloud and YouTube switch to the built-in player. Your Soloist key stays saved. EQ and full queue editing require the built-in player."));

@@ -904,7 +904,7 @@ pub fn populate(app: &mut App) {
     app.devices = vec![
         Device {
             id: Some("local-demo".into()),
-            name: "Siphon".into(),
+            name: "Encore".into(),
             is_active: false,
             is_restricted: false,
             volume_percent: Some(70),
@@ -8456,7 +8456,7 @@ mod tests {
                             "{:?} is cut off at {size:?} in {state:?}",
                             text.galley.job.text
                         );
-                        if text.galley.job.text == "Siphon" {
+                        if text.galley.job.text == "Encore" {
                             title = Some(rect);
                         }
                     }
@@ -9272,7 +9272,7 @@ mod tests {
         accessible_node(&tree, "This computer", Role::Button);
         accessible_node(&tree, "Siphon Soloist (12345678)", Role::Button);
         assert!(!tree.nodes.iter().any(|(_, n)| n.label().is_some_and(|s| {
-            s.starts_with("Playing on") || s == "Siphon (this computer)" || s == "Audio output"
+            s.starts_with("Playing on") || s == "Encore (this computer)" || s == "Audio output"
         })));
         assert!(app.targets_own_soloist());
         assert!(
@@ -9293,7 +9293,7 @@ mod tests {
         app.apply(Action::SetSoloist(false), &ctx);
         accessible_frame(&ctx, &mut app, vec![]);
         let tree = accessible_frame(&ctx, &mut app, vec![]);
-        accessible_node(&tree, "Siphon (this computer)", Role::Button);
+        accessible_node(&tree, "Encore (this computer)", Role::Button);
         accessible_node(&tree, "Audio output", Role::Button);
         app.backend.shutdown();
     }

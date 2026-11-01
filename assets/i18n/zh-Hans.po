@@ -3,12 +3,12 @@
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: Siphon\n"
+"Project-Id-Version: Encore\n"
 "Report-Msgid-Bugs-To: https://github.com/crmne/spotifast/issues/new?"
 "template=translation.yml\n"
 "POT-Creation-Date: 2026-10-29 21:31+0100\n"
 "PO-Revision-Date: 2026-09-09 13:30+0000\n"
-"Last-Translator: Siphon contributors\n"
+"Last-Translator: Encore contributors\n"
 "Language-Team: Simplified Chinese\n"
 "Language: zh_CN\n"
 "MIME-Version: 1.0\n"
@@ -359,8 +359,8 @@ msgid "Mute"
 msgstr "静音"
 
 #: src/ui/player_bar.rs:1028
-msgid "This device's volume can't be changed from Siphon"
-msgstr "无法从 Siphon 更改此设备的音量"
+msgid "This device's volume can't be changed from Encore"
+msgstr "无法从 Encore 更改此设备的音量"
 
 #: src/ui/player_bar.rs:1048 src/ui/devices.rs:404
 msgid "Connect to a device"
@@ -478,8 +478,8 @@ msgstr "当前处于离线状态"
 #: src/ui/collection.rs:2191 src/ui/collection.rs:2438 src/ui/home.rs:34
 #: src/ui/library.rs:262 src/ui/show.rs:69 src/ui/show.rs:115
 #: src/ui/show.rs:145
-msgid "Siphon will reconnect automatically when your connection returns."
-msgstr "连接恢复后，Siphon 将自动重新连接。"
+msgid "Encore will reconnect automatically when your connection returns."
+msgstr "连接恢复后，Encore 将自动重新连接。"
 
 #. Translators: Keep {error} unchanged. It is the original failure detail.
 #: src/ui/lyrics.rs:182 src/ui/lyrics.rs:463 src/ui/lyrics.rs:699
@@ -833,8 +833,8 @@ msgid "Restoring proxy settings"
 msgstr "正在恢复代理设置"
 
 #: src/app.rs:1570
-msgid "Couldn't change how Siphon starts with your computer."
-msgstr "无法更改 Siphon 随电脑启动的方式。"
+msgid "Couldn't change how Encore starts with your computer."
+msgstr "无法更改 Encore 随电脑启动的方式。"
 
 #. Translators: {name} is the name of a speaker or other playback device.
 #: src/app.rs:2839
@@ -859,12 +859,12 @@ msgstr "{error}原始设置文件保持不变，更改的偏好设置尚未保�
 #. Translators: {version} is a version number such as 1.4.0.
 #: src/app.rs:3038
 #, rust-format
-msgid "Siphon {version} is available"
-msgstr "Siphon {version} 已推出"
+msgid "Encore {version} is available"
+msgstr "Encore {version} 已推出"
 
 #: src/app.rs:3055
-msgid "Siphon is up to date"
-msgstr "Siphon 已是最新版本"
+msgid "Encore is up to date"
+msgstr "Encore 已是最新版本"
 
 #. Translators: {error} is an error message.
 #: src/app.rs:3063
@@ -1092,8 +1092,8 @@ msgid "This song's album is not on Spotify"
 msgstr "这首歌曲所属的专辑不在 Spotify 上"
 
 #: src/app.rs:9229
-msgid "Siphon cannot open this kind of Spotify link"
-msgstr "Siphon 无法打开这类 Spotify 链接"
+msgid "Encore cannot open this kind of Spotify link"
+msgstr "Encore 无法打开这类 Spotify 链接"
 
 #: src/app.rs:9481
 msgid "Nothing is playing. Pick something first"
@@ -1374,16 +1374,16 @@ msgstr "个人 Spotify 应用"
 
 #: src/ui/settings.rs:423
 msgid ""
-"You're still signed in through the shared app Siphon used before, which "
+"You're still signed in through the shared app Encore used before, which "
 "Spotify can stop accepting at any time. Set up your own app to keep "
 "listening."
 msgstr ""
-"你仍在通过 Siphon 以前使用的共享应用登录，Spotify 随时可能停止接受它。请设置"
+"你仍在通过 Encore 以前使用的共享应用登录，Spotify 随时可能停止接受它。请设置"
 "你自己的应用以继续收听。"
 
 #: src/ui/settings.rs:426
-msgid "Siphon signs in through your own free Spotify app."
-msgstr "Siphon 通过你自己的免费 Spotify 应用登录。"
+msgid "Encore signs in through your own free Spotify app."
+msgstr "Encore 通过你自己的免费 Spotify 应用登录。"
 
 #: src/ui/settings.rs:430
 msgid "Create an app"
@@ -1402,8 +1402,8 @@ msgid "Supported requests use your app. Other requests use the shared app."
 msgstr "支持的请求使用你的应用，其他请求使用共享应用。"
 
 #: src/ui/settings.rs:445
-msgid "Siphon uses your app for Spotify's Web API."
-msgstr "Siphon 使用你的应用访问 Spotify 的 Web API。"
+msgid "Encore uses your app for Spotify's Web API."
+msgstr "Encore 使用你的应用访问 Spotify 的 Web API。"
 
 #: src/ui/settings.rs:450
 msgid "Authorize your personal app"
@@ -1573,13 +1573,13 @@ msgstr "歌曲之间不插入静音。"
 
 #: src/ui/settings.rs:671
 msgid ""
-"Siphon hides to the system tray. Quit from the tray menu or with Ctrl+Q."
-msgstr "Siphon 会隐藏到系统托盘。可通过托盘菜单或 Ctrl+Q 退出。"
+"Encore hides to the system tray. Quit from the tray menu or with Ctrl+Q."
+msgstr "Encore 会隐藏到系统托盘。可通过托盘菜单或 Ctrl+Q 退出。"
 
 #: src/ui/settings.rs:676
 msgid ""
-"Siphon hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q."
-msgstr "Siphon 会隐藏到菜单栏。可通过菜单栏图标或 Cmd+Q 退出。"
+"Encore hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q."
+msgstr "Encore 会隐藏到菜单栏。可通过菜单栏图标或 Cmd+Q 退出。"
 
 #: src/ui/settings.rs:683
 msgid "Checks GitHub once a day. No personal data is sent."
@@ -1621,10 +1621,10 @@ msgstr "本地文件"
 
 #: src/ui/settings.rs:719
 msgid ""
-"When off, Siphon lives in the menu bar and leaves Cmd+Tab. Open it from its "
+"When off, Encore lives in the menu bar and leaves Cmd+Tab. Open it from its "
 "menu-bar icon."
 msgstr ""
-"关闭后，Siphon 只留在菜单栏，也不会出现在 Cmd+Tab 中。请从菜单栏图标打开它。"
+"关闭后，Encore 只留在菜单栏，也不会出现在 Cmd+Tab 中。请从菜单栏图标打开它。"
 
 #: src/ui/settings.rs:725
 msgid "Tray icon"
@@ -1789,8 +1789,8 @@ msgstr ""
 
 #: src/ui/settings.rs:1200
 msgid ""
-"Draw Siphon's own title bar and window buttons instead of the desktop's."
-msgstr "使用 Siphon 自己的标题栏和窗口按钮，而不是桌面环境提供的。"
+"Draw Encore's own title bar and window buttons instead of the desktop's."
+msgstr "使用 Encore 自己的标题栏和窗口按钮，而不是桌面环境提供的。"
 
 #: src/ui/settings.rs:1208
 msgid ""
@@ -1978,34 +1978,34 @@ msgstr "预设"
 #: src/ui/settings.rs:1873
 #, rust-format
 msgid ""
-"None yet in {folder}. Add .milk files here. Siphon downloads presets when "
+"None yet in {folder}. Add .milk files here. Encore downloads presets when "
 "MilkDrop first opens with an empty folder."
 msgstr ""
 "{folder} 中还没有预设。请将 .milk 文件添加到此处。首次打开 MilkDrop 时如果文"
-"件夹为空，Siphon 会下载预设。"
+"件夹为空，Encore 会下载预设。"
 
 #. Translators: {folder} is the path of the MilkDrop presets folder.
 #: src/ui/settings.rs:1879
 #, rust-format
 msgid ""
-"One preset in {folder}. Add .milk files here. Siphon downloads presets when "
+"One preset in {folder}. Add .milk files here. Encore downloads presets when "
 "MilkDrop first opens with an empty folder."
 msgstr ""
 "{folder} 中有 1 个预设。请将 .milk 文件添加到此处。首次打开 MilkDrop 时如果文"
-"件夹为空，Siphon 会下载预设。"
+"件夹为空，Encore 会下载预设。"
 
 #. Translators: {count} is the number of presets, {folder} the path of the MilkDrop presets folder.
 #: src/ui/settings.rs:1885
 #, rust-format
 msgid ""
-"{count} preset in {folder}. Add .milk files here. Siphon downloads presets "
+"{count} preset in {folder}. Add .milk files here. Encore downloads presets "
 "when MilkDrop first opens with an empty folder."
 msgid_plural ""
-"{count} presets in {folder}. Add .milk files here. Siphon downloads presets "
+"{count} presets in {folder}. Add .milk files here. Encore downloads presets "
 "when MilkDrop first opens with an empty folder."
 msgstr[0] ""
 "{folder} 中有 {count} 个预设。请将 .milk 文件添加到此处。首次打开 MilkDrop 时"
-"如果文件夹为空，Siphon 会下载预设。"
+"如果文件夹为空，Encore 会下载预设。"
 
 #: src/ui/settings.rs:1894
 msgid "Time per preset"
@@ -2190,8 +2190,8 @@ msgid "In the tray"
 msgstr "在托盘中"
 
 #: src/ui/settings.rs:2358
-msgid "Allow Siphon in System Settings, General, Login Items."
-msgstr "请在“系统设置”>“通用”>“登录项”中允许 Siphon。"
+msgid "Allow Encore in System Settings, General, Login Items."
+msgstr "请在“系统设置”>“通用”>“登录项”中允许 Encore。"
 
 #: src/ui/settings.rs:2364
 msgid ""
@@ -2207,12 +2207,12 @@ msgid ""
 msgstr "要在托盘中启动，需要开启“关闭窗口后继续播放音乐”。在此之前会打开窗口。"
 
 #: src/ui/settings.rs:2375
-msgid "Open Siphon when you log in, with its window or in the menu bar."
-msgstr "登录时打开 Siphon，显示窗口或留在菜单栏中。"
+msgid "Open Encore when you log in, with its window or in the menu bar."
+msgstr "登录时打开 Encore，显示窗口或留在菜单栏中。"
 
 #: src/ui/settings.rs:2380
-msgid "Open Siphon when you log in, with its window or in the tray."
-msgstr "登录时打开 Siphon，显示窗口或留在托盘中。"
+msgid "Open Encore when you log in, with its window or in the tray."
+msgstr "登录时打开 Encore，显示窗口或留在托盘中。"
 
 #: src/ui/settings.rs:2486
 msgctxt "language"
@@ -2622,11 +2622,11 @@ msgstr "改用你自己的 Spotify 应用"
 
 #: src/ui/dialogs.rs:134
 msgid ""
-"You're signed in through the shared app Siphon used before. Siphon no longer "
+"You're signed in through the shared app Encore used before. Encore no longer "
 "offers it, and Spotify can stop accepting it at any time. Set up your own "
 "free Spotify app so nothing stops your music. It takes a few minutes."
 msgstr ""
-"你正在通过 Siphon 以前使用的共享应用登录。Siphon 已不再提供它，Spotify 也随时"
+"你正在通过 Encore 以前使用的共享应用登录。Encore 已不再提供它，Spotify 也随时"
 "可能停止接受它。请设置你自己的免费 Spotify 应用，让音乐不会中断。只需几分钟。"
 
 #: src/ui/dialogs.rs:138 src/ui/mod.rs:387
@@ -2690,9 +2690,9 @@ msgstr "此账户无法在此播放音乐"
 #: src/ui/dialogs.rs:304
 msgid ""
 "Playback needs Spotify Premium. Free accounts can browse and search, but "
-"cannot play music through Siphon."
+"cannot play music through Encore."
 msgstr ""
-"播放需要 Spotify Premium。免费账户可以浏览和搜索，但无法通过 Siphon 播放音"
+"播放需要 Spotify Premium。免费账户可以浏览和搜索，但无法通过 Encore 播放音"
 "乐。"
 
 #: src/ui/dialogs.rs:313
@@ -3056,8 +3056,8 @@ msgstr "你关注的艺人的新专辑和单曲会显示在这里。"
 #. Translators: {version} is the app's version number, such as 1.2.0.
 #: src/ui/login.rs:152
 #, rust-format
-msgid "Siphon {version} • not affiliated with Spotify"
-msgstr "Siphon {version} • 与 Spotify 无关"
+msgid "Encore {version} • not affiliated with Spotify"
+msgstr "Encore {version} • 与 Spotify 无关"
 
 #: src/ui/login.rs:165
 msgid ""
@@ -3083,10 +3083,10 @@ msgstr ""
 
 #: src/ui/login.rs:177
 msgid ""
-"Spotify no longer accepts the shared sign-in Siphon used before. Set up your "
+"Spotify no longer accepts the shared sign-in Encore used before. Set up your "
 "own Spotify app to keep listening."
 msgstr ""
-"Spotify 已不再接受 Siphon 以前使用的共享登录。请设置你自己的 Spotify 应用以继"
+"Spotify 已不再接受 Encore 以前使用的共享登录。请设置你自己的 Spotify 应用以继"
 "续收听。"
 
 #: src/ui/login.rs:214
@@ -3116,10 +3116,10 @@ msgstr "使用 Spotify 登录"
 
 #: src/ui/login.rs:305
 msgid ""
-"Sign in through your browser. Siphon never sees your password. Local "
+"Sign in through your browser. Encore never sees your password. Local "
 "playback needs Spotify Premium."
 msgstr ""
-"通过浏览器登录。Siphon 永远不会看到你的密码。本地播放需要 Spotify Premium。"
+"通过浏览器登录。Encore 永远不会看到你的密码。本地播放需要 Spotify Premium。"
 
 #: src/ui/login.rs:314
 msgid "How to set up your Spotify app"
@@ -3139,10 +3139,10 @@ msgstr "设置你的 Spotify 应用"
 
 #: src/ui/login.rs:444
 msgid ""
-"Siphon signs in through your own free Spotify app. Spotify requires its "
+"Encore signs in through your own free Spotify app. Spotify requires its "
 "owner to have Premium."
 msgstr ""
-"Siphon 通过你自己的免费 Spotify 应用登录。Spotify 要求应用所有者拥有 "
+"Encore 通过你自己的免费 Spotify 应用登录。Spotify 要求应用所有者拥有 "
 "Premium。"
 
 #: src/ui/login.rs:454
@@ -3176,10 +3176,10 @@ msgstr "Spotify 在共享应用上响应很慢。"
 
 #: src/ui/mod.rs:383
 msgid ""
-"Siphon no longer offers the shared app, and Spotify can stop accepting it at "
+"Encore no longer offers the shared app, and Spotify can stop accepting it at "
 "any time. Set up your own free Spotify app and you won't have to wait."
 msgstr ""
-"Siphon 已不再提供共享应用，Spotify 也随时可能停止接受它。设置你自己的免费 "
+"Encore 已不再提供共享应用，Spotify 也随时可能停止接受它。设置你自己的免费 "
 "Spotify 应用，就不用再等待了。"
 
 #. Translators: a button that opens a page explaining why
@@ -3190,11 +3190,11 @@ msgstr "为什么？"
 
 #: src/ui/mod.rs:416
 msgid ""
-"Spotify refused the key that unlocks the audio. Siphon can't fix that, but "
+"Spotify refused the key that unlocks the audio. Encore can't fix that, but "
 "it sometimes clears up on its own. You can still play on your phone or "
 "another Spotify device."
 msgstr ""
-"Spotify 拒绝提供解锁音频的密钥。Siphon 没法解决，但有时过一会儿会自己恢复。你"
+"Spotify 拒绝提供解锁音频的密钥。Encore 没法解决，但有时过一会儿会自己恢复。你"
 "仍然可以在手机或其他 Spotify 设备上播放。"
 
 #: src/ui/mod.rs:420
@@ -3464,8 +3464,8 @@ msgid "What do you want to play?"
 msgstr "想听什么？"
 
 #: src/ui/topbar.rs:545
-msgid "Siphon is offline. Reconnecting automatically when connection returns."
-msgstr "Siphon 处于离线状态。连接恢复后将自动重新连接。"
+msgid "Encore is offline. Reconnecting automatically when connection returns."
+msgstr "Encore 处于离线状态。连接恢复后将自动重新连接。"
 
 #: src/ui/topbar.rs:572
 msgid "MilkDrop visualiser (Ctrl+Shift+K)"
@@ -3502,8 +3502,8 @@ msgid "Version {version} is available."
 msgstr "版本 {version} 已推出。"
 
 #: src/ui/update.rs:19
-msgid "Update Siphon"
-msgstr "更新 Siphon"
+msgid "Update Encore"
+msgstr "更新 Encore"
 
 #: src/ui/update.rs:51
 msgid "Close update"
@@ -3524,8 +3524,8 @@ msgid "Ready to install"
 msgstr "可以安装"
 
 #: src/ui/update.rs:115
-msgid "Music playing on this computer will stop when Siphon restarts."
-msgstr "Siphon 重启时，这台电脑上正在播放的音乐将停止。"
+msgid "Music playing on this computer will stop when Encore restarts."
+msgstr "Encore 重启时，这台电脑上正在播放的音乐将停止。"
 
 #: src/ui/update.rs:122
 msgid "Restart to update"
@@ -3848,8 +3848,8 @@ msgid "On Wayland, use your desktop's Keep Above shortcut or window rule."
 msgstr "在 Wayland 上，请使用桌面环境的“保持在最上层”快捷键或窗口规则。"
 
 #: src/window.rs:31
-msgid "Siphon cannot open its window"
-msgstr "Siphon 无法打开窗口"
+msgid "Encore cannot open its window"
+msgstr "Encore 无法打开窗口"
 
 #: src/window.rs:34
 msgid "Open page"
@@ -3857,11 +3857,11 @@ msgstr "打开页面"
 
 #: src/window.rs:51
 msgid ""
-"On Windows on ARM, the OpenGL that Siphon draws with comes from Microsoft's "
+"On Windows on ARM, the OpenGL that Encore draws with comes from Microsoft's "
 "OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft Store page to "
 "install or repair it?"
 msgstr ""
-"在 ARM 版 Windows 上，Siphon 用于绘制界面的 OpenGL 由 Microsoft 的 OpenCL, "
+"在 ARM 版 Windows 上，Encore 用于绘制界面的 OpenGL 由 Microsoft 的 OpenCL, "
 "OpenGL & Vulkan Compatibility Pack 提供。要打开其 Microsoft Store 页面以安装"
 "或修复吗？"
 
@@ -3870,11 +3870,11 @@ msgstr ""
 #: src/window.rs:58
 #, rust-format
 msgid ""
-"Siphon needs a graphics driver with OpenGL 2.0 or newer, and this PC or "
+"Encore needs a graphics driver with OpenGL 2.0 or newer, and this PC or "
 "virtual machine does not provide one. Install the graphics driver, or turn "
 "on GPU acceleration for the virtual machine. Open {url} to read more?"
 msgstr ""
-"Siphon 需要支持 OpenGL 2.0 或更高版本的显卡驱动程序，而这台电脑或虚拟机没有提"
+"Encore 需要支持 OpenGL 2.0 或更高版本的显卡驱动程序，而这台电脑或虚拟机没有提"
 "供。请安装显卡驱动程序，或为虚拟机开启 GPU 加速。要打开 {url} 了解更多吗？"
 
 #: src/soundcloud/connect.rs:23

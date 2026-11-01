@@ -166,7 +166,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                     &gettext(app.locale, "You're offline"),
                     &gettext(
                         app.locale,
-                        "Siphon will reconnect automatically when your connection returns.",
+                        "Encore will reconnect automatically when your connection returns.",
                     ),
                 );
             } else {
@@ -183,7 +183,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                     &gettext(app.locale, "You're offline"),
                     &gettext(
                         app.locale,
-                        "Siphon will reconnect automatically when your connection returns.",
+                        "Encore will reconnect automatically when your connection returns.",
                     ),
                 );
                 return;

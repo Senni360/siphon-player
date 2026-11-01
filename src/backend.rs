@@ -809,7 +809,7 @@ pub enum AutostartRequest {
 /// Siphon's registration to start at login. The hidden start passes
 /// `--start-hidden`, which the command line takes.
 pub fn autostart() -> fastframe_autostart::Autostart {
-    fastframe_autostart::Autostart::new(crate::brand::SLUG, crate::brand::NAME)
+    fastframe_autostart::Autostart::new(crate::brand::SLUG, crate::brand::STABLE_NAME)
 }
 
 mod download_jobs;

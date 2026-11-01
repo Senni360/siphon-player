@@ -818,7 +818,7 @@ fn composer(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>)
                         ui,
                         gettext(
                             locale,
-                            "That isn't a song, album, playlist or set link Siphon can share",
+                            "That isn't a song, album, playlist or set link Encore can share",
                         ),
                         theme::regular(12.5),
                         palette.dim,

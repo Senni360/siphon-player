@@ -57,7 +57,10 @@ fn current_exists() -> io::Result<bool> {
         .encode_utf16()
         .chain(Some(0))
         .collect();
-    let value: Vec<u16> = crate::brand::NAME.encode_utf16().chain(Some(0)).collect();
+    let value: Vec<u16> = crate::brand::STABLE_NAME
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
     let mut size = 0;
     // SAFETY: terminated UTF-16 names and a valid length pointer; a null
     // data buffer asks only whether the current registration is present.

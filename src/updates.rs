@@ -15,7 +15,7 @@ use fastframe_update::{MacConfig, Prereleases, ReqwestTransport, UpdateConfig};
 pub const CONFIG: UpdateConfig = UpdateConfig {
     macos: MacConfig {
         bundle_ids: &["com.siphon.player"],
-        executable_names: &["Siphon"],
+        executable_names: &["Encore"],
         legacy_bundle_names: &[],
     },
     // Siphon's own release key, which signs every release's checksums.txt.
@@ -30,7 +30,7 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     appimage: true,
     ..UpdateConfig::new(
         "Senni360/siphon-player",
-        "Siphon",
+        "Encore",
         "siphon",
         env!("CARGO_PKG_VERSION"),
     )

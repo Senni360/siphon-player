@@ -60,7 +60,7 @@ pub fn connect(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
             ui,
             gettext(
                 locale,
-                "Your groups follow your Spotify account: sign in on another computer and you're in the same groups, with the same songs. Siphon shows your Spotify account to the group service once to prove it's you, and the service doesn't keep anything it could use to reach your account.",
+                "Your groups follow your Spotify account: sign in on another computer and you're in the same groups, with the same songs. Encore shows your Spotify account to the group service once to prove it's you, and the service doesn't keep anything it could use to reach your account.",
             ),
             &palette,
         );

@@ -149,8 +149,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, connecting: bool) {
                 pos2(rect.center().x, rect.bottom() - 24.0),
                 egui::Align2::CENTER_BOTTOM,
                 // Translators: {version} is the app's version number, such as 1.2.0.
-                gettext(app.locale, "Siphon {version} • not affiliated with Spotify")
-                    .replace("{version}", env!("CARGO_PKG_VERSION")),
+                gettext(
+                    app.locale,
+                    "Siphon: Encore {version} • not affiliated with Spotify",
+                )
+                .replace("{version}", env!("CARGO_PKG_VERSION")),
                 theme::regular(11.5),
                 palette.dim,
             );
@@ -174,7 +177,7 @@ fn problem_text(locale: crate::i18n::Locale, problem: SignInProblem) -> String {
         ),
         SignInProblem::SharedRetired => gettext(
             locale,
-            "Spotify no longer accepts the shared sign-in Siphon used before. Set up your own Spotify app to keep listening.",
+            "Spotify no longer accepts the shared sign-in Encore used before. Set up your own Spotify app to keep listening.",
         ),
         SignInProblem::Expired => {
             gettext(locale, "Your Spotify sign-in expired. Please sign in again.")
@@ -199,12 +202,13 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
     // Beside the steps the card has more to hold in the same height, so
     // the heading is smaller.
     let logo_size = if steps { 56.0 } else { 72.0 };
-    let (logo, _) = ui.allocate_exact_size(Vec2::splat(logo_size), egui::Sense::hover());
+    // The raster runs a little past the mark, and the mark reaches its own
+    // edges, so the logo's own square holds the gap above the title too.
+    let (logo, _) = ui.allocate_exact_size(Vec2::splat(logo_size + 6.0), egui::Sense::hover());
     theme::logo(ui, logo.center(), logo_size);
-    ui.add_space(6.0);
     theme::text(
         ui,
-        "Siphon",
+        "Encore",
         theme::bold(if steps { 26.0 } else { 30.0 }),
         palette.text,
     );
@@ -302,7 +306,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 ui,
                 gettext(
                     locale,
-                    "Sign in through your browser. Siphon never sees your password. Local playback needs Spotify Premium.",
+                    "Sign in through your browser. Encore never sees your password. Local playback needs Spotify Premium.",
                 ),
                 theme::regular(12.5),
                 palette.secondary,
@@ -441,7 +445,7 @@ fn setup_steps(app: &mut App, ui: &mut egui::Ui, width: f32) {
         ui,
         gettext(
             locale,
-            "Siphon signs in through your own free Spotify app. Spotify requires its owner to have Premium.",
+            "Encore signs in through your own free Spotify app. Spotify requires its owner to have Premium.",
         ),
         theme::regular(13.0),
         palette.secondary,

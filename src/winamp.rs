@@ -413,7 +413,7 @@ mod tests {
     fn a_short_title_sits_still_and_a_long_one_scrolls() {
         let mut state = WinampState::new(None, AudioTap::new(), crate::eq::shared());
         let start = Instant::now();
-        assert_eq!(state.marquee("Siphon", start).0, "Siphon");
+        assert_eq!(state.marquee("Encore", start).0, "Encore");
         assert!(!state.marquee_scrolling());
 
         let long = "Radiohead - Everything In Its Right Place (4:11)";

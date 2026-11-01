@@ -184,7 +184,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::PersonalAppIntro => {
                     theme::text(ui, gettext(locale, "Move to your own Spotify app"), theme::bold(20.0), palette.text);
                     ui.add_space(12.0);
-                    ui.add(egui::Label::new(egui::RichText::new(gettext(locale, "You're signed in through the shared app Siphon used before. Siphon no longer offers it, and Spotify can stop accepting it at any time. Set up your own free Spotify app so nothing stops your music. It takes a few minutes.")).font(theme::regular(14.0)).color(palette.secondary)).wrap());
+                    ui.add(egui::Label::new(egui::RichText::new(gettext(locale, "You're signed in through the shared app Encore used before. Encore no longer offers it, and Spotify can stop accepting it at any time. Set up your own free Spotify app so nothing stops your music. It takes a few minutes.")).font(theme::regular(14.0)).color(palette.secondary)).wrap());
                     ui.add_space(10.0);
                     ui.add_space(8.0);
                     buttons(ui, |ui| {
@@ -354,7 +354,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                         egui::Label::new(
                             egui::RichText::new(gettext(
                                 locale,
-                                "Playback needs Spotify Premium. Free accounts can browse and search, but cannot play music through Siphon.",
+                                "Playback needs Spotify Premium. Free accounts can browse and search, but cannot play music through Encore.",
                             ))
                             .font(theme::regular(14.0))
                             .color(palette.secondary),

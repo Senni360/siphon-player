@@ -28,7 +28,7 @@ pub fn no_window_dialog(
     use crate::i18n::gettext;
     let english = fastframe_graphics::Dialog::english(trouble);
     fastframe_graphics::Dialog {
-        title: gettext(locale, "Siphon cannot open its window").into_owned(),
+        title: gettext(locale, "Encore cannot open its window").into_owned(),
         body: no_window_body(locale, trouble.cause, trouble.help_url)
             .unwrap_or_else(|| english.body.clone()),
         open_label: gettext(locale, "Open page").into_owned(),
@@ -48,14 +48,14 @@ fn no_window_body(
     Some(match cause {
         fastframe_graphics::Cause::WindowsOnArm => gettext(
             locale,
-            "On Windows on ARM, the OpenGL that Siphon draws with comes from Microsoft's OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft Store page to install or repair it?",
+            "On Windows on ARM, the OpenGL that Encore draws with comes from Microsoft's OpenCL, OpenGL & Vulkan Compatibility Pack. Open its Microsoft Store page to install or repair it?",
         )
         .into_owned(),
         fastframe_graphics::Cause::NoGraphicsDriver => gettext(
             locale,
             // Translators: Keep {url} exactly as written. It becomes the address
             // of the Siphon download page.
-            "Siphon needs a graphics driver with OpenGL 2.0 or newer, and this PC or virtual machine does not provide one. Install the graphics driver, or turn on GPU acceleration for the virtual machine. Open {url} to read more?",
+            "Encore needs a graphics driver with OpenGL 2.0 or newer, and this PC or virtual machine does not provide one. Install the graphics driver, or turn on GPU acceleration for the virtual machine. Open {url} to read more?",
         )
         .replace("{url}", help_url.unwrap_or(DOWNLOAD_PAGE)),
         _ => return None,
@@ -218,7 +218,7 @@ mod tests {
         let details = "egui_glow requires opengl 2.0+";
         let arm = no_window_dialog(
             english,
-            &Trouble::new("Siphon", Cause::WindowsOnArm, details, Some(DOWNLOAD_PAGE)),
+            &Trouble::new("Encore", Cause::WindowsOnArm, details, Some(DOWNLOAD_PAGE)),
         );
         assert!(arm.body.contains("Compatibility Pack"));
         assert!(
@@ -230,13 +230,13 @@ mod tests {
         let x64 = no_window_dialog(
             english,
             &Trouble::new(
-                "Siphon",
+                "Encore",
                 Cause::NoGraphicsDriver,
                 details,
                 Some(DOWNLOAD_PAGE),
             ),
         );
-        assert_eq!(x64.title, "Siphon cannot open its window");
+        assert_eq!(x64.title, "Encore cannot open its window");
         assert_eq!(x64.link.as_deref(), Some(DOWNLOAD_PAGE));
         assert!(x64.body.contains("OpenGL 2.0"));
         assert!(x64.body.contains("virtual machine"));

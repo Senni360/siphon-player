@@ -280,7 +280,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
                     &gettext(app.locale, "You're offline"),
                     &gettext(
                         app.locale,
-                        "Siphon will reconnect automatically when your connection returns.",
+                        "Encore will reconnect automatically when your connection returns.",
                     ),
                 );
             } else {
@@ -308,7 +308,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
                     &gettext(app.locale, "You're offline"),
                     &gettext(
                         app.locale,
-                        "Siphon will reconnect automatically when your connection returns.",
+                        "Encore will reconnect automatically when your connection returns.",
                     ),
                 );
             } else {

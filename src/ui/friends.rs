@@ -109,10 +109,10 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
     let label = if unread > 0 {
         format!(
             "{} · {unread} new",
-            gettext(app.locale, "Open the Siphon group")
+            gettext(app.locale, "Open the Encore group")
         )
     } else {
-        gettext(app.locale, "Open the Siphon group").into_owned()
+        gettext(app.locale, "Open the Encore group").into_owned()
     };
     if theme::soft_button(ui, &palette, Some(Icon::Users), &label, false).clicked() {
         app.actions.push(Action::Open(Page::Group));

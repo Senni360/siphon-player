@@ -287,7 +287,7 @@ fn run_control(control: Control) -> i32 {
             }
         }
         Err(error) => {
-            eprintln!("Siphon is not running or does not support remote control: {error}");
+            eprintln!("Encore is not running or does not support remote control: {error}");
             return 1;
         }
     };
@@ -474,7 +474,7 @@ pub(crate) fn run() -> eframe::Result<()> {
             // Release builds on Windows have no stderr console. Make a safe
             // retry actionable even when no application window was opened.
             rfd::MessageDialog::new()
-                .set_title("Siphon")
+                .set_title("Encore")
                 .set_description(&message)
                 .set_level(rfd::MessageLevel::Error)
                 .show();
@@ -771,7 +771,7 @@ pub(crate) fn run() -> eframe::Result<()> {
                 screen_asked: None,
             }))
         }));
-        fastframe_graphics::Graphics::new("Siphon")
+        fastframe_graphics::Graphics::new("Encore")
             .help(spotifast::window::DOWNLOAD_PAGE)
             .dialog(move |trouble| spotifast::window::no_window_dialog(locale, trouble))
             .run_native(

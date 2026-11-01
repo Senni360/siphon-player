@@ -229,12 +229,12 @@ pub fn item_link(item: &crate::api::models::PlayableItem) -> Option<String> {
     }
 }
 
-/// The nested-U template mark. The OS supplies its black or white colour.
+/// The nested-C template mark. The OS supplies its black or white colour.
 pub fn tray_template_rgba(size: usize) -> Vec<u8> {
     raster_mark(include_bytes!("../packaging/icons/siphon-mono.svg"), size)
 }
 
-/// The same Siphon artwork identifies the window, tray and in-app logo.
+/// The same artwork identifies the window, tray and in-app logo.
 pub fn app_icon_rgba(size: usize) -> Vec<u8> {
     raster_mark(include_bytes!("../packaging/icons/spotifast.svg"), size)
 }
@@ -252,7 +252,7 @@ fn raster_mark(svg: &[u8], size: usize) -> Vec<u8> {
         },
         &Default::default(),
     )
-    .expect("the bundled Siphon icon is valid SVG");
+    .expect("the bundled Encore icon is valid SVG");
     image
         .pixels
         .iter()
@@ -351,22 +351,24 @@ mod tests {
         ]
     }
 
-    /// The icon wears the polished disc at every size, and the tray
-    /// template keeps its punched-out triangle.
+    /// The icon's tile fills its square at every size, and the tray template
+    /// is the mark alone.
     #[test]
-    fn the_icon_and_template_carry_siphons_nested_u_mark() {
+    fn the_icon_and_template_carry_the_nested_c_mark() {
         for size in [32, 128] {
             let icon = app_icon_rgba(size);
             assert_eq!(icon.len(), size * size * 4);
             assert_eq!(pixel(&icon, size, 0, 0)[3], 0);
-            let ground = pixel(&icon, size, size / 2, size / 2);
+            // Open to the right: past the ends of the strokes there is only tile.
+            let ground = pixel(&icon, size, size * 57 / 64, size / 2);
             assert!(ground[0] < 70 && ground[1] < 70 && ground[3] == 255);
-            // The outer U's vertical stroke, white against the neutral tile.
-            let stroke = pixel(&icon, size, size * 17 / 64, size * 24 / 64);
+            // The outer C's curve, white against the neutral tile.
+            let stroke = pixel(&icon, size, size * 17 / 64, size / 2);
             assert!(stroke[0] > 200 && stroke[1] > 200);
             let template = tray_template_rgba(size);
-            assert_eq!(pixel(&template, size, size / 2, size / 2)[3], 0);
-            assert!(pixel(&template, size, size / 4, size / 3)[3] > 200);
+            // Between the two curves there is nothing; on the outer one there is.
+            assert_eq!(pixel(&template, size, size * 24 / 100, size / 2)[3], 0);
+            assert!(pixel(&template, size, size * 15 / 100, size / 2)[3] > 200);
         }
     }
 

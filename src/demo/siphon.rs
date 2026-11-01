@@ -366,7 +366,7 @@ pub fn apply(app: &mut crate::app::App, scenario: Scenario) {
         .playlists
         .push(crate::mixed_playlists::Playlist {
             id: "demo-siphon".into(),
-            name: "Siphon backend fixtures".into(),
+            name: "Encore backend fixtures".into(),
             description: "Invented offline data for frontend development".into(),
             created: 1_793_361_600,
             modified: 1_793_361_600,

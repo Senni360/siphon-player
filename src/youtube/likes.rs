@@ -145,7 +145,7 @@ impl Likes {
         })?;
         if likes.version != 1 {
             return Err(io::Error::other(
-                "YouTube likes file needs a newer Siphon version",
+                "YouTube likes file needs a newer Encore version",
             ));
         }
         if likes

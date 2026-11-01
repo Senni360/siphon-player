@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/assets/images/logo.svg" alt="Siphon logo" width="88" height="88">
+  <img src="docs/assets/images/logo.svg" alt="Encore logo" width="88" height="88">
 </p>
 
-<h1 align="center">Siphon</h1>
+<h1 align="center">Encore</h1>
 
 <p align="center"><strong>Spotify, native and fast.</strong><br>A lightweight music app for Linux, macOS, and Windows.</p>
 
@@ -19,7 +19,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-1ed760" alt="MIT license"></a>
 </p>
 
-Siphon began as a fork of [Spotifast](https://github.com/crmne/spotifast),
+**Siphon: Encore**, Encore for short, began as a fork of [Spotifast](https://github.com/crmne/spotifast),
 created by Carmine Paolino and its contributors. The upstream MIT licence,
 copyright notices and dependency attributions remain intact in [LICENSE](LICENSE).
 The name and nested-U logo match the owner's Siphon browser extension;
@@ -129,7 +129,7 @@ folded until you open them. **Playlists** shares a whole list with the group, as
 of how it is now, for anyone to save, play or use in a party.
 
 While Discord is open, your profile shows the song you're playing, with a progress bar
-and a link to it, and in a party, how many are listening and a **Join in Siphon** button for
+and a link to it, and in a party, how many are listening and a **Join in Encore** button for
 others in your group. A song from a private SoundCloud link only ever shows as "Listening
 on Encore". Turn it off in the **People** tab.
 

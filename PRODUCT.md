@@ -14,7 +14,7 @@ The app serves both sides of the same person: the simple listener who just wants
 
 ## Product Purpose
 
-Siphon Player is a private desktop music app for that group. One library, one queue and one search hold Spotify songs, SoundCloud uploads (private links included) and YouTube beats. The group's own shared songs come first; Spotify friend activity and SoundCloud's people-you-follow sit underneath as secondary feeds. Every track carries the Siphon helper's download and BPM/key tools.
+Siphon: Encore, shown as Encore throughout the app, is a private desktop music app for that group. One library, one queue and one search hold Spotify songs, SoundCloud uploads (private links included) and YouTube beats. The group's own shared songs come first; Spotify friend activity and SoundCloud's people-you-follow sit underneath as secondary feeds. Every track carries the Siphon helper's download and BPM/key tools.
 
 Success: it replaces the Spotify app and the SoundCloud tab for the group, sharing a song with friends takes one action, and opening the app on a normal day lands on new releases and a mix built from what Spotify and SoundCloud both recommend.
 

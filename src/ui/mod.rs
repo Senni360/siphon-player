@@ -668,7 +668,7 @@ fn slow_banner(app: &mut App, ui: &mut egui::Ui) {
         &gettext(locale, "Spotify is being slow on the shared app."),
         &gettext(
             locale,
-            "Siphon no longer offers the shared app, and Spotify can stop accepting it at any time. Set up your own free Spotify app and you won't have to wait.",
+            "Encore no longer offers the shared app, and Spotify can stop accepting it at any time. Set up your own free Spotify app and you won't have to wait.",
         ),
         [
             (
@@ -701,7 +701,7 @@ fn audio_key_banner(app: &mut App, ui: &mut egui::Ui) {
         ),
         &gettext(
             locale,
-            "Spotify refused the key that unlocks the audio. Siphon can't fix that, but it sometimes clears up on its own. You can still play on your phone or another Spotify device.",
+            "Spotify refused the key that unlocks the audio. Encore can't fix that, but it sometimes clears up on its own. You can still play on your phone or another Spotify device.",
         ),
         [
             (

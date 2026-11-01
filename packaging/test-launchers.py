@@ -58,7 +58,7 @@ class LauncherInstallTest(unittest.TestCase):
         parser = configparser.ConfigParser(interpolation=None)
         parser.read(entries[0])
         entry = parser["Desktop Entry"]
-        self.assertEqual(entry["Name"], "Siphon")
+        self.assertEqual(entry["Name"], "Encore")
         self.assertEqual(entry["Icon"], icon)
         self.assertEqual(entry["StartupWMClass"], window_class)
         self.assertEqual(entry["Exec"], "siphon %u")

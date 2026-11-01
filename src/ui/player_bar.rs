@@ -1375,7 +1375,7 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
         )
         .on_hover_text(gettext(
             app.locale,
-            "This device's volume can't be changed from Siphon",
+            "This device's volume can't be changed from Encore",
         ));
     }
     ui.add_space(4.0);

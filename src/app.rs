@@ -990,7 +990,7 @@ fn tray_config() -> fastframe_tray::Config {
         template_icon: Some(util::tray_template_rgba),
         themed_icon: true,
         menu: vec![
-            MenuItem::action(TRAY_SHOW, "Show or hide Siphon"),
+            MenuItem::action(TRAY_SHOW, "Show or hide Encore"),
             MenuItem::Separator,
             MenuItem::action(TRAY_PLAY_PAUSE, play_pause_label(false)),
             MenuItem::action(TRAY_NEXT, "Next"),
@@ -1630,7 +1630,7 @@ impl App {
                 log::warn!("couldn't change how Siphon starts at login: {error}");
                 self.toast_error(gettext(
                     self.locale,
-                    "Couldn't change how Siphon starts with your computer.",
+                    "Couldn't change how Encore starts with your computer.",
                 ));
                 // Show what the system really has.
                 self.autostart_wanted = None;
@@ -3143,7 +3143,7 @@ impl App {
                             if manual || self.update.as_ref() != Some(&notice) {
                                 self.toast(
                                     // Translators: {version} is a version number such as 1.4.0.
-                                    gettext(self.locale, "Siphon {version} is available")
+                                    gettext(self.locale, "Encore {version} is available")
                                         .replace("{version}", &notice.version.to_string()),
                                 );
                             }
@@ -3160,7 +3160,7 @@ impl App {
                         Ok(None) => {
                             self.update = None;
                             if manual {
-                                self.toast(gettext(self.locale, "Siphon is up to date"));
+                                self.toast(gettext(self.locale, "Encore is up to date"));
                             } else {
                                 log::debug!("this is the newest release");
                             }
@@ -9571,7 +9571,7 @@ impl App {
                 self.pending_link = None;
                 self.toast_error(gettext(
                     self.locale,
-                    "Siphon cannot open this kind of Spotify link",
+                    "Encore cannot open this kind of Spotify link",
                 ));
             }
         }
@@ -14364,9 +14364,9 @@ impl App {
     /// Keeps the current track in the window and taskbar title (#94).
     fn sync_window_title(&mut self, ctx: &egui::Context) {
         let title = match self.now_playing().filter(|now| now.playing) {
-            Some(now) if now.subtitle.is_empty() => format!("{} - Siphon", now.title),
+            Some(now) if now.subtitle.is_empty() => format!("{} - Encore", now.title),
             Some(now) => format!("{} - {}", now.subtitle, now.title),
-            None => "Siphon".to_string(),
+            None => "Encore".to_string(),
         };
         if title != self.window_title {
             ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -27572,7 +27572,7 @@ mod tests {
         assert_eq!(app.update, None);
         assert_eq!(
             app.toasts.last().map(|toast| toast.message.as_str()),
-            Some("Siphon is up to date")
+            Some("Encore is up to date")
         );
 
         app.toasts.clear();
@@ -27621,7 +27621,7 @@ mod tests {
         );
         assert_eq!(
             app.toasts.last().map(|toast| toast.message.as_str()),
-            Some("Siphon 1.2.3 is available")
+            Some("Encore 1.2.3 is available")
         );
     }
 
@@ -32808,7 +32808,7 @@ mod tests {
                 "unknown",
                 // Local playback is this computer, which Spotify has not
                 // named because it is not a remote device.
-                "Siphon",
+                "Encore",
             ]
         );
         // No devices seen yet is an empty array, not an empty string, so a

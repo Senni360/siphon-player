@@ -227,7 +227,7 @@ fn reply(line: &str) -> std::io::Result<Reply> {
     } else {
         Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
-            "the running Siphon answered something unexpected",
+            "the running Encore answered something unexpected",
         ))
     }
 }

@@ -1,3 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <path d="M6 4v8a6 6 0 0 0 12 0V4M10 4v8a2 2 0 0 0 4 0V4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="10 8 48 48" fill="none">
+  <path d="M47 14H35a18 18 0 0 0 0 36H47M47 23H35a9 9 0 0 0 0 18H47M35 32H47" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

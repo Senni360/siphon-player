@@ -3,7 +3,7 @@
 //! writes to Discord's local socket, and Discord does the rest.
 //!
 //! A private SoundCloud link is a secret that happens to be a URL, so a song
-//! from one shows up as nothing more than "Listening on Siphon".
+//! from one shows up as nothing more than "Listening on Encore".
 
 use std::time::Duration;
 
@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
-/// The Discord application whose name reads "Listening to Siphon". Not a
+/// The Discord application whose name reads "Listening to Encore". Not a
 /// secret: every Discord presence carries its application's id.
 pub const APPLICATION_ID: &str = "";
 const RETRY: Duration = Duration::from_secs(20);
@@ -98,7 +98,7 @@ pub fn activity(status: &Status) -> Value {
     if let Some(party) = &status.party {
         activity["party"] = json!({ "id": party.id, "size": [party.size.max(1), 50] });
         if let Some(url) = &party.join_url {
-            buttons.push(json!({ "label": short("Join in Siphon", BUTTON), "url": url }));
+            buttons.push(json!({ "label": short("Join in Encore", BUTTON), "url": url }));
         }
     }
     if let Some((label, url)) = &status.link {
@@ -297,7 +297,7 @@ mod tests {
         });
         assert_eq!(activity["state"], "Friday · 3 listening");
         assert_eq!(activity["party"]["size"][0], 3);
-        assert_eq!(activity["buttons"][0]["label"], "Join in Siphon");
+        assert_eq!(activity["buttons"][0]["label"], "Join in Encore");
         assert_eq!(activity["buttons"][1]["label"], "Open in Spotify");
     }
 

@@ -1186,7 +1186,7 @@ mod tests {
             })
         ));
         assert_eq!(paired.cached_palette(false), Some(latte));
-        assert_eq!(paired.cached_palette(true), None, "dark stays Siphon's");
+        assert_eq!(paired.cached_palette(true), None, "dark stays Encore's");
         let encoded = serde_json::to_string(&paired).unwrap();
         let decoded: Settings = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded, paired);

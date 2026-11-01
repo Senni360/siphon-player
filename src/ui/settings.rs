@@ -430,10 +430,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             if app.shared_grant && !in_use {
                 gettext(
                     locale,
-                    "You're still signed in through the shared app Siphon used before, which Spotify can stop accepting at any time. Set up your own app to keep listening.",
+                    "You're still signed in through the shared app Encore used before, which Spotify can stop accepting at any time. Set up your own app to keep listening.",
                 )
             } else {
-                gettext(locale, "Siphon signs in through your own free Spotify app.")
+                gettext(locale, "Encore signs in through your own free Spotify app.")
             },
         ),
         RowText::new(
@@ -452,7 +452,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     "Supported requests use your app. Other requests use the shared app.",
                 )
             } else {
-                gettext(locale, "Siphon uses your app for Spotify's Web API.")
+                gettext(locale, "Encore uses your app for Spotify's Web API.")
             },
         )
         .when(in_use),
@@ -684,12 +684,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             super::keys::platform_shortcut(
                 &gettext(
                     locale,
-                    "Siphon hides to the system tray. Quit from the tray menu or with Ctrl+Q.",
+                    "Encore hides to the system tray. Quit from the tray menu or with Ctrl+Q.",
                 ),
                 // macOS has a menu bar where the others have a tray (#1006).
                 &gettext(
                     locale,
-                    "Siphon hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q.",
+                    "Encore hides to the menu bar. Quit from its menu-bar icon or with Cmd+Q.",
                 ),
             )
             .to_owned(),
@@ -732,7 +732,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             show_in_dock.clone(),
             gettext(
                 locale,
-                "When off, Siphon lives in the menu bar and leaves Cmd+Tab. Open it from its menu-bar icon.",
+                "When off, Encore lives in the menu bar and leaves Cmd+Tab. Open it from its menu-bar icon.",
             ),
         )
         .when(cfg!(target_os = "macos")),
@@ -1238,7 +1238,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             custom_titlebar.clone(),
             gettext(
                 locale,
-                "Draw Siphon's own title bar and window buttons instead of the desktop's.",
+                "Draw Encore's own title bar and window buttons instead of the desktop's.",
             ),
         )
         .when(show_custom_titlebar),
@@ -1797,7 +1797,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 // the mini player opens.
                 const RANDOM: usize = usize::MAX;
                 let random = gettext(locale, "Random");
-                let mut options: Vec<(usize, &str)> = vec![(RANDOM, &random), (0, "Siphon")];
+                let mut options: Vec<(usize, &str)> = vec![(RANDOM, &random), (0, "Encore")];
                 options.extend(
                     choices
                         .iter()
@@ -1831,7 +1831,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     let label = options
                         .iter()
                         .find(|(value, _)| *value == showing)
-                        .map_or("Siphon", |(_, label)| label);
+                        .map_or("Encore", |(_, label)| label);
                     theme::subtle(
                         ui,
                         &palette,
@@ -2080,7 +2080,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let source_code = gettext(locale, "Source code");
     let about_rows = [
         RowText::new(
-            format!("Siphon {}", env!("CARGO_PKG_VERSION")),
+            format!("{} {}", crate::brand::FULL_NAME, env!("CARGO_PKG_VERSION")),
             built_with.clone(),
         ),
         RowText::new(
@@ -2092,12 +2092,12 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         any_visible = true;
         section(ui, &palette, &about, |ui| {
             ui.horizontal(|ui| {
-                let (logo, _) = ui.allocate_exact_size(Vec2::splat(40.0), egui::Sense::hover());
+                let (logo, _) = ui.allocate_exact_size(Vec2::splat(44.0), egui::Sense::hover());
                 theme::logo(ui, logo.center(), 40.0);
                 ui.vertical(|ui| {
                     theme::text(
                         ui,
-                        format!("Siphon {}", env!("CARGO_PKG_VERSION")),
+                        format!("Encore {}", env!("CARGO_PKG_VERSION")),
                         theme::semibold(15.0),
                         palette.text,
                     );
@@ -2209,7 +2209,7 @@ fn start_with_computer_detail(
     if matches!(state, Some(State::NeedsApproval(_))) && choice.is_some() {
         gettext(
             locale,
-            "Allow Siphon in System Settings, General, Login Items.",
+            "Allow Encore in System Settings, General, Login Items.",
         )
     } else if choice == Some(Start::Hidden) && !keeps_running {
         if cfg!(target_os = "macos") {
@@ -2226,12 +2226,12 @@ fn start_with_computer_detail(
     } else if cfg!(target_os = "macos") {
         gettext(
             locale,
-            "Open Siphon when you log in, with its window or in the menu bar.",
+            "Open Encore when you log in, with its window or in the menu bar.",
         )
     } else {
         gettext(
             locale,
-            "Open Siphon when you log in, with its window or in the tray.",
+            "Open Encore when you log in, with its window or in the tray.",
         )
     }
 }
