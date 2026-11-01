@@ -9,6 +9,7 @@ mod dialogs;
 mod downloads;
 pub(crate) mod friends;
 pub mod group;
+mod group_live;
 mod group_shelf;
 pub mod home;
 mod keys;

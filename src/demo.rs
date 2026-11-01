@@ -1860,6 +1860,10 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.resume_position_ms = 19_566;
                 app.actions.push(Action::Next);
             }
+            // Friends playing songs, and a channel this listener is in.
+            "group-live" => siphon::live(app, true),
+            // The same, before joining anything and before being asked to share.
+            "group-live-ask" => siphon::live(app, false),
             // Use the built-in skin for deterministic screenshots.
             "winamp" | "winamp-bars" | "winamp-scope" => {
                 app.settings.winamp_window = true;

@@ -1321,6 +1321,8 @@ impl Toast {
 #[derive(Clone, Debug)]
 pub enum Action {
     Friends(crate::friends::Action),
+    /// Listening together with the group. See [`crate::friends::live`].
+    Live(crate::friends::live::Action),
     /// Download a song a friend shared, by the share's id, so it lands as
     /// a file ready to drag into a DAW.
     DownloadShare(String),

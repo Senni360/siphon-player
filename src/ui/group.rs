@@ -147,6 +147,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             recovery(ui, &palette, &secret, &mut actions);
             ui.add_space(16.0);
         }
+        super::rise(ui, 1, |ui| super::group_live::section(app, ui, &me, &mut actions));
         super::rise(ui, 1, |ui| composer(app, ui, &me, &mut actions));
         ui.add_space(20.0);
 
@@ -259,7 +260,14 @@ fn header(app: &App, ui: &mut Ui) {
 }
 
 /// An initial in a circle, quiet: the shade only tells people apart.
-fn avatar(ui: &Ui, palette: &Palette, center: egui::Pos2, size: f32, name: &str, ring: bool) {
+pub(super) fn avatar(
+    ui: &Ui,
+    palette: &Palette,
+    center: egui::Pos2,
+    size: f32,
+    name: &str,
+    ring: bool,
+) {
     let initial = name
         .chars()
         .find(|c| c.is_alphanumeric())
@@ -386,7 +394,7 @@ fn join(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
 }
 
 /// A one-line text field in the page's style.
-fn field(
+pub(super) fn field(
     ui: &mut Ui,
     palette: &Palette,
     text: &mut String,
@@ -414,7 +422,7 @@ fn field(
 }
 
 /// A plain raised surface holding a group of controls.
-fn card<R>(ui: &mut Ui, palette: &Palette, add: impl FnOnce(&mut Ui) -> R) -> R {
+pub(super) fn card<R>(ui: &mut Ui, palette: &Palette, add: impl FnOnce(&mut Ui) -> R) -> R {
     egui::Frame::new()
         .fill(palette.panel)
         .stroke(Stroke::new(1.0, palette.outline))
@@ -559,7 +567,7 @@ fn link_source(url: &str) -> Option<PostSource> {
 /// already knows about it: the playing song, a cached song, album or
 /// playlist. A link nothing is known about keeps an empty title for the
 /// person to type, except SoundCloud's, whose path names the song.
-fn recognise(app: &mut App, text: &str) -> Option<NewPost> {
+pub(super) fn recognise(app: &mut App, text: &str) -> Option<NewPost> {
     let text = text.trim();
     let source = link_source(text)?;
     let uri = crate::link::parse(text)?;
@@ -2058,6 +2066,19 @@ fn identity(app: &App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>) {
                 actions.push(Action::Friends(Group::Rename(name.trim().to_owned())));
             }
         });
+        ui.add_space(12.0);
+        let mut sharing = app.settings.group_sharing == Some(true);
+        if ui
+            .checkbox(
+                &mut sharing,
+                gettext(locale, "Share what I'm playing with the group"),
+            )
+            .changed()
+        {
+            actions.push(Action::Live(crate::friends::live::Action::SetSharing(
+                sharing,
+            )));
+        }
         ui.add_space(12.0);
         theme::text(
             ui,

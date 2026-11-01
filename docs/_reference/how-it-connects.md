@@ -271,6 +271,12 @@ out, or a reconnection that gives up stops it.
   no Spotify or SoundCloud account grants. The group bearer uses an independent
   protected credential slot. See the repository's `services/friends/README.md`
   for its API, deployment setup, membership revocation and local-forget rules.
+  Once a member agrees to share their listening, it also receives the song they
+  are playing and its position, when that changes and every 90 seconds, and keeps
+  only the latest for 200 seconds. While they listen along with someone or are in a
+  channel, Siphon reads the group's live state every 3 seconds, and every 15 seconds
+  while the Group page is open. No audio goes through it: each listener plays the
+  song on their own account from its own service.
   When the lyrics
   panel is open and neither Spotify nor a local file has lyrics, it sends
   the track's artist, title, album, and length to

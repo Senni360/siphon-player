@@ -223,6 +223,10 @@ The Web API and librespot do not provide these features:
 - **Editing playlist folders.** librespot can only read them.
 - **Smart Shuffle, Jam, Blend, and similar Spotify features.** Spotify
   generates these for its own clients. Siphon only has plain shuffle.
+  A Jam started in a Spotify app can be joined there from its link. Siphon's
+  group has its own listening together, which is not a Jam: each listener's
+  Siphon plays the same song at the same place, and it also works for SoundCloud
+  and YouTube.
   A Blend that a Spotify app already made opens like any playlist, with
   who added each song, but Siphon cannot start or manage one.
 - **Spotify DJ.** Its special playlist context does not expose playable tracks

@@ -3,6 +3,7 @@
 mod download_actions;
 mod extension_bridge;
 mod hybrid;
+mod live;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
 mod youtube;
@@ -612,6 +613,9 @@ pub struct App {
     /// What friends last played. A refresh keeps the last answer on screen.
     pub friends: Loadable<Vec<crate::session_reads::FriendActivity>>,
     pub friends_feed: crate::friends::Model,
+    /// Who is playing what in the group, and who this listener is with.
+    pub live: crate::friends::live::Model,
+    live_driver: live::Driver,
     /// Downloads in flight that stand for one song, by download id: the
     /// song's link or URI.
     pub(crate) download_keys: HashMap<u64, String>,
@@ -1286,6 +1290,8 @@ impl App {
             show_friends_panel: false,
             friends: Loadable::NotLoaded,
             friends_feed: crate::friends::Model::default(),
+            live: crate::friends::live::Model::default(),
+            live_driver: live::Driver::default(),
             download_keys: HashMap::new(),
             group_opened: false,
             downloaded_files: HashMap::new(),
@@ -2812,6 +2818,7 @@ impl App {
                         self.group_pick = Some((seed, pick));
                     }
                 }
+                Event::Live(event) => self.handle_live_event(event),
                 Event::Friends(event) => {
                     self.friends_feed.receive(event);
                     // A write made while another ran goes out now.
@@ -3765,7 +3772,8 @@ impl App {
         }
         if let Some(seed) = autoplay_seed(
             self.local_list.as_deref(),
-            self.settings.autoplay,
+            // Listening together, the session says what comes next.
+            self.settings.autoplay && !self.live.together(),
             &self.local,
             &state,
         ) {
@@ -4116,6 +4124,7 @@ impl App {
             return;
         };
         if !self.settings.autoplay
+            || self.live.together()
             || self.offline
             || list.last() != Some(&track.uri)
             || self
@@ -11917,6 +11926,9 @@ impl App {
         let Some(action) = self.apply_playlist_source_action(action, ctx) else {
             return;
         };
+        if self.live_intercept(&action) {
+            return;
+        }
         if matches!(
             &action,
             Action::Open(_)
@@ -11956,7 +11968,14 @@ impl App {
                 unreachable!("local playlist actions are applied by the source adapter")
             }
             Action::Open(page) => self.open(page),
+            Action::Live(action) => self.live_action(action),
             Action::Friends(action) => {
+                if matches!(
+                    action,
+                    crate::friends::Action::Leave | crate::friends::Action::LeaveGroup
+                ) {
+                    self.live_forget();
+                }
                 if (!self.offline
                     || matches!(
                         action,
@@ -13928,6 +13947,11 @@ impl App {
         }
         self.handle_control_commands();
         self.handle_events();
+        // Listening together keeps going with the window hidden.
+        let looking = matches!(self.page(), Page::Group)
+            && self.budget != crate::power::Budget::Background
+            && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+        self.live_tick(ctx, looking);
         if let Some(url) = self.group_pick_art.take() {
             self.backend.art().prefetch(ctx, &url);
         }
@@ -22832,7 +22856,7 @@ mod tests {
         app.backend.shutdown();
     }
 
-    fn test_app(name: &str) -> App {
+    pub(super) fn test_app(name: &str) -> App {
         let root =
             std::env::temp_dir().join(format!("spotifast-{name}-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);

@@ -1070,7 +1070,7 @@ impl App {
             })
     }
 
-    fn hybrid_track(&self, uri: &str, label: Option<&str>) -> Track {
+    pub(super) fn hybrid_track(&self, uri: &str, label: Option<&str>) -> Track {
         self.hybrid_cached_track(uri).unwrap_or_else(|| Track {
             uri: uri.into(),
             id: uri.strip_prefix("spotify:track:").map(str::to_owned),

@@ -802,6 +802,8 @@ pub use hybrid::HybridCommand;
 
 pub enum Command {
     Friends(crate::friends::Request),
+    /// Listening together with the group, one request at a time.
+    Live(crate::friends::live::Request),
     /// Ask the group to read waiting upload titles. See [`crate::retitle`].
     Retitle,
     /// Ask the group which friend's share should follow the list ending
@@ -1177,6 +1179,7 @@ pub struct LyricsRequest {
 
 pub enum Event {
     Friends(crate::friends::Event),
+    Live(crate::friends::live::Event),
     /// The share to follow the list ending on `seed`, if Jev picked one.
     GroupPick {
         seed: String,
@@ -1466,6 +1469,8 @@ pub struct Backend {
     #[cfg(test)]
     hybrid_commands: std::sync::Mutex<Vec<HybridCommand>>,
     #[cfg(test)]
+    live_requests: std::sync::Mutex<Vec<crate::friends::live::Request>>,
+    #[cfg(test)]
     album_type_requests: std::sync::Mutex<Vec<Vec<String>>>,
     #[cfg(test)]
     home_episode_requests: std::sync::Mutex<Vec<(Vec<String>, u64)>>,
@@ -1568,6 +1573,8 @@ impl Backend {
             #[cfg(test)]
             hybrid_commands: std::sync::Mutex::new(Vec::new()),
             #[cfg(test)]
+            live_requests: std::sync::Mutex::new(Vec::new()),
+            #[cfg(test)]
             album_type_requests: std::sync::Mutex::new(Vec::new()),
             #[cfg(test)]
             home_episode_requests: std::sync::Mutex::new(Vec::new()),
@@ -1621,6 +1628,10 @@ impl Backend {
     }
 
     pub fn send(&self, command: Command) {
+        #[cfg(test)]
+        if let Command::Live(request) = &command {
+            self.live_requests.lock().unwrap().push(request.clone());
+        }
         #[cfg(test)]
         if let Command::Hybrid(command) = &command {
             self.hybrid_commands.lock().unwrap().push(command.clone());
@@ -1916,6 +1927,11 @@ impl Backend {
     }
 
     #[cfg(test)]
+    pub(crate) fn take_live_requests(&self) -> Vec<crate::friends::live::Request> {
+        std::mem::take(&mut *self.live_requests.lock().unwrap())
+    }
+
+    #[cfg(test)]
     pub(crate) fn take_hybrid_commands(&self) -> Vec<HybridCommand> {
         std::mem::take(&mut *self.hybrid_commands.lock().unwrap())
     }
@@ -2133,6 +2149,7 @@ impl PlaylistHeaderLookup {
 
 struct Worker {
     friends_feed: Option<mpsc::UnboundedSender<(crate::friends::Request, Http)>>,
+    live: Option<mpsc::UnboundedSender<crate::friends::live::Request>>,
     download_jobs: download_jobs::Jobs,
     track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
@@ -2266,6 +2283,7 @@ impl Worker {
         Self {
             hybrid: hybrid::HybridRuntime::default(),
             friends_feed: None,
+            live: None,
             download_jobs: download_jobs::Jobs::default(),
             track_details: track_details::Jobs::default(),
             soloist: None,
@@ -2513,6 +2531,20 @@ impl Worker {
                         .map(Http::new)
                         .unwrap_or_else(Http::unavailable);
                     let _ = tx.send((request, http));
+                }
+                Command::Live(request) => {
+                    let tx = self.live.get_or_insert_with(|| {
+                        let events = self.events.clone();
+                        let waker = self.waker.clone();
+                        let http = crate::http::build_collection_client(&self.engine_config.proxy)
+                            .map(Http::new)
+                            .unwrap_or_else(Http::unavailable);
+                        crate::friends::live::spawn(self.credentials.clone(), http, move |event| {
+                            let _ = events.send(Event::Live(event));
+                            waker.wake();
+                        })
+                    });
+                    let _ = tx.send(request);
                 }
                 Command::GroupPick {
                     seed,

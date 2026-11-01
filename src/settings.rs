@@ -270,6 +270,9 @@ pub struct Settings {
     pub bitrate: u16,
     pub normalisation: bool,
     pub autoplay: bool,
+    /// Whether the group sees what this listener plays. None until they have
+    /// been asked: nothing is shared before they say so.
+    pub group_sharing: Option<bool>,
     pub gapless: bool,
     /// The output local playback uses: the id of a device
     /// `fastframe_audio::output_devices` lists, or `None` for the system
@@ -473,6 +476,7 @@ impl Default for Settings {
             bitrate: 320,
             normalisation: false,
             autoplay: true,
+            group_sharing: None,
             gapless: true,
             audio_device: None,
             local_files_folder: None,

@@ -381,6 +381,150 @@ pub fn apply(app: &mut crate::app::App, scenario: Scenario) {
     app.open(crate::model::Page::MixedPlaylist("demo-siphon".into()));
 }
 
+/// Sample friends for the Group page's Listening now.
+#[cfg(feature = "demo")]
+pub(super) fn live(app: &mut crate::app::App, joined: bool) {
+    use crate::friends::live::{Channel, Entry, Presence, Session, Snapshot};
+
+    let song = |id: &str, title: &str, artist: &str, source: Source| NewPost {
+        url: match source {
+            Source::Spotify => format!("https://open.spotify.com/track/{id}"),
+            Source::Soundcloud => format!("https://soundcloud.com/demo/{id}"),
+            Source::Youtube => "https://www.youtube.com/watch?v=dQw4w9WgXcQ".to_owned(),
+        },
+        source,
+        title: title.to_owned(),
+        artists: vec![artist.to_owned()],
+        artwork_url: None,
+        duration_ms: 214_000,
+        note: String::new(),
+        to: Vec::new(),
+    };
+    let me = app
+        .friends_feed
+        .profile
+        .get_or_insert_with(|| Profile {
+            user_id: "demo-viewer".into(),
+            display_name: "Demo Listener".into(),
+        })
+        .user_id
+        .clone();
+    app.friends_feed.members = [
+        ("ana", "Ana"),
+        ("bo", "Bo"),
+        ("cleo", "Cleo"),
+        ("dev", "Dev"),
+    ]
+    .into_iter()
+    .map(|(id, name)| Profile {
+        user_id: id.into(),
+        display_name: name.into(),
+    })
+    .chain(std::iter::once(Profile {
+        user_id: me.clone(),
+        display_name: "Demo Listener".into(),
+    }))
+    .collect();
+    let presence =
+        |user: &str, item: Option<NewPost>, playing: bool, following: Option<&str>| Presence {
+            user_id: user.into(),
+            item,
+            position_ms: 42_000,
+            playing,
+            at: 0,
+            following: following.map(str::to_owned),
+        };
+    let entry = |id: &str, item: NewPost, by: &str| Entry {
+        id: id.into(),
+        item,
+        added_by: by.into(),
+    };
+    let mut members = vec!["cleo".to_owned(), "dev".to_owned()];
+    if joined {
+        members.push(me.clone());
+    }
+    app.live.snapshot = Snapshot {
+        now: 0,
+        presence: vec![
+            presence(
+                "ana",
+                Some(song(
+                    "a1",
+                    "Midnight In A Perfect World",
+                    "DJ Shadow",
+                    Source::Spotify,
+                )),
+                true,
+                None,
+            ),
+            presence(
+                "bo",
+                Some(song(
+                    "b1",
+                    "Late Night Tales (Unreleased Mix)",
+                    "Moonlit Sessions",
+                    Source::Soundcloud,
+                )),
+                false,
+                None,
+            ),
+            presence(
+                "cleo",
+                Some(song("c1", "Teardrop", "Massive Attack", Source::Spotify)),
+                true,
+                None,
+            ),
+            presence(
+                "dev",
+                Some(song("c1", "Teardrop", "Massive Attack", Source::Spotify)),
+                true,
+                None,
+            ),
+        ],
+        channels: vec![Channel {
+            id: "friday".into(),
+            name: "Friday night".into(),
+            host_id: "cleo".into(),
+            created_at: 0,
+            members,
+            current: Some(entry(
+                "e0",
+                song("c1", "Teardrop", "Massive Attack", Source::Spotify),
+                "cleo",
+            )),
+            position_ms: 42_000,
+            playing: true,
+            at: 0,
+            queue: vec![
+                entry(
+                    "e1",
+                    song("q1", "Roygbiv", "Boards of Canada", Source::Spotify),
+                    "dev",
+                ),
+                entry(
+                    "e2",
+                    song(
+                        "q2",
+                        "Warehouse Rework",
+                        "Unknown Artist",
+                        Source::Soundcloud,
+                    ),
+                    "cleo",
+                ),
+                entry(
+                    "e3",
+                    song("q3", "Porcelain", "Moby", Source::Spotify),
+                    "dev",
+                ),
+            ],
+        }],
+    };
+    if joined {
+        app.settings.group_sharing = Some(true);
+        app.live.session = Session::Channel("friday".into());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

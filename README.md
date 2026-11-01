@@ -102,6 +102,12 @@ it), and how to read messy SoundCloud and YouTube titles such as
 uploader names, and your own shares and hearts are all that is sent; nothing
 is asked outside a group, and a slow or failed answer changes nothing.
 
+The Group page shows what the others are playing, once they agree to share it.
+On anyone listed, **Play song** plays it for you alone and **Join** listens along
+with them, playing what they play. **Start a channel** makes a shared room instead:
+everyone in it can add songs, reorder them, skip and pause, and Spotify, SoundCloud
+and YouTube songs can sit in the same queue. Everyone plays on their own account.
+
 The owner's browser extension can open **Add to playlist** with
 `siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,
 or a SoundCloud track or set. The player comes forward and asks for a

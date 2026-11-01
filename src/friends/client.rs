@@ -188,6 +188,7 @@ pub struct Feed {
 pub struct Client {
     http: Http,
     base: Url,
+    timeout: Duration,
 }
 
 impl Client {
@@ -208,14 +209,25 @@ impl Client {
         {
             return Err("Friends requires HTTPS, or a local development server.".into());
         }
-        Ok(Self { http, base })
+        Ok(Self {
+            http,
+            base,
+            timeout: Duration::from_secs(15),
+        })
+    }
+
+    /// Live requests run one after another, so one must not hold the next up
+    /// for long: a later one says the same, and newer.
+    pub(super) fn for_live(mut self) -> Self {
+        self.timeout = Duration::from_secs(6);
+        self
     }
 
     pub fn base_url(&self) -> &str {
         self.base.as_str()
     }
 
-    async fn request<T: DeserializeOwned>(
+    pub(super) async fn request<T: DeserializeOwned>(
         &self,
         method: Method,
         path: &str,
@@ -232,7 +244,7 @@ impl Client {
             .http
             .client()?
             .request(method, url)
-            .timeout(Duration::from_secs(15));
+            .timeout(self.timeout);
         if let Some(identity) = identity {
             if identity.base_url != self.base_url() {
                 return Err("This Friends identity belongs to another service.".into());
@@ -460,7 +472,7 @@ impl Client {
 
 /// Post and reply ids are the service's UUIDs; anything else never reaches
 /// a request path.
-fn valid_id(id: &str) -> Result<(), String> {
+pub(super) fn valid_id(id: &str) -> Result<(), String> {
     if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') {
         return Err("Invalid post id.".into());
     }

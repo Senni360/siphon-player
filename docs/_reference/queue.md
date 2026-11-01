@@ -192,6 +192,22 @@ counts once, and the notification reports only the rows actually added.
     offered only while this computer is the active player. *Next up* rows
     have no such entry; they play from the current context.
 
+## Listening together
+
+Listening along with someone on the Group page plays what they play, on your
+own account. They lead: Play, Next, Previous or seeking here, or starting
+anything else, stops listening along and then does what you asked. Your own
+queue stays as it was, and Add to queue still adds to it.
+
+A channel has one queue, which belongs to everyone in it, and it lives in the
+group's service rather than on any computer. While you are in one, Play, Next,
+Previous and seeking change what plays for everyone, and **Add to queue**, **Play
+next** and a dragged song add to the channel's queue instead of yours. Anyone can
+reorder a row, remove it, or play it, which drops the rows above it as rule 5
+does. A song's end moves the channel on once, however many listeners report it.
+Starting anything else from your library leaves the channel. Spotify's autoplay
+does not run while listening together: the session says what comes next.
+
 ## Optional Soloist
 
 Spotify-only Soloist playback uses the existing remote queue rules: additions
