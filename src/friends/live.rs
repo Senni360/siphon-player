@@ -66,6 +66,32 @@ pub struct Channel {
     pub at: u64,
     #[serde(default)]
     pub queue: Vec<Entry>,
+    /// A party: only the host and those they name move the music. Channels
+    /// from older clients are open to everyone in them.
+    #[serde(default)]
+    pub locked: bool,
+    #[serde(default)]
+    pub controllers: Vec<String>,
+    #[serde(default)]
+    pub skip_requests: Vec<String>,
+    #[serde(default)]
+    pub background: Option<Background>,
+}
+
+impl Channel {
+    pub fn controlled_by(&self, user: &str) -> bool {
+        !self.locked || self.host_id == user || self.controllers.iter().any(|id| id == user)
+    }
+}
+
+/// The list a party falls back on when its queue runs out.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct Background {
+    pub name: String,
+    pub by: String,
+    pub total: u32,
+    #[serde(default)]
+    pub upcoming: Vec<NewPost>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -116,6 +142,22 @@ pub enum Action {
     },
     /// Skip to a row of the channel's queue.
     PlayEntry(String),
+    /// Close the party for everyone. The host's.
+    End,
+    /// Ask the host to skip this song, or take that back.
+    RequestSkip(bool),
+    HandOver(String),
+    /// Share the controls with a guest, or take them back.
+    SetController {
+        user: String,
+        allowed: bool,
+    },
+    /// Fall back on this list when the queue runs out.
+    SetBackground {
+        name: String,
+        items: Vec<NewPost>,
+    },
+    ClearBackground,
 }
 
 #[derive(Clone, Debug)]
@@ -160,6 +202,25 @@ pub enum Op {
         entry: String,
         index: usize,
     },
+    End(String),
+    SkipRequest {
+        channel: String,
+        asking: bool,
+    },
+    Host {
+        channel: String,
+        user: String,
+    },
+    Controllers {
+        channel: String,
+        users: Vec<String>,
+    },
+    SetBackground {
+        channel: String,
+        name: String,
+        items: Vec<NewPost>,
+    },
+    ClearBackground(String),
     PutStats {
         period: &'static str,
         summary: Box<crate::stats::Summary>,
@@ -183,6 +244,12 @@ impl Op {
                 | Self::Add { .. }
                 | Self::Remove { .. }
                 | Self::Move { .. }
+                | Self::End(_)
+                | Self::SkipRequest { .. }
+                | Self::Host { .. }
+                | Self::Controllers { .. }
+                | Self::SetBackground { .. }
+                | Self::ClearBackground(_)
         )
     }
 }
@@ -251,6 +318,9 @@ pub enum Outcome {
     LeaderGone(String),
     /// The channel this listener was in no longer holds them.
     ChannelGone,
+    /// The service still seats this listener in a party they are not in,
+    /// as after closing the app in one. It must not start playing by itself.
+    StaleSeat(String),
     WriteFailed(String),
 }
 
@@ -310,6 +380,16 @@ impl Model {
         match &self.session {
             Session::Channel(id) => self.channel(id),
             _ => None,
+        }
+    }
+
+    /// Whether this listener's own controls are out of their hands: they are
+    /// in someone else's party, or listening along. Leaving hands them back.
+    pub fn controls_locked(&self, me: &str) -> bool {
+        match &self.session {
+            Session::Alone => false,
+            Session::Following(_) => true,
+            Session::Channel(_) => self.my_channel().is_some_and(|c| !c.controlled_by(me)),
         }
     }
 
@@ -438,6 +518,10 @@ impl Model {
             at: now,
             current,
             queue: Vec::new(),
+            locked: true,
+            controllers: Vec::new(),
+            skip_requests: Vec::new(),
+            background: None,
         });
         self.session = Session::Channel(PENDING_CHANNEL.into());
     }
@@ -496,6 +580,61 @@ impl Model {
         channel.position_ms = 0;
         channel.playing = channel.current.is_some();
         channel.at = now;
+        channel.skip_requests.clear();
+    }
+
+    /// Closes the party here at once; the answer says it is gone for all.
+    pub fn end_party(&mut self) -> Option<String> {
+        let Session::Channel(id) = std::mem::take(&mut self.session) else {
+            return None;
+        };
+        self.snapshot.channels.retain(|c| c.id != id);
+        Some(id)
+    }
+
+    pub fn ask_skip(&mut self, me: &str, asking: bool) {
+        if let Some(channel) = self.mine() {
+            channel.skip_requests.retain(|id| id != me);
+            if asking {
+                channel.skip_requests.push(me.to_owned());
+            }
+        }
+    }
+
+    pub fn hand_over(&mut self, user: &str) {
+        if let Some(channel) = self.mine() {
+            channel.host_id = user.to_owned();
+            channel.controllers.retain(|id| id != user);
+        }
+    }
+
+    /// Who holds the controls once this is applied.
+    pub fn set_controller(&mut self, user: &str, allowed: bool) -> Vec<String> {
+        let Some(channel) = self.mine() else {
+            return Vec::new();
+        };
+        channel.controllers.retain(|id| id != user);
+        if allowed {
+            channel.controllers.push(user.to_owned());
+        }
+        channel.controllers.clone()
+    }
+
+    pub fn set_background(&mut self, me: &str, name: &str, items: &[NewPost]) {
+        if let Some(channel) = self.mine() {
+            channel.background = Some(Background {
+                name: name.to_owned(),
+                by: me.to_owned(),
+                total: items.len() as u32,
+                upcoming: items.iter().take(3).cloned().collect(),
+            });
+        }
+    }
+
+    pub fn clear_background(&mut self) {
+        if let Some(channel) = self.mine() {
+            channel.background = None;
+        }
     }
 
     pub fn add(&mut self, me: &str, item: NewPost, place: Place, now: u64) {
@@ -608,6 +747,9 @@ impl Model {
 
     fn check_session(&mut self, me: &str, current: bool) -> Outcome {
         match self.session.clone() {
+            Session::Alone if current => self.channel_of(me).map_or(Outcome::Nothing, |channel| {
+                Outcome::StaleSeat(channel.id.clone())
+            }),
             Session::Alone => Outcome::Nothing,
             Session::Following(user) => {
                 let chain = self.leader_of(&user);
@@ -699,9 +841,82 @@ pub(super) async fn run(client: &Client, identity: &Identity, op: Op) -> Result<
                     "item": item,
                     "position_ms": position_ms,
                     "playing": playing,
+                    "locked": true,
                 }),
             )
             .await
+        }
+        Op::End(channel) => {
+            let _: ChannelAnswer = client
+                .request(
+                    Method::POST,
+                    &path(&channel, "end")?,
+                    Some(identity),
+                    Some(serde_json::json!({})),
+                    None,
+                )
+                .await?;
+            Ok(Update::Nothing)
+        }
+        Op::SkipRequest { channel, asking } => {
+            let answer: ChannelAnswer = client
+                .request(
+                    if asking { Method::PUT } else { Method::DELETE },
+                    &path(&channel, "skip-request")?,
+                    Some(identity),
+                    None,
+                    None,
+                )
+                .await?;
+            Ok(channel_answer(answer))
+        }
+        Op::Host { channel, user } => {
+            valid_id(&user)?;
+            post(
+                path(&channel, "host")?,
+                serde_json::json!({ "user_id": user }),
+            )
+            .await
+        }
+        Op::Controllers { channel, users } => {
+            let answer: ChannelAnswer = client
+                .request(
+                    Method::PUT,
+                    &path(&channel, "controllers")?,
+                    Some(identity),
+                    Some(serde_json::json!({ "user_ids": users })),
+                    None,
+                )
+                .await?;
+            Ok(channel_answer(answer))
+        }
+        Op::SetBackground {
+            channel,
+            name,
+            items,
+        } => {
+            let answer: ChannelAnswer = client
+                .request(
+                    Method::PUT,
+                    &path(&channel, "background")?,
+                    Some(identity),
+                    Some(serde_json::json!({ "name": name, "items": items })),
+                    None,
+                )
+                .await?;
+            Ok(channel_answer(answer))
+        }
+        Op::ClearBackground(channel) => {
+            let answer: ChannelAnswer = client
+                .request(
+                    Method::DELETE,
+                    &path(&channel, "background")?,
+                    Some(identity),
+                    None,
+                    None,
+                )
+                .await?;
+            Ok(channel_answer(answer))
         }
         Op::Join(channel) => post(path(&channel, "join")?, serde_json::json!({})).await,
         Op::LeaveChannel(channel) => post(path(&channel, "leave")?, serde_json::json!({})).await,
@@ -840,6 +1055,11 @@ pub fn spawn(
         }
     });
     tx
+}
+
+#[cfg(test)]
+pub(crate) fn test_answer(generation: u64, result: Result<Update, String>) -> Event {
+    answer(generation, true, false, 0, 1, result)
 }
 
 #[cfg(test)]

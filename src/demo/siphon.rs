@@ -140,6 +140,7 @@ pub fn fixture(scenario: Scenario) -> Fixture {
                 artwork_url: None,
                 duration_ms: track.duration_ms,
                 note: "Fictional sharing example".into(),
+                uri: None,
                 to: Vec::new(),
             },
             replies: Vec::new(),
@@ -155,6 +156,7 @@ pub fn fixture(scenario: Scenario) -> Fixture {
             posts,
             next_cursor: None,
             members: None,
+            ..Feed::default()
         }),
     };
     let following = match scenario {
@@ -265,6 +267,7 @@ pub fn group(songs: &[(String, String, String, Option<String>)], now_ms: u64) ->
                     artwork_url: artwork.clone(),
                     duration_ms: 200_000,
                     note: notes[index].into(),
+                    uri: None,
                     // Jonas sent the second one to the viewer only.
                     to: if index == 1 {
                         vec![VIEWER.into()]
@@ -398,6 +401,7 @@ pub(super) fn live(app: &mut crate::app::App, joined: bool) {
         artwork_url: None,
         duration_ms: 214_000,
         note: String::new(),
+        uri: None,
         to: Vec::new(),
     };
     let me = app
@@ -517,12 +521,54 @@ pub(super) fn live(app: &mut crate::app::App, joined: bool) {
                     "dev",
                 ),
             ],
+            locked: true,
+            controllers: vec![],
+            skip_requests: vec![],
+            background: None,
         }],
     };
     if joined {
         app.settings.group_sharing = Some(true);
         app.live.session = Session::Channel("friday".into());
     }
+    let me = app
+        .friends_feed
+        .profile
+        .as_ref()
+        .map_or_else(String::new, |profile| profile.user_id.clone());
+    let members: Vec<serde_json::Value> = app
+        .friends_feed
+        .members
+        .iter()
+        .map(|member| {
+            let owner = member.user_id == me;
+            serde_json::json!({
+                "user_id": member.user_id,
+                "display_name": member.display_name,
+                "role": if owner { "owner" } else { "member" },
+                "spotify_linked": true,
+            })
+        })
+        .collect();
+    app.friends_feed.account = serde_json::from_value(serde_json::json!({
+        "user_id": me,
+        "display_name": "You",
+        "spotify_id": "demo-listener",
+        "devices": [
+            { "id": "d1", "name": "DESKTOP", "created_at": 0, "current": true },
+            { "id": "d2", "name": "Studio laptop", "created_at": 0 },
+        ],
+        "groups": [
+            {
+                "id": "g1", "name": "Friends", "owner_id": me, "role": "owner",
+                "rights": { "share": true, "host": true, "queue": true, "invite": true },
+                "members": members, "invite": "demo-invite-code", "pending": ["newcomer"],
+            },
+            { "id": "g2", "name": "Studio", "role": "member", "members": [] },
+        ],
+    }))
+    .ok();
+    crate::friends::account::set_current_group(Some("g1".into()));
 }
 
 /// A season of sample plays, and friends who share theirs.

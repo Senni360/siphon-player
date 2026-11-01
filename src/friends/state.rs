@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use crate::credentials::{Slot, Store as CredentialStore};
 use crate::http::Http;
 
+use super::account::{self, Account, Op, SharedPlaylist};
 use super::{Client, Feed, Identity, NewPost, Post, Profile, Reply};
 
 /// The id an optimistic share carries until the service names it.
@@ -30,6 +31,25 @@ pub enum Action {
     Leave,
     /// Revoke group membership remotely, then forget the device credential.
     LeaveGroup,
+    /// Prove who this listener is; the backend adds the Spotify token.
+    ConnectSpotify,
+    /// What `ConnectSpotify` becomes once the backend has the token.
+    ConnectWithToken(String),
+    /// A change to the account or to one of its groups.
+    Account(Op),
+    /// Look at another group. Nothing changes on the service.
+    SelectGroup(String),
+    SharePlaylist {
+        name: String,
+        items: Vec<NewPost>,
+        to: Vec<String>,
+    },
+    DeleteSharedPlaylist(String),
+    /// Fetch a shared list's songs, for `purpose`.
+    OpenSharedPlaylist {
+        id: String,
+        purpose: SongsFor,
+    },
     Refresh,
     More,
     Share(NewPost),
@@ -51,6 +71,14 @@ pub enum Action {
     DismissSecret,
 }
 
+/// What a shared playlist's songs were fetched for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SongsFor {
+    SaveCopy,
+    PartyBackground,
+    Play,
+}
+
 impl Action {
     /// Reads can be dropped or superseded; writes are what the person did
     /// and are never lost while another request runs.
@@ -67,6 +95,10 @@ impl Action {
                 | Self::Rename(_)
                 | Self::Reply { .. }
                 | Self::DeleteReply { .. }
+                | Self::Account(_)
+                | Self::SharePlaylist { .. }
+                | Self::DeleteSharedPlaylist(_)
+                | Self::OpenSharedPlaylist { .. }
         )
     }
 }
@@ -81,6 +113,12 @@ impl std::fmt::Debug for Action {
             Self::Rename(_) => "Friends::Rename",
             Self::Leave => "Friends::Leave",
             Self::LeaveGroup => "Friends::LeaveGroup",
+            Self::ConnectSpotify | Self::ConnectWithToken(_) => "Friends::ConnectSpotify",
+            Self::Account(_) => "Friends::Account",
+            Self::SelectGroup(_) => "Friends::SelectGroup",
+            Self::SharePlaylist { .. } => "Friends::SharePlaylist",
+            Self::DeleteSharedPlaylist(_) => "Friends::DeleteSharedPlaylist",
+            Self::OpenSharedPlaylist { .. } => "Friends::OpenSharedPlaylist",
             Self::Refresh => "Friends::Refresh",
             Self::More => "Friends::More",
             Self::Share(_) => "Friends::Share",
@@ -117,8 +155,21 @@ pub enum Update {
     Left,
     Feed(Feed, bool),
     Shared(Post),
-    Replied { post: String, reply: Reply },
+    Replied {
+        post: String,
+        reply: Reply,
+    },
     Changed,
+    /// Signed in with Spotify: this computer is this account now.
+    Connected(Profile, Box<Feed>),
+    /// The account as it stands after a change.
+    Account(Box<Account>),
+    PlaylistShared(SharedPlaylist),
+    SharedSongs {
+        name: String,
+        songs: Vec<NewPost>,
+        purpose: SongsFor,
+    },
 }
 
 #[derive(Default)]
@@ -127,6 +178,12 @@ pub struct Model {
     pub posts: Vec<Post>,
     /// Everyone in the group, for sending a share to some of them.
     pub members: Vec<Profile>,
+    /// None until read, and from a service that predates accounts.
+    pub account: Option<Account>,
+    /// What the chosen group has had shared with it, or with this listener.
+    pub shared_playlists: Vec<SharedPlaylist>,
+    /// Songs fetched for a purpose, for the app to act on.
+    pub songs_ready: Option<(String, Vec<NewPost>, SongsFor)>,
     pub next_cursor: Option<String>,
     pub busy: bool,
     pub error: Option<String>,
@@ -154,6 +211,19 @@ impl Model {
             return None;
         }
         let pending = self.apply_optimistic(&action);
+        if let Action::SelectGroup(id) = &action {
+            // Another group's songs must not linger under its name.
+            account::set_current_group(Some(id.clone()));
+            self.posts.clear();
+            self.shared_playlists.clear();
+            self.next_cursor = None;
+            self.members = self
+                .account
+                .as_ref()
+                .and_then(|account| account.groups.iter().find(|group| group.id == *id))
+                .map(account::Group::profiles)
+                .unwrap_or_default();
+        }
         if self.busy && !matches!(action, Action::Leave | Action::LeaveGroup) {
             // A write never waits on a read: it replaces it, and the read
             // runs again after it. A write behind another write waits its
@@ -270,6 +340,16 @@ impl Model {
                 }
                 self.optimistic = true;
             }
+            Action::Account(op) => {
+                if let Some(account) = &mut self.account {
+                    account::apply_locally(account, op);
+                }
+                self.optimistic = true;
+            }
+            Action::DeleteSharedPlaylist(id) => {
+                self.shared_playlists.retain(|list| list.id != *id);
+                self.optimistic = true;
+            }
             _ => {}
         }
         None
@@ -350,6 +430,8 @@ impl Model {
                         if let Some(members) = feed.members {
                             self.members = members;
                         }
+                        self.account = feed.account;
+                        self.shared_playlists = feed.shared_playlists;
                         self.restored = true;
                         self.profile = profile;
                         self.posts = feed.posts;
@@ -378,9 +460,51 @@ impl Model {
                         self.profile = Some(profile);
                     }
                     Update::Left => {}
+                    Update::Connected(profile, feed) => {
+                        self.restored = true;
+                        self.profile = Some(profile);
+                        self.account = feed.account;
+                        self.members = feed.members.unwrap_or_default();
+                        self.shared_playlists = feed.shared_playlists;
+                        self.posts = feed.posts;
+                        self.next_cursor = feed.next_cursor;
+                    }
+                    Update::Account(account) => {
+                        let chosen = account::current_group();
+                        self.members = account
+                            .chosen_group(chosen.as_deref())
+                            .map(account::Group::profiles)
+                            .unwrap_or_default();
+                        // A group this listener just lost must not stay on screen.
+                        if chosen.is_some()
+                            && account.chosen_group(chosen.as_deref()).map(|g| &g.id)
+                                != chosen.as_ref()
+                        {
+                            self.posts.clear();
+                            self.shared_playlists.clear();
+                            self.next_cursor = None;
+                            account::set_current_group(
+                                account.groups.first().map(|group| group.id.clone()),
+                            );
+                        }
+                        self.account = Some(*account);
+                    }
+                    Update::PlaylistShared(list) => {
+                        self.shared_playlists.retain(|row| row.id != list.id);
+                        self.shared_playlists.insert(0, list);
+                    }
+                    Update::SharedSongs {
+                        name,
+                        songs,
+                        purpose,
+                    } => self.songs_ready = Some((name, songs, purpose)),
                     Update::Feed(feed, append) => {
                         if let Some(members) = feed.members {
                             self.members = members;
+                        }
+                        if feed.account.is_some() {
+                            self.account = feed.account;
+                            self.shared_playlists = feed.shared_playlists;
                         }
                         if append {
                             for post in feed.posts {
@@ -440,6 +564,12 @@ impl Model {
                     }
                 }
                 self.error = Some(error);
+                // What was shown at once and did not happen comes back with the
+                // next read, soon. A read that failed just waits longer.
+                if std::mem::take(&mut self.optimistic) && self.queued.is_empty() {
+                    self.next_poll = Some(Instant::now());
+                    return;
+                }
             }
         }
         self.next_poll =
@@ -574,36 +704,68 @@ impl Runtime {
                 .transpose()?;
             self.loaded = true;
         }
-        let Some(identity) = &self.identity else {
+        if let Action::ConnectWithToken(token) = action {
+            let (identity, display_name) = client
+                .sign_in(&token, &device_name(), self.identity.as_ref())
+                .await?;
+            // A failed save still signs this session in; the sign-in is cheap to repeat.
+            let bytes = serde_json::to_vec(&identity)
+                .map_err(|_| "Friends identity could not be encoded.")?;
+            let lease = credentials.lease(Slot::Friends);
+            let saved = lease.save_secret(bytes).await;
+            let profile = Profile {
+                user_id: identity.user_id.clone(),
+                display_name,
+            };
+            self.identity = Some(identity);
+            let identity = self.identity.clone().expect("just set");
+            let feed = self.read_group(&client, &identity, None, true).await?;
+            self.cursor.clone_from(&feed.next_cursor);
+            if saved.is_err() {
+                log::warn!("the group sign-in could not be remembered");
+            }
+            return Ok(Update::Connected(profile, Box::new(feed)));
+        }
+        let Some(identity) = self.identity.clone() else {
             return Ok(Update::Opened(None, Feed::default()));
         };
+        let identity = &identity;
         let update = match action {
             Action::Open => {
                 let profile = client.profile(identity).await?;
-                let mut feed = client.feed(identity, None).await?;
-                // Members only decide who a share can be sent to; a feed
-                // without them still opens.
-                feed.members = client.members(identity).await.ok();
-                self.members_read = Some(Instant::now());
+                let feed = self.read_group(&client, identity, None, true).await?;
                 self.cursor.clone_from(&feed.next_cursor);
                 Update::Opened(Some(profile), feed)
             }
-            Action::Refresh | Action::More => {
-                let more = matches!(action, Action::More);
-                let mut feed = client
-                    .feed(identity, if more { self.cursor.as_deref() } else { None })
-                    .await?;
-                // Someone may have joined; ask again now and then.
-                if !more
-                    && self
-                        .members_read
-                        .is_none_or(|at| at.elapsed() > Duration::from_secs(5 * 60))
-                {
-                    feed.members = client.members(identity).await.ok();
-                    self.members_read = Some(Instant::now());
-                }
+            Action::Refresh | Action::SelectGroup(_) => {
+                let feed = self.read_group(&client, identity, None, false).await?;
                 self.cursor.clone_from(&feed.next_cursor);
-                Update::Feed(feed, more)
+                Update::Feed(feed, false)
+            }
+            Action::More => {
+                let cursor = self.cursor.clone();
+                let feed = client.feed(identity, cursor.as_deref()).await?;
+                self.cursor.clone_from(&feed.next_cursor);
+                Update::Feed(feed, true)
+            }
+            Action::Account(op) => {
+                client.apply(identity, op).await?;
+                Update::Account(Box::new(client.account(identity).await?))
+            }
+            Action::SharePlaylist { name, items, to } => {
+                Update::PlaylistShared(client.share_playlist(identity, &name, &items, &to).await?)
+            }
+            Action::DeleteSharedPlaylist(id) => {
+                client.delete_shared_playlist(identity, &id).await?;
+                Update::Changed
+            }
+            Action::OpenSharedPlaylist { id, purpose } => {
+                let (name, songs) = client.shared_playlist_songs(identity, &id).await?;
+                Update::SharedSongs {
+                    name,
+                    songs,
+                    purpose,
+                }
             }
             Action::Rename(name) => Update::Renamed(client.rename(identity, &name).await?),
             Action::Reply { post, text } => {
@@ -640,8 +802,77 @@ impl Runtime {
                     })?;
                 Update::Left
             }
-            Action::Leave | Action::Join { .. } | Action::DismissSecret => unreachable!(),
+            Action::Leave
+            | Action::Join { .. }
+            | Action::DismissSecret
+            | Action::ConnectSpotify
+            | Action::ConnectWithToken(_) => unreachable!(),
         };
         Ok(update)
+    }
+
+    /// The account, the group to look at within it, and that group's feed.
+    /// The account comes first: someone just removed from a group must not ask
+    /// it for a feed. A service from before accounts answers none, and the one
+    /// group it has is read as it always was.
+    async fn read_group(
+        &mut self,
+        client: &Client,
+        identity: &Identity,
+        cursor: Option<&str>,
+        always_members: bool,
+    ) -> Result<Feed, String> {
+        let account = client.account(identity).await.ok();
+        let chosen = account::current_group();
+        let group = account
+            .as_ref()
+            .and_then(|account| account.chosen_group(chosen.as_deref()));
+        if let Some(account) = &account {
+            account::set_current_group(group.map(|group| group.id.clone()));
+            if account.groups.is_empty() {
+                return Ok(Feed {
+                    members: Some(Vec::new()),
+                    account: Some(account.clone()),
+                    ..Feed::default()
+                });
+            }
+        }
+        let mut feed = client.feed(identity, cursor).await?;
+        // Members only decide who a share can be sent to; a feed without them
+        // still opens. An account already says who they are.
+        if let Some(group) = group {
+            feed.members = Some(group.profiles());
+        } else if always_members
+            || self
+                .members_read
+                .is_none_or(|at| at.elapsed() > Duration::from_secs(5 * 60))
+        {
+            feed.members = client.members(identity).await.ok();
+            self.members_read = Some(Instant::now());
+        }
+        if account.is_some() {
+            feed.shared_playlists = client.shared_playlists(identity).await.unwrap_or_default();
+        }
+        feed.account = account;
+        Ok(feed)
+    }
+}
+
+/// How a signed-in computer shows up in the list of them.
+fn device_name() -> String {
+    let name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default();
+    let clean: String = name
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(60)
+        .collect::<String>()
+        .trim()
+        .to_owned();
+    if clean.is_empty() {
+        "This computer".to_owned()
+    } else {
+        clean
     }
 }

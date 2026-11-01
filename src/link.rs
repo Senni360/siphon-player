@@ -18,6 +18,15 @@ const KINDS: [&str; 7] = [
     "prerelease",
 ];
 
+/// The group and party a `siphon://party/GROUP/PARTY` link names. Both are the
+/// service's UUIDs; anything else is not such a link.
+pub fn party(text: &str) -> Option<(String, String)> {
+    let rest = text.trim().strip_prefix("siphon://party/")?;
+    let (group, party) = rest.trim_end_matches('/').split_once('/')?;
+    let uuid = |id: &str| id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
+    (uuid(group) && uuid(party)).then(|| (group.to_ascii_lowercase(), party.to_ascii_lowercase()))
+}
+
 /// The extension bridge accepts songs and whole collections, never navigation
 /// links or arbitrary hosts. Keep the result safe for the line-based IPC.
 pub fn playlist_item(text: &str) -> Option<String> {
@@ -102,10 +111,14 @@ pub fn canonical_context_uri(uri: &str) -> String {
 /// not a link to a track, album, artist, playlist, show, episode, prerelease, or search.
 ///
 /// Accepted: `spotify:track:ID`, the old `spotify:user:NAME:playlist:ID`,
+/// `siphon://party/GROUP/PARTY` stays as it came: it names no music, only a door.
 /// `spotify://track/ID`, and `https://open.spotify.com/track/ID` with or
 /// without a locale segment (`/intl-de/`), a query string, or the old
 /// `/user/NAME/playlist/ID` shape.
 pub fn parse(text: &str) -> Option<String> {
+    if party(text).is_some() {
+        return Some(text.trim().to_owned());
+    }
     if let Some(uri) = crate::youtube::parse(text) {
         return Some(uri);
     }

@@ -267,15 +267,22 @@ out, or a reconnection that gives up stops it.
   Like and Unlike are kept over lagging reads until Spotify confirms them.
 - Siphon has no telemetry or analytics. An optional owner-configured private
   Friends service receives explicitly shared metadata and source links,
-  including private SoundCloud tokens when those links are shared. It receives
-  no Spotify or SoundCloud account grants. The group bearer uses an independent
-  protected credential slot. See the repository's `services/friends/README.md`
+  including private SoundCloud tokens when those links are shared. The group
+  bearer uses an independent protected credential slot. Pressing **Connect
+  Spotify** on the Group page sends the app's current Web API access token to the
+  service once, which reads the account's id from `GET /v1/me` with it and neither
+  stores nor logs it. That token carries the app's full Web API scopes until it
+  expires, within the hour, so connecting means trusting whoever runs the service
+  for that long. Nothing is sent before that press. No SoundCloud grant ever
+  leaves the app: linking SoundCloud only tells the service your username. See the repository's `services/friends/README.md`
   for its API, deployment setup, membership revocation and local-forget rules.
   Once a member agrees to share their listening, it also receives the song they
   are playing and its position, when that changes and every 90 seconds, and keeps
   only the latest for 200 seconds. While they listen along with someone or are in a
   channel, Siphon reads the group's live state every 3 seconds, and every 15 seconds
-  while the Group page is open. No audio goes through it: each listener plays the
+  while the Group page is open. While Discord is open, the song playing here also
+  goes to Discord through its local socket, with its artwork and link, unless it
+  came from a private SoundCloud link or the switch is off. No audio goes through it: each listener plays the
   song on their own account from its own service. A member who shares also sends
   their monthly and all-time totals and the top of each list, about once an hour,
   never individual plays. The listening statistics read

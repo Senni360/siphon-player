@@ -213,6 +213,7 @@ fn optimistic_state_does_not_accept_stale_events_after_leave() {
                 posts: vec![post],
                 next_cursor: None,
                 members: None,
+                ..Feed::default()
             },
             false,
         )),
@@ -286,6 +287,7 @@ fn replacing_identity_clears_private_rows_and_ignores_previous_request_events() 
                 posts: vec![post],
                 next_cursor: None,
                 members: None,
+                ..Feed::default()
             },
         )),
     });

@@ -636,6 +636,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let gapless = gettext(locale, "Gapless playback");
     let keep_playing = gettext(locale, "Keep music playing when the window closes");
     let update_checks = gettext(locale, "Automatic update checks");
+    let discord_presence = gettext(locale, "Show what I'm playing on Discord");
     let audio_cache = gettext(locale, "Audio cache");
     let apply_playback = gettext(locale, "Apply and restart playback");
     let apply_playback_note = gettext(locale, "Restart local playback to apply these settings.");
@@ -742,7 +743,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         )
         .when(!cfg!(target_os = "macos")),
         RowText::new(start_with_computer.clone(), start_detail).when(start_available),
+        RowText::new(
+            discord_presence.clone(),
+            gettext(
+                locale,
+                "While Discord is open, your profile shows your song. Songs from private SoundCloud links stay hidden.",
+            ),
+        ),
     ];
+    let discord_row = playback_rows.len() - 1;
     for index in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 14] {
         playback_rows[index].available &= built_in;
     }
@@ -986,6 +995,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     changed = true;
                 }
             });
+            filtered_row(
+                ui,
+                &palette,
+                &needle,
+                &playback,
+                &playback_rows[discord_row],
+                |ui| {
+                    let mut shown = app.settings.discord_presence;
+                    if widgets::switch(ui, &palette, &discord_presence, &mut shown).changed() {
+                        app.actions.push(Action::SetDiscordPresence(shown));
+                    }
+                },
+            );
             filtered_row(ui, &palette, &needle, &playback, &playback_rows[12], |ui| {
                 if widgets::switch(
                     ui,

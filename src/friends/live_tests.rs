@@ -14,6 +14,7 @@ fn song(title: &str) -> NewPost {
         artwork_url: None,
         duration_ms: 180_000,
         note: String::new(),
+        uri: None,
         to: Vec::new(),
     }
 }
@@ -49,6 +50,10 @@ fn channel(members: &[&str]) -> Channel {
         playing: true,
         at: 1_000,
         queue: vec![entry("two"), entry("three"), entry("four")],
+        locked: false,
+        controllers: Vec::new(),
+        skip_requests: Vec::new(),
+        background: None,
     }
 }
 
@@ -650,10 +655,22 @@ async fn every_request_works_against_a_running_service() {
         .unwrap(),
     );
     assert_eq!(order(&removed), ["three", "two"]);
+    // In a party only the host moves the music, and the service says so.
+    run(
+        &client,
+        &bo,
+        Op::Playback {
+            channel: id.clone(),
+            playing: false,
+            position_ms: 42_000,
+        },
+    )
+    .await
+    .expect_err("a guest cannot pause the party");
     let paused = channel_of(
         run(
             &client,
-            &bo,
+            &ana,
             Op::Playback {
                 channel: id.clone(),
                 playing: false,

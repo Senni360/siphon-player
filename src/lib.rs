@@ -16,6 +16,7 @@ pub mod credits;
 #[cfg(any(test, feature = "demo"))]
 pub mod demo;
 pub mod device_history;
+pub mod discord;
 pub mod downloads;
 pub mod drag_out;
 pub mod emoji;

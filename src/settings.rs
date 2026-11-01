@@ -273,6 +273,12 @@ pub struct Settings {
     /// Whether the group sees what this listener plays. None until they have
     /// been asked: nothing is shared before they say so.
     pub group_sharing: Option<bool>,
+    /// The group being looked at. An id only: what it means comes from the service.
+    pub group_current: Option<String>,
+    /// Whether Discord shows what plays here. Private SoundCloud links never show.
+    pub discord_presence: bool,
+    /// Whether this listener was told about the above, once.
+    pub discord_notice_seen: bool,
     pub gapless: bool,
     /// The output local playback uses: the id of a device
     /// `fastframe_audio::output_devices` lists, or `None` for the system
@@ -477,6 +483,9 @@ impl Default for Settings {
             normalisation: false,
             autoplay: true,
             group_sharing: None,
+            group_current: None,
+            discord_presence: true,
+            discord_notice_seen: false,
             gapless: true,
             audio_device: None,
             local_files_folder: None,

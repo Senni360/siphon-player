@@ -1104,7 +1104,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         18.0,
         dim,
         palette.text,
-        &gettext(app.locale, "Previous"),
+        &locked_hint(app, "Previous"),
     )
     .clicked()
     {
@@ -1161,7 +1161,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         18.0,
         dim,
         palette.text,
-        &gettext(app.locale, "Next"),
+        &locked_hint(app, "Next"),
     )
     .clicked()
     {
@@ -1246,7 +1246,11 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
     } else {
         0.0
     };
-    match thin_slider(
+    // A knob that will not move should look it.
+    if controls_locked(app) {
+        slider_ui.set_opacity(0.45);
+    }
+    let slider_event = thin_slider(
         &mut slider_ui,
         &palette,
         egui::Id::new("seek-slider"),
@@ -1254,7 +1258,16 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         fraction,
         slider_width,
         None,
-    ) {
+    );
+    let event_is_commit = matches!(slider_event, SliderEvent::Committed(_));
+    match slider_event {
+        // In someone else's party the knob stays where the party is.
+        SliderEvent::Dragging(_) | SliderEvent::Committed(_) if controls_locked(app) => {
+            app.seek_preview = None;
+            if event_is_commit {
+                app.actions.push(Action::Seek(position));
+            }
+        }
         SliderEvent::Dragging(value) => app.seek_preview = Some(value),
         SliderEvent::Committed(value) => {
             app.seek_preview = None;
@@ -1708,4 +1721,28 @@ mod island_tests {
         let narrow = island_rect(Rect::from_min_size(strip.min, vec2(600.0, strip.height())));
         assert_eq!(narrow.width(), 600.0 - ISLAND_MARGIN * 2.0);
     }
+}
+
+/// Whether the music here is someone else's to move.
+fn controls_locked(app: &App) -> bool {
+    app.friends_feed
+        .profile
+        .as_ref()
+        .is_some_and(|me| app.live.controls_locked(&me.user_id))
+}
+
+/// A control's tooltip, saying what it does in a party rather than what it usually does.
+fn locked_hint(app: &App, usual: &'static str) -> String {
+    if !controls_locked(app) {
+        return gettext(app.locale, usual).into_owned();
+    }
+    gettext(
+        app.locale,
+        if usual == "Next" {
+            "Ask the host to skip"
+        } else {
+            "Only the host controls the music"
+        },
+    )
+    .into_owned()
 }

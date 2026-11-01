@@ -106,11 +106,32 @@ In the sidebar, SoundCloud is one dropdown that starts collapsed each time Sipho
 opens. Press it for your likes, uploads, playlists and the artists you follow. A
 library search still finds them while it is closed.
 
-The Group page shows what the others are playing, once they agree to share it.
-On anyone listed, **Play song** plays it for you alone and **Join** listens along
-with them, playing what they play. **Start a channel** makes a shared room instead:
-everyone in it can add songs, reorder them, skip and pause, and Spotify, SoundCloud
-and YouTube songs can sit in the same queue. Everyone plays on their own account.
+Your group account is your Spotify account: press **Connect Spotify** on the Group
+page once on each computer, and your groups, name and shares come along. Link
+SoundCloud to it, or unlink either, from the **People** tab. Whoever creates a group
+owns it: they can add and remove people, make a new invite code, make admins, and
+decide who may share, host, add to a queue or invite. A group's page has five tabs:
+**Now**, **Songs**, **Playlists**, **Stats** and **People**.
+
+**Now** shows what the others are playing, once they agree to share it. On anyone
+listed, **Play song** plays it for you alone and **Join** listens along with them.
+**Start a party** makes a shared room with you as its host, and a strip across the top
+of every page says you are in it, whose music it is, and how to leave. Only the host
+moves the music. For guests, seeking, pausing and skipping stay locked until they press
+**Leave**, and Next asks the host to skip instead. Anyone may change the queue: search
+as usual and any song you press joins it instead of playing, with Spotify, SoundCloud
+and YouTube songs side by side. **Use a playlist** picks a whole playlist to play when the
+queue runs out, and the host can share the controls or hand the party over. Everyone
+plays on their own account.
+
+**Songs** is everything shared, searchable by song, artist or person, with conversations
+folded until you open them. **Playlists** shares a whole list with the group, as a copy
+of how it is now, for anyone to save, play or use in a party.
+
+While Discord is open, your profile shows the song you're playing, with a progress bar
+and a link to it, and in a party, how many are listening and a **Join in Siphon** button for
+others in your group. A song from a private SoundCloud link only ever shows as "Listening
+on Encore". Turn it off in the **People** tab.
 
 Its **Stats** tab shows minutes listened by month, top songs, artists, albums and
 genres, streaks and when you listen, for any period, and compares you with friends

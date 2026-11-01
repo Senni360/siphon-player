@@ -166,6 +166,21 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                     egui::ScrollArea::vertical().max_height(height)
                         .show(ui, |ui| soundcloud_connect(app, ui));
                 }
+                Dialog::Confirm { title, message, confirm, action } => {
+                    theme::text(ui, title, theme::bold(20.0), palette.text);
+                    ui.add_space(8.0);
+                    ui.add(egui::Label::new(egui::RichText::new(message).font(theme::regular(14.0)).color(palette.secondary)).wrap());
+                    ui.add_space(20.0);
+                    buttons(ui, |ui| {
+                        if theme::pill_button(ui, &palette, &confirm, true).clicked() {
+                            app.actions.push(*action.clone());
+                            app.actions.push(Action::CloseDialog);
+                        }
+                        if theme::pill_button(ui, &palette, &gettext(locale, "Cancel"), false).clicked() {
+                            app.actions.push(Action::CloseDialog);
+                        }
+                    });
+                }
                 Dialog::PersonalAppIntro => {
                     theme::text(ui, gettext(locale, "Move to your own Spotify app"), theme::bold(20.0), palette.text);
                     ui.add_space(12.0);

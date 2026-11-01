@@ -9,7 +9,9 @@ mod dialogs;
 mod downloads;
 pub(crate) mod friends;
 pub mod group;
+mod group_account;
 mod group_live;
+mod group_playlists;
 mod group_shelf;
 mod group_stats;
 pub mod home;
@@ -20,6 +22,7 @@ pub mod login;
 mod lyrics;
 pub mod new_releases;
 pub mod now_playing;
+pub(crate) mod party_bar;
 pub mod player_bar;
 mod prerelease;
 pub mod queue;
@@ -483,6 +486,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             // page casts a shadow under the header instead.
             ui.spacing_mut().scroll.fade.strength = 0.0;
             topbar::show(app, ui);
+            party_bar::show(app, ui);
             // One banner at a time: a song that will not play matters more
             // than a slow app, which waits its turn.
             if app.dialog.is_none() && page != Page::Settings {

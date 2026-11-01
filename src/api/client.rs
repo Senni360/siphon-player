@@ -185,7 +185,7 @@ impl WebTokens {
     /// A valid access token, refreshing first when it is close to expiry or
     /// when `rejected`, the token a 401 refused, is still the current one. A
     /// request that finds the token already replaced reuses the new one.
-    async fn access_token(&self, rejected: Option<&str>) -> Result<String> {
+    pub(crate) async fn access_token(&self, rejected: Option<&str>) -> Result<String> {
         let mut guard = self.token.lock().await;
         let force = rejected.is_some_and(|token| token == guard.access_token);
         if !self.lease.current() {

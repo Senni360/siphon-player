@@ -823,6 +823,8 @@ pub enum Command {
     Friends(crate::friends::Request),
     /// Listening together with the group, one request at a time.
     Live(crate::friends::live::Request),
+    /// What Discord should show, or nothing. Goes no further than this computer.
+    Discord(Option<crate::discord::Status>),
     StatsRecord {
         plays: Vec<crate::stats::Play>,
         check: bool,
@@ -2210,6 +2212,7 @@ impl PlaylistHeaderLookup {
 struct Worker {
     friends_feed: Option<mpsc::UnboundedSender<(crate::friends::Request, Http)>>,
     live: Option<mpsc::UnboundedSender<crate::friends::live::Request>>,
+    discord: Option<Option<mpsc::UnboundedSender<Option<crate::discord::Status>>>>,
     download_jobs: download_jobs::Jobs,
     track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
@@ -2344,6 +2347,7 @@ impl Worker {
             hybrid: hybrid::HybridRuntime::default(),
             friends_feed: None,
             live: None,
+            discord: None,
             download_jobs: download_jobs::Jobs::default(),
             track_details: track_details::Jobs::default(),
             soloist: None,
@@ -2578,7 +2582,25 @@ impl Worker {
                 continue;
             }
             match command {
-                Command::Friends(request) => {
+                Command::Friends(mut request) => {
+                    // The one moment a Spotify token leaves this computer, and
+                    // only because the person pressed Connect. It proves who they
+                    // are to the group service, which does not keep it.
+                    let connecting =
+                        matches!(request.action, crate::friends::Action::ConnectSpotify);
+                    let tokens = self.web_tokens.iter().flatten().next().cloned();
+                    if connecting && tokens.is_none() {
+                        let _ = self.events.send(Event::Friends(crate::friends::Event {
+                            generation: request.generation,
+                            result: Err("Sign in to Spotify first.".into()),
+                        }));
+                        self.waker.wake();
+                        continue;
+                    }
+                    if connecting {
+                        // A placeholder until the token is back, so nothing waits on it here.
+                        request.action = crate::friends::Action::ConnectWithToken(String::new());
+                    }
                     let tx = self.friends_feed.get_or_insert_with(|| {
                         let events = self.events.clone();
                         let waker = self.waker.clone();
@@ -2590,6 +2612,32 @@ impl Worker {
                     let http = crate::http::build_collection_client(&self.engine_config.proxy)
                         .map(Http::new)
                         .unwrap_or_else(Http::unavailable);
+                    if let (true, Some(tokens)) = (connecting, tokens) {
+                        let tx = tx.clone();
+                        let events = self.events.clone();
+                        let waker = self.waker.clone();
+                        let generation = request.generation;
+                        tokio::spawn(async move {
+                            match tokens.access_token(None).await {
+                                Ok(token) => {
+                                    request.action =
+                                        crate::friends::Action::ConnectWithToken(token);
+                                    let _ = tx.send((request, http));
+                                }
+                                Err(_) => {
+                                    let _ = events.send(Event::Friends(crate::friends::Event {
+                                        generation,
+                                        result: Err(
+                                            "Spotify would not confirm who you are. Try again."
+                                                .into(),
+                                        ),
+                                    }));
+                                    waker.wake();
+                                }
+                            }
+                        });
+                        continue;
+                    }
                     let _ = tx.send((request, http));
                 }
                 Command::StatsRecord { plays, check } => {
@@ -2657,6 +2705,11 @@ impl Worker {
                             log::warn!("genres could not be kept");
                         }
                     });
+                }
+                Command::Discord(status) => {
+                    if let Some(tx) = self.discord.get_or_insert_with(crate::discord::spawn) {
+                        let _ = tx.send(status);
+                    }
                 }
                 Command::Live(request) => {
                     let tx = self.live.get_or_insert_with(|| {

@@ -1231,8 +1231,22 @@ pub struct DragEntry {
     pub image: Option<String>,
 }
 
+/// What a playlist is being read whole for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GroupPlaylistUse {
+    Share { to: Vec<String> },
+    PartyBackground,
+}
+
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    /// Are you sure, for anything that cannot be taken back or that starts by itself.
+    Confirm {
+        title: String,
+        message: String,
+        confirm: String,
+        action: Box<Action>,
+    },
     /// The ordinary playlist picker, opened by an external item request.
     AddToPlaylist {
         request: u64,
@@ -1323,6 +1337,19 @@ pub enum Action {
     Friends(crate::friends::Action),
     /// Listening together with the group. See [`crate::friends::live`].
     Live(crate::friends::live::Action),
+    /// Read a playlist whole, to share it or make it a party's background.
+    GroupPlaylist {
+        uri: String,
+        name: String,
+        purpose: GroupPlaylistUse,
+    },
+    /// A party's link was opened: ask first, then join.
+    JoinPartyLink {
+        group: String,
+        party: String,
+    },
+    SetDiscordPresence(bool),
+    ShowToast(String),
     /// The Group page's statistics.
     Stats(crate::stats::Action),
     /// Download a song a friend shared, by the share's id, so it lands as

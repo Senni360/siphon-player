@@ -30,8 +30,9 @@ const REPLY_AVATAR: f32 = 24.0;
 const COVER: f32 = 56.0;
 /// Room left of a message's body for its avatar.
 const GUTTER: f32 = AVATAR + 12.0;
-/// Replies shown before the rest fold behind "Show all".
-const FOLDED_REPLIES: usize = 2;
+/// Replies shown before the rest fold away: none. A busy thread must not push
+/// the next song off the page, so a conversation opens when asked for.
+const FOLDED_REPLIES: usize = 0;
 
 /// Who a share is about to go to, what is attached and what it says,
 /// kept between frames while the person writes it.
@@ -110,119 +111,303 @@ pub fn unread(app: &App, ctx: &egui::Context) -> usize {
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     let palette = app.palette;
-    let locale = app.locale;
     let ctx = ui.ctx().clone();
     let width = ui.available_width().min(COLUMN);
     let mut actions = Vec::new();
 
     let margin = ((ui.available_width() - width) / 2.0).max(0.0).floor();
     ui.horizontal_top(|ui| {
-    ui.add_space(margin);
-    ui.vertical(|ui| {
-        ui.set_width(width);
-        super::rise(ui, 0, |ui| header(app, ui));
-        ui.add_space(16.0);
-
-        let feed = &app.friends_feed;
-        if feed.profile.is_none() {
-            join(app, ui, &mut actions);
-            return;
-        }
-        let me = feed.profile.clone().unwrap_or_else(|| Profile {
-            user_id: String::new(),
-            display_name: String::new(),
-        });
-        // The feed is read: the newest thing in it is now seen. The line
-        // marking what was new keeps the time from when the page opened.
-        let newest = feed.newest();
-        let seen = ctx
-            .data_mut(|data| data.get_persisted::<u64>(seen_id(&me.user_id)))
-            .unwrap_or(0);
-        let divider = ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(divider_id(), || seen));
-        if newest > seen {
-            ctx.data_mut(|data| data.insert_persisted(seen_id(&me.user_id), newest));
-        }
-
-        if let Some(secret) = feed.recovery_secret.clone() {
-            recovery(ui, &palette, &secret, &mut actions);
+        ui.add_space(margin);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            super::rise(ui, 0, |ui| header(app, ui));
             ui.add_space(16.0);
-        }
-        if feed.recovery_secret.is_none() {
-            ui.horizontal(|ui| {
-                use crate::stats::{Action as Stats, Tab};
-                let tab = app.stats.tab;
-                for (label, each) in [("Listening", Tab::Feed), ("Stats", Tab::Stats)] {
-                    if chip(ui, &palette, &gettext(locale, label), tab == each, Id::new(("group-tab", label)))
-                        .clicked()
-                    {
-                        actions.push(Action::Stats(Stats::Tab(each)));
+
+            let feed = &app.friends_feed;
+            if feed.profile.is_none() {
+                super::group_account::connect(app, ui, &mut actions);
+                return;
+            }
+            let me = feed.profile.clone().unwrap_or_else(|| Profile {
+                user_id: String::new(),
+                display_name: String::new(),
+            });
+            let account = feed.account.clone();
+            if let Some(account) = &account {
+                if account.spotify_id.is_none() {
+                    super::group_account::connect_nudge(app, ui, &mut actions);
+                    ui.add_space(12.0);
+                }
+                if account.groups.is_empty() {
+                    super::group_account::no_group(app, ui, &mut actions);
+                    ui.add_space(12.0);
+                    super::group_account::people(app, ui, &mut actions);
+                    return;
+                }
+                super::group_account::switcher(app, ui, account, &mut actions);
+            }
+            // The feed is read: the newest thing in it is now seen. The line
+            // marking what was new keeps the time from when the page opened.
+            let feed = &app.friends_feed;
+            let newest = feed.newest();
+            let seen = ctx
+                .data_mut(|data| data.get_persisted::<u64>(seen_id(&me.user_id)))
+                .unwrap_or(0);
+            let divider =
+                ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(divider_id(), || seen));
+            if newest > seen {
+                ctx.data_mut(|data| data.insert_persisted(seen_id(&me.user_id), newest));
+            }
+
+            if let Some(secret) = feed.recovery_secret.clone() {
+                recovery(ui, &palette, &secret, &mut actions);
+                ui.add_space(16.0);
+            }
+            let tab = tabs(app, ui, account.is_some(), &mut actions);
+            ui.add_space(16.0);
+            match tab {
+                Tab::Now => {
+                    super::rise(ui, 1, |ui| {
+                        super::group_live::section(app, ui, &me, &mut actions)
+                    });
+                }
+                Tab::Songs => songs(app, ui, &me, divider, &mut actions),
+                Tab::Playlists => super::group_playlists::show(app, ui, &me, &mut actions),
+                Tab::Stats => super::group_stats::show(app, ui, &me, &mut actions),
+                Tab::People => {
+                    if account.is_some() {
+                        super::group_account::people(app, ui, &mut actions);
+                    } else {
+                        identity(app, ui, &me, &mut actions);
                     }
                 }
-            });
-            ui.add_space(16.0);
-        }
-        if app.stats.tab == crate::stats::Tab::Stats {
-            super::group_stats::show(app, ui, &me, &mut actions);
+            }
             ui.add_space(32.0);
-            identity(app, ui, &me, &mut actions);
-            return;
+        });
+    });
+    app.actions.extend(actions);
+}
+
+/// The page's parts. Who is here and what is on first: that is what changes.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum Tab {
+    #[default]
+    Now,
+    Songs,
+    Playlists,
+    Stats,
+    People,
+}
+
+fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Tab {
+    use crate::stats::{Action as Stats, Tab as StatsTab};
+    let palette = app.palette;
+    let locale = app.locale;
+    let id = Id::new("group-tab");
+    let mut tab = ui
+        .data(|data| data.get_temp::<Tab>(id))
+        .unwrap_or_else(demo_tab);
+    // A demo or an older path may already be looking at statistics.
+    if app.stats.tab == StatsTab::Stats && tab != Tab::Stats {
+        tab = Tab::Stats;
+    }
+    ui.horizontal(|ui| {
+        let mut all = vec![(Tab::Now, "Now"), (Tab::Songs, "Songs")];
+        if accounts {
+            all.push((Tab::Playlists, "Playlists"));
         }
-        super::rise(ui, 1, |ui| super::group_live::section(app, ui, &me, &mut actions));
-        super::rise(ui, 1, |ui| composer(app, ui, &me, &mut actions));
-        ui.add_space(20.0);
+        all.push((Tab::Stats, "Stats"));
+        all.push((Tab::People, "People"));
+        for (each, label) in all {
+            if chip(
+                ui,
+                &palette,
+                &gettext(locale, label),
+                tab == each,
+                id.with(label),
+            )
+            .clicked()
+                && tab != each
+            {
+                if each == Tab::Stats {
+                    actions.push(Action::Stats(Stats::Tab(StatsTab::Stats)));
+                } else if tab == Tab::Stats {
+                    actions.push(Action::Stats(Stats::Tab(StatsTab::Feed)));
+                }
+                tab = each;
+            }
+        }
+    });
+    ui.data_mut(|data| data.insert_temp(id, tab));
+    tab
+}
 
-        let filter = super::rise(ui, 2, |ui| filters(ui, &palette));
+/// The tab a demo capture opens on, so a screen can be captured without clicking.
+#[cfg(feature = "demo")]
+fn demo_tab() -> Tab {
+    match std::env::var("SIPHON_DEMO_GROUP_TAB").as_deref() {
+        Ok("songs") => Tab::Songs,
+        Ok("playlists") => Tab::Playlists,
+        Ok("people") => Tab::People,
+        _ => Tab::Now,
+    }
+}
+
+#[cfg(not(feature = "demo"))]
+fn demo_tab() -> Tab {
+    Tab::default()
+}
+
+/// Whether a share answers what was typed: its song, its artists, its note or who sent it.
+fn matches_search(post: &Post, needle: &str) -> bool {
+    let has = |text: &str| text.to_lowercase().contains(needle);
+    has(&post.item.title)
+        || post.item.artists.iter().any(|artist| has(artist))
+        || has(&post.item.note)
+        || has(&post.author_name)
+}
+
+/// Everything ever shared, findable: search it, narrow it to a person, and
+/// conversations stay folded until asked for.
+fn songs(app: &mut App, ui: &mut Ui, me: &Profile, divider: u64, actions: &mut Vec<Action>) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let search_id = Id::new("group-search");
+    let person_id = Id::new("group-person");
+    let compose_id = Id::new("group-compose-open");
+    let mut search = ui
+        .data(|data| data.get_temp::<String>(search_id))
+        .unwrap_or_default();
+    let mut person = ui
+        .data(|data| data.get_temp::<Option<String>>(person_id))
+        .unwrap_or_default();
+    let mut compose = ui
+        .data(|data| data.get_temp::<bool>(compose_id))
+        .unwrap_or(false);
+    ui.horizontal(|ui| {
+        let width = (ui.available_width() - 130.0).max(120.0);
+        ui.allocate_ui(vec2(width, 36.0), |ui| {
+            field(
+                ui,
+                &palette,
+                &mut search,
+                &gettext(locale, "Find a song, artist or person"),
+                false,
+                100,
+            );
+        });
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::Plus),
+            &gettext(locale, "Share a song"),
+            !compose,
+        )
+        .clicked()
+        {
+            compose = !compose;
+        }
+    });
+    ui.data_mut(|data| data.insert_temp(compose_id, compose));
+    ui.add_space(8.0);
+    if compose {
+        composer(app, ui, me, actions);
+        ui.add_space(16.0);
+    }
+    let filter = filters(ui, &palette);
+    let members = app.friends_feed.members.clone();
+    if members.len() > 1 {
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            for member in &members {
+                let selected = person.as_deref() == Some(member.user_id.as_str());
+                if chip(
+                    ui,
+                    &palette,
+                    &member.display_name,
+                    selected,
+                    Id::new(("group-person-chip", &member.user_id)),
+                )
+                .clicked()
+                {
+                    person = if selected {
+                        None
+                    } else {
+                        Some(member.user_id.clone())
+                    };
+                }
+            }
+        });
+    }
+    ui.data_mut(|data| data.insert_temp(person_id, person.clone()));
+    ui.add_space(12.0);
+
+    let feed = &app.friends_feed;
+    if let Some(error) = &feed.error {
+        notice(
+            ui,
+            &palette,
+            Icon::CircleAlert,
+            error,
+            Some((gettext(locale, "Try again").into_owned(), Group::Refresh)),
+            actions,
+        );
         ui.add_space(12.0);
-
-        let feed = &app.friends_feed;
-        if let Some(error) = &feed.error {
+    }
+    let needle = search.trim().to_lowercase();
+    let narrowed = !needle.is_empty() || person.is_some();
+    // Searching means all of it: older pages come in as they are found to be needed.
+    if narrowed && feed.next_cursor.is_some() && !feed.busy {
+        actions.push(Action::Friends(Group::More));
+    }
+    let posts: Vec<Post> = feed
+        .posts
+        .iter()
+        .filter(|post| filter.keeps(post, &me.user_id))
+        .filter(|post| person.as_deref().is_none_or(|id| post.author_id == id))
+        .filter(|post| needle.is_empty() || matches_search(post, &needle))
+        .cloned()
+        .collect();
+    if posts.is_empty() {
+        if feed.busy {
+            skeleton(ui, &palette);
+        } else {
+            let text = if narrowed {
+                "Nothing shared matches that"
+            } else {
+                match filter {
+                    Filter::Everyone => {
+                        "Nothing shared yet. Share a song and it lands here for everyone"
+                    }
+                    Filter::ToYou => "Songs a friend sends only to you show up here",
+                    Filter::FromYou => "What you share shows up here",
+                }
+            };
             notice(
                 ui,
                 &palette,
-                Icon::CircleAlert,
-                error,
-                Some((gettext(locale, "Try again").into_owned(), Group::Refresh)),
-                &mut actions,
+                Icon::Users,
+                &gettext(locale, text),
+                None,
+                actions,
             );
-            ui.add_space(12.0);
         }
-        let posts: Vec<Post> = feed
-            .posts
-            .iter()
-            .filter(|post| filter.keeps(post, &me.user_id))
-            .cloned()
-            .collect();
-        if posts.is_empty() {
-            if feed.busy {
-                skeleton(ui, &palette);
-            } else {
-                let text = match filter {
-                    Filter::Everyone => "Nothing shared yet. Paste a link above, or share what's playing, and it lands here for everyone",
-                    Filter::ToYou => "Songs a friend sends only to you show up here",
-                    Filter::FromYou => "What you share shows up here",
-                };
-                notice(ui, &palette, Icon::Users, &gettext(locale, text), None, &mut actions);
+    } else {
+        feed_list(app, ui, &posts, me, divider, actions);
+    }
+    let feed = &app.friends_feed;
+    if feed.next_cursor.is_some() && filter == Filter::Everyone && !narrowed {
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            ui.add_space(GUTTER);
+            if theme::soft_button(ui, &palette, None, &gettext(locale, "Older shares"), false)
+                .clicked()
+            {
+                actions.push(Action::Friends(Group::More));
             }
-        } else {
-            feed_list(app, ui, &posts, &me, divider, &mut actions);
-        }
-        let feed = &app.friends_feed;
-        if feed.next_cursor.is_some() && filter == Filter::Everyone {
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                ui.add_space(GUTTER);
-                if theme::soft_button(ui, &palette, None, &gettext(locale, "Older shares"), false)
-                    .clicked()
-                {
-                    actions.push(Action::Friends(Group::More));
-                }
-            });
-        }
-        ui.add_space(32.0);
-        identity(app, ui, &me, &mut actions);
-    });
-    });
-    app.actions.extend(actions);
+        });
+    }
+    ui.data_mut(|data| data.insert_temp(search_id, search));
 }
 
 /// The page title, and the members as a stack of initials that spreads
@@ -320,97 +505,6 @@ fn shade_of(palette: &Palette, step: u32) -> Color32 {
         Color32::BLACK
     };
     super::blend(palette.surface_active, toward, 0.04 * step as f32)
-}
-
-/// Before joining: what the group is, and the invite and name to join with.
-fn join(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
-    let palette = app.palette;
-    let locale = app.locale;
-    let feed = &app.friends_feed;
-    let id = Id::new("group-join");
-    let (mut invite, mut name) = ui
-        .data(|data| data.get_temp::<(String, String)>(id))
-        .unwrap_or_default();
-    card(ui, &palette, |ui| {
-        theme::text(
-            ui,
-            gettext(locale, "Join your group"),
-            theme::medium(17.0),
-            palette.text,
-        );
-        ui.add_space(4.0);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(gettext(
-                    locale,
-                    "Your friends' shares from Spotify, SoundCloud and YouTube in one feed, with download and drag-to-DAW on every song. Ask whoever runs the group for the invite code.",
-                ))
-                .font(theme::regular(14.0))
-                .color(palette.secondary),
-            )
-            .wrap(),
-        );
-        ui.add_space(16.0);
-        ui.add_enabled_ui(!feed.busy, |ui| {
-            field(
-                ui,
-                &palette,
-                &mut invite,
-                &gettext(locale, "Invite code"),
-                true,
-                256,
-            );
-            ui.add_space(8.0);
-            field(
-                ui,
-                &palette,
-                &mut name,
-                &gettext(locale, "Your name in the group"),
-                false,
-                40,
-            );
-            ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                let ready = !invite.trim().is_empty() && !name.trim().is_empty();
-                let label = if feed.busy {
-                    gettext(locale, "Joining…")
-                } else {
-                    gettext(locale, "Join")
-                };
-                if ui
-                    .add_enabled_ui(ready, |ui| theme::pill_button(ui, &palette, &label, true))
-                    .inner
-                    .clicked()
-                {
-                    actions.push(Action::Friends(Group::Join {
-                        invite_code: std::mem::take(&mut invite).trim().to_owned(),
-                        display_name: name.trim().to_owned(),
-                    }));
-                }
-                if feed.error.is_some() {
-                    ui.add_space(8.0);
-                    if theme::pill_button(
-                        ui,
-                        &palette,
-                        &gettext(locale, "Retry saved identity"),
-                        false,
-                    )
-                    .clicked()
-                    {
-                        actions.push(Action::Friends(Group::Open));
-                    }
-                }
-            });
-        });
-        if let Some(error) = &feed.error {
-            ui.add_space(10.0);
-            ui.horizontal_wrapped(|ui| {
-                theme::icon(ui, Icon::CircleAlert, 16.0, palette.danger);
-                theme::text(ui, error, theme::regular(13.0), palette.secondary);
-            });
-        }
-    });
-    ui.data_mut(|data| data.insert_temp(id, (invite, name)));
 }
 
 /// A one-line text field in the page's style.
@@ -1864,7 +1958,7 @@ fn thread(
         return;
     }
     ui.add_space(8.0);
-    let all = open || post.replies.len() <= FOLDED_REPLIES + 1;
+    let all = open;
     let shown: Vec<&Reply> = if all {
         post.replies.iter().collect()
     } else {
@@ -1879,9 +1973,9 @@ fn thread(
             ui.add_space(indent);
             let more = post.replies.len() - FOLDED_REPLIES;
             let label = if more == 1 {
-                gettext(locale, "Show 1 earlier reply").into_owned()
+                gettext(locale, "1 reply").into_owned()
             } else {
-                gettext(locale, "Show {n} earlier replies").replace("{n}", &more.to_string())
+                gettext(locale, "{n} replies").replace("{n}", &more.to_string())
             };
             if theme::link(ui, label, theme::medium(12.5), palette.secondary).clicked() {
                 ui.data_mut(|data| data.insert_temp(open_id, true));

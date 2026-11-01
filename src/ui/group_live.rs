@@ -1,6 +1,6 @@
 //! Who in the group is listening to what, and listening with them: play the
-//! song by yourself, listen along with one person who leads, or join a channel
-//! whose queue belongs to everyone in it.
+//! song by yourself, listen along with one person, or join a party, which has
+//! a host at the controls and a queue that belongs to everyone in it.
 
 use egui::{Id, RichText, Sense, Ui, Vec2, vec2};
 
@@ -147,7 +147,7 @@ pub fn section(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Actio
         .presence
         .iter()
         .filter(|p| p.user_id != me.user_id && p.item.is_some())
-        // Those in your own channel are on its card already.
+        // Those in your own party are on its card already.
         .filter(|p| {
             app.live
                 .my_channel()
@@ -195,7 +195,15 @@ pub fn section(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Actio
         );
         ui.add_space(8.0);
     }
-    if !matches!(app.live.session, Session::Channel(_)) {
+    let may_host = app
+        .friends_feed
+        .account
+        .as_ref()
+        .and_then(|account| {
+            account.chosen_group(crate::friends::account::current_group().as_deref())
+        })
+        .is_none_or(|group| group.rights.host);
+    if !matches!(app.live.session, Session::Channel(_)) && may_host {
         start_channel(app, ui, actions);
     }
     ui.add_space(20.0);
@@ -297,6 +305,14 @@ fn channel_card(
                 } else {
                     gettext(locale, "Join")
                 };
+                if mine
+                    && channel.host_id == me.user_id
+                    && theme::soft_button(ui, &palette, None, &gettext(locale, "End party"), false)
+                        .on_hover_text(gettext(locale, "Stops it for everyone"))
+                        .clicked()
+                {
+                    actions.push(Action::Live(Live::End));
+                }
                 if theme::soft_button(ui, &palette, None, &label, !mine).clicked() {
                     actions.push(Action::Live(if mine {
                         Live::Leave
@@ -304,7 +320,16 @@ fn channel_card(
                         Live::JoinChannel(channel.id.clone())
                     }));
                 }
-                let detail = format!("{count} · {}", names.join(", "));
+                let host = if channel.locked {
+                    format!(
+                        "{} {} · ",
+                        gettext(locale, "Hosted by"),
+                        name_of(app, &channel.host_id)
+                    )
+                } else {
+                    String::new()
+                };
+                let detail = format!("{host}{count} · {}", names.join(", "));
                 line(ui, detail, theme::regular(12.5), palette.dim);
             });
         });
@@ -343,7 +368,9 @@ fn channel_card(
         }
         if mine {
             queue(app, ui, channel, me, actions);
-            add = add_song(app, ui, channel);
+            background(app, ui, channel, me, actions);
+            add = add_song(app, ui, channel, actions);
+            guests(app, ui, channel, me, actions);
         } else if !channel.queue.is_empty() {
             ui.add_space(6.0);
             theme::text(
@@ -369,7 +396,7 @@ fn line_fit(ui: &mut Ui, text: &str, font: egui::FontId, color: egui::Color32, w
 
 /// The shared queue. Anyone in the channel may reorder it, remove from it, or
 /// jump to a row.
-fn queue(app: &App, ui: &mut Ui, channel: &Channel, _me: &Profile, actions: &mut Vec<Action>) {
+fn queue(app: &App, ui: &mut Ui, channel: &Channel, me: &Profile, actions: &mut Vec<Action>) {
     let palette = app.palette;
     let locale = app.locale;
     if channel.queue.is_empty() {
@@ -385,8 +412,9 @@ fn queue(app: &App, ui: &mut Ui, channel: &Channel, _me: &Profile, actions: &mut
     ui.add_space(4.0);
     let last = channel.queue.len() - 1;
     let width = ui.available_width();
+    let at_controls = channel.controlled_by(&me.user_id);
     for (index, entry) in channel.queue.iter().enumerate() {
-        queue_row(app, ui, entry, index, last, width, actions);
+        queue_row(app, ui, entry, (index, last), width, at_controls, actions);
     }
 }
 
@@ -394,9 +422,9 @@ fn queue_row(
     app: &App,
     ui: &mut Ui,
     entry: &Entry,
-    index: usize,
-    last: usize,
+    (index, last): (usize, usize),
     width: f32,
+    at_controls: bool,
     actions: &mut Vec<Action>,
 ) {
     let palette = app.palette;
@@ -420,11 +448,13 @@ fn queue_row(
             );
             line(ui, detail, theme::regular(11.5), palette.dim);
         });
-        if response
-            .on_hover_text(gettext(locale, "Play now, for everyone"))
-            .clicked()
-            && !pending
-        {
+        // Jumping to a row is moving the music, so it is for whoever is at the controls.
+        let response = if at_controls {
+            response.on_hover_text(gettext(locale, "Play now, for everyone"))
+        } else {
+            response
+        };
+        if response.clicked() && !pending && at_controls {
             actions.push(Action::Live(Live::PlayEntry(entry.id.clone())));
         }
         ui.add_enabled_ui(!pending, |ui| {
@@ -478,8 +508,104 @@ fn queue_row(
     });
 }
 
-/// A pasted Spotify, SoundCloud or YouTube link becomes the queue's last row.
-fn add_song(app: &mut App, ui: &mut Ui, channel: &Channel) -> Option<NewPost> {
+/// What plays when the queue runs out.
+fn background(app: &App, ui: &mut Ui, channel: &Channel, me: &Profile, actions: &mut Vec<Action>) {
+    let palette = app.palette;
+    let locale = app.locale;
+    ui.add_space(10.0);
+    match &channel.background {
+        Some(list) => {
+            ui.horizontal(|ui| {
+                theme::icon(ui, Icon::ListMusic, 14.0, palette.secondary);
+                let next = list
+                    .upcoming
+                    .first()
+                    .map(|song| format!(" · {} {}", gettext(locale, "next:"), song.title))
+                    .unwrap_or_default();
+                line(
+                    ui,
+                    format!(
+                        "{} · {} {}{next}",
+                        list.name,
+                        list.total,
+                        gettext(locale, "songs in the background")
+                    ),
+                    theme::regular(12.5),
+                    palette.secondary,
+                );
+                if (list.by == me.user_id || channel.controlled_by(&me.user_id))
+                    && theme::icon_button(
+                        ui,
+                        Icon::X,
+                        14.0,
+                        palette.dim,
+                        palette.text,
+                        &gettext(locale, "Remove background playlist"),
+                    )
+                    .clicked()
+                {
+                    actions.push(Action::Live(Live::ClearBackground));
+                }
+            });
+        }
+        None => {
+            theme::text(
+                ui,
+                gettext(
+                    locale,
+                    "No background playlist. When the queue runs out, the music stops",
+                ),
+                theme::regular(12.5),
+                palette.dim,
+            );
+        }
+    }
+}
+
+/// The host's view of who is here: who else may hold the controls, and who takes over.
+fn guests(app: &App, ui: &mut Ui, channel: &Channel, me: &Profile, actions: &mut Vec<Action>) {
+    if !channel.locked || channel.host_id != me.user_id || channel.members.len() < 2 {
+        return;
+    }
+    let palette = app.palette;
+    let locale = app.locale;
+    ui.add_space(10.0);
+    theme::text(
+        ui,
+        gettext(locale, "Guests"),
+        theme::medium(12.5),
+        palette.secondary,
+    );
+    for guest in channel.members.iter().filter(|id| **id != me.user_id) {
+        ui.horizontal(|ui| {
+            line(ui, name_of(app, guest), theme::regular(13.0), palette.text);
+            let mut allowed = channel.controllers.contains(guest);
+            if ui
+                .checkbox(&mut allowed, gettext(locale, "Can control"))
+                .changed()
+            {
+                actions.push(Action::Live(Live::SetController {
+                    user: guest.clone(),
+                    allowed,
+                }));
+            }
+            if theme::soft_button(ui, &palette, None, &gettext(locale, "Make host"), false)
+                .clicked()
+            {
+                actions.push(Action::Live(Live::HandOver(guest.clone())));
+            }
+        });
+    }
+}
+
+/// Everything a person might add: a song found by searching, a whole playlist
+/// as the background, or, for those who have one to hand, a link.
+fn add_song(
+    app: &mut App,
+    ui: &mut Ui,
+    channel: &Channel,
+    actions: &mut Vec<Action>,
+) -> Option<NewPost> {
     let palette = app.palette;
     let locale = app.locale;
     let id = Id::new(("group-channel-add", &channel.id));
@@ -489,6 +615,40 @@ fn add_song(app: &mut App, ui: &mut Ui, channel: &Channel) -> Option<NewPost> {
     ui.add_space(10.0);
     let mut added = None;
     ui.horizontal(|ui| {
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::Search),
+            &gettext(locale, "Find a song"),
+            true,
+        )
+        .on_hover_text(gettext(
+            locale,
+            "Search as usual. Any song you press joins the queue",
+        ))
+        .clicked()
+        {
+            actions.push(Action::FocusSearch);
+        }
+        let button = theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::ListMusic),
+            &gettext(locale, "Use a playlist"),
+            false,
+        )
+        .on_hover_text(gettext(locale, "Plays when the queue runs out"));
+        egui::Popup::menu(&button).show(|ui| {
+            super::group_playlists::playlist_choices(
+                app,
+                ui,
+                crate::model::GroupPlaylistUse::PartyBackground,
+                actions,
+            );
+        });
+    });
+    ui.add_space(6.0);
+    ui.horizontal(|ui| {
         let width = (ui.available_width() - 72.0).max(80.0);
         let submitted = ui
             .allocate_ui(vec2(width, 36.0), |ui| {
@@ -496,7 +656,7 @@ fn add_song(app: &mut App, ui: &mut Ui, channel: &Channel) -> Option<NewPost> {
                     ui,
                     &palette,
                     &mut text,
-                    &gettext(locale, "Paste a song link, or use Add to queue anywhere"),
+                    &gettext(locale, "Or paste a song link"),
                     false,
                     4096,
                 );
@@ -558,12 +718,12 @@ fn start_channel(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
             ui,
             &palette,
             Some(Icon::Users),
-            &gettext(locale, "Start a channel"),
+            &gettext(locale, "Start a party"),
             false,
         )
         .on_hover_text(gettext(
             locale,
-            "A shared queue: everyone who joins can add songs, reorder them, skip and pause",
+            "You run the music. Everyone who joins hears the same thing, and can add to and reorder the queue",
         ))
         .clicked()
         {
@@ -583,7 +743,7 @@ fn start_channel(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
                     ui,
                     &palette,
                     &mut name,
-                    &gettext(locale, "Channel name"),
+                    &gettext(locale, "Party name"),
                     false,
                     60,
                 );

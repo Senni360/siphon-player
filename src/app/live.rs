@@ -1,9 +1,12 @@
 //! Drives this computer's player from the group's listening session, and
 //! tells the group what plays here.
 //!
-//! Listening along follows one member: whatever they do plays here too, and
-//! touching the controls here means leaving. In a channel the controls change
-//! what plays for everyone in it, and the queue belongs to all of them.
+//! Listening along follows one member: whatever they do plays here too. A
+//! party has one host at the controls, and everyone may add to its queue.
+//! For anyone not at the controls, seeking, skipping, pausing and playing
+//! something else stay locked until they press Leave: nobody drifts out of a
+//! session by accident, and a song pressed in a party joins its queue instead.
+//! Parties from older clients stay open to everyone in them.
 use super::*;
 use crate::friends::NewPost;
 use crate::friends::live::{
@@ -94,7 +97,7 @@ impl App {
 
     /// What plays here, as the group would be told or a channel would queue it.
     /// None for what has no share link: an episode or a local file.
-    fn live_item(&self, now: &NowPlaying) -> Option<NewPost> {
+    pub(super) fn live_item(&self, now: &NowPlaying) -> Option<NewPost> {
         if now.is_episode {
             return None;
         }
@@ -124,6 +127,34 @@ impl App {
     fn live_item_of(&self, uri: &str, label: &str) -> Option<NewPost> {
         let track = self.hybrid_track(uri, Some(label));
         NewPost::from_item(&PlayableItem::Track(track)).ok()
+    }
+
+    /// The song a play action names, when it names one.
+    fn live_song_of(&self, action: &Action) -> Option<NewPost> {
+        let uri = match action {
+            Action::PlayUris { uris, index } => uris.get(*index as usize).cloned(),
+            Action::PlayFromRow { uri, .. } => Some(uri.clone()),
+            Action::PlayContext {
+                offset_uri: Some(uri),
+                ..
+            } => Some(uri.clone()),
+            Action::OpenLink(uri) if uri.starts_with("spotify:track:") => Some(uri.clone()),
+            Action::PlayEpisode { .. } => None,
+            _ => None,
+        }?;
+        // Without a name a song is nothing to show in a queue; the service refuses it too.
+        let track = self.hybrid_track(&uri, None);
+        if track.name.is_empty() || track.name == uri {
+            return None;
+        }
+        NewPost::from_item(&PlayableItem::Track(track)).ok()
+    }
+
+    /// Says what is locked and offers the way out, which is always Leave.
+    fn live_locked_notice(&mut self, message: &'static str) {
+        let message = gettext(self.locale, message).into_owned();
+        let leave = gettext(self.locale, "Leave").into_owned();
+        self.toast_with(message, leave, Action::Live(live::Action::Leave));
     }
 
     pub(super) fn live_action(&mut self, action: live::Action) {
@@ -185,6 +216,55 @@ impl App {
                 self.live_send(Op::Join(id));
             }
             live::Action::Add(item, place) => self.live_add(&me, item, place, now_ms),
+            live::Action::End => {
+                let Some(channel) = self.live.end_party() else {
+                    return;
+                };
+                self.live_driver.loaded = None;
+                self.live_driver.ended = None;
+                if channel != PENDING_CHANNEL {
+                    self.live_send(Op::End(channel));
+                }
+            }
+            live::Action::RequestSkip(asking) => {
+                let Some(channel) = self.live_channel_id() else {
+                    return;
+                };
+                self.live.ask_skip(&me, asking);
+                self.live_send(Op::SkipRequest { channel, asking });
+            }
+            live::Action::HandOver(user) => {
+                let Some(channel) = self.live_channel_id() else {
+                    return;
+                };
+                self.live.hand_over(&user);
+                self.live_send(Op::Host { channel, user });
+            }
+            live::Action::SetController { user, allowed } => {
+                let Some(channel) = self.live_channel_id() else {
+                    return;
+                };
+                let users = self.live.set_controller(&user, allowed);
+                self.live_send(Op::Controllers { channel, users });
+            }
+            live::Action::SetBackground { name, items } => {
+                let Some(channel) = self.live_channel_id() else {
+                    return;
+                };
+                self.live.set_background(&me, &name, &items);
+                self.live_send(Op::SetBackground {
+                    channel,
+                    name,
+                    items,
+                });
+            }
+            live::Action::ClearBackground => {
+                let Some(channel) = self.live_channel_id() else {
+                    return;
+                };
+                self.live.clear_background();
+                self.live_send(Op::ClearBackground(channel));
+            }
             live::Action::Remove(entry) => {
                 let Some(channel) = self.live_channel_id() else {
                     return;
@@ -260,6 +340,17 @@ impl App {
         self.live_driver.ended = None;
     }
 
+    /// Looking at another group ends what was live in the old one, here. The
+    /// service is not told: this request would name the new group, and the old
+    /// seat goes by itself or is given up on the way back.
+    pub(super) fn live_group_changed(&mut self) {
+        self.live.session = Session::Alone;
+        self.live.snapshot = live::Snapshot::default();
+        self.live_driver.loaded = None;
+        self.live_driver.ended = None;
+        self.live_read_now();
+    }
+
     /// Leaving the group ends everything live, and its identity with it.
     pub(super) fn live_forget(&mut self) {
         self.live.reset();
@@ -319,17 +410,70 @@ impl App {
                             | Action::SeekBy(_)
                     )
                 {
-                    self.live_leave_session(&me);
-                    self.toast(gettext(self.locale, "Stopped listening along"));
+                    self.live_locked_notice(
+                        "You're listening along. Leave to choose your own music",
+                    );
+                    return true;
                 }
                 false
             }
             Session::Channel(id) => {
                 let now = self.live.server_now(wall_ms());
-                if starts_playback {
+                let open = self.live.my_channel().is_none_or(|c| !c.locked);
+                if starts_playback && open {
                     self.live_leave_session(&me);
                     self.toast(gettext(self.locale, "Left the channel"));
                     return false;
+                }
+                let at_controls = self.live.my_channel().is_some_and(|c| c.controlled_by(&me));
+                if starts_playback {
+                    // Pressing play in a party adds the song. It never pulls
+                    // anyone out, and it never cuts off what the room is hearing.
+                    match self.live_song_of(action) {
+                        Some(item) => {
+                            let title = item.title.clone();
+                            self.live_add(&me, item, Place::End, now);
+                            self.toast(format!(
+                                "{} {title}",
+                                gettext(self.locale, "Added to the party:")
+                            ));
+                        }
+                        None => self.live_locked_notice(
+                            "In a party, songs go in the queue one at a time. Use a playlist's menu to make it the background",
+                        ),
+                    }
+                    return true;
+                }
+                if !at_controls {
+                    match action {
+                        Action::Next => {
+                            let asked = self
+                                .live
+                                .my_channel()
+                                .is_some_and(|c| c.skip_requests.contains(&me));
+                            if asked {
+                                self.toast(gettext(
+                                    self.locale,
+                                    "You already asked the host to skip",
+                                ));
+                            } else {
+                                self.live_action(live::Action::RequestSkip(true));
+                                self.toast(gettext(
+                                    self.locale,
+                                    "Asked the host to skip this song",
+                                ));
+                            }
+                            return true;
+                        }
+                        Action::TogglePlay
+                        | Action::Previous
+                        | Action::Seek(_)
+                        | Action::SeekBy(_) => {
+                            self.live_locked_notice("Only the host controls the music");
+                            return true;
+                        }
+                        _ => {}
+                    }
                 }
                 let channel_playing = self.live.my_channel().is_some_and(|c| c.playing);
                 match action {
@@ -431,8 +575,9 @@ impl App {
             }
             Outcome::ChannelGone => {
                 self.live_driver.loaded = None;
-                self.toast(gettext(self.locale, "The channel ended"));
+                self.toast(gettext(self.locale, "The party ended"));
             }
+            Outcome::StaleSeat(channel) => self.live_send(Op::LeaveChannel(channel)),
             Outcome::WriteFailed(error) => {
                 self.toast_error(error);
                 self.live_read_now();
@@ -743,6 +888,7 @@ mod tests {
             artwork_url: None,
             duration_ms: 180_000,
             note: String::new(),
+            uri: None,
             to: Vec::new(),
         }
     }
@@ -787,7 +933,18 @@ mod tests {
             playing: true,
             at: wall_ms(),
             queue: vec![entry("22222222-0000-0000-0000-000000000002")],
+            locked: false,
+            controllers: vec![],
+            skip_requests: vec![],
+            background: None,
         }
+    }
+
+    /// In a party Ana hosts.
+    fn in_party(name: &str) -> App {
+        let mut app = in_channel(name);
+        app.live.snapshot.channels[0].locked = true;
+        app
     }
 
     fn in_channel(name: &str) -> App {
@@ -856,7 +1013,7 @@ mod tests {
     }
 
     #[test]
-    fn the_controls_leave_when_listening_along() {
+    fn the_controls_are_locked_while_listening_along_until_leaving() {
         for action in [
             Action::TogglePlay,
             Action::Next,
@@ -868,9 +1025,145 @@ mod tests {
             },
         ] {
             let mut app = following("live-follow-controls");
-            assert!(!app.live_intercept(&action), "the action still applies");
-            assert_eq!(app.live.session, Session::Alone);
+            assert!(app.live_intercept(&action), "it goes no further");
+            assert_eq!(
+                app.live.session,
+                Session::Following(ANA.into()),
+                "nobody drops out by touching a control"
+            );
         }
+    }
+
+    #[test]
+    fn a_guest_in_a_party_cannot_move_the_music_and_stays_in() {
+        for action in [
+            Action::TogglePlay,
+            Action::Previous,
+            Action::Seek(5),
+            Action::SeekBy(5_000),
+        ] {
+            let mut app = in_party("live-party-locked");
+            assert!(app.live_intercept(&action));
+            assert_eq!(app.live.session, Session::Channel(CHANNEL.into()));
+            assert_eq!(app.live.my_channel().unwrap().position_ms, 20_000);
+            assert!(ops(&app).is_empty(), "nothing reaches the service");
+        }
+    }
+
+    #[test]
+    fn next_from_a_guest_asks_the_host_once() {
+        let mut app = in_party("live-party-skip");
+        assert!(app.live_intercept(&Action::Next));
+        assert!(matches!(
+            ops(&app).as_slice(),
+            [Op::SkipRequest { asking: true, .. }]
+        ));
+        assert_eq!(
+            app.live.my_channel().unwrap().skip_requests,
+            [ME.to_owned()]
+        );
+        assert!(app.live_intercept(&Action::Next));
+        assert!(ops(&app).is_empty(), "asking twice changes nothing");
+        assert_eq!(
+            app.live.my_channel().unwrap().current.as_ref().unwrap().id,
+            "11111111-0000-0000-0000-000000000001",
+            "the song plays on"
+        );
+    }
+
+    #[test]
+    fn playing_a_song_in_a_party_adds_it_and_cuts_nothing_off() {
+        let mut app = in_party("live-party-add");
+        app.track_cache.insert(
+            "abc".into(),
+            crate::api::models::Track {
+                id: Some("abc".into()),
+                uri: "spotify:track:abc".into(),
+                name: "Abc".into(),
+                ..Default::default()
+            },
+        );
+        let action = Action::PlayUris {
+            uris: vec!["spotify:track:abc".into()],
+            index: 0,
+        };
+        assert!(app.live_intercept(&action), "nothing plays here by itself");
+        let channel = app.live.my_channel().unwrap();
+        assert_eq!(channel.queue.last().unwrap().item.title, "Abc");
+        assert_eq!(
+            channel.current.as_ref().unwrap().id,
+            "11111111-0000-0000-0000-000000000001"
+        );
+        assert_eq!(app.live.session, Session::Channel(CHANNEL.into()));
+        assert!(matches!(
+            ops(&app).as_slice(),
+            [Op::Add {
+                place: Place::End,
+                ..
+            }]
+        ));
+    }
+
+    #[test]
+    fn a_whole_album_pressed_in_a_party_adds_nothing_and_leaves_nobody() {
+        let mut app = in_party("live-party-context");
+        let action = Action::PlayContext {
+            uri: "spotify:album:abc".into(),
+            offset_uri: None,
+            offset_index: None,
+        };
+        assert!(app.live_intercept(&action));
+        assert_eq!(app.live.session, Session::Channel(CHANNEL.into()));
+        assert!(ops(&app).is_empty());
+    }
+
+    #[test]
+    fn the_host_of_a_party_moves_it_for_everyone() {
+        let mut app = in_party("live-party-host");
+        app.live.snapshot.channels[0].host_id = ME.into();
+        assert!(app.live_intercept(&Action::Seek(42_000)));
+        assert_eq!(app.live.my_channel().unwrap().position_ms, 42_000);
+        assert!(matches!(ops(&app).as_slice(), [Op::Playback { .. }]));
+    }
+
+    #[test]
+    fn a_guest_handed_the_controls_can_use_them() {
+        let mut app = in_party("live-party-controller");
+        app.live.snapshot.channels[0].controllers = vec![ME.into()];
+        assert!(!app.live.controls_locked(ME));
+        assert!(app.live_intercept(&Action::TogglePlay));
+        assert!(matches!(ops(&app).as_slice(), [Op::Playback { .. }]));
+    }
+
+    #[test]
+    fn leaving_hands_the_controls_back() {
+        let mut app = in_party("live-party-leave");
+        assert!(app.live.controls_locked(ME));
+        app.live_action(live::Action::Leave);
+        assert!(!app.live.controls_locked(ME));
+        assert!(!app.live_intercept(&Action::TogglePlay));
+    }
+
+    #[test]
+    fn a_seat_left_from_an_earlier_run_is_given_up_without_playing() {
+        let mut app = app("live-stale-seat");
+        app.live.snapshot.channels = vec![channel()];
+        let mut request = app.live.read().unwrap();
+        request.generation = 0;
+        let outcome = app.live.receive(
+            crate::friends::live::test_answer(
+                0,
+                Ok(crate::friends::live::Update::Snapshot(Snapshot {
+                    now: wall_ms(),
+                    presence: vec![],
+                    channels: vec![channel()],
+                })),
+            ),
+            ME,
+        );
+        assert_eq!(outcome, Outcome::StaleSeat(CHANNEL.into()));
+        assert_eq!(app.live.session, Session::Alone);
+        assert!(app.live_driver.loaded.is_none());
     }
 
     #[test]

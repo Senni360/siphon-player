@@ -42,6 +42,10 @@ pub struct NewPost {
     pub duration_ms: u32,
     #[serde(default)]
     pub note: String,
+    /// What the player calls this song, carried for lists: a SoundCloud link
+    /// alone names no row a saved copy could hold.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
     /// The members a share was sent to. Empty: the whole group.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub to: Vec<String>,
@@ -108,7 +112,47 @@ impl NewPost {
             artwork_url: item.image(300).map(str::to_owned),
             duration_ms: item.duration_ms(),
             note: String::new(),
+            uri: Some(uri.to_owned()),
             to: Vec::new(),
+        })
+    }
+
+    /// A row for a playlist or a queue here, from what a friend's app said of it.
+    pub fn to_track(&self) -> Option<crate::api::models::Track> {
+        use crate::api::models::{Album, ArtistRef, ExternalUrls, Image, Track};
+        let uri = self.uri.clone().or_else(|| crate::link::parse(&self.url))?;
+        // Only a song's URI makes a row; a link still waiting to be resolved does not.
+        if !(uri.starts_with("spotify:track:")
+            || uri.starts_with("soundcloud:")
+            || uri.starts_with("youtube:video:"))
+        {
+            return None;
+        }
+        Some(Track {
+            id: uri.strip_prefix("spotify:track:").map(str::to_owned),
+            name: self.title.clone(),
+            uri,
+            duration_ms: self.duration_ms,
+            artists: self
+                .artists
+                .iter()
+                .map(|name| ArtistRef {
+                    name: name.clone(),
+                    ..ArtistRef::default()
+                })
+                .collect(),
+            album: self.artwork_url.as_ref().map(|url| Album {
+                images: vec![Image {
+                    url: url.clone(),
+                    width: None,
+                    height: None,
+                }],
+                ..Album::default()
+            }),
+            external_urls: ExternalUrls {
+                spotify: Some(self.url.clone()),
+            },
+            ..Track::default()
         })
     }
 
@@ -122,6 +166,7 @@ impl NewPost {
             artwork_url: None,
             duration_ms: 0,
             note: String::new(),
+            uri: None,
             to: Vec::new(),
         }
     }
@@ -182,6 +227,10 @@ pub struct Feed {
     /// The group's members, when this read asked for them too.
     #[serde(skip)]
     pub members: Option<Vec<Profile>>,
+    #[serde(skip)]
+    pub account: Option<super::account::Account>,
+    #[serde(skip)]
+    pub shared_playlists: Vec<super::account::SharedPlaylist>,
 }
 
 #[derive(Clone)]
@@ -251,6 +300,9 @@ impl Client {
             }
             request = request.bearer_auth(&identity.secret);
         }
+        if let Some(group) = super::account::current_group() {
+            request = request.header("X-Siphon-Group", group);
+        }
         if let Some(body) = body {
             request = request.json(&body);
         }
@@ -262,8 +314,9 @@ impl Client {
         if !status.is_success() {
             // Never display arbitrary server errors, URLs, or authorization responses.
             return Err(match status.as_u16() {
-                401 => "Friends sign-in is no longer valid. Leave and join again.",
-                403 => "The invite code is incorrect, or this post belongs to someone else.",
+                401 => "Your sign-in here is no longer valid. Connect Spotify again.",
+                403 => "That isn't allowed: the code is wrong, or only an admin can do it.",
+                404 => "That group or song is gone.",
                 429 => "Friends is receiving too many requests. Try again later.",
                 400 | 413 | 415 => {
                     "Check the name, link and note. The service rejected this request."

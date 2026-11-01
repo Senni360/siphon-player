@@ -2,6 +2,7 @@
 
 mod download_actions;
 mod extension_bridge;
+mod group;
 mod hybrid;
 mod live;
 pub(crate) mod playlist_sources;
@@ -527,6 +528,10 @@ pub struct App {
     pub mixed_filters: HashMap<String, String>,
     pub playlist_sources_revision: u64,
     pending_mixed_imports: HashSet<String>,
+    /// Spotify playlists being read whole, to share or to make a party's background.
+    pending_group_playlists: HashMap<String, (String, crate::model::GroupPlaylistUse)>,
+    discord_last: Option<(Instant, Option<crate::discord::Status>)>,
+    discord_paused_at: Option<Instant>,
     pending_soundcloud_adds: HashMap<u64, playlist_sources::PendingSoundCloudAdd>,
     /// Current track timing used to decide when a play counts.
     listening: Option<Listening>,
@@ -1240,6 +1245,9 @@ impl App {
             mixed_filters: HashMap::new(),
             playlist_sources_revision: 0,
             pending_mixed_imports: HashSet::new(),
+            pending_group_playlists: HashMap::new(),
+            discord_last: None,
+            discord_paused_at: None,
             pending_soundcloud_adds: HashMap::new(),
             listening: None,
             recents: crate::model::CursorList::default(),
@@ -2828,6 +2836,7 @@ impl App {
                 Event::Stats(update) => self.handle_stats_update(update),
                 Event::Friends(event) => {
                     self.friends_feed.receive(event);
+                    self.group_after_event();
                     // A write made while another ran goes out now.
                     if let Some(request) = self.friends_feed.next_request() {
                         self.backend.send(Command::Friends(request));
@@ -4503,6 +4512,7 @@ impl App {
             && self.user.is_some()
         {
             self.group_opened = true;
+            self.group_restore_choice();
             self.actions
                 .push(Action::Friends(crate::friends::Action::Open));
         }
@@ -6393,6 +6403,7 @@ impl App {
                 let restart_from_top = self.playlist_pages.get(&id).is_some_and(|page| {
                     page.items.base_offset > 0
                         && (self.pending_mixed_imports.contains(&id)
+                            || self.pending_group_playlists.contains_key(&id)
                             || self.playlist_overlay.has_overlay(&id)
                             || !page.filter.trim().is_empty()
                             || self.table_sorts.contains_key(&Page::Playlist(id.clone())))
@@ -8509,7 +8520,9 @@ impl App {
                 if self.table_sorts.contains_key(&Page::Playlist(id.clone()))
                     || self.playlist_overlay.has_overlay(&id)
                     || self.pending_mixed_imports.contains(&id)
+                    || self.pending_group_playlists.contains_key(&id)
                 {
+                    self.group_playlists_loaded(&id);
                     if self.pending_mixed_imports.contains(&id)
                         && self
                             .playlist_pages
@@ -12000,6 +12013,16 @@ impl App {
                 self.live_action(action);
             }
             Action::Stats(action) => self.stats_action(action),
+            Action::GroupPlaylist { uri, name, purpose } => {
+                self.group_playlist(uri, name, purpose);
+            }
+            Action::JoinPartyLink { group, party } => self.join_party_link(group, party),
+            Action::SetDiscordPresence(on) => {
+                self.settings.discord_presence = on;
+                self.mark_settings_dirty();
+                self.discord_tick(true);
+            }
+            Action::ShowToast(message) => self.toast(message),
             Action::Friends(action) => {
                 if matches!(
                     action,
@@ -12048,6 +12071,12 @@ impl App {
             Action::OpenUri(uri) => {
                 if let Some(page) = Page::from_uri(&uri) {
                     self.open(page);
+                }
+            }
+            Action::OpenLink(uri) if crate::link::party(&uri).is_some() => {
+                self.actions.push(Action::ShowWindow);
+                if let Some((group, party)) = crate::link::party(&uri) {
+                    self.join_party_link(group, party);
                 }
             }
             Action::OpenLink(uri) => {
@@ -13984,6 +14013,7 @@ impl App {
             && self.budget != crate::power::Budget::Background
             && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
         self.live_tick(ctx, looking);
+        self.discord_tick(false);
         self.stats_tick(looking);
         if let Some(url) = self.group_pick_art.take() {
             self.backend.art().prefetch(ctx, &url);

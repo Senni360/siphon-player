@@ -38,10 +38,73 @@ pub fn register_player() {
     #[cfg(windows)]
     if let Ok(worker) = std::thread::Builder::new()
         .name("extension-discovery".into())
-        .spawn(register_windows_player)
+        .spawn(|| {
+            register_windows_player();
+            register_windows_links();
+        })
     {
         let _ = worker.join();
     }
+}
+
+/// Lets `siphon://` links, such as Join on a Discord profile, reach this app
+/// without an installer: preview builds are unpacked from a zip.
+#[cfg(windows)]
+pub(crate) fn register_windows_links() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::System::Registry::{
+        HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
+        RegCreateKeyExW, RegSetValueExW,
+    };
+    let Ok(exe) = std::env::current_exe() else {
+        return;
+    };
+    let wide = |text: &str| -> Vec<u16> { text.encode_utf16().chain(Some(0)).collect() };
+    let command: Vec<u16> = {
+        let mut text: Vec<u16> = wide("\"");
+        text.pop();
+        text.extend(exe.as_os_str().encode_wide());
+        text.extend("\" \"%1\"\0".encode_utf16());
+        text
+    };
+    let root = wide("Software\\Classes\\siphon");
+    let open = wide("Software\\Classes\\siphon\\shell\\open\\command");
+    let about = wide("URL:Siphon");
+    let protocol = wide("URL Protocol");
+    let empty = wide("");
+    let set = |key: &[u16], name: *const u16, value: &[u16]| {
+        let mut handle = std::ptr::null_mut();
+        // SAFETY: Every string is NUL-terminated UTF-16; all pointers remain
+        // valid for the calls, and an opened handle is closed on this thread.
+        unsafe {
+            if RegCreateKeyExW(
+                HKEY_CURRENT_USER,
+                key.as_ptr(),
+                0,
+                std::ptr::null(),
+                REG_OPTION_NON_VOLATILE,
+                KEY_SET_VALUE,
+                std::ptr::null(),
+                &mut handle,
+                std::ptr::null_mut(),
+            ) != 0
+            {
+                return;
+            }
+            let _ = RegSetValueExW(
+                handle,
+                name,
+                0,
+                REG_SZ,
+                value.as_ptr().cast(),
+                std::mem::size_of_val(value) as u32,
+            );
+            RegCloseKey(handle);
+        }
+    };
+    set(&root, std::ptr::null(), &about);
+    set(&root, protocol.as_ptr(), &empty);
+    set(&open, std::ptr::null(), &command);
 }
 
 #[cfg(windows)]
