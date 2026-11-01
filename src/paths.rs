@@ -246,6 +246,10 @@ impl AppDirs {
     }
 
     /// Upload titles Jev read as artist and song. See [`crate::retitle`].
+    pub fn listening_dir(&self) -> PathBuf {
+        self.state.join("listening")
+    }
+
     pub fn retitles_file(&self) -> PathBuf {
         self.state.join("retitles.json")
     }

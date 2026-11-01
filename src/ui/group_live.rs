@@ -110,7 +110,7 @@ pub fn section(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Actio
                 egui::Label::new(
                     RichText::new(gettext(
                         locale,
-                        "Friends see your song while you play it, and can listen along with you. You can change this any time in your group settings.",
+                        "Friends see your song while you play it and your listening stats, and can listen along with you. You can change this any time in your group settings.",
                     ))
                     .font(theme::regular(13.0))
                     .color(palette.secondary),

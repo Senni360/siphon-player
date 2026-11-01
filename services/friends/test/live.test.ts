@@ -153,6 +153,38 @@ test('leaving the group leaves nothing live behind', async () => {
   assert.equal((await call(a.secret, 'GET', '/live')).status, 401);
 });
 
+const shared = { month: '2026-11', minutes: 120, plays: 30, songs: [{ name: 'One', detail: 'Artist', art: 'https://i.scdn.co/image/a', uri: 'spotify:track:a', plays: 3, minutes: 9 }], artists: [], genres: [], hours: new Array(24).fill(0) };
+
+test('members see each other\'s shared totals until they take them back', async () => {
+  const { call, join } = group();
+  const a = await join('A'); const b = await join('B');
+  assert.deepEqual((await call(b.secret, 'GET', '/live/stats/month')).body.stats, []);
+  assert.equal((await call(a.secret, 'PUT', '/live/stats/month', { summary: shared })).status, 200);
+  const seen = (await call(b.secret, 'GET', '/live/stats/month')).body.stats;
+  assert.equal(seen[0].user_id, a.id);
+  assert.equal(seen[0].summary.minutes, 120);
+  assert.equal(seen[0].summary.songs[0].name, 'One');
+  assert.deepEqual((await call(b.secret, 'GET', '/live/stats/all')).body.stats, []);
+  await call(a.secret, 'DELETE', '/live/stats');
+  assert.deepEqual((await call(b.secret, 'GET', '/live/stats/month')).body.stats, []);
+  assert.equal((await call(b.secret, 'GET', '/live/stats/week')).status, 404);
+});
+
+test('shared totals are checked and do not outlast leaving', async () => {
+  const { call, join } = group();
+  const a = await join('A'); const b = await join('B');
+  for (const summary of [
+    null,
+    { ...shared, minutes: -1 },
+    { ...shared, songs: new Array(21).fill(shared.songs[0]) },
+    { ...shared, songs: [{ ...shared.songs[0], art: 'http://insecure.example/a' }] },
+    { ...shared, hours: new Array(25).fill(0) },
+  ]) assert.equal((await call(a.secret, 'PUT', '/live/stats/all', { summary })).status, 400);
+  await call(a.secret, 'PUT', '/live/stats/all', { summary: shared });
+  await call(a.secret, 'DELETE', '/me');
+  assert.deepEqual((await call(b.secret, 'GET', '/live/stats/all')).body.stats, []);
+});
+
 test('a live read costs no read of the group document once known', async () => {
   let now = 1_000_000;
   class Counting extends MemoryStorage {

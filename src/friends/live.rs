@@ -160,6 +160,12 @@ pub enum Op {
         entry: String,
         index: usize,
     },
+    PutStats {
+        period: &'static str,
+        summary: Box<crate::stats::Summary>,
+    },
+    GetStats(&'static str),
+    DeleteStats,
     /// Forget this device's identity: the group was left.
     Forget,
 }
@@ -192,7 +198,20 @@ pub enum Update {
     Snapshot(Snapshot),
     Channel(Option<Box<Channel>>, u64),
     Now(u64),
+    Stats(&'static str, Vec<MemberStats>),
     Nothing,
+}
+
+/// A member's totals for one period, as they shared them.
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub struct MemberStats {
+    pub user_id: String,
+    pub summary: crate::stats::Summary,
+}
+
+#[derive(Deserialize)]
+struct StatsAnswer {
+    stats: Vec<MemberStats>,
 }
 
 #[derive(Debug)]
@@ -239,6 +258,8 @@ pub enum Outcome {
 pub struct Model {
     pub snapshot: Snapshot,
     pub session: Session,
+    /// The group's shared totals, by the service's name for the period.
+    pub group_stats: std::collections::HashMap<&'static str, Vec<MemberStats>>,
     /// The service's clock minus this computer's, in milliseconds.
     offset_ms: i64,
     best_trip: Option<u64>,
@@ -577,6 +598,10 @@ impl Model {
                 self.snapshot.now = now;
                 Outcome::Nothing
             }
+            Ok(Update::Stats(period, stats)) => {
+                self.group_stats.insert(period, stats);
+                Outcome::Nothing
+            }
             Ok(Update::Nothing) => Outcome::Nothing,
         }
     }
@@ -733,6 +758,36 @@ pub(super) async fn run(client: &Client, identity: &Identity, op: Op) -> Result<
                 serde_json::json!({ "index": index }),
             )
             .await
+        }
+        Op::PutStats { period, summary } => {
+            let answer: NowAnswer = client
+                .request(
+                    Method::PUT,
+                    &format!("/live/stats/{period}"),
+                    Some(identity),
+                    Some(serde_json::json!({ "summary": summary })),
+                    None,
+                )
+                .await?;
+            Ok(Update::Now(answer.now))
+        }
+        Op::GetStats(period) => {
+            let answer: StatsAnswer = client
+                .request(
+                    Method::GET,
+                    &format!("/live/stats/{period}"),
+                    Some(identity),
+                    None,
+                    None,
+                )
+                .await?;
+            Ok(Update::Stats(period, answer.stats))
+        }
+        Op::DeleteStats => {
+            let answer: NowAnswer = client
+                .request(Method::DELETE, "/live/stats", Some(identity), None, None)
+                .await?;
+            Ok(Update::Now(answer.now))
         }
         Op::Forget => Ok(Update::Nothing),
     }

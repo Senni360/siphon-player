@@ -120,6 +120,13 @@ make 120 live reads and 60 live writes a minute per instance.
 | `DELETE /api/live/channels/:id/queue/:entry` | -> `{now, channel}`. |
 | `POST /api/live/channels/:id/queue/:entry/move` | `{index}` -> `{now, channel}`. |
 
+| `PUT /api/live/stats/month`, `/all` | `{summary}` -> `{now}`. A member's totals: this month's kept 40 days, all time's 400. |
+| `GET /api/live/stats/month`, `/all` | `{now, stats: [{user_id, summary}]}`, for everyone who shared. |
+| `DELETE /api/live/stats` | Take your totals back -> `{now}`. Also happens on leaving. |
+
+`summary` is `{month, minutes, plays, songs, artists, genres, hours}`: the top
+20 songs and artists and 10 genres at most, never individual plays.
+
 `item` is one playable song, the share payload without album or playlist links.
 Positions are extrapolated by clients from `at` against `now`. A channel is
 `{id, name, host_id, created_at, members, current, position_ms, playing, at, queue}`,

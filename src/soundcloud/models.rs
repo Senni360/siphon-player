@@ -72,6 +72,8 @@ pub struct Track {
     pub release_date: Option<String>,
     pub display_date: Option<String>,
     pub playback_count: Option<u64>,
+    #[serde(default)]
+    pub genre: Option<String>,
     pub label_name: Option<String>,
     pub permalink_url: Option<String>,
     pub user: Option<User>,
@@ -149,6 +151,9 @@ impl Track {
                         .and_then(|user| user.avatar_url.as_deref())
                 }),
         );
+        if let Some(genre) = &self.genre {
+            crate::stats::note_soundcloud_genre(&track_uri(self.id), genre);
+        }
         let mut track = app::Track {
             id: Some(self.id.to_string()),
             name: self.title.clone().unwrap_or_default(),

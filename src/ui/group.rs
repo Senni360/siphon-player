@@ -147,6 +147,26 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             recovery(ui, &palette, &secret, &mut actions);
             ui.add_space(16.0);
         }
+        if feed.recovery_secret.is_none() {
+            ui.horizontal(|ui| {
+                use crate::stats::{Action as Stats, Tab};
+                let tab = app.stats.tab;
+                for (label, each) in [("Listening", Tab::Feed), ("Stats", Tab::Stats)] {
+                    if chip(ui, &palette, &gettext(locale, label), tab == each, Id::new(("group-tab", label)))
+                        .clicked()
+                    {
+                        actions.push(Action::Stats(Stats::Tab(each)));
+                    }
+                }
+            });
+            ui.add_space(16.0);
+        }
+        if app.stats.tab == crate::stats::Tab::Stats {
+            super::group_stats::show(app, ui, &me, &mut actions);
+            ui.add_space(32.0);
+            identity(app, ui, &me, &mut actions);
+            return;
+        }
         super::rise(ui, 1, |ui| super::group_live::section(app, ui, &me, &mut actions));
         super::rise(ui, 1, |ui| composer(app, ui, &me, &mut actions));
         ui.add_space(20.0);
@@ -923,10 +943,16 @@ fn recipients(
 }
 
 /// A small toggle with a check that grows in when it is on.
-fn chip(ui: &mut Ui, palette: &Palette, label: &str, on: bool, id: Id) -> egui::Response {
-    let galley = ui
-        .painter()
-        .layout_no_wrap(label.to_owned(), theme::medium(12.5), palette.text);
+pub(super) fn chip(
+    ui: &mut Ui,
+    palette: &Palette,
+    label: &str,
+    on: bool,
+    id: Id,
+) -> egui::Response {
+    let galley =
+        ui.painter()
+            .layout_no_wrap(label.to_owned(), theme::medium(12.5), Color32::PLACEHOLDER);
     let check = 14.0;
     let size = vec2(galley.size().x + 20.0 + check + 4.0, 28.0);
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());

@@ -1860,6 +1860,8 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.resume_position_ms = 19_566;
                 app.actions.push(Action::Next);
             }
+            // A season of plays, with friends to compare them with.
+            "group-stats" => siphon::stats(app),
             // Friends playing songs, and a channel this listener is in.
             "group-live" => siphon::live(app, true),
             // The same, before joining anything and before being asked to share.

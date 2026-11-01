@@ -108,6 +108,14 @@ with them, playing what they play. **Start a channel** makes a shared room inste
 everyone in it can add songs, reorder them, skip and pause, and Spotify, SoundCloud
 and YouTube songs can sit in the same queue. Everyone plays on their own account.
 
+Its **Stats** tab shows minutes listened by month, top songs, artists, albums and
+genres, streaks and when you listen, for any period, and compares you with friends
+who share theirs. Plays are counted on this computer in the state folder's
+`listening/`: exactly what you hear in Siphon, and Spotify's list of your last 50
+plays for your other devices, whose times are estimated. Importing your Extended
+streaming history from Spotify adds every play since your account began. The group
+only ever receives your totals and the top of each list, and only if you share.
+
 The owner's browser extension can open **Add to playlist** with
 `siphon.exe --add-to-playlist <url>` for a Spotify track, album or playlist,
 or a SoundCloud track or set. The player comes forward and asks for a

@@ -19,6 +19,9 @@ export interface Channel { id: string; name: string; host_id: string; created_at
 interface Channels { revision: number; channels: Channel[] }
 
 const presenceKey = (id: string) => `presence:${id}`;
+const STATS_PERIODS = ['month', 'all'];
+const statsKey = (id: string, period: string) => `stats:${id}:${period}`;
+const STATS_SECONDS: Record<string, number> = { month: 40 * 86400, all: 400 * 86400 };
 function parsed<T>(value: string | null): T | null {
   if (value === null) return null;
   try { return JSON.parse(value) as T; } catch { return null; }
@@ -39,6 +42,30 @@ function song(value: unknown): Song {
   const artists = (raw.artists as unknown[]).map(a => text(a, 'artist', 200));
   const artwork = raw.artwork_url == null || raw.artwork_url === '' ? null : https(raw.artwork_url).toString();
   return { url, source, title: text(raw.title, 'title', 300), artists, artwork_url: artwork, duration_ms: position(raw.duration_ms) };
+}
+function count(value: unknown, name: string): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0) fail(400, `Invalid ${name}`);
+  return Number(value);
+}
+function tops(value: unknown, max: number): unknown[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > max) return fail(400, 'Invalid list');
+  return value.map(row => {
+    const raw = (row ?? {}) as Record<string, unknown>;
+    const art = raw.art == null || raw.art === '' ? null : https(raw.art).toString();
+    return { name: text(raw.name, 'name', 300), detail: text(raw.detail, 'detail', 400, true), art, uri: text(raw.uri, 'uri', 300, true), plays: count(raw.plays, 'plays'), minutes: count(raw.minutes, 'minutes') };
+  });
+}
+/** What a member shares of their listening: totals and the top of each list. */
+function summary(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fail(400, 'Invalid summary');
+  const raw = value as Record<string, unknown>;
+  const hours = raw.hours === undefined ? [] : raw.hours;
+  if (!Array.isArray(hours) || hours.length > 24) return fail(400, 'Invalid hours');
+  return {
+    month: text(raw.month, 'month', 7, true), minutes: count(raw.minutes, 'minutes'), plays: count(raw.plays, 'plays'),
+    songs: tops(raw.songs, 20), artists: tops(raw.artists, 20), genres: tops(raw.genres, 10), hours: hours.map(h => count(h, 'hours')),
+  };
 }
 /** Who a listener's song comes from: a member's id, or nobody. */
 function followed(value: unknown, reader: string): string | null {
@@ -116,6 +143,26 @@ export function createLive(storage: Storage, clock: () => number = Date.now) {
     }
     if (path === '/live/presence' && method === 'DELETE') {
       await storage.liveDelete(presenceKey(me), signal);
+      return json({ now: clock() });
+    }
+    const stats = /^\/live\/stats\/(month|all)$/.exec(path);
+    if (stats && method === 'PUT') {
+      const shared = summary((await body(request, signal, 64 * 1024)).summary);
+      await storage.livePut(statsKey(me, stats[1]), JSON.stringify(shared), STATS_SECONDS[stats[1]], signal);
+      return json({ now: clock() });
+    }
+    if (stats && method === 'GET') {
+      const found = await storage.liveRead(users.map(u => statsKey(u.user_id, stats[1])), signal);
+      return json({
+        now: clock(),
+        stats: users.flatMap((u, i) => {
+          const value = parsed<ReturnType<typeof summary>>(found[i]);
+          return value ? [{ user_id: u.user_id, summary: value }] : [];
+        }),
+      });
+    }
+    if (path === '/live/stats' && method === 'DELETE') {
+      for (const period of STATS_PERIODS) await storage.liveDelete(statsKey(me, period), signal);
       return json({ now: clock() });
     }
     if (path === '/live/channels' && method === 'POST') {
@@ -233,6 +280,7 @@ export function createLive(storage: Storage, clock: () => number = Date.now) {
       document.channels = document.channels.filter(c => c.members.length);
     }, signal);
     await storage.liveDelete(presenceKey(user.user_id), signal);
+    for (const period of STATS_PERIODS) await storage.liveDelete(statsKey(user.user_id, period), signal);
   }
 
   return { route, forget };

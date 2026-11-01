@@ -6,6 +6,7 @@ mod hybrid;
 mod live;
 pub(crate) mod playlist_sources;
 mod soundcloud_library;
+pub mod stats;
 mod youtube;
 pub use hybrid::{PendingHybridSnapshot, PlaybackOwner};
 
@@ -300,6 +301,8 @@ struct Listening {
     listened: std::time::Duration,
     playing_since: Option<Instant>,
     recorded: bool,
+    /// What goes in the listening log when this song ends.
+    play: Option<crate::stats::Play>,
 }
 
 /// Where the play counts of one album or artist stand.
@@ -616,6 +619,8 @@ pub struct App {
     /// Who is playing what in the group, and who this listener is with.
     pub live: crate::friends::live::Model,
     live_driver: live::Driver,
+    /// The Group page's statistics.
+    pub stats: stats::View,
     /// Downloads in flight that stand for one song, by download id: the
     /// song's link or URI.
     pub(crate) download_keys: HashMap<u64, String>,
@@ -1292,6 +1297,7 @@ impl App {
             friends_feed: crate::friends::Model::default(),
             live: crate::friends::live::Model::default(),
             live_driver: live::Driver::default(),
+            stats: stats::View::default(),
             download_keys: HashMap::new(),
             group_opened: false,
             downloaded_files: HashMap::new(),
@@ -2819,6 +2825,7 @@ impl App {
                     }
                 }
                 Event::Live(event) => self.handle_live_event(event),
+                Event::Stats(update) => self.handle_stats_update(update),
                 Event::Friends(event) => {
                     self.friends_feed.receive(event);
                     // A write made while another ran goes out now.
@@ -7926,7 +7933,15 @@ impl App {
                 limit,
                 result,
             } => match who {
+                RecentsFor::Stats => {
+                    if let Ok(page) = &result {
+                        self.stats_note_recent(&page.items);
+                    }
+                }
                 RecentsFor::Home => {
+                    if let Ok(page) = &result {
+                        self.stats_note_recent(&page.items);
+                    }
                     if generation != self.home.generation {
                         return;
                     }
@@ -9253,6 +9268,16 @@ impl App {
                         Ok(episodes) => page.episodes.absorb(offset, episodes),
                         Err(error) => page.episodes.fail(friendly_api_error(self.locale, &error)),
                     }
+                }
+            }
+            ApiResponse::ArtistGenres { id, result } => {
+                if let Ok(artist) = result {
+                    self.stats_artist_genres(id, artist.genres);
+                }
+            }
+            ApiResponse::StatsSong { result } => {
+                if let Ok(track) = result {
+                    self.stats_song_artists(&track);
                 }
             }
             ApiResponse::Track { id, result } => {
@@ -11968,7 +11993,13 @@ impl App {
                 unreachable!("local playlist actions are applied by the source adapter")
             }
             Action::Open(page) => self.open(page),
-            Action::Live(action) => self.live_action(action),
+            Action::Live(action) => {
+                if matches!(action, crate::friends::live::Action::SetSharing(false)) {
+                    self.stats_unshare();
+                }
+                self.live_action(action);
+            }
+            Action::Stats(action) => self.stats_action(action),
             Action::Friends(action) => {
                 if matches!(
                     action,
@@ -13375,6 +13406,7 @@ impl App {
             }
             Action::ClearPlayHistory => {
                 self.plays.clear();
+                self.stats_cleared();
                 self.plays.save(&self.files, &self.dirs.history_file());
                 self.rebuild_recents();
                 self.toast(gettext(self.locale, "Play history cleared"));
@@ -13952,6 +13984,7 @@ impl App {
             && self.budget != crate::power::Budget::Background
             && !ctx.input(|i| i.viewport().minimized.unwrap_or(false));
         self.live_tick(ctx, looking);
+        self.stats_tick(looking);
         if let Some(url) = self.group_pick_art.take() {
             self.backend.art().prefetch(ctx, &url);
         }
@@ -14101,6 +14134,7 @@ impl App {
             use crate::power::Event;
             match event {
                 Event::Suspending(ack) | Event::EndingSession(ack) => {
+                    self.stats_finish_listening();
                     self.save_state();
                     self.plays.save(&self.files, &self.dirs.history_file());
                     // The system may stop for good after this: the writes
@@ -14168,17 +14202,21 @@ impl App {
             return;
         }
         let Some(now) = self.now_playing_live() else {
+            self.stats_finish_listening();
             self.listening = None;
             return;
         };
         let listening = match &mut self.listening {
             Some(held) if held.uri == now.uri => held,
             _ => {
+                self.stats_finish_listening();
+                let play = self.stats_play_of(&now);
                 self.listening = Some(Listening {
                     uri: now.uri.clone(),
                     listened: std::time::Duration::ZERO,
                     playing_since: now.playing.then(Instant::now),
                     recorded: false,
+                    play,
                 });
                 return;
             }

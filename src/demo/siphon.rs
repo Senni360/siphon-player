@@ -525,6 +525,108 @@ pub(super) fn live(app: &mut crate::app::App, joined: bool) {
     }
 }
 
+/// A season of sample plays, and friends who share theirs.
+#[cfg(feature = "demo")]
+pub(super) fn stats(app: &mut crate::app::App) {
+    use crate::friends::live::MemberStats;
+    use crate::stats::{Genres, Period, Play, PlayArtist, Summary, Tab, Top, report};
+    live(app, false);
+    app.settings.group_sharing = Some(true);
+    app.stats.tab = Tab::Stats;
+    app.stats.period = Period::AllTime;
+    let now = jiff::Zoned::now();
+    let songs = [
+        (
+            "Midnight In A Perfect World",
+            "DJ Shadow",
+            "Endtroducing",
+            "trip hop",
+        ),
+        ("Teardrop", "Massive Attack", "Mezzanine", "trip hop"),
+        (
+            "Roygbiv",
+            "Boards of Canada",
+            "Music Has the Right to Children",
+            "idm",
+        ),
+        ("Porcelain", "Moby", "Play", "downtempo"),
+        ("Rosewood", "Bonobo", "Fragments", "downtempo"),
+        ("Windowlicker", "Aphex Twin", "Windowlicker", "idm"),
+        ("Angel", "Massive Attack", "Mezzanine", "trip hop"),
+        ("Kerala", "Bonobo", "Migration", "downtempo"),
+    ];
+    let mut genres = Genres::default();
+    let mut plays = Vec::new();
+    for day in 0..420i64 {
+        for slot in 0..(1 + (day * 7 % 9)) {
+            let (title, artist, album, genre) = songs[((day * 3 + slot * 5) % 8) as usize];
+            let id = format!("demo-{artist}");
+            genres.artists.insert(id.clone(), vec![genre.to_owned()]);
+            plays.push(Play {
+                at: now.timestamp().as_second() - day * 86_400 - slot * 3_700,
+                ms: 215_000,
+                uri: format!("spotify:track:demo{}", title.len()),
+                title: title.to_owned(),
+                artists: vec![PlayArtist {
+                    id: Some(id),
+                    name: artist.to_owned(),
+                }],
+                album: album.to_owned(),
+                art: None,
+                genre: None,
+                estimated: day < 3 && slot == 0,
+            });
+        }
+    }
+    let mine = report(plays, Period::AllTime, &genres, &now);
+    let friend = |user: &str, minutes: u64, artists: &[&str]| MemberStats {
+        user_id: user.to_owned(),
+        summary: Summary {
+            minutes,
+            plays: minutes / 3,
+            artists: artists
+                .iter()
+                .map(|name| Top {
+                    name: (*name).to_owned(),
+                    minutes: minutes / artists.len() as u64,
+                    plays: 10,
+                    ..Top::default()
+                })
+                .collect(),
+            songs: vec![Top {
+                name: "Teardrop".into(),
+                detail: "Massive Attack".into(),
+                plays: 44,
+                minutes: 170,
+                ..Top::default()
+            }],
+            genres: vec![Top {
+                name: "trip hop".into(),
+                minutes: minutes / 2,
+                plays: 44,
+                ..Top::default()
+            }],
+            hours: (0..24).map(|hour| (hour * 7 % 24) as u64).collect(),
+            month: String::new(),
+        },
+    };
+    let mut shared = vec![
+        friend("ana", 9_400, &["Massive Attack", "Bonobo", "Burial"]),
+        friend("bo", 4_100, &["Burial", "Four Tet"]),
+    ];
+    let viewer = app
+        .friends_feed
+        .profile
+        .as_ref()
+        .map_or_else(String::new, |profile| profile.user_id.clone());
+    shared.push(MemberStats {
+        user_id: viewer,
+        summary: mine.summary(),
+    });
+    app.live.group_stats.insert("all", shared);
+    app.stats.reports.insert(Period::AllTime, mine);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

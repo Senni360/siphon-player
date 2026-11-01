@@ -68,6 +68,7 @@ pub mod skin;
 pub mod soloist;
 pub mod sonos;
 pub mod soundcloud;
+pub mod stats;
 pub mod system_fonts;
 pub mod theme;
 pub mod thumbbar;

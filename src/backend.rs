@@ -145,6 +145,8 @@ pub enum RemoteAction {
 /// belongs to: the shelf on Home, or the Recents tab in the queue panel.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RecentsFor {
+    /// Only to count plays from other devices in the listening statistics.
+    Stats,
     Home,
     Panel,
 }
@@ -316,6 +318,14 @@ pub enum ApiRequest {
     ArtistTopTracks {
         id: String,
     },
+    /// An artist's genres, for the listening statistics.
+    ArtistGenres {
+        id: String,
+    },
+    /// A song's artists, for plays imported with only their names.
+    StatsSong {
+        id: String,
+    },
     ArtistAlbums {
         id: String,
         groups: String,
@@ -402,6 +412,8 @@ impl ApiRequest {
             | Self::FollowPlaylist { id, .. }
             | Self::Artist { id }
             | Self::ArtistTopTracks { id }
+            | Self::ArtistGenres { id }
+            | Self::StatsSong { id }
             | Self::ArtistAlbums { id, .. }
             | Self::RelatedArtists { id }
             | Self::Album { id }
@@ -675,6 +687,13 @@ pub enum ApiResponse {
         id: String,
         result: ApiResult<Vec<Track>>,
     },
+    ArtistGenres {
+        id: String,
+        result: ApiResult<Artist>,
+    },
+    StatsSong {
+        result: ApiResult<Track>,
+    },
     ArtistAlbums {
         id: String,
         groups: String,
@@ -804,6 +823,22 @@ pub enum Command {
     Friends(crate::friends::Request),
     /// Listening together with the group, one request at a time.
     Live(crate::friends::live::Request),
+    StatsRecord {
+        plays: Vec<crate::stats::Play>,
+        check: bool,
+    },
+    StatsReport {
+        period: crate::stats::Period,
+    },
+    StatsImport {
+        selected:
+            std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>,
+    },
+    StatsClear,
+    StatsGenres {
+        artists: Vec<(String, Vec<String>)>,
+        names: Vec<(String, String)>,
+    },
     /// Ask the group to read waiting upload titles. See [`crate::retitle`].
     Retitle,
     /// Ask the group which friend's share should follow the list ending
@@ -1180,6 +1215,7 @@ pub struct LyricsRequest {
 pub enum Event {
     Friends(crate::friends::Event),
     Live(crate::friends::live::Event),
+    Stats(crate::stats::Update),
     /// The share to follow the list ending on `seed`, if Jev picked one.
     GroupPick {
         seed: String,
@@ -1471,6 +1507,8 @@ pub struct Backend {
     #[cfg(test)]
     live_requests: std::sync::Mutex<Vec<crate::friends::live::Request>>,
     #[cfg(test)]
+    stats_records: std::sync::Mutex<Vec<Vec<crate::stats::Play>>>,
+    #[cfg(test)]
     album_type_requests: std::sync::Mutex<Vec<Vec<String>>>,
     #[cfg(test)]
     home_episode_requests: std::sync::Mutex<Vec<(Vec<String>, u64)>>,
@@ -1575,6 +1613,8 @@ impl Backend {
             #[cfg(test)]
             live_requests: std::sync::Mutex::new(Vec::new()),
             #[cfg(test)]
+            stats_records: std::sync::Mutex::new(Vec::new()),
+            #[cfg(test)]
             album_type_requests: std::sync::Mutex::new(Vec::new()),
             #[cfg(test)]
             home_episode_requests: std::sync::Mutex::new(Vec::new()),
@@ -1633,6 +1673,10 @@ impl Backend {
             self.live_requests.lock().unwrap().push(request.clone());
         }
         #[cfg(test)]
+        if let Command::StatsRecord { plays, .. } = &command {
+            self.stats_records.lock().unwrap().push(plays.clone());
+        }
+        #[cfg(test)]
         if let Command::Hybrid(command) = &command {
             self.hybrid_commands.lock().unwrap().push(command.clone());
         }
@@ -1686,6 +1730,17 @@ impl Backend {
         self.send(Command::ChoosePlaylistCover {
             id,
             request,
+            selected: Box::pin(selected),
+        });
+    }
+
+    /// Construct the file dialog on the UI thread, like the cover's.
+    pub fn choose_stats_import(&self) {
+        let selected = rfd::AsyncFileDialog::new()
+            .set_title("Choose your Spotify history")
+            .add_filter("Spotify data", &["zip", "json"])
+            .pick_file();
+        self.send(Command::StatsImport {
             selected: Box::pin(selected),
         });
     }
@@ -1929,6 +1984,11 @@ impl Backend {
     #[cfg(test)]
     pub(crate) fn take_live_requests(&self) -> Vec<crate::friends::live::Request> {
         std::mem::take(&mut *self.live_requests.lock().unwrap())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn take_stats_records(&self) -> Vec<Vec<crate::stats::Play>> {
+        std::mem::take(&mut *self.stats_records.lock().unwrap())
     }
 
     #[cfg(test)]
@@ -2531,6 +2591,72 @@ impl Worker {
                         .map(Http::new)
                         .unwrap_or_else(Http::unavailable);
                     let _ = tx.send((request, http));
+                }
+                Command::StatsRecord { plays, check } => {
+                    let dir = self.dirs.listening_dir();
+                    tokio::task::spawn_blocking(move || {
+                        if crate::stats::record(&dir, plays, check).is_err() {
+                            log::warn!("a play could not be added to the listening log");
+                        }
+                    });
+                }
+                Command::StatsReport { period } => {
+                    let dir = self.dirs.listening_dir();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let report = crate::stats::report(
+                            crate::stats::read_all(&dir),
+                            period,
+                            &crate::stats::read_genres(&dir),
+                            &jiff::Zoned::now(),
+                        );
+                        let _ = events.send(Event::Stats(crate::stats::Update::Report(
+                            period,
+                            Box::new(report),
+                        )));
+                        waker.wake();
+                    });
+                }
+                Command::StatsImport { selected } => {
+                    let dir = self.dirs.listening_dir();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result = match selected.await {
+                            None => Err(String::new()),
+                            Some(file) => {
+                                let path = file.path().to_owned();
+                                tokio::task::spawn_blocking(move || {
+                                    let plays = crate::stats::read_import(&path)?;
+                                    crate::stats::record(&dir, plays, true)
+                                        .map_err(|_| "Your history could not be saved.".to_owned())
+                                })
+                                .await
+                                .unwrap_or_else(|_| {
+                                    Err("Your history could not be saved.".to_owned())
+                                })
+                            }
+                        };
+                        let _ = events.send(Event::Stats(crate::stats::Update::Imported(result)));
+                        waker.wake();
+                    });
+                }
+                Command::StatsClear => {
+                    let dir = self.dirs.listening_dir();
+                    tokio::task::spawn_blocking(move || {
+                        if crate::stats::clear(&dir).is_err() {
+                            log::warn!("the listening log could not be cleared");
+                        }
+                    });
+                }
+                Command::StatsGenres { artists, names } => {
+                    let dir = self.dirs.listening_dir();
+                    tokio::task::spawn_blocking(move || {
+                        if crate::stats::add_genres(&dir, artists, names).is_err() {
+                            log::warn!("genres could not be kept");
+                        }
+                    });
                 }
                 Command::Live(request) => {
                     let tx = self.live.get_or_insert_with(|| {
@@ -5748,7 +5874,9 @@ fn operation_for(api: &ApiGateway, request: &ApiRequest) -> Operation {
         ApiRequest::ArtistTopTracks { .. } => Operation::ArtistTopTracks,
         ApiRequest::RelatedArtists { .. } => Operation::RelatedArtists,
         ApiRequest::Recommendations { .. } => Operation::UnsupportedDevelopmentMode,
-        ApiRequest::Artist { .. }
+        ApiRequest::ArtistGenres { .. }
+        | ApiRequest::StatsSong { .. }
+        | ApiRequest::Artist { .. }
         | ApiRequest::ArtistAlbums { .. }
         | ApiRequest::Album { .. }
         | ApiRequest::AlbumTracks { .. }
@@ -6608,6 +6736,13 @@ async fn handle(
                 },
             }
         }
+        ApiRequest::ArtistGenres { id } => ApiResponse::ArtistGenres {
+            result: routed!(artist(&id)),
+            id,
+        },
+        ApiRequest::StatsSong { id } => ApiResponse::StatsSong {
+            result: routed!(track(&id)),
+        },
         ApiRequest::Track { id } => ApiResponse::Track {
             result: routed!(track(&id)),
             id,

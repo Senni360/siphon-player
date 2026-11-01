@@ -11,6 +11,7 @@ pub(crate) mod friends;
 pub mod group;
 mod group_live;
 mod group_shelf;
+mod group_stats;
 pub mod home;
 mod keys;
 pub mod kit;

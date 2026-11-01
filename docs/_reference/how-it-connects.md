@@ -276,7 +276,13 @@ out, or a reconnection that gives up stops it.
   only the latest for 200 seconds. While they listen along with someone or are in a
   channel, Siphon reads the group's live state every 3 seconds, and every 15 seconds
   while the Group page is open. No audio goes through it: each listener plays the
-  song on their own account from its own service.
+  song on their own account from its own service. A member who shares also sends
+  their monthly and all-time totals and the top of each list, about once an hour,
+  never individual plays. The listening statistics read
+  `/me/player/recently-played` every 30 minutes and, on the Stats tab only, an
+  artist's genres from `/artists/{id}` or a song's artists from `/tracks/{id}`, one
+  request every 3 seconds, at most 40 per report. The plays themselves stay in the
+  state folder's `listening/`.
   When the lyrics
   panel is open and neither Spotify nor a local file has lyrics, it sends
   the track's artist, title, album, and length to
