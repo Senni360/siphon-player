@@ -1339,6 +1339,18 @@ fn soundcloud_rows(app: &App, needle: &str) -> Vec<(String, Page, Icon)> {
     rows
 }
 
+/// Where the dropdown's state lives. Not in settings: every launch starts with
+/// it collapsed, so a long list of follows never fills the sidebar by itself.
+fn soundcloud_open_id() -> egui::Id {
+    egui::Id::new("sidebar-soundcloud-open")
+}
+
+/// Whether the dropdown's rows are on show: a library search always reaches
+/// them, open or not.
+fn soundcloud_rows_shown(open: bool, needle: &str) -> bool {
+    open || !needle.is_empty()
+}
+
 fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
     let palette = app.palette;
     let locale = app.locale;
@@ -1360,11 +1372,51 @@ fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
         return;
     }
     ui.add_space(8.0);
-    let header = ui.label(
-        egui::RichText::new(gettext(locale, "SoundCloud"))
-            .font(theme::bold(13.0))
-            .color(palette.secondary),
-    );
+    let open = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(soundcloud_open_id()))
+        .unwrap_or(false);
+    let shown = soundcloud_rows_shown(open, needle);
+    let playlists = app.soundcloud_library.snapshot.playlists.len();
+    let artists = app.soundcloud_library.snapshot.artists.len();
+    // Collapsed, the row stands for whichever of its pages is open.
+    let inside = match app.page() {
+        Page::SoundCloudLikes => true,
+        Page::SoundCloud(uri) => uri != "youtube:likes",
+        _ => false,
+    };
+    let header = nav_row(
+        ui,
+        &palette,
+        if shown {
+            Icon::ChevronDown
+        } else {
+            Icon::ChevronRight
+        },
+        &gettext(locale, "SoundCloud"),
+        inside && !shown,
+    )
+    .on_hover_text(if shown {
+        gettext(locale, "Collapse")
+    } else {
+        gettext(
+            locale,
+            "Show your likes, uploads, playlists and the artists you follow",
+        )
+    });
+    if artists + playlists > 0 && !shown {
+        ui.painter().text(
+            header.rect.right_center() - vec2(10.0, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            (artists + playlists).to_string(),
+            theme::regular(12.0),
+            palette.dim,
+        );
+    }
+    if header.clicked() {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(soundcloud_open_id(), !shown));
+    }
     if app.soundcloud_reconnect
         && nav_row(
             ui,
@@ -1407,13 +1459,15 @@ fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
             app.actions.push(Action::DisconnectSoundCloud);
         }
     });
-    let rows = soundcloud_rows(app, needle);
-    super::widgets::virtual_rows(ui, rows.len(), 40.0, |ui, index| {
-        let (name, page, icon) = &rows[index];
-        if nav_row(ui, &palette, *icon, name, app.page() == page).clicked() {
-            app.actions.push(Action::Open(page.clone()));
-        }
-    });
+    if shown {
+        let rows = soundcloud_rows(app, needle);
+        super::widgets::virtual_rows(ui, rows.len(), 40.0, |ui, index| {
+            let (name, page, icon) = &rows[index];
+            if nav_row(ui, &palette, *icon, name, app.page() == page).clicked() {
+                app.actions.push(Action::Open(page.clone()));
+            }
+        });
+    }
     ui.add_space(8.0);
     theme::text(
         ui,
@@ -2857,6 +2911,18 @@ mod ordering_tests {
         );
         app.recent_contexts = vec![uri("d"), uri("a")];
         app
+    }
+
+    #[test]
+    fn soundcloud_starts_collapsed_and_a_library_search_still_reaches_it() {
+        assert!(!soundcloud_rows_shown(false, ""));
+        assert!(soundcloud_rows_shown(true, ""));
+        assert!(soundcloud_rows_shown(false, "sunset"));
+        let ctx = egui::Context::default();
+        assert_eq!(
+            ctx.data(|data| data.get_temp::<bool>(soundcloud_open_id())),
+            None
+        );
     }
 
     #[test]

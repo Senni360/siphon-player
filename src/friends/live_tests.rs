@@ -705,6 +705,46 @@ async fn every_request_works_against_a_running_service() {
         .await
         .unwrap();
     assert!(read(&ana).await.channels.iter().all(|c| c.id != id));
+    let summary = crate::stats::Summary {
+        month: "2026-11".into(),
+        minutes: 120,
+        plays: 30,
+        songs: vec![crate::stats::Top {
+            name: "One".into(),
+            detail: "Artist".into(),
+            art: None,
+            uri: "spotify:track:one".into(),
+            plays: 3,
+            minutes: 9,
+        }],
+        hours: vec![0; 24],
+        ..Default::default()
+    };
+    run(
+        &client,
+        &ana,
+        Op::PutStats {
+            period: "month",
+            summary: Box::new(summary.clone()),
+        },
+    )
+    .await
+    .unwrap();
+    let Update::Stats("month", stats) = run(&client, &bo, Op::GetStats("month")).await.unwrap()
+    else {
+        panic!("expected stats");
+    };
+    assert!(
+        stats
+            .iter()
+            .any(|row| row.user_id == ana.user_id && row.summary == summary)
+    );
+    run(&client, &ana, Op::DeleteStats).await.unwrap();
+    let Update::Stats("month", stats) = run(&client, &bo, Op::GetStats("month")).await.unwrap()
+    else {
+        panic!("expected stats");
+    };
+    assert!(stats.iter().all(|row| row.user_id != ana.user_id));
     run(&client, &ana, Op::ClearPresence).await.unwrap();
     assert!(
         read(&bo)

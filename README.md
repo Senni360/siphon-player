@@ -102,6 +102,10 @@ it), and how to read messy SoundCloud and YouTube titles such as
 uploader names, and your own shares and hearts are all that is sent; nothing
 is asked outside a group, and a slow or failed answer changes nothing.
 
+In the sidebar, SoundCloud is one dropdown that starts collapsed each time Siphon
+opens. Press it for your likes, uploads, playlists and the artists you follow. A
+library search still finds them while it is closed.
+
 The Group page shows what the others are playing, once they agree to share it.
 On anyone listed, **Play song** plays it for you alone and **Join** listens along
 with them, playing what they play. **Start a channel** makes a shared room instead:

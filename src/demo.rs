@@ -2163,10 +2163,66 @@ mod tests {
         (ctx, app)
     }
 
+    fn sidebar_button(tree: &egui::accesskit::TreeUpdate, label: &str) -> Option<egui::Pos2> {
+        tree.nodes.iter().find_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            (node.role() == egui::accesskit::Role::Button
+                && node.label() == Some(label)
+                && bounds.x0 < 300.0)
+                .then(|| {
+                    egui::pos2(
+                        bounds.x0 as f32 + 60.0,
+                        (bounds.y0 + bounds.y1) as f32 / 2.0,
+                    )
+                })
+        })
+    }
+
+    /// Presses the sidebar's SoundCloud dropdown.
+    fn expand_soundcloud(ctx: &egui::Context, app: &mut App) {
+        accessible_frame(ctx, app, vec![]);
+        let tree = accessible_frame(ctx, app, vec![]);
+        let header = sidebar_button(&tree, "SoundCloud").expect("SoundCloud dropdown");
+        frame_events(
+            ctx,
+            app,
+            pointer_click(header, egui::PointerButton::Primary),
+        );
+    }
+
+    /// Nothing from SoundCloud fills the sidebar until the dropdown is pressed,
+    /// and pressing it again folds everything away.
+    #[test]
+    fn the_soundcloud_dropdown_starts_collapsed_and_opens_when_pressed() {
+        let (ctx, mut app) = accessible_app("soundcloud-dropdown");
+        soundcloud_profile(&mut app);
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        assert!(sidebar_button(&tree, "Likes").is_none());
+        assert!(sidebar_button(&tree, "Sunset discoveries").is_none());
+
+        expand_soundcloud(&ctx, &mut app);
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        assert!(sidebar_button(&tree, "Likes").is_some());
+
+        let header = sidebar_button(&tree, "SoundCloud").unwrap();
+        frame_events(
+            &ctx,
+            &mut app,
+            pointer_click(header, egui::PointerButton::Primary),
+        );
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        assert!(sidebar_button(&tree, "Likes").is_none());
+        app.backend.shutdown();
+    }
+
     #[test]
     fn soundcloud_sidebar_rows_never_take_spotify_reorder_drops() {
         let (ctx, mut app) = accessible_app("soundcloud-drop-boundary");
         soundcloud_profile(&mut app);
+        expand_soundcloud(&ctx, &mut app);
         for grid in [false, true] {
             app.settings.sidebar_grid = grid;
             accessible_frame(&ctx, &mut app, vec![]);
