@@ -50,6 +50,9 @@
     <control>keyboard</control>
   </supports>
   <releases>
+    <release version="0.15.0-pre.6" date="2026-11-02" type="development">
+      <description><p>The app is now Siphon: Encore, shown as Encore, with a new logo. Discord presence is on, with an Encore counter, the sound of the song and a count of group members on it.</p></description>
+    </release>
     <release version="0.15.0-pre.5" date="2026-11-01" type="development">
       <description><p>Spotify-based group accounts, groups you can run, parties with a host, background playlists and shared playlists.</p></description>
     </release>
