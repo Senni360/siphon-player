@@ -13,7 +13,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
 /// The Discord application whose name reads "Listening to Encore". Not a
 /// secret: every Discord presence carries its application's id.
-pub const APPLICATION_ID: &str = "";
+pub const APPLICATION_ID: &str = "1566731432385314876";
 const RETRY: Duration = Duration::from_secs(20);
 const ANSWER: Duration = Duration::from_secs(5);
 const OP_HANDSHAKE: u32 = 0;
