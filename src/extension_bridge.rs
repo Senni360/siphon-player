@@ -41,6 +41,12 @@ pub fn register_player() {
         .spawn(|| {
             register_windows_player();
             register_windows_links();
+            // A development build must not take over the desktop's web links.
+            if !cfg!(debug_assertions)
+                && let Ok(exe) = std::env::current_exe()
+            {
+                crate::web_links::register(&exe);
+            }
         })
     {
         let _ = worker.join();

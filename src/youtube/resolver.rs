@@ -35,6 +35,13 @@ pub struct Resolver {
     timeout: Duration,
 }
 
+impl Resolver {
+    /// Whether the helper's yt-dlp is there to play YouTube links.
+    pub fn is_installed(&self) -> bool {
+        self.executable.as_deref().is_some_and(Path::is_file)
+    }
+}
+
 impl Default for Resolver {
     fn default() -> Self {
         // A development fixture must never become shipping helper discovery.

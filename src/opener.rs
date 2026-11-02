@@ -15,8 +15,24 @@ pub fn open(target: impl AsRef<OsStr>) -> io::Result<()> {
 }
 
 /// Opens a URL or a path in whatever the desktop uses for it.
+///
+/// When Encore itself is the desktop's handler for web links, a web address
+/// goes straight to the browser: asked to open one, Encore means the page, and
+/// the handler would send a music link right back to Encore.
 #[cfg(windows)]
 pub fn open(target: impl AsRef<OsStr>) -> io::Result<()> {
+    if let Some(url) = target.as_ref().to_str()
+        && (url.starts_with("https://") || url.starts_with("http://"))
+        && crate::web_links::replaces_browser()
+    {
+        return crate::web_links::open_in_browser(url);
+    }
+    open_shell(target)
+}
+
+/// Hands a target to the desktop's own handler for it, whatever that is.
+#[cfg(windows)]
+pub(crate) fn open_shell(target: impl AsRef<OsStr>) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx};
     use windows_sys::Win32::UI::Shell::ShellExecuteW;

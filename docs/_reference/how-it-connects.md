@@ -796,6 +796,13 @@ That lookup runs on the credential worker and does not block the interface or
 shutdown. The password belongs to its host, port, and username; editing any of
 these fields clears it. See [password storage and migration](/settings-and-files/).
 
+## Web links
+
+When Encore is the Windows handler for web links, a clicked normal YouTube video
+link sends that video's address to YouTube's public oEmbed endpoint to decide
+whether it is a beat. No other link causes a request. See
+[Web links](/web-links/).
+
 ## Upcoming albums and countdown links
 
 `spotify:prerelease:` and Spotify prerelease share links require the same-account

@@ -151,6 +151,10 @@ The owner's browser extension can open **Add to playlist** with
 or a SoundCloud track or set. The player comes forward and asks for a
 destination. See the [local extension bridge contract](docs/_reference/extension-bridge.md).
 
+On Windows, `siphon.exe --set-up-web-links` lets Encore open music links you
+click in Discord and other apps, including normal YouTube videos that look like
+beats. Other links go on to your browser. See [Web links](docs/_reference/web-links.md).
+
 **Spotify playback needs Spotify Premium.** Free Spotify accounts can browse
 and search, but cannot play Spotify music through Siphon.
 

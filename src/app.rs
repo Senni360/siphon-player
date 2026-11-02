@@ -12851,7 +12851,13 @@ impl App {
             Action::PasteSongs { playlist_id, text } => self.paste_songs(playlist_id, &text),
             Action::OpenInSpotify(uri) => {
                 if let Some(url) = util::open_spotify_url(&uri) {
-                    ctx.open_url(egui::OpenUrl::new_tab(url));
+                    // Through the opener: this means Spotify's page, even when
+                    // Encore is the handler for web links.
+                    std::thread::spawn(move || {
+                        if crate::opener::open(&url).is_err() {
+                            log::warn!("unable to open external link");
+                        }
+                    });
                 }
             }
             Action::Search(query) => {

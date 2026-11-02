@@ -369,7 +369,13 @@ pub(crate) fn run() -> eframe::Result<()> {
     // First of all: `--apply-update <job>` makes this process the update
     // helper, which installs and exits; otherwise the receipt and error an
     // update relaunch carries are taken out of the arguments.
-    let launch = fastframe_update::intercept(&spotifast::updates::CONFIG);
+    let mut launch = fastframe_update::intercept(&spotifast::updates::CONFIG);
+    // A clicked web link waits on this process, and most of them only pass
+    // through on their way to the browser, so nothing else has started yet.
+    #[cfg(windows)]
+    {
+        launch.arguments = spotifast::web_links::intercept(std::mem::take(&mut launch.arguments));
+    }
     // Before any output is listed or opened.
     spotifast::sink::name_in_mixers();
     let cli = Cli::from_arg_matches(&Cli::command().get_matches_from(&launch.arguments))
