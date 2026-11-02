@@ -354,7 +354,7 @@ pub(crate) fn glass_sheen(ui: &egui::Ui, rect: Rect, radius: f32) {
 /// The colour a cover lends the glow. Pale and greyish cool tones read as
 /// steel rather than colour, so a tint with any real hue is lifted to at
 /// least moderate saturation and brightness; true greys stay grey.
-fn glow_color(tint: Color32) -> Color32 {
+pub(crate) fn glow_color(tint: Color32) -> Color32 {
     let mut hsva = egui::ecolor::Hsva::from(tint);
     if hsva.s >= 0.12 && hsva.s < 0.5 {
         // A washed-out colour gets its hue back, and is kept deep enough

@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.js';
+import { badge } from './badge.js';
 import { HttpError, body, fail, https, json, text, validateUrl } from './http.js';
 import { createLive, song } from './live.js';
 import { FIRST_GROUP, MAX_DEVICES, admitPending, fullRights, groupById, groupRoute, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
@@ -174,6 +175,9 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       // and the app only lets in those already in the group.
       const door = /^\/open\/party\/([a-f0-9-]{36})\/([a-f0-9-]{36})$/.exec(path);
       if (door && method === 'GET') return new Response(null, { status: 302, headers: { Location: `siphon://party/${door[1]}/${door[2]}`, 'Cache-Control': 'no-store' } });
+      // Discord fetches this for the card. All it names is a colour.
+      const mark = /^\/badge\/([0-9a-f]{3})\.gif$/.exec(path);
+      if (mark && (method === 'GET' || method === 'HEAD')) return badge(mark[1]);
       if (path === '/live' || path.startsWith('/live/')) return await liveRoute(request, path, clientIp, signal);
       // IP identifiers are hashed before storage. On Vercel the adapter supplies
       // only the platform-overwritten x-vercel-forwarded-for, never a client header.

@@ -29,9 +29,6 @@ const URL: usize = 256;
 /// hold still when it stops. Discord fetches these, this app never does.
 const BADGE_PLAYING: &str = "https://raw.githubusercontent.com/Senni360/siphon-player/main/packaging/icons/encore-badge.gif";
 const BADGE_STILL: &str = "https://raw.githubusercontent.com/Senni360/siphon-player/main/packaging/icons/encore-badge.png";
-/// Bars of the sound in one small space, from the bass up.
-const PULSE_BARS: usize = 6;
-const PULSE_GLYPHS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Party {
@@ -52,12 +49,12 @@ pub struct Status {
     pub started_ms: Option<u64>,
     pub ends_ms: Option<u64>,
     pub paused: bool,
+    /// The badge while it plays, lit in the colour of this song's cover.
+    pub badge: Option<String>,
     /// A line about this listener, shown when pointing at the badge.
     pub hover: Option<String>,
     /// What is special about this song right now, under its artist.
     pub moment: Option<String>,
-    /// The sound at this moment, as bars. See [`pulse`].
-    pub pulse: Option<String>,
     pub party: Option<Party>,
 }
 
@@ -75,22 +72,19 @@ pub fn is_private_link(url: &str) -> bool {
     url.contains("secret_token=") || url.contains("/s-")
 }
 
-/// What the song sounds like at this moment, in a few characters, from the
-/// player bar's analyser. Silence draws nothing rather than a flat line.
-pub fn pulse(levels: &[f32]) -> Option<String> {
-    if levels.is_empty() || levels.iter().all(|level| *level < 0.02) {
-        return None;
-    }
-    let each = levels.len().div_ceil(PULSE_BARS);
-    Some(
-        levels
-            .chunks(each)
-            .map(|band| {
-                let level = band.iter().copied().fold(0.0, f32::max).clamp(0.0, 1.0);
-                PULSE_GLYPHS[(level * (PULSE_GLYPHS.len() - 1) as f32).round() as usize]
-            })
-            .collect(),
-    )
+/// The group service's badge with its rings lit in `color`, at full brightness
+/// so a dark cover still lights up. Three hex digits are plenty for a mark this
+/// small, and keep the number of images Discord has to fetch small too. All the
+/// address says is a colour, and Discord fetches it: this app never does.
+pub fn lit_badge(service: &str, color: [u8; 3]) -> Option<String> {
+    let brightest = u32::from(color.into_iter().max().filter(|most| *most > 0)?);
+    let [r, g, b] = color.map(|channel| (u32::from(channel) * 15 + brightest / 2) / brightest);
+    service.starts_with("https://").then(|| {
+        format!(
+            "{}/badge/{r:x}{g:x}{b:x}.gif",
+            service.trim_end_matches('/')
+        )
+    })
 }
 
 /// The line a song you keep coming back to earns: the name of the app, as a
@@ -116,11 +110,7 @@ pub fn activity(status: &Status) -> Value {
     } else if status.paused {
         Some(format!("Paused · {}", status.artists))
     } else {
-        Some(match &status.pulse {
-            // First, so a long list of artists cannot push it out of sight.
-            Some(pulse) => format!("{pulse}  {}", status.artists),
-            None => status.artists.clone(),
-        })
+        Some(status.artists.clone())
     };
     let mut activity = json!({
         "type": 2,
@@ -146,7 +136,7 @@ pub fn activity(status: &Status) -> Value {
             assets["small_image"] = json!(if status.paused {
                 BADGE_STILL
             } else {
-                BADGE_PLAYING
+                status.badge.as_deref().unwrap_or(BADGE_PLAYING)
             });
             assets["small_text"] = json!(short(&about, TEXT));
         }
@@ -329,9 +319,9 @@ mod tests {
             started_ms: Some(1_000),
             ends_ms: Some(181_000),
             paused: false,
+            badge: None,
             hover: None,
             moment: None,
-            pulse: None,
             party: None,
         }
     }
@@ -406,34 +396,6 @@ mod tests {
     }
 
     #[test]
-    fn the_pulse_draws_the_sound_and_nothing_for_silence() {
-        assert_eq!(pulse(&[]), None);
-        assert_eq!(pulse(&[0.0; 75]), None);
-        let mut levels = [0.0; 75];
-        levels[0] = 1.0;
-        levels[74] = 0.5;
-        let bars = pulse(&levels).unwrap();
-        assert_eq!(bars.chars().count(), PULSE_BARS);
-        assert_eq!(bars.chars().next(), Some('█'));
-        assert_eq!(bars.chars().nth(2), Some('▁'));
-        assert_eq!(bars.chars().last(), Some('▅'));
-    }
-
-    #[test]
-    fn the_pulse_leads_the_artist_while_playing_and_rests_when_paused() {
-        let playing = Status {
-            pulse: Some("▂▅▇▆▃▂".into()),
-            ..status()
-        };
-        assert_eq!(activity(&playing)["state"], "▂▅▇▆▃▂  Massive Attack");
-        let paused = Status {
-            paused: true,
-            ..playing
-        };
-        assert_eq!(activity(&paused)["state"], "Paused · Massive Attack");
-    }
-
-    #[test]
     fn the_member_list_names_the_song_and_its_title_links_to_it() {
         let activity = activity(&status());
         assert_eq!(activity["status_display_type"], 2);
@@ -443,6 +405,30 @@ mod tests {
             activity["assets"]["large_url"],
             activity["buttons"][0]["url"]
         );
+    }
+
+    #[test]
+    fn the_badge_is_lit_in_the_covers_colour_only_while_music_plays() {
+        let badge = lit_badge("https://example.test/api/", [153, 51, 0]).unwrap();
+        assert_eq!(badge, "https://example.test/api/badge/f50.gif");
+        let lit = Status {
+            badge: Some(badge.clone()),
+            ..status()
+        };
+        assert_eq!(activity(&lit)["assets"]["small_image"], badge.as_str());
+        let paused = activity(&Status {
+            paused: true,
+            ..lit
+        });
+        assert_eq!(paused["assets"]["small_image"], BADGE_STILL);
+        // Greys stay grey, and nothing lights up without a colour or over http.
+        assert!(
+            lit_badge("https://example.test", [77, 77, 77])
+                .unwrap()
+                .ends_with("/badge/fff.gif")
+        );
+        assert_eq!(lit_badge("https://example.test", [0, 0, 0]), None);
+        assert_eq!(lit_badge("http://localhost:8787", [153, 51, 0]), None);
     }
 
     #[test]

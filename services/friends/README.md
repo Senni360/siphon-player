@@ -175,6 +175,7 @@ make 120 live reads and 60 live writes a minute per instance.
 | `PUT` / `DELETE /api/live/channels/:id/skip-request` | Ask the host to skip this song, or take it back. Moving on clears them. |
 | `PUT /api/live/channels/:id/background` | `{name, items (1 to 1000)}`: what plays, in a loop, when the queue runs out. Only someone at the controls may replace another's. |
 | `DELETE /api/live/channels/:id/background` | Remove it. |
+| `GET /api/badge/:rgb.gif` | No sign-in. The Discord card's badge, its rings lit in a colour of three hex digits. It names nothing else, and Discord fetches it, not the app. |
 | `GET /api/open/party/:group/:party` | No sign-in. `302` to `siphon://party/...`, because a Discord button can only open https. It names no song or person, and the app lets in only those already in the group, after asking. |
 
 In a party (`locked`), only the host and the controllers may seek, pause, skip or

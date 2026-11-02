@@ -14,10 +14,6 @@ const DISCORD_TICK: Duration = Duration::from_secs(3);
 const DISCORD_DRIFT_MS: u64 = 3_000;
 /// Longer paused than this and there is nothing to show anymore.
 const DISCORD_PAUSED: Duration = Duration::from_secs(5 * 60);
-/// How often the sound on the card is redrawn: Discord takes about one update
-/// in this long, so anything faster would be dropped.
-const DISCORD_PULSE: Duration = Duration::from_secs(15);
-
 fn wall_ms() -> u64 {
     jiff::Timestamp::now().as_millisecond().max(0) as u64
 }
@@ -32,15 +28,6 @@ fn songs_of(tracks: Vec<crate::api::models::Track>) -> Vec<NewPost> {
         })
         .take(1000)
         .collect()
-}
-
-/// Whether two statuses say the same, allowing for a clock that moved a little.
-/// The sound changes every instant and the card can't. Between redraws the same
-/// song keeps the picture it has, so the sound alone is no news.
-fn hold_pulse(current: &mut Status, sent: &Status, due: bool) {
-    if !due && current.title == sent.title && current.paused == sent.paused {
-        current.pulse.clone_from(&sent.pulse);
-    }
 }
 
 /// How often a song played before `started`: today and in all that is kept. The
@@ -69,6 +56,7 @@ fn plays_before(
     (today, ever)
 }
 
+/// Whether two statuses say the same, allowing for a clock that moved a little.
 fn same_status(a: &Option<Status>, b: &Option<Status>) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -297,7 +285,6 @@ impl App {
         let moment = shown
             .as_ref()
             .and_then(|item| self.discord_moment(&now, item));
-        let pulse = shown.as_ref().and_then(|_| self.discord_pulse(&now));
         let hover = shown.as_ref().and_then(|_| self.discord_hover());
         let (title, artists, artwork_url, link) = match shown {
             Some(item) => {
@@ -326,10 +313,14 @@ impl App {
         let started_ms = now.playing.then(|| wall.saturating_sub(position));
         let ends_ms = (now.playing && now.duration_ms > 0)
             .then(|| wall + u64::from(now.duration_ms).saturating_sub(position));
+        let base = std::env::var("SIPHON_FRIENDS_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
+        // Only for a song the card shows the cover of, so never a private one.
+        let badge = artwork_url
+            .as_ref()
+            .and_then(|_| self.discord_glow(&now))
+            .and_then(|glow| discord::lit_badge(&base, glow));
         let party = self.live.my_channel().and_then(|channel| {
             let group = account::current_group()?;
-            let base =
-                std::env::var("SIPHON_FRIENDS_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into());
             Some(Party {
                 id: channel.id.clone(),
                 name: channel.name.clone(),
@@ -368,26 +359,21 @@ impl App {
             started_ms,
             ends_ms,
             paused: !now.playing,
+            badge,
             hover,
             moment,
-            pulse,
             party,
         })
     }
 
-    /// The sound playing here right now: what the visualisers see, so the
-    /// volume knob never moves it. Nothing is drawn for a song this computer
-    /// isn't making the sound of.
-    fn discord_pulse(&self, now: &NowPlaying) -> Option<String> {
-        if !now.local || !now.playing {
+    /// The colour the window's glow has for this song, when it has one.
+    fn discord_glow(&self, now: &NowPlaying) -> Option<[u8; 3]> {
+        if !self.settings.accent_from_art {
             return None;
         }
-        let samples = self
-            .winamp
-            .tap
-            .window(crate::vis::WIDE_SAMPLES, crate::vis::LAG);
-        let levels = crate::vis::WideAnalyser::default().step(&samples, Instant::now());
-        discord::pulse(&levels)
+        let art = now.art_small.as_ref().or(now.art_url.as_ref())?;
+        let glow = crate::ui::glow_color(*self.accents.get(art)?);
+        Some([glow.r(), glow.g(), glow.b()])
     }
 
     /// What makes this song worth a line today, best first. People in the group
@@ -470,12 +456,6 @@ impl App {
         } else {
             None
         };
-        if let (Some(current), Some((_, Some(sent)))) = (&mut status, &self.discord_last) {
-            let due = self
-                .discord_pulsed
-                .is_none_or(|at| at.elapsed() >= DISCORD_PULSE);
-            hold_pulse(current, sent, due);
-        }
         // Paused a long while, there is nothing to show.
         if let Some(current) = &status
             && current.paused
@@ -514,7 +494,6 @@ impl App {
                 Action::SetDiscordPresence(false),
             );
         }
-        self.discord_pulsed = Some(Instant::now());
         self.backend.send(Command::Discord(status.clone()));
         self.discord_last = Some((Instant::now(), status));
     }
@@ -534,9 +513,9 @@ mod tests {
             started_ms: Some(1_000),
             ends_ms: Some(100_000),
             paused: false,
+            badge: None,
             hover: None,
             moment: None,
-            pulse: None,
             party: None,
         }
     }
@@ -591,31 +570,6 @@ mod tests {
             plays_before(&plays, "new", at("2026-11-02T20:00:00Z"), None),
             (0, 0)
         );
-    }
-
-    #[test]
-    fn the_sound_on_the_card_is_no_news_until_its_redraw_is_due() {
-        let sent = Status {
-            pulse: Some("▂▅▇▆▃▂".into()),
-            ..status()
-        };
-        let moved = Status {
-            pulse: Some("▇▃▁▁▃▇".into()),
-            ..status()
-        };
-        let mut held = moved.clone();
-        hold_pulse(&mut held, &sent, false);
-        assert!(same_status(&Some(sent.clone()), &Some(held)));
-        let mut due = moved.clone();
-        hold_pulse(&mut due, &sent, true);
-        assert!(!same_status(&Some(sent.clone()), &Some(due)));
-        // A new song has no reason to wear the last one's sound.
-        let mut next = Status {
-            title: "Next".into(),
-            ..moved
-        };
-        hold_pulse(&mut next, &sent, false);
-        assert_eq!(next.pulse.as_deref(), Some("▇▃▁▁▃▇"));
     }
 
     #[test]

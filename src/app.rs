@@ -532,8 +532,6 @@ pub struct App {
     pending_group_playlists: HashMap<String, (String, crate::model::GroupPlaylistUse)>,
     discord_last: Option<(Instant, Option<crate::discord::Status>)>,
     discord_paused_at: Option<Instant>,
-    /// When the Discord card was last sent, which is when its sound was drawn.
-    discord_pulsed: Option<Instant>,
     pending_soundcloud_adds: HashMap<u64, playlist_sources::PendingSoundCloudAdd>,
     /// Current track timing used to decide when a play counts.
     listening: Option<Listening>,
@@ -1250,7 +1248,6 @@ impl App {
             pending_group_playlists: HashMap::new(),
             discord_last: None,
             discord_paused_at: None,
-            discord_pulsed: None,
             pending_soundcloud_adds: HashMap::new(),
             listening: None,
             recents: crate::model::CursorList::default(),
