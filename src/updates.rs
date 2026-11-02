@@ -98,9 +98,6 @@ mod tests {
         );
     }
 
-    /// An AppImage may replace itself only because the release workflow
-    /// builds the AppImages into the signed checksums.txt;
-    /// packaging/test-release-names.py checks that side.
     #[test]
     fn previews_follow_the_next_preview() {
         assert_eq!(CONFIG.prereleases, Prereleases::WhenRunningPrerelease);

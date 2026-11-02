@@ -10,7 +10,6 @@
   <a href="https://spotifast.rocks/download/"><strong>Download</strong></a> ·
   <a href="https://spotifast.rocks/getting-started/">Getting started</a> ·
   <a href="https://spotifast.rocks/using-spotifast/">User guide</a> ·
-  <a href="CONTRIBUTING.md">Contribute</a>
 </p>
 
 <p align="center">
@@ -207,9 +206,7 @@ cargo build --locked --release
 Run `target/release/siphon` (`target\release\siphon.exe` on Windows).
 The [source-build guide](docs/_guide/getting-started.md#build-from-source)
 lists native dependencies. The inherited download, Homebrew and AUR links
-refer to upstream Spotifast and do not install this fork. Packaging templates
-in this repository now produce Siphon artifacts; release hosting and signing
-still need to be configured for the fork.
+refer to upstream Spotifast and do not install this fork.
 
 ## Start listening
 
@@ -279,20 +276,15 @@ this fork's updated references live in [docs](docs/).
 | Understand what is stored and sent | [Privacy](https://spotifast.rocks/privacy/) · [How it connects](https://spotifast.rocks/how-it-connects/) |
 | Check Spotify and librespot limitations | [What Spotify allows](https://spotifast.rocks/what-spotify-allows/) |
 | Understand account risk | [Will my account get banned?](https://spotifast.rocks/what-is-spotifast/#will-my-spotify-account-get-banned) |
-| Report a bug or propose a feature | Read [Contributing](CONTRIBUTING.md), then use the [issue forms](https://github.com/crmne/spotifast/issues/new/choose). |
 
-## Contributing
+## Demo
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening an issue or pull
-request. To look at the interface without a Spotify account, run:
+To look at the interface without a Spotify account, run:
 
 ```sh
 cargo run --features demo -- --demo
 ```
 
-Translations live in `assets/i18n/`; see
-[Translating Siphon](docs/_reference/translating.md). Release packaging
-is described in [PACKAGING.md](PACKAGING.md).
 
 The library's **+** menu offers **New mixed playlist** alongside the usual
 Spotify playlist. Mixed playlists hold Spotify and SoundCloud tracks together,
