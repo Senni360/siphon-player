@@ -281,8 +281,11 @@ out, or a reconnection that gives up stops it.
   only the latest for 200 seconds. While they listen along with someone or are in a
   channel, Siphon reads the group's live state every 3 seconds, and every 15 seconds
   while the Group page is open. While Discord is open, the song playing here also
-  goes to Discord through its local socket, with its artwork and link, unless it
-  came from a private SoundCloud link or the switch is off. No audio goes through it: each listener plays the
+  goes to Discord through its local socket, with its artwork and link, a few bars
+  of the sound's spectrum, a count of how often it played, and a count of group
+  members on the same song (never their names), unless it came from a private
+  SoundCloud link or the switch is off. Discord itself fetches the card's badge
+  image from this repository on GitHub; the app does not. No audio goes through it: each listener plays the
   song on their own account from its own service. A member who shares also sends
   their monthly and all-time totals and the top of each list, about once an hour,
   never individual plays. The listening statistics read

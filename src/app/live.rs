@@ -76,7 +76,7 @@ fn play_request(wanted: &Wanted) -> Option<PlayRequest> {
 }
 
 impl App {
-    fn me(&self) -> Option<String> {
+    pub(super) fn me(&self) -> Option<String> {
         self.friends_feed
             .profile
             .as_ref()

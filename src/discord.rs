@@ -23,6 +23,15 @@ const LARGEST_FRAME: u32 = 64 * 1024;
 /// What Discord accepts in a text field, and in a button's label.
 const TEXT: usize = 128;
 const BUTTON: usize = 32;
+/// What Discord accepts as a link. It refuses the whole card over a longer one.
+const URL: usize = 256;
+/// The mark in the artwork's corner: its rings pulse while music plays, and
+/// hold still when it stops. Discord fetches these, this app never does.
+const BADGE_PLAYING: &str = "https://raw.githubusercontent.com/Senni360/siphon-player/main/packaging/icons/encore-badge.gif";
+const BADGE_STILL: &str = "https://raw.githubusercontent.com/Senni360/siphon-player/main/packaging/icons/encore-badge.png";
+/// Bars of the sound in one small space, from the bass up.
+const PULSE_BARS: usize = 6;
+const PULSE_GLYPHS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Party {
@@ -43,8 +52,12 @@ pub struct Status {
     pub started_ms: Option<u64>,
     pub ends_ms: Option<u64>,
     pub paused: bool,
-    /// A line about this listener, shown when pointing at the artwork.
+    /// A line about this listener, shown when pointing at the badge.
     pub hover: Option<String>,
+    /// What is special about this song right now, under its artist.
+    pub moment: Option<String>,
+    /// The sound at this moment, as bars. See [`pulse`].
+    pub pulse: Option<String>,
     pub party: Option<Party>,
 }
 
@@ -62,26 +75,88 @@ pub fn is_private_link(url: &str) -> bool {
     url.contains("secret_token=") || url.contains("/s-")
 }
 
+/// What the song sounds like at this moment, in a few characters, from the
+/// player bar's analyser. Silence draws nothing rather than a flat line.
+pub fn pulse(levels: &[f32]) -> Option<String> {
+    if levels.is_empty() || levels.iter().all(|level| *level < 0.02) {
+        return None;
+    }
+    let each = levels.len().div_ceil(PULSE_BARS);
+    Some(
+        levels
+            .chunks(each)
+            .map(|band| {
+                let level = band.iter().copied().fold(0.0, f32::max).clamp(0.0, 1.0);
+                PULSE_GLYPHS[(level * (PULSE_GLYPHS.len() - 1) as f32).round() as usize]
+            })
+            .collect(),
+    )
+}
+
+/// The line a song you keep coming back to earns: the name of the app, as a
+/// count. `today` and `ever` are the plays before this one.
+pub fn encore_line(today: usize, ever: usize) -> Option<String> {
+    match (today, ever) {
+        (0, 0..=3) => None,
+        (0, ever) => Some(format!("{} plays and counting", ever + 1)),
+        (today, _) => Some(format!("Encore ×{today} · {} plays today", today + 1)),
+    }
+}
+
 pub fn activity(status: &Status) -> Value {
+    // No artist means the song itself must not show: all there is to say is
+    // the party, if any.
+    let hidden = status.artists.is_empty();
+    let party_line = status
+        .party
+        .as_ref()
+        .map(|party| format!("{} · {} listening", party.name, party.size));
+    let state = if hidden {
+        party_line.clone()
+    } else if status.paused {
+        Some(format!("Paused · {}", status.artists))
+    } else {
+        Some(match &status.pulse {
+            // First, so a long list of artists cannot push it out of sight.
+            Some(pulse) => format!("{pulse}  {}", status.artists),
+            None => status.artists.clone(),
+        })
+    };
     let mut activity = json!({
         "type": 2,
         "details": short(&status.title, TEXT),
-        "state": short(
-            &match (&status.party, status.paused) {
-                (Some(party), _) => format!("{} · {} listening", party.name, party.size),
-                (None, true) => format!("Paused · {}", status.artists),
-                (None, false) => status.artists.clone(),
-            },
-            TEXT,
-        ),
+        // In the member list, "Listening to" the song, not to the app.
+        "status_display_type": if hidden { 0 } else { 2 },
     });
-    let hover = status
+    if let Some(state) = state {
+        activity["state"] = json!(short(&state, TEXT));
+    }
+    let about = status
         .hover
         .clone()
         .unwrap_or_else(|| crate::brand::NAME.to_owned());
-    let mut assets = json!({ "large_text": short(&hover, TEXT) });
-    if let Some(art) = &status.artwork_url {
-        assets["large_image"] = json!(art);
+    let line = party_line
+        .filter(|_| !hidden)
+        .or_else(|| status.moment.clone())
+        .unwrap_or_else(|| about.clone());
+    let mut assets = json!({ "large_text": short(&line, TEXT) });
+    match &status.artwork_url {
+        Some(art) => {
+            assets["large_image"] = json!(art);
+            assets["small_image"] = json!(if status.paused {
+                BADGE_STILL
+            } else {
+                BADGE_PLAYING
+            });
+            assets["small_text"] = json!(short(&about, TEXT));
+        }
+        // Never an empty square: the mark alone, large.
+        None => assets["large_image"] = json!(BADGE_STILL),
+    }
+    if let Some((_, url)) = status.link.as_ref().filter(|(_, url)| url.len() <= URL) {
+        activity["details_url"] = json!(url);
+        activity["state_url"] = json!(url);
+        assets["large_url"] = json!(url);
     }
     activity["assets"] = assets;
     if !status.paused {
@@ -255,6 +330,8 @@ mod tests {
             ends_ms: Some(181_000),
             paused: false,
             hover: None,
+            moment: None,
+            pulse: None,
             party: None,
         }
     }
@@ -295,19 +372,116 @@ mod tests {
             }),
             ..status()
         });
-        assert_eq!(activity["state"], "Friday · 3 listening");
+        assert_eq!(activity["state"], "Massive Attack");
+        assert_eq!(activity["assets"]["large_text"], "Friday · 3 listening");
         assert_eq!(activity["party"]["size"][0], 3);
         assert_eq!(activity["buttons"][0]["label"], "Join in Encore");
         assert_eq!(activity["buttons"][1]["label"], "Open in Spotify");
     }
 
     #[test]
-    fn the_artwork_says_something_about_the_listener() {
-        let activity = activity(&Status {
+    fn the_card_says_something_about_the_listener() {
+        let plain = activity(&Status {
             hover: Some("41 hours this month".into()),
             ..status()
         });
-        assert_eq!(activity["assets"]["large_text"], "41 hours this month");
+        assert_eq!(plain["assets"]["large_text"], "41 hours this month");
+        assert_eq!(plain["assets"]["small_text"], "41 hours this month");
+        let special = activity(&Status {
+            hover: Some("41 hours this month".into()),
+            moment: Some("Encore ×2 · 3 plays today".into()),
+            ..status()
+        });
+        assert_eq!(special["assets"]["large_text"], "Encore ×2 · 3 plays today");
+        assert_eq!(special["assets"]["small_text"], "41 hours this month");
+    }
+
+    #[test]
+    fn a_song_you_keep_coming_back_to_earns_an_encore() {
+        assert_eq!(encore_line(0, 0), None);
+        assert_eq!(encore_line(0, 3), None);
+        assert_eq!(encore_line(0, 4).unwrap(), "5 plays and counting");
+        assert_eq!(encore_line(1, 1).unwrap(), "Encore ×1 · 2 plays today");
+        assert_eq!(encore_line(3, 40).unwrap(), "Encore ×3 · 4 plays today");
+    }
+
+    #[test]
+    fn the_pulse_draws_the_sound_and_nothing_for_silence() {
+        assert_eq!(pulse(&[]), None);
+        assert_eq!(pulse(&[0.0; 75]), None);
+        let mut levels = [0.0; 75];
+        levels[0] = 1.0;
+        levels[74] = 0.5;
+        let bars = pulse(&levels).unwrap();
+        assert_eq!(bars.chars().count(), PULSE_BARS);
+        assert_eq!(bars.chars().next(), Some('█'));
+        assert_eq!(bars.chars().nth(2), Some('▁'));
+        assert_eq!(bars.chars().last(), Some('▅'));
+    }
+
+    #[test]
+    fn the_pulse_leads_the_artist_while_playing_and_rests_when_paused() {
+        let playing = Status {
+            pulse: Some("▂▅▇▆▃▂".into()),
+            ..status()
+        };
+        assert_eq!(activity(&playing)["state"], "▂▅▇▆▃▂  Massive Attack");
+        let paused = Status {
+            paused: true,
+            ..playing
+        };
+        assert_eq!(activity(&paused)["state"], "Paused · Massive Attack");
+    }
+
+    #[test]
+    fn the_member_list_names_the_song_and_its_title_links_to_it() {
+        let activity = activity(&status());
+        assert_eq!(activity["status_display_type"], 2);
+        assert_eq!(activity["details_url"], activity["buttons"][0]["url"]);
+        assert_eq!(activity["state_url"], activity["buttons"][0]["url"]);
+        assert_eq!(
+            activity["assets"]["large_url"],
+            activity["buttons"][0]["url"]
+        );
+    }
+
+    #[test]
+    fn the_badge_pulses_only_while_music_plays() {
+        let playing = activity(&status());
+        assert_eq!(playing["assets"]["small_image"], BADGE_PLAYING);
+        let paused = activity(&Status {
+            paused: true,
+            ..status()
+        });
+        assert_eq!(paused["assets"]["small_image"], BADGE_STILL);
+    }
+
+    #[test]
+    fn a_hidden_song_says_nothing_beyond_listening_on_the_app() {
+        let hidden = activity(&Status {
+            title: "Listening on Encore".into(),
+            artists: String::new(),
+            artwork_url: None,
+            link: None,
+            ..status()
+        });
+        assert_eq!(hidden["details"], "Listening on Encore");
+        assert_eq!(hidden["status_display_type"], 0);
+        assert!(hidden.get("state").is_none());
+        assert!(hidden.get("details_url").is_none());
+        assert!(hidden.get("buttons").is_none());
+        assert_eq!(hidden["assets"]["large_image"], BADGE_STILL);
+        assert_eq!(hidden["assets"]["large_text"], "Encore");
+    }
+
+    #[test]
+    fn a_link_too_long_for_discord_cannot_cost_the_whole_card() {
+        let long = activity(&Status {
+            link: Some(("Open in Spotify", format!("https://x/{}", "y".repeat(300)))),
+            ..status()
+        });
+        assert!(long.get("details_url").is_none());
+        assert!(long["assets"].get("large_url").is_none());
     }
 
     #[test]

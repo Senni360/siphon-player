@@ -14,6 +14,9 @@ const DISCORD_TICK: Duration = Duration::from_secs(3);
 const DISCORD_DRIFT_MS: u64 = 3_000;
 /// Longer paused than this and there is nothing to show anymore.
 const DISCORD_PAUSED: Duration = Duration::from_secs(5 * 60);
+/// How often the sound on the card is redrawn: Discord takes about one update
+/// in this long, so anything faster would be dropped.
+const DISCORD_PULSE: Duration = Duration::from_secs(15);
 
 fn wall_ms() -> u64 {
     jiff::Timestamp::now().as_millisecond().max(0) as u64
@@ -32,6 +35,40 @@ fn songs_of(tracks: Vec<crate::api::models::Track>) -> Vec<NewPost> {
 }
 
 /// Whether two statuses say the same, allowing for a clock that moved a little.
+/// The sound changes every instant and the card can't. Between redraws the same
+/// song keeps the picture it has, so the sound alone is no news.
+fn hold_pulse(current: &mut Status, sent: &Status, due: bool) {
+    if !due && current.title == sent.title && current.paused == sent.paused {
+        current.pulse.clone_from(&sent.pulse);
+    }
+}
+
+/// How often a song played before `started`: today and in all that is kept. The
+/// play in progress is written down part of the way through, so it can't count
+/// itself and change the line halfway.
+fn plays_before(
+    plays: &[crate::api::models::PlayHistory],
+    uri: &str,
+    started: jiff::Timestamp,
+    midnight: Option<jiff::Timestamp>,
+) -> (usize, usize) {
+    let (mut today, mut ever) = (0, 0);
+    for play in plays.iter().filter(|play| play.track.uri == uri) {
+        let Some(at) = play
+            .played_at
+            .as_deref()
+            .and_then(|at| at.parse::<jiff::Timestamp>().ok())
+        else {
+            continue;
+        };
+        if at < started {
+            ever += 1;
+            today += usize::from(midnight.is_some_and(|midnight| at >= midnight));
+        }
+    }
+    (today, ever)
+}
+
 fn same_status(a: &Option<Status>, b: &Option<Status>) -> bool {
     match (a, b) {
         (None, None) => true,
@@ -255,7 +292,14 @@ impl App {
         let private = item
             .as_ref()
             .is_none_or(|item| discord::is_private_link(&item.url));
-        let (title, artists, artwork_url, link) = match item.filter(|_| !private) {
+        let shown = item.filter(|_| !private);
+        // A private song says nothing about itself, not even how often it plays.
+        let moment = shown
+            .as_ref()
+            .and_then(|item| self.discord_moment(&now, item));
+        let pulse = shown.as_ref().and_then(|_| self.discord_pulse(&now));
+        let hover = shown.as_ref().and_then(|_| self.discord_hover());
+        let (title, artists, artwork_url, link) = match shown {
             Some(item) => {
                 let link = match item.source {
                     Source::Spotify => "Open in Spotify",
@@ -324,9 +368,75 @@ impl App {
             started_ms,
             ends_ms,
             paused: !now.playing,
-            hover: self.discord_hover(),
+            hover,
+            moment,
+            pulse,
             party,
         })
+    }
+
+    /// The sound playing here right now: what the visualisers see, so the
+    /// volume knob never moves it. Nothing is drawn for a song this computer
+    /// isn't making the sound of.
+    fn discord_pulse(&self, now: &NowPlaying) -> Option<String> {
+        if !now.local || !now.playing {
+            return None;
+        }
+        let samples = self
+            .winamp
+            .tap
+            .window(crate::vis::WIDE_SAMPLES, crate::vis::LAG);
+        let levels = crate::vis::WideAnalyser::default().step(&samples, Instant::now());
+        discord::pulse(&levels)
+    }
+
+    /// What makes this song worth a line today, best first. People in the group
+    /// are only ever counted: they share with the group, not with Discord.
+    fn discord_moment(&self, now: &NowPlaying, item: &NewPost) -> Option<String> {
+        let group = account::current_group().and_then(|id| {
+            self.friends_feed
+                .account
+                .as_ref()?
+                .groups
+                .iter()
+                .find(|group| group.id == id)
+                .map(|group| group.name.clone())
+        });
+        let same = |other: &NewPost| {
+            other.url == item.url || (other.uri.is_some() && other.uri == item.uri)
+        };
+        if let Some(group) = &group {
+            let me = self.me();
+            let others = self
+                .live
+                .snapshot
+                .presence
+                .iter()
+                .filter(|person| person.playing && Some(&person.user_id) != me.as_ref())
+                .filter(|person| person.item.as_ref().is_some_and(same))
+                .count();
+            match others {
+                0 => {}
+                1 => return Some(format!("1 other in {group} is on this right now")),
+                many => return Some(format!("{many} others in {group} are on this right now")),
+            }
+        }
+        let started =
+            jiff::Timestamp::now() - jiff::SignedDuration::from_millis(i64::from(now.position_ms));
+        let midnight = jiff::Zoned::now()
+            .start_of_day()
+            .map(|day| day.timestamp())
+            .ok();
+        let (today, ever) = plays_before(self.plays.plays(), &now.uri, started, midnight);
+        if let Some(line) = discord::encore_line(today, 0) {
+            return Some(line);
+        }
+        if let Some(group) = &group
+            && self.friends_feed.posts.iter().any(|post| same(&post.item))
+        {
+            return Some(format!("Shared in {group}"));
+        }
+        discord::encore_line(0, ever)
     }
 
     /// Something no other player's card can say: how much of this month went here.
@@ -360,6 +470,12 @@ impl App {
         } else {
             None
         };
+        if let (Some(current), Some((_, Some(sent)))) = (&mut status, &self.discord_last) {
+            let due = self
+                .discord_pulsed
+                .is_none_or(|at| at.elapsed() >= DISCORD_PULSE);
+            hold_pulse(current, sent, due);
+        }
         // Paused a long while, there is nothing to show.
         if let Some(current) = &status
             && current.paused
@@ -398,6 +514,7 @@ impl App {
                 Action::SetDiscordPresence(false),
             );
         }
+        self.discord_pulsed = Some(Instant::now());
         self.backend.send(Command::Discord(status.clone()));
         self.discord_last = Some((Instant::now(), status));
     }
@@ -418,6 +535,8 @@ mod tests {
             ends_ms: Some(100_000),
             paused: false,
             hover: None,
+            moment: None,
+            pulse: None,
             party: None,
         }
     }
@@ -438,6 +557,65 @@ mod tests {
         assert!(!same_status(&Some(status()), &Some(seeked)));
         assert!(!same_status(&Some(status()), &None));
         assert!(same_status(&None, &None));
+    }
+
+    #[test]
+    fn a_song_counts_its_earlier_plays_but_never_the_one_in_progress() {
+        let play = |uri: &str, at: &str| crate::api::models::PlayHistory {
+            track: crate::api::models::Track {
+                uri: uri.into(),
+                ..Default::default()
+            },
+            played_at: Some(at.into()),
+            context: None,
+        };
+        let at = |text: &str| text.parse::<jiff::Timestamp>().unwrap();
+        let plays = [
+            // Written down thirty seconds into the play in progress.
+            play("song", "2026-11-02T20:00:30Z"),
+            play("song", "2026-11-02T19:00:00Z"),
+            play("song", "2026-11-02T18:00:00Z"),
+            play("other", "2026-11-02T17:00:00Z"),
+            play("song", "2026-11-01T12:00:00Z"),
+        ];
+        assert_eq!(
+            plays_before(
+                &plays,
+                "song",
+                at("2026-11-02T20:00:00Z"),
+                Some(at("2026-11-02T00:00:00Z")),
+            ),
+            (2, 3)
+        );
+        assert_eq!(
+            plays_before(&plays, "new", at("2026-11-02T20:00:00Z"), None),
+            (0, 0)
+        );
+    }
+
+    #[test]
+    fn the_sound_on_the_card_is_no_news_until_its_redraw_is_due() {
+        let sent = Status {
+            pulse: Some("▂▅▇▆▃▂".into()),
+            ..status()
+        };
+        let moved = Status {
+            pulse: Some("▇▃▁▁▃▇".into()),
+            ..status()
+        };
+        let mut held = moved.clone();
+        hold_pulse(&mut held, &sent, false);
+        assert!(same_status(&Some(sent.clone()), &Some(held)));
+        let mut due = moved.clone();
+        hold_pulse(&mut due, &sent, true);
+        assert!(!same_status(&Some(sent.clone()), &Some(due)));
+        // A new song has no reason to wear the last one's sound.
+        let mut next = Status {
+            title: "Next".into(),
+            ..moved
+        };
+        hold_pulse(&mut next, &sent, false);
+        assert_eq!(next.pulse.as_deref(), Some("▇▃▁▁▃▇"));
     }
 
     #[test]

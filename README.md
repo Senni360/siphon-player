@@ -129,9 +129,14 @@ folded until you open them. **Playlists** shares a whole list with the group, as
 of how it is now, for anyone to save, play or use in a party.
 
 While Discord is open, your profile shows the song you're playing, with a progress bar
-and a link to it, and in a party, how many are listening and a **Join in Encore** button for
-others in your group. A song from a private SoundCloud link only ever shows as "Listening
-on Encore". Turn it off in the **People** tab.
+and a link to it, and your member-list status names the song. The card also shows what no
+other player's can: a few bars of the sound playing at that moment, redrawn every 15 seconds
+or so; **Encore ×3 · 4 plays today** when you keep coming back to a song; how many others in
+your group are on it right now (only ever a count, never their names), or that it was shared
+in your group; and the logo pulsing in the corner of the artwork while music plays. In a
+party it shows how many are listening and a **Join in Encore** button for others in your
+group. A song from a private SoundCloud link only ever shows as "Listening on Encore". Turn
+it off in the **People** tab.
 
 Its **Stats** tab shows minutes listened by month, top songs, artists, albums and
 genres, streaks and when you listen, for any period, and compares you with friends
