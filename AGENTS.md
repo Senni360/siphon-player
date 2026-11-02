@@ -28,7 +28,9 @@ These instructions add implementation constraints for coding agents.
   never run on the UI thread: encode there and hand the bytes to the app's
   `fastframe_file::Writer`. fastframe_file's guard panics in debug builds.
 - Keep platform integrations behind target-specific modules or `cfg` blocks.
-  A fix for one platform must keep the other two targets compiling.
+  Windows x64 is the one target CI checks and releases cover. Do not break the
+  Linux and macOS code on purpose, but nothing verifies it compiles anymore, so
+  never claim it does.
 - Settings and state files must remain readable, backward compatible, and
   atomically written. Never log credentials or authorization responses.
 - Prefer existing dependencies. Explain any new crate in `Cargo.toml` next to
@@ -216,14 +218,15 @@ A release is not the tag alone. Do these in order:
 
 1. Change the `Cargo.toml` version, add the matching release to the Flatpak
    metainfo, and update the lockfile with a build.
-   The Nix package reads the lockfile itself, so it needs no hash. Verify
-   `nix build .#default` locally or in CI. Wait for every required CI job on the release commit before tagging.
+   Wait for every required CI job on the release commit before tagging.
    Commit and push this before the tag so the binaries report the right
    version. Include written notes in `packaging/release-notes/vVERSION.md`
    so the release publishes the real description immediately.
-2. Push the `v*` tag, which triggers the release workflow. Wait for every
-   required artifact and `checksums.txt`, then verify the published written
-   notes, screenshot and download links. Never publish generated placeholder notes.
+2. Build with `packaging/windows/package-candidate.ps1` from the clean checkout,
+   zip it under a top folder named `siphon-vVERSION-x86_64-pc-windows-msvc/`,
+   write `checksums.txt` and sign it as `checksums.txt.sig`. Push the `v*` tag and
+   create the release with those files, then verify the published written notes
+   and download links. Never publish generated placeholder notes.
 3. A prerelease stops here. Keep the stable version current on the website,
    Homebrew, and AUR. The prerelease remains available from GitHub's releases
    page.

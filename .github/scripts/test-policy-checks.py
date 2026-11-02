@@ -252,29 +252,19 @@ class ReviewMediaTest(unittest.TestCase):
 
 
 class CiScopeTest(unittest.TestCase):
-    def test_a_pull_request_tests_on_linux_and_windows(self):
-        self.assertEqual(ci_scope.scope("pull_request", ["src/player.rs"], set()), (True, ci_scope.PULL_REQUEST))
+    def test_everything_tests_on_windows_x64_alone(self):
+        self.assertEqual(ci_scope.SYSTEMS, ["windows-latest"])
+        for event in ["push", "pull_request"]:
+            for path in ["src/player.rs", "Cargo.lock", ".github/workflows/ci.yml", "src/platform/macos.rs"]:
+                self.assertEqual(ci_scope.scope(event, [path], set()), (True, ci_scope.SYSTEMS))
 
-    def test_main_and_the_label_test_everywhere(self):
-        self.assertEqual(ci_scope.scope("push", ["src/player.rs"], set()), (True, ci_scope.EVERYTHING))
-        self.assertEqual(ci_scope.scope("pull_request", ["src/player.rs"], {"all-platforms"}), (True, ci_scope.EVERYTHING))
-
-    def test_dependencies_and_ci_test_everywhere(self):
-        for path in ["Cargo.lock", ".cargo/config.toml", ".github/workflows/ci.yml"]:
-            self.assertEqual(ci_scope.scope("pull_request", [path], set())[1], ci_scope.EVERYTHING)
-
-    def test_macos_code_adds_macos(self):
-        _code, systems = ci_scope.scope("pull_request", ["src/platform/macos.rs"], set())
-        self.assertIn("macos-latest", systems)
-        self.assertNotIn("windows-11-arm", systems)
-
-    def test_documentation_alone_tests_on_linux(self):
-        self.assertEqual(ci_scope.scope("push", ["docs/_guide/winamp.md", "README.md"], set()), (False, [ci_scope.LINUX]))
-        self.assertEqual(ci_scope.scope("push", [".github/triage.yml"], set()), (False, [ci_scope.LINUX]))
+    def test_documentation_alone_skips_the_lints(self):
+        self.assertEqual(ci_scope.scope("push", ["docs/_guide/winamp.md", "README.md"], set()), (False, ci_scope.SYSTEMS))
+        self.assertEqual(ci_scope.scope("push", [".github/triage.yml"], set()), (False, ci_scope.SYSTEMS))
         self.assertTrue(ci_scope.scope("pull_request", ["docs/_guide/winamp.md", "src/app.rs"], set())[0])
 
-    def test_an_unreadable_change_runs_everything(self):
-        self.assertEqual(ci_scope.scope("pull_request", None, set()), (True, ci_scope.EVERYTHING))
+    def test_an_unreadable_change_checks_everything(self):
+        self.assertEqual(ci_scope.scope("pull_request", None, set()), (True, ci_scope.SYSTEMS))
 
 
 if __name__ == "__main__":

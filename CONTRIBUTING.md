@@ -74,9 +74,9 @@ implementation and regression tests live in the Copilot Triage repository.
 3. **Honest integrations.** Use Spotify's Web API and librespot for what they
    support. Do not scrape, impersonate capabilities, bypass technical
    protections, or silently replace one service with another.
-4. **Cross-platform by default.** Linux, macOS, and Windows are supported
-   products. Platform-specific code must be isolated and the other targets
-   must keep compiling.
+4. **Windows x64 first.** It is the one platform that CI checks and releases
+   cover. Platform-specific code must still be isolated, and the Linux and
+   macOS code stays in place, but nothing verifies that it compiles.
 5. **Small dependency surface.** Reuse the standard library and existing
    crates where practical. A new dependency needs a concrete benefit worth
    its build time, binary size, maintenance, and security cost.
@@ -228,7 +228,6 @@ Run the same checks CI runs before submitting:
 python3 .github/scripts/check-dependency-sources.py
 python3 .github/scripts/check-review-evidence.py
 python3 .github/scripts/check-new-settings.py --base origin/main
-python3 packaging/test-launchers.py
 cargo fmt --all --check
 cargo clippy --locked --all-targets -- -D warnings
 cargo clippy --locked --all-targets --all-features -- -D warnings
@@ -267,10 +266,8 @@ in GitHub Pages. When changing domains, configure DNS and GitHub Pages before
 redeploying; the previous hostname keeps working until that switch. Renamed
 guides use `jekyll-redirect-from` to preserve their old URLs.
 
-When changing `Cargo.lock` or `flake.nix`, also verify `nix build .#default`
-on a Nix host or wait for the Nix CI job. The package reads `Cargo.lock`
-directly, so a dependency update needs no hash in `flake.nix`. Releases must wait for all required CI
-jobs on the version commit before the tag is pushed.
+Releases must wait for all required CI jobs on the version commit before the
+tag is pushed.
 
 By contributing, you agree that your contribution is licensed under the
 project's MIT License.

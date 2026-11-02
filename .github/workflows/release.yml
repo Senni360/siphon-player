@@ -1,8 +1,9 @@
 name: Release
 
+# Every platform's build: by hand only. A Windows x64 release is built with
+# packaging/windows/package-candidate.ps1, as AGENTS.md describes.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write

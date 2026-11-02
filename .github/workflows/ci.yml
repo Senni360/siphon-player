@@ -55,12 +55,9 @@ jobs:
           if grep -qx setting-approved <<< "$labels"; then approved=(--approved); fi
           python3 .github/scripts/check-new-settings.py --base "$BASE" "${approved[@]}"
 
-  # Every repository on the account shares the hosted runners, so a pull
-  # request tests on Linux and Windows, and macOS and Windows on ARM join on
-  # main and when ci-scope.py says the change needs them. A change to the
-  # docs alone skips the Rust lints and the Nix package. This job is not a
-  # required check, so a skipped one never blocks a merge. After adding the
-  # all-platforms label to a pull request, re-run all its jobs.
+  # Windows x64 is the one system this project builds, checks and releases.
+  # A change to the docs alone skips the Rust lints. This job is not a required
+  # check, so a skipped one never blocks a merge.
   scope:
     name: scope
     runs-on: ubuntu-latest
@@ -86,18 +83,16 @@ jobs:
     name: quality
     needs: scope
     if: needs.scope.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: windows-latest
+    env:
+      CMAKE_GENERATOR: Ninja
+    # A cold cache on Windows needs about 30 minutes for each of these builds.
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: GUI build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libasound2-dev libpipewire-0.3-dev libxkbcommon-dev \
-            libwayland-dev libgl1-mesa-dev cmake libclang-dev ruby
       # After the toolchain, so the cache key follows the pinned rustc. The
       # key carries no job name, so each job sets its own generation. Only
       # pushes to main save; a pull request restores and builds on top.
@@ -109,12 +104,10 @@ jobs:
           cache-generation: quality-v1
       - name: Formatting
         run: cargo fmt --all --check
-      - name: Flatpak release metadata regression tests
-        run: python3 packaging/flatpak/test-metainfo.py
-      - name: Linux launcher packaging regressions
-        run: python3 packaging/test-launchers.py
+      - name: Release metadata regression tests
+        run: python packaging/flatpak/test-metainfo.py
       - name: Release name migration regressions
-        run: python3 packaging/test-release-names.py
+        run: python packaging/test-release-names.py
       - name: Clippy (default features)
         run: mbx clippy --locked --all-targets -- -D warnings
       - name: Clippy (all features)
@@ -137,8 +130,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-11-arm is the only place the Windows on ARM build is
-        # tested, so it runs on every push to main.
         os: ${{ fromJSON(needs.scope.outputs.platforms) }}
     steps:
       - uses: actions/checkout@v7
@@ -275,42 +266,6 @@ jobs:
           set -e
           test "$status" -eq 1
           test -s "$RUNNER_TEMP/siphon-helper-check.log"
-
-  nix:
-    name: Nix package
-    needs: scope
-    if: needs.scope.outputs.code == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v7
-      - uses: wimpysworld/nothing-but-nix@v9
-      - uses: cachix/install-nix-action@v31
-      - uses: nix-community/cache-nix-action@v7
-        with:
-          primary-key: nix-${{ runner.os }}-${{ hashFiles('**/flake.lock') }}
-          restore-prefixes-first-match: nix-${{ runner.os }}-
-      - name: Read the public Nix cache
-        if: vars.CACHIX_CACHE != ''
-        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
-        with:
-          name: ${{ vars.CACHIX_CACHE }}
-          skipPush: true
-      - run: nix build .#default
-      # Only a successful main push publishes. PRs and manual branch builds
-      # can read the public cache, but never receive its upload credential.
-      - name: Publish the Nix package closure
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.CACHIX_CACHE != ''
-        shell: bash
-        env:
-          CACHIX_CACHE: ${{ vars.CACHIX_CACHE }}
-          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
-        run: |
-          if [ -z "$CACHIX_AUTH_TOKEN" ]; then
-            echo '::error::CACHIX_CACHE is configured but CACHIX_AUTH_TOKEN is missing.'
-            exit 1
-          fi
-          nix path-info --recursive ./result | cachix push "$CACHIX_CACHE"
 
   docs:
     name: docs
