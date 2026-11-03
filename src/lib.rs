@@ -28,6 +28,7 @@ pub mod http;
 pub mod hybrid_queue;
 pub mod i18n;
 pub mod images;
+pub mod install;
 pub mod isrc;
 pub mod liked;
 pub mod limiter;

@@ -11,7 +11,8 @@ asks Windows about them.
 
 ## Turning it on
 
-Run this once from the copy of Encore you use:
+Run this once from the copy of Encore you use, which a new copy puts in
+`%LOCALAPPDATA%\Programs\Encore`:
 
 ```text
 siphon.exe --set-up-web-links

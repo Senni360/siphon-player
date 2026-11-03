@@ -409,6 +409,12 @@ preserved and edits to that store are refused until the load error is fixed.
 
 ### Portable copies
 
+The first time you open a new copy from Downloads, or straight out of the zip,
+it copies itself to `%LOCALAPPDATA%\Programs\Encore`, adds a Start menu entry
+and runs from there. If Encore is already in that folder, that copy opens
+instead. The download stays where it was and can be deleted. A copy in any other
+folder, or one with a `siphon-data` folder beside it, stays where it is.
+
 Since 0.13.4, Siphon started from the Windows ZIP keeps its files in a
 `siphon-data` folder next to `siphon.exe`, instead of the folders
 above. It knows it is the ZIP copy by the `siphon-portable.txt` file beside

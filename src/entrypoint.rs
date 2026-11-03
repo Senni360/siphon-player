@@ -375,6 +375,9 @@ pub(crate) fn run() -> eframe::Result<()> {
     #[cfg(windows)]
     {
         launch.arguments = spotifast::web_links::intercept(std::mem::take(&mut launch.arguments));
+        // Before this copy registers itself or makes a profile in a folder
+        // it is about to leave.
+        spotifast::install::settle_in(&launch.arguments);
     }
     // Before any output is listed or opened.
     spotifast::sink::name_in_mixers();
