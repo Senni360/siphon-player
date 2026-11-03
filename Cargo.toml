@@ -155,6 +155,9 @@ http = "1"
 # there and nowhere else. `net` is the local HTTP-proxy tests. `process`
 # keeps the installed Siphon helper's pipes and lifetime on the runtime.
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros", "fs", "net", "io-util", "process"] }
+# Stops a Soloist an earlier run left holding its data folder (`soloist/mod.rs`).
+# Already in the tree through librespot, with the same features.
+sysinfo = { version = "0.36", default-features = false, features = ["system"] }
 # Soloist's loopback control API. Both already arrive through librespot.
 tokio-tungstenite = "0.28"
 futures-util = { version = "0.3", features = ["sink"] }

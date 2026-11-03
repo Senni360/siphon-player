@@ -245,11 +245,13 @@ async fn run(args: Run, mut stopped: watch::Receiver<bool>) -> Result<()> {
     }
     let _ = install::collect(&root, &keep).await;
     let mut expired_retries = 0;
+    let mut restarts = 0;
     loop {
         if *stopped.borrow() {
             return Ok(());
         }
         let previous = install::saved(&root, "current.json").await;
+        let started = Instant::now();
         let outcome = process(
             Player {
                 root: &root,
@@ -280,7 +282,24 @@ async fn run(args: Run, mut stopped: watch::Receiver<bool>) -> Result<()> {
                 notify(Update::UpdateFailed);
                 continue;
             }
-            Err(error) => return Err(error),
+            // It stopped after running for a while, so bring it back rather than
+            // leave the person without a player. One that keeps stopping at
+            // once has a reason to report, such as a bad key.
+            Err(error) => {
+                if started.elapsed() >= HEALTHY_RUN {
+                    restarts = 0;
+                }
+                if restarts >= RESTART_LIMIT {
+                    return Err(error);
+                }
+                restarts += 1;
+                log::warn!("Soloist stopped; starting it again ({restarts}/{RESTART_LIMIT})");
+                tokio::select! {
+                    _ = stopped.changed() => return Ok(()),
+                    _ = tokio::time::sleep(RESTART_DELAY) => {}
+                }
+                continue;
+            }
         };
         match outcome {
             Outcome::Stopped => return Ok(()),
@@ -337,6 +356,9 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
     for file in ["ws.addr", "ws.port"] {
         let _ = tokio::fs::remove_file(data.join(file)).await;
     }
+    let reclaim_builds = root.to_path_buf();
+    let reclaim_data = data.to_path_buf();
+    let _ = tokio::task::spawn_blocking(move || reclaim(&reclaim_builds, &reclaim_data)).await;
     let mut command = tokio::process::Command::new(build.path(root));
     command
         .args([
@@ -354,8 +376,8 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
         .arg("--cache-dir")
         .arg(data.join("cache"))
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .kill_on_drop(true);
     #[cfg(windows)]
     command.creation_flags(0x08000000);
@@ -364,6 +386,7 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
     let mut child = command.spawn().context(
         "Soloist could not start. Check that this operating system supports Spotify's build.",
     )?;
+    keep_output(&data.join("soloist-output.log"), &key.value, &mut child).await;
     let mut cancellation = stopped.clone();
     let work = async {
         let port = tokio::time::timeout(Duration::from_secs(20), async {
@@ -407,7 +430,9 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
         changes.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         let mut pending_change = false;
         let mut pending_queue = false;
+        let mut last_reconnect = None;
         loop {
+            let mut reconnected = false;
             tokio::select! {
                 _ = stopped.changed() => return Ok(Outcome::Stopped),
                 exit = child.wait() => {
@@ -420,8 +445,8 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
                     notify(Update::Changed { queue: std::mem::take(&mut pending_queue) });
                 }
                 _ = tick.tick() => {
-                    protocol::send(&mut socket, json!({"command":"get_auth_state"})).await?;
-                    if logged_in { protocol::send(&mut socket, json!({"command":"get_state"})).await?; }
+                    reconnected |= protocol::send_reconnecting(&mut socket, port, json!({"command":"get_auth_state"})).await?;
+                    if logged_in { reconnected |= protocol::send_reconnecting(&mut socket, port, json!({"command":"get_state"})).await?; }
                     let mut current = build.clone();
                     current.checked = checked;
                     if current.due(install::now()) && downloading.is_none() && pending.is_none() {
@@ -451,8 +476,12 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
                         }
                     }
                 }
-                message = protocol::receive(&mut socket) => {
+                message = protocol::receive_reconnecting(&mut socket, port) => {
                     let message = message?;
+                    reconnected |= message.is_none();
+                    // A replaced connection has no event; everything below
+                    // reads fields that are then simply absent.
+                    let message = message.unwrap_or_default();
                     let kind = message["type"].as_str().unwrap_or_default();
                     if let Some(value) = message["is_active"].as_bool() { active = value; client.active(active); }
                     if kind == "auth_state" {
@@ -480,6 +509,17 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
                     }
                 }
             }
+            if reconnected {
+                // Soloist drops this connection as a matter of course while it
+                // keeps playing, so it never ends the player. Dropping it again
+                // at once only slows the retries.
+                log::info!("Reconnected to Soloist's local API");
+                if last_reconnect.is_some_and(|at: Instant| at.elapsed() < RECONNECT_PAUSE) {
+                    tokio::time::sleep(RECONNECT_PAUSE).await;
+                }
+                last_reconnect = Some(Instant::now());
+                notify(Update::Changed { queue: true });
+            }
             if idle && let Some(next) = pending.take() {
                 return Ok(Outcome::Update(next));
             }
@@ -494,6 +534,97 @@ async fn process(player: Player<'_>, mut stopped: watch::Receiver<bool>) -> Resu
     let _ = child.kill().await;
     let _ = child.wait().await;
     result
+}
+
+/// A connection dropped again this soon waits this long before the next try.
+const RECONNECT_PAUSE: Duration = Duration::from_secs(1);
+/// How many times in a row a player that stopped is started again.
+const RESTART_LIMIT: u32 = 3;
+const RESTART_DELAY: Duration = Duration::from_secs(2);
+/// A run this long was working, so a stop after it starts the count afresh.
+const HEALTHY_RUN: Duration = Duration::from_secs(60);
+const OUTPUT_LIMIT: usize = 1 << 20;
+
+/// Soloist's own account of why it stopped goes to a file beside its data, with
+/// the key removed. Each start replaces the file, and a long run stops at
+/// `OUTPUT_LIMIT`, so what led to an early exit is what stays.
+async fn keep_output(path: &std::path::Path, key: &str, child: &mut tokio::process::Child) {
+    let Ok(file) = tokio::fs::File::create(path).await else {
+        return;
+    };
+    let file = Arc::new(tokio::sync::Mutex::new((file, 0)));
+    if let Some(stdout) = child.stdout.take() {
+        tokio::spawn(copy_output(stdout, key.to_owned(), file.clone()));
+    }
+    if let Some(stderr) = child.stderr.take() {
+        tokio::spawn(copy_output(stderr, key.to_owned(), file));
+    }
+}
+
+/// Drains one of the child's streams to the end, as a full pipe would stall it.
+async fn copy_output(
+    stream: impl tokio::io::AsyncRead + Unpin,
+    key: String,
+    file: Arc<tokio::sync::Mutex<(tokio::fs::File, usize)>>,
+) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+    let mut lines = tokio::io::BufReader::new(stream).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let line = format!("{}\n", line.replace(&key, "<key>"));
+        let mut file = file.lock().await;
+        if file.1 + line.len() <= OUTPUT_LIMIT {
+            file.1 += line.len();
+            let _ = file.0.write_all(line.as_bytes()).await;
+            let _ = file.0.flush().await;
+        }
+    }
+}
+
+/// Stops a Soloist an earlier run left behind, for example after Encore was
+/// force-closed. It still holds the data folder's lock, so a new player would
+/// exit before it is ready. Only a process started from our own builds is
+/// stopped, because the recorded id may now belong to another program.
+fn reclaim(builds: &std::path::Path, data: &std::path::Path) {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
+    let Some(pid) = std::fs::read_to_string(data.join("soloist.pid"))
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .map(Pid::from_u32)
+    else {
+        return;
+    };
+    let Ok(builds) = builds.canonicalize() else {
+        return;
+    };
+    let mut system = System::new();
+    system.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[pid]),
+        true,
+        ProcessRefreshKind::nothing().with_exe(UpdateKind::Always),
+    );
+    let Some(process) = system.process(pid) else {
+        return;
+    };
+    let ours = process
+        .exe()
+        .and_then(|exe| exe.canonicalize().ok())
+        .is_some_and(|exe| exe.starts_with(&builds));
+    if !ours || !process.kill() {
+        return;
+    }
+    log::info!("Stopped a Soloist left running by an earlier run");
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&[pid]),
+            true,
+            ProcessRefreshKind::nothing(),
+        );
+        if system.process(pid).is_none() || Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
 }
 
 #[cfg(test)]
