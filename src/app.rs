@@ -2014,6 +2014,15 @@ impl App {
         }
     }
 
+    /// `text` as streamer mode allows it on screen: an identifier reads "Hidden".
+    pub fn private_text(&self, text: &str) -> String {
+        if self.settings.streamer_mode {
+            gettext(self.locale, "Hidden").into_owned()
+        } else {
+            text.to_owned()
+        }
+    }
+
     /// Presentation only: Soloist's own local process still uses the remote
     /// command path and must not inherit librespot's audio/queue capabilities.
     pub fn targets_own_soloist(&self) -> bool {

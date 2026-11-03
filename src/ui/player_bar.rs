@@ -2,7 +2,7 @@
 //! song, the next few songs of the queue, the transport and the extras.
 //! A new song slides the old one off the island (`ui::kit::motion::Swipe`).
 
-use egui::{Align, Color32, Frame, Layout, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
+use egui::{Align, Color32, Layout, Rect, Sense, UiBuilder, Vec2, pos2, vec2};
 
 use crate::api::models::PlayableItem;
 use crate::app::{App, NowPlaying};
@@ -61,20 +61,20 @@ pub(crate) fn end_tint_session(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<u64>(egui::Id::new(TINT_SESSION_ID)));
 }
 
-pub fn show(app: &mut App, ui: &mut egui::Ui) {
+/// Draws the island over the bottom of the panels, which run behind it to the
+/// window's edge. Call it after them, so its controls take the clicks.
+pub fn show(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
     let palette = app.palette;
     let fill = eased_fill(ui.ctx(), palette.panel, app.now_playing_tint());
-    egui::Panel::bottom("player-bar")
-        .exact_size(theme::PLAYER_BAR_HEIGHT)
-        .resizable(false)
-        .show_separator_line(false)
-        .frame(Frame::new())
-        .show(ui, |ui| {
+    ui.scope_builder(
+        UiBuilder::new().id_salt("player-bar").max_rect(strip),
+        |ui| {
             let island = island_rect(ui.max_rect());
             super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
-            // Glass, like the cards: the song's glow around it shows through.
+            // Solid, because the page scrolls behind it and text showing through
+            // would fight with the controls.
             ui.painter()
-                .rect_filled(island, ISLAND_RADIUS, super::glass_fill(&palette, fill));
+                .rect_filled(island, ISLAND_RADIUS, fill.to_opaque());
             super::glass_sheen(ui, island, ISLAND_RADIUS);
             ui.painter().rect_stroke(
                 island,
@@ -138,7 +138,8 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             );
             let transport_right = center.center().x + transport_width() / 2.0;
             extras(app, &mut right_ui, now.as_ref(), transport_right);
-        });
+        },
+    );
 }
 
 /// Draws the chosen spectrum or waveform of the song playing on this
@@ -1308,6 +1309,12 @@ fn state_dot(ui: &egui::Ui, button: Rect, on: bool, palette: &theme::Palette, na
 fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_right: f32) {
     let palette = app.palette;
     ui.spacing_mut().item_spacing.x = 6.0;
+    if let Some((leave, label)) = super::party_bar::leave_action(app)
+        && theme::icon_button(ui, Icon::LogOut, 18.0, palette.accent, palette.text, &label)
+            .clicked()
+    {
+        app.actions.push(leave);
+    }
     let volume = now
         .map(|now| now.volume_percent)
         .unwrap_or_else(|| crate::app::volume_to_percent(app.local.volume));

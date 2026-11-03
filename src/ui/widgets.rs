@@ -1457,6 +1457,24 @@ fn soundcloud_repost_menu(ui: &mut Ui, app: &mut App, uri: &str) {
 }
 
 /// Menu for a context (playlist, album, artist, show).
+/// Puts a playlist on the group's shelf, for everyone to play or save.
+pub(super) fn share_playlist_item(ui: &mut Ui, app: &mut App, uri: &str, name: &str) {
+    let palette = app.palette;
+    if menu_item_enabled(
+        ui,
+        &palette,
+        Some(Icon::Users),
+        &gettext(app.locale, "Share with friends"),
+        app.friends_feed.profile.is_some() && !app.friends_feed.busy,
+    ) {
+        app.actions.push(Action::GroupPlaylist {
+            uri: uri.to_owned(),
+            name: name.to_owned(),
+            purpose: crate::model::GroupPlaylistUse::Share { to: Vec::new() },
+        });
+    }
+}
+
 pub fn context_menu_items(
     ui: &mut Ui,
     app: &mut App,
@@ -1477,6 +1495,9 @@ pub fn context_menu_items(
     } else {
         util::uri_kind(uri).unwrap_or("")
     };
+    if uri.starts_with("spotify:playlist:") {
+        share_playlist_item(ui, app, uri, name);
+    }
     if (crate::soundcloud::playlist_id(uri).is_some()
         || (uri.starts_with("spotify:") && matches!(kind, "album" | "playlist")))
         && download_menu_item(ui, app, "Download all")

@@ -236,7 +236,12 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
         ui,
         egui::ScrollArea::vertical()
             .id_salt("lyrics-scroll")
-            .auto_shrink([false, false]),
+            .auto_shrink([false, false])
+            // The last line scrolls clear of the player.
+            .content_margin(egui::Margin {
+                bottom: crate::theme::PLAYER_BAR_HEIGHT as i8,
+                ..Default::default()
+            }),
         egui::Vec2b::new(false, true),
         |ui| {
             // Before the first line there is nothing to highlight, so the

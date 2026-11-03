@@ -132,7 +132,7 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
                     left: 0,
                     right: 12,
                     top: 0,
-                    bottom: 0,
+                    bottom: crate::theme::PLAYER_BAR_HEIGHT as i8,
                 }),
             egui::Vec2b::new(false, true),
             |ui| match app.queue_tab {

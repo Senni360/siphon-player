@@ -2173,7 +2173,14 @@ fn identity(app: &App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>) {
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.allocate_ui(vec2(260.0, 36.0), |ui| {
-                field(ui, &palette, &mut name, &gettext(locale, "Name"), false, 40);
+                field(
+                    ui,
+                    &palette,
+                    &mut name,
+                    &gettext(locale, "Name"),
+                    app.settings.streamer_mode,
+                    40,
+                );
             });
             let changed = !name.trim().is_empty() && name.trim() != me.display_name;
             if ui

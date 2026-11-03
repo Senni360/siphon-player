@@ -77,6 +77,11 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
         egui::ScrollArea::vertical()
             .id_salt("friends-panel-scroll")
             .auto_shrink([false, false])
+            // The last row scrolls clear of the player.
+            .content_margin(egui::Margin {
+                bottom: crate::theme::PLAYER_BAR_HEIGHT as i8,
+                ..Default::default()
+            })
             .show(ui, |ui| contents(app, ui));
     });
     let enter = super::kit::motion::opening(

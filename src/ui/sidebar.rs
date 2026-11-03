@@ -1437,7 +1437,10 @@ fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
     }
     header.context_menu(|ui| {
         if let Some(user) = app.soundcloud_account.user() {
-            ui.label(gettext(locale, "Connected as {name}").replace("{name}", &user.username));
+            ui.label(
+                gettext(locale, "Connected as {name}")
+                    .replace("{name}", &app.private_text(&user.username)),
+            );
         }
         if super::widgets::menu_item(
             ui,
@@ -1907,7 +1910,12 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
         ui,
         egui::ScrollArea::vertical()
             .id_salt("sidebar-list")
-            .auto_shrink([false, false]),
+            .auto_shrink([false, false])
+            // The last row scrolls clear of the player.
+            .content_margin(egui::Margin {
+                bottom: crate::theme::PLAYER_BAR_HEIGHT as i8,
+                ..Default::default()
+            }),
         egui::Vec2b::new(false, true),
         |ui| {
             if egui::DragAndDrop::has_payload_of_type::<DragTrack>(ui.ctx())

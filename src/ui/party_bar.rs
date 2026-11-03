@@ -59,6 +59,30 @@ pub(crate) fn party_line(app: &App, channel: &Channel, me: &str) -> String {
     )
 }
 
+/// What leaving means right now, and what to call it, while with others: the
+/// last one in a party ends it. `None` while alone.
+pub(crate) fn leave_action(app: &App) -> Option<(Action, String)> {
+    if app.live.session == Session::Alone {
+        return None;
+    }
+    let me = app.friends_feed.profile.as_ref()?.user_id.as_str();
+    let ends = app
+        .live
+        .my_channel()
+        .is_some_and(|c| c.locked && c.host_id == me && c.members.len() <= 1);
+    Some(if ends {
+        (
+            Action::Live(Live::End),
+            gettext(app.locale, "End party").into_owned(),
+        )
+    } else {
+        (
+            Action::Live(Live::Leave),
+            gettext(app.locale, "Leave party").into_owned(),
+        )
+    })
+}
+
 pub fn show(app: &mut App, ui: &mut Ui) {
     let Some(me) = app.friends_feed.profile.as_ref().map(|p| p.user_id.clone()) else {
         return;

@@ -409,6 +409,32 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         any_visible = true;
         section(ui, &palette, &soloist, |ui| super::soloist::show(app, ui));
     }
+    let streamer = gettext(locale, "Streamer mode");
+    if row_matches(
+        &needle,
+        &streamer,
+        &gettext(
+            locale,
+            "Hide client id spotify name account invite code privacy stream",
+        ),
+    ) {
+        any_visible = true;
+        section(ui, &palette, &streamer, |ui| {
+            if widgets::switch(
+                ui,
+                &palette,
+                &gettext(
+                    locale,
+                    "Hide your Client ID, account names and invite codes",
+                ),
+                &mut app.settings.streamer_mode,
+            )
+            .changed()
+            {
+                changed = true;
+            }
+        });
+    }
 
     let open_folder = gettext(locale, "Open folder");
 
@@ -505,7 +531,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                                 ui,
                                 // Translators: {username} is the Spotify account's user name.
                                 gettext(locale, "Connected as {username}")
-                                    .replace("{username}", &username),
+                                    .replace("{username}", &app.private_text(&username)),
                                 theme::regular(12.0),
                                 palette.dim,
                             );
@@ -536,6 +562,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                             app.locale,
                             egui::TextEdit::singleline(&mut client_id)
                                 .id(egui::Id::new("personal-web-client-id"))
+                                .password(app.settings.streamer_mode)
                                 .hint_text(
                                     egui::RichText::new(gettext(locale, "Client ID"))
                                         .color(palette.dim),

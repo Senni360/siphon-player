@@ -83,10 +83,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     let window = ui.max_rect();
     backdrop(app, ctx);
-    player_bar::show(app, ui);
-    let content = ui.available_rect_before_wrap();
+    let strip = Rect::from_min_max(
+        egui::pos2(window.left(), window.bottom() - theme::PLAYER_BAR_HEIGHT),
+        window.max,
+    );
+    let mut content = ui.available_rect_before_wrap();
+    content.max.y = strip.top();
     if app.lyrics_fullscreen.is_some() {
+        // A full-screen view has nothing to scroll out from under the player.
+        egui::Panel::bottom("player-room")
+            .exact_size(theme::PLAYER_BAR_HEIGHT)
+            .resizable(false)
+            .show_separator_line(false)
+            .frame(Frame::new())
+            .show(ui, |_| {});
         lyrics::fullscreen(app, ui);
+        player_bar::show(app, ui, strip);
     } else {
         if app.settings.sidebar_visible {
             sidebar::show(app, ui);
@@ -100,12 +112,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         if app.show_friends_panel {
             friends::side_panel(app, ui);
         }
-        let page = ui.available_rect_before_wrap();
+        let mut page = ui.available_rect_before_wrap();
+        page.max.y = strip.top();
         central(app, ui);
-        let strip = Rect::from_min_max(
-            egui::pos2(window.left(), window.bottom() - theme::PLAYER_BAR_HEIGHT),
-            window.max,
-        );
+        player_bar::show(app, ui, strip);
         now_playing::show(app, ui, page, player_bar::island_rect(strip));
         if !app.settings.sidebar_visible {
             sidebar::floating(app, ui, content);
@@ -520,7 +530,8 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                     left: widgets::PAGE_PADDING as i8,
                                     right: widgets::PAGE_PADDING as i8,
                                     top: 4,
-                                    bottom: 48,
+                                    // The last row scrolls clear of the player.
+                                    bottom: theme::PLAYER_BAR_HEIGHT as i8,
                                 })
                                 .show(ui, |ui| {
                                     ui.set_min_width(ui.available_width());

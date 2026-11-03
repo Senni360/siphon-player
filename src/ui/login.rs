@@ -354,6 +354,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
 
 /// The listener's own app's Client ID, kept in settings as Settings keeps it.
 fn client_id_field(app: &mut App, ui: &mut egui::Ui) {
+    let streamer = app.settings.streamer_mode;
     let palette = app.palette;
     let locale = app.locale;
     let mut client_id = app.settings.web_client_id.clone().unwrap_or_default();
@@ -367,6 +368,7 @@ fn client_id_field(app: &mut App, ui: &mut egui::Ui) {
                 locale,
                 egui::TextEdit::singleline(&mut client_id)
                     .id(egui::Id::new("login-client-id"))
+                    .password(streamer)
                     .hint_text(egui::RichText::new(gettext(locale, "Client ID")).color(palette.dim))
                     .font(theme::regular(14.0))
                     .frame(egui::Frame::NONE)

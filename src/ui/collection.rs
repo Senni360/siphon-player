@@ -2608,6 +2608,12 @@ fn spotify_owned(owner_id: Option<&str>) -> bool {
 /// streaming session carries only the owner's id, so the name the profile
 /// lookup found stands in before the id does.
 fn owner_name<'a>(app: &'a App, playlist: &'a Playlist) -> &'a str {
+    // In streamer mode, your own name stays off your own playlists.
+    if app.settings.streamer_mode
+        && app.user.as_ref().map(|user| user.id.as_str()) == playlist.owner.id.as_deref()
+    {
+        return "You";
+    }
     playlist
         .owner
         .display_name
@@ -2911,6 +2917,7 @@ pub(super) fn mixed_playlist_menu(app: &mut App, ui: &mut egui::Ui, id: &str) {
     };
     ui.set_min_width(200.0);
     let palette = app.palette;
+    widgets::share_playlist_item(ui, app, &playlist.uri(), &playlist.name);
     if widgets::menu_item(ui, &palette, Some(Icon::Play), &gettext(app.locale, "Play")) {
         app.actions.push(Action::PlayContext {
             uri: playlist.uri(),

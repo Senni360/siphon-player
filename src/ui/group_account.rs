@@ -482,7 +482,12 @@ fn invite_card(app: &App, ui: &mut Ui, group: &account::Group, actions: &mut Vec
         match &group.invite {
             Some(code) => {
                 ui.horizontal(|ui| {
-                    theme::text(ui, code.clone(), theme::medium(14.0), palette.text);
+                    theme::text(
+                        ui,
+                        app.private_text(code),
+                        theme::medium(14.0),
+                        palette.text,
+                    );
                     if theme::soft_button(
                         ui,
                         &palette,
@@ -624,7 +629,7 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
                     &palette,
                     &mut name,
                     &gettext(locale, "Your name"),
-                    false,
+                    app.settings.streamer_mode,
                     40,
                 );
             });
@@ -643,7 +648,7 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
             Some(id) => {
                 theme::text(
                     ui,
-                    format!("Spotify: {id}"),
+                    format!("Spotify: {}", app.private_text(id)),
                     theme::regular(13.0),
                     palette.secondary,
                 );
@@ -679,7 +684,7 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
             (Some(link), _) => {
                 theme::text(
                     ui,
-                    format!("SoundCloud: {}", link.username),
+                    format!("SoundCloud: {}", app.private_text(&link.username)),
                     theme::regular(13.0),
                     palette.secondary,
                 );
