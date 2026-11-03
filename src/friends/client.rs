@@ -231,11 +231,17 @@ pub struct Feed {
     pub account: Option<super::account::Account>,
     #[serde(skip)]
     pub shared_playlists: Vec<super::account::SharedPlaylist>,
+    #[serde(skip)]
+    pub shared_songs: Vec<crate::shared_songs::SharedSong>,
+    #[serde(skip)]
+    pub songs_used: u64,
+    #[serde(skip)]
+    pub songs_capacity: u64,
 }
 
 #[derive(Clone)]
 pub struct Client {
-    http: Http,
+    pub(super) http: Http,
     base: Url,
     timeout: Duration,
 }

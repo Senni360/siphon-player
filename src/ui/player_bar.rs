@@ -61,9 +61,20 @@ pub(crate) fn end_tint_session(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<u64>(egui::Id::new(TINT_SESSION_ID)));
 }
 
+/// The player alone along the bottom of `ui`, for tests that draw only it.
+#[cfg(test)]
+pub fn show(app: &mut App, ui: &mut egui::Ui) {
+    let rect = ui.max_rect();
+    let strip = Rect::from_min_max(
+        pos2(rect.left(), rect.bottom() - theme::PLAYER_BAR_HEIGHT),
+        rect.max,
+    );
+    show_in(app, ui, strip);
+}
+
 /// Draws the island over the bottom of the panels, which run behind it to the
 /// window's edge. Call it after them, so its controls take the clicks.
-pub fn show(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
+pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
     let palette = app.palette;
     let fill = eased_fill(ui.ctx(), palette.panel, app.now_playing_tint());
     ui.scope_builder(

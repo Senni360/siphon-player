@@ -2843,6 +2843,12 @@ impl App {
                 }
                 Event::Live(event) => self.handle_live_event(event),
                 Event::Stats(update) => self.handle_stats_update(update),
+                Event::SongsToShare(paths) => {
+                    for path in paths {
+                        self.actions
+                            .push(Action::Friends(crate::friends::Action::UploadSong(path)));
+                    }
+                }
                 Event::Friends(event) => {
                     self.friends_feed.receive(event);
                     self.group_after_event();
@@ -12031,6 +12037,7 @@ impl App {
                 self.mark_settings_dirty();
                 self.discord_tick(true);
             }
+            Action::ChooseSongsToShare => self.backend.choose_songs_to_share(),
             Action::ShowToast(message) => self.toast(message),
             Action::Friends(action) => {
                 if matches!(
@@ -15406,7 +15413,8 @@ mod tests {
                 &ctx,
                 &mut app,
                 frame,
-                vec![egui::Event::PointerMoved(egui::pos2(1100.0, 680.0))],
+                // Close to the anchor, so the row scrolls but stays on screen.
+                vec![egui::Event::PointerMoved(anchor + egui::vec2(300.0, 60.0))],
             );
         }
         let tree = draw(&ctx, &mut app, 8, vec![]);
@@ -22920,6 +22928,57 @@ mod tests {
             assert_eq!(app.selected_device.is_some(), id == "speaker");
             assert_eq!(app.remote_poll_seq, seq + u64::from(id == "soloist"));
         }
+    }
+
+    /// Shared songs play through the same mixed queue as SoundCloud and YouTube.
+    #[test]
+    fn a_shared_song_plays_from_the_groups_list() {
+        let mut app = test_app("shared-song");
+        let song = crate::shared_songs::SharedSong {
+            id: "0f8fad5b-d9cb-469f-a165-70867728950e".into(),
+            title: "Midnight".into(),
+            duration_ms: 180_000,
+            by: "ana".into(),
+            ..Default::default()
+        };
+        app.friends_feed.shared_songs = vec![song.clone()];
+        app.apply(
+            Action::PlayContext {
+                uri: crate::shared_songs::LIBRARY.into(),
+                offset_uri: Some(song.uri()),
+                offset_index: Some(0),
+            },
+            &egui::Context::default(),
+        );
+        assert!(app.hybrid_owned());
+        let commands = app.backend.take_hybrid_commands();
+        app.backend.shutdown();
+        assert!(
+            commands.iter().any(|command| matches!(command,
+                crate::backend::HybridCommand::Load { track, play: true, .. }
+                    if track.uri == song.uri() && track.name == "Midnight"
+            )),
+            "{commands:?}"
+        );
+    }
+
+    /// Soloist steps aside for a mixed playlist and comes back by itself.
+    #[test]
+    fn soloist_comes_back_after_mixed_playback() {
+        let mut app = test_app("soloist-returns");
+        app.settings.soloist_enabled = true;
+        app.playback_owner = PlaybackOwner::SpotifyConnect;
+        app.enter_hybrid_for_test();
+        assert!(!app.settings.soloist_enabled);
+        assert!(app.settings.soloist_resume);
+        app.leave_hybrid_for_test();
+        assert!(!app.settings.soloist_resume);
+        assert!(
+            app.actions
+                .iter()
+                .any(|action| matches!(action, Action::SetSoloist(true)))
+        );
+        app.backend.shutdown();
     }
 
     #[test]

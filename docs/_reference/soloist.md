@@ -91,11 +91,17 @@ Soloist sends audio directly to the system's default output. Siphon's EQ and
 local-file playback require the built-in player. This port does not include
 Spotifast's platform audio capture adapters.
 
-Mixed playlists, SoundCloud and YouTube continue through Siphon's built-in
-player. Starting mixed playback turns Soloist off before taking the local
-output, keeping the saved Soloist key. To enable Soloist again, start a
-Spotify-only collection and use **Settings → Spotify Soloist → Enable with
-saved key**. Soloist cannot be enabled while a mixed queue owns playback.
+Mixed playlists, SoundCloud, YouTube and shared songs continue through the
+built-in player. Starting mixed playback stops Soloist before taking the local
+output, and Soloist starts again by itself when mixed playback ends. It cannot be
+enabled while a mixed queue owns playback.
+
+If Soloist closes its local connection while it keeps running, Encore reconnects.
+If the program stops after running for a minute or more, Encore starts it again;
+three stops in a row that come sooner show an error in Settings. A Soloist left
+behind by an earlier run is stopped first, because it would hold the data folder's
+lock. What Soloist prints goes to `soloist-output.log` in its account folder, with
+the key removed.
 
 Spotify lists capabilities such as Smart Shuffle, Jam and crossfade for its
 player. Siphon only offers controls exposed by the documented Soloist API;

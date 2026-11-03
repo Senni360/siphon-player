@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt, randomUUID, timingSafeEqual } from 
 import { setTimeout as delay } from 'node:timers/promises';
 import { MAX_POSTS, MAX_RECIPIENTS, MAX_REPLIES, MAX_USERS, StorageFullError } from './storage.js';
 import { badge } from './badge.js';
+import { audioRoute, type AudioStore } from './audio.js';
 import { HttpError, body, fail, https, json, text, validateUrl } from './http.js';
 import { createLive, song } from './live.js';
 import { FIRST_GROUP, MAX_DEVICES, admitPending, fullRights, groupById, groupRoute, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
@@ -104,7 +105,7 @@ const MAX_PLAYLISTS = 1000;
 const MAX_PLAYLIST_SONGS = 1000;
 const seenByReader = (list: SharedPlaylist, reader: string) => !list.to?.length || list.by === reader || list.to.includes(reader);
 
-export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now, verify: VerifySpotify = verifySpotify, ownerSpotify = '') {
+export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now, verify: VerifySpotify = verifySpotify, ownerSpotify = '', audioStore: AudioStore | null = null) {
   const live = createLive(storage, clock);
   let roster: { state: State; until: number } | null = null;
   const liveCalls = new Map<string, { count: number; until: number }>();
@@ -426,6 +427,11 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         }, signal);
         return json({ id, name, by: user.user_id, by_name: user.display_name, created_at: row.created_at, count: row.count, artwork_url: row.artwork_url, to }, 201);
       }
+      const shared = await audioRoute({
+        request, path, user, groupId: group.id, mayShare: seat.rights.share, manages: manages(seat), state, storage,
+        store: audioStore, clock, signal, change: update => memberChange(storage, secret_hash, update, signal),
+      });
+      if (shared) return shared;
       const sharedList = /^\/playlists\/([a-f0-9-]{36})$/.exec(path);
       if (sharedList && method === 'GET') {
         const row = (state.playlists ?? []).find(p => p.id === sharedList[1] && p.group_id === group.id);

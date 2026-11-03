@@ -64,6 +64,7 @@ pub mod retitle;
 pub mod session_reads;
 pub mod settings;
 pub mod shared_media;
+pub mod shared_songs;
 pub mod single_instance;
 pub mod sink;
 pub mod skin;

@@ -490,6 +490,8 @@ impl App {
         let special = context_uri.starts_with(crate::mixed_playlists::PLAYLIST_PREFIX)
             || crate::youtube::is_track_uri(&context_uri)
             || context_uri == "youtube:likes"
+            || context_uri == crate::shared_songs::LIBRARY
+            || crate::shared_songs::is_song(&context_uri)
             || crate::soundcloud::is_uri(&context_uri)
             || crate::link::soundcloud_url(&context_uri).is_some()
             || context_uri
@@ -607,11 +609,23 @@ impl App {
         true
     }
 
+    #[cfg(test)]
+    pub(super) fn enter_hybrid_for_test(&mut self) {
+        self.enter_hybrid();
+    }
+
+    #[cfg(test)]
+    pub(super) fn leave_hybrid_for_test(&mut self) {
+        self.leave_hybrid();
+    }
+
     fn enter_hybrid(&mut self) {
         // Soloist cannot consume this app's mixed-source queue. Stop its child
         // before claiming the shared local output, so two players never overlap.
         if self.settings.soloist_enabled {
             self.settings.soloist_enabled = false;
+            // It comes back by itself when mixed playback ends.
+            self.settings.soloist_resume = true;
             self.mark_settings_dirty();
             self.soloist_select = false;
             self.soloist_key.clear();
@@ -621,7 +635,7 @@ impl App {
                 enabled: false,
                 key: None,
             });
-            self.toast("Mixed playback uses the built-in player. Your Soloist key is saved.");
+            self.toast("Mixed playback uses the built-in player. Soloist comes back after it.");
         }
         self.backend.send(Command::Hybrid(HybridCommand::Claim));
         self.playback_owner = PlaybackOwner::Hybrid;
@@ -662,6 +676,10 @@ impl App {
         self.queue_seq = self.queue_seq.wrapping_add(1);
         self.backend.send(Command::Hybrid(HybridCommand::Release));
         self.frame_now = None;
+        if std::mem::take(&mut self.settings.soloist_resume) {
+            self.mark_settings_dirty();
+            self.actions.push(Action::SetSoloist(true));
+        }
     }
 
     fn start_hybrid_context(
@@ -817,6 +835,18 @@ impl App {
     }
 
     fn loaded_hybrid_context(&self, uri: &str) -> Option<Context> {
+        if uri == crate::shared_songs::LIBRARY {
+            return Some(Context {
+                uri: uri.into(),
+                name: gettext(self.locale, "Shared songs").into_owned(),
+                tracks: self
+                    .friends_feed
+                    .shared_songs
+                    .iter()
+                    .map(crate::shared_songs::SharedSong::to_track)
+                    .collect(),
+            });
+        }
         if uri == "youtube:likes" {
             return Some(Context {
                 uri: uri.into(),
@@ -933,6 +963,9 @@ impl App {
     }
 
     fn hybrid_context_name(&self, uri: &str) -> String {
+        if uri == crate::shared_songs::LIBRARY {
+            return gettext(self.locale, "Shared songs").into_owned();
+        }
         if uri == "youtube:likes" {
             return "YouTube Likes".into();
         }
@@ -996,6 +1029,14 @@ impl App {
     }
 
     pub(super) fn hybrid_cached_track(&self, uri: &str) -> Option<Track> {
+        if let Some(song) = self
+            .friends_feed
+            .shared_songs
+            .iter()
+            .find(|song| song.uri() == uri)
+        {
+            return Some(song.to_track());
+        }
         if let Some(track) = self
             .youtube_likes()
             .unwrap_or_default()

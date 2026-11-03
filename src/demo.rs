@@ -12781,10 +12781,9 @@ mod tests {
                     };
                     let side = rect(&format!("{panel}-panel"));
                     let library = rect("sidebar");
-                    let player = rect("player-bar");
                     assert_eq!(side.top(), library.top(), "{panel} at {width} in {theme}");
                     assert_eq!(side.top(), 0.0, "{panel} must start at the window top");
-                    assert_eq!(side.bottom(), player.top());
+                    assert_eq!(side.bottom(), 800.0, "panels run behind the player");
                     let search = ctx.read_response(egui::Id::new("global-search")).unwrap();
                     assert!(side.top() < search.rect.top());
                 }

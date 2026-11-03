@@ -45,6 +45,9 @@ pub enum Action {
         to: Vec<String>,
     },
     DeleteSharedPlaylist(String),
+    /// Upload a song from this computer for the group.
+    UploadSong(std::path::PathBuf),
+    DeleteSong(String),
     /// Fetch a shared list's songs, for `purpose`.
     OpenSharedPlaylist {
         id: String,
@@ -98,6 +101,8 @@ impl Action {
                 | Self::Account(_)
                 | Self::SharePlaylist { .. }
                 | Self::DeleteSharedPlaylist(_)
+                | Self::UploadSong(_)
+                | Self::DeleteSong(_)
                 | Self::OpenSharedPlaylist { .. }
         )
     }
@@ -118,6 +123,8 @@ impl std::fmt::Debug for Action {
             Self::SelectGroup(_) => "Friends::SelectGroup",
             Self::SharePlaylist { .. } => "Friends::SharePlaylist",
             Self::DeleteSharedPlaylist(_) => "Friends::DeleteSharedPlaylist",
+            Self::UploadSong(_) => "Friends::UploadSong",
+            Self::DeleteSong(_) => "Friends::DeleteSong",
             Self::OpenSharedPlaylist { .. } => "Friends::OpenSharedPlaylist",
             Self::Refresh => "Friends::Refresh",
             Self::More => "Friends::More",
@@ -165,6 +172,7 @@ pub enum Update {
     /// The account as it stands after a change.
     Account(Box<Account>),
     PlaylistShared(SharedPlaylist),
+    SongUploaded(crate::shared_songs::SharedSong),
     SharedSongs {
         name: String,
         songs: Vec<NewPost>,
@@ -182,6 +190,11 @@ pub struct Model {
     pub account: Option<Account>,
     /// What the chosen group has had shared with it, or with this listener.
     pub shared_playlists: Vec<SharedPlaylist>,
+    /// Songs people shared from their own files.
+    pub shared_songs: Vec<crate::shared_songs::SharedSong>,
+    pub songs_used: u64,
+    /// Zero until read, and from a service with no file store.
+    pub songs_capacity: u64,
     /// Songs fetched for a purpose, for the app to act on.
     pub songs_ready: Option<(String, Vec<NewPost>, SongsFor)>,
     pub next_cursor: Option<String>,
@@ -216,6 +229,7 @@ impl Model {
             account::set_current_group(Some(id.clone()));
             self.posts.clear();
             self.shared_playlists.clear();
+            self.shared_songs.clear();
             self.next_cursor = None;
             self.members = self
                 .account
@@ -350,6 +364,10 @@ impl Model {
                 self.shared_playlists.retain(|list| list.id != *id);
                 self.optimistic = true;
             }
+            Action::DeleteSong(id) => {
+                self.shared_songs.retain(|song| song.id != *id);
+                self.optimistic = true;
+            }
             _ => {}
         }
         None
@@ -466,6 +484,9 @@ impl Model {
                         self.account = feed.account;
                         self.members = feed.members.unwrap_or_default();
                         self.shared_playlists = feed.shared_playlists;
+                        self.shared_songs = feed.shared_songs;
+                        self.songs_used = feed.songs_used;
+                        self.songs_capacity = feed.songs_capacity;
                         self.posts = feed.posts;
                         self.next_cursor = feed.next_cursor;
                     }
@@ -482,6 +503,7 @@ impl Model {
                         {
                             self.posts.clear();
                             self.shared_playlists.clear();
+                            self.shared_songs.clear();
                             self.next_cursor = None;
                             account::set_current_group(
                                 account.groups.first().map(|group| group.id.clone()),
@@ -492,6 +514,11 @@ impl Model {
                     Update::PlaylistShared(list) => {
                         self.shared_playlists.retain(|row| row.id != list.id);
                         self.shared_playlists.insert(0, list);
+                    }
+                    Update::SongUploaded(song) => {
+                        self.songs_used += song.size;
+                        self.shared_songs.retain(|row| row.id != song.id);
+                        self.shared_songs.insert(0, song);
                     }
                     Update::SharedSongs {
                         name,
@@ -505,6 +532,9 @@ impl Model {
                         if feed.account.is_some() {
                             self.account = feed.account;
                             self.shared_playlists = feed.shared_playlists;
+                            self.shared_songs = feed.shared_songs;
+                            self.songs_used = feed.songs_used;
+                            self.songs_capacity = feed.songs_capacity;
                         }
                         if append {
                             for post in feed.posts {
@@ -575,6 +605,16 @@ impl Model {
         self.next_poll =
             Some(Instant::now() + Duration::from_secs(60 * 2u64.pow(self.failures.min(4))));
     }
+}
+
+/// The saved sign-in, for a song's stream, which plays outside this runtime.
+pub async fn saved_identity(credentials: &crate::credentials::Store) -> Option<Identity> {
+    let bytes = credentials
+        .lease(Slot::Friends)
+        .load_secret()
+        .await
+        .ok()??;
+    serde_json::from_slice(&bytes).ok()
 }
 
 /// One actor on the existing backend runtime. A newer request (only sign-out
@@ -759,6 +799,13 @@ impl Runtime {
                 client.delete_shared_playlist(identity, &id).await?;
                 Update::Changed
             }
+            Action::UploadSong(path) => {
+                Update::SongUploaded(client.upload_song(identity, path).await?)
+            }
+            Action::DeleteSong(id) => {
+                client.delete_song(identity, &id).await?;
+                Update::Changed
+            }
             Action::OpenSharedPlaylist { id, purpose } => {
                 let (name, songs) = client.shared_playlist_songs(identity, &id).await?;
                 Update::SharedSongs {
@@ -852,6 +899,12 @@ impl Runtime {
         }
         if account.is_some() {
             feed.shared_playlists = client.shared_playlists(identity).await.unwrap_or_default();
+            // A service with no file store just has none to list.
+            if let Ok((songs, used, capacity)) = client.shared_songs(identity).await {
+                feed.shared_songs = songs;
+                feed.songs_used = used;
+                feed.songs_capacity = capacity;
+            }
         }
         feed.account = account;
         Ok(feed)

@@ -329,6 +329,8 @@ pub struct Settings {
     pub player_bar_vis_click: bool,
     /// Hides what identifies you on screen: Client ID, account names and invite codes.
     pub streamer_mode: bool,
+    /// Mixed playback set Soloist aside, to come back when it ends.
+    pub soloist_resume: bool,
     /// How many frames a second the player bar's visualizer and the mini
     pub visualizer_fps: u32,
     /// Last local volume, 0..=65535.
@@ -505,6 +507,7 @@ impl Default for Settings {
             player_bar_vis: PlayerBarVis::Off,
             player_bar_vis_click: true,
             streamer_mode: false,
+            soloist_resume: false,
             visualizer_fps: crate::vis::DEFAULT_FPS,
             volume: (u16::MAX as u32 * 70 / 100) as u16,
             sidebar_visible: true,

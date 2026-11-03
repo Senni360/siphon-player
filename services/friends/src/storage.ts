@@ -52,7 +52,9 @@ export interface Post extends Payload {
   /** Jev's estimate, by member id, that the member will enjoy this song. */
   affinity?: Record<string, number>;
 }
-export interface State { revision: number; users: User[]; posts: Post[]; groups?: Group[]; playlists?: SharedPlaylist[] }
+/** A song someone shared from their own files. `url` stays null until the upload finishes. */
+export interface SharedAudio { id: string; group_id: string; by: string; title: string; artists: string[]; duration_ms: number; size: number; ext: string; created_at: number; url: string | null }
+export interface State { revision: number; users: User[]; posts: Post[]; groups?: Group[]; playlists?: SharedPlaylist[]; audio?: SharedAudio[]; audio_month?: { month: string; bytes: number } }
 export const empty = (): State => ({ revision: 0, users: [], posts: [] });
 export const MAX_USERS = 500;
 export const MAX_POSTS = 5000;

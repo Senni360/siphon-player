@@ -2622,14 +2622,18 @@ pub(crate) fn scroll_during_drag(ui: &Ui) {
     {
         return;
     }
-    let edge = 48.0_f32.min(viewport.height() / 2.0);
+    // A list runs on behind the player, so its usable edge is where the player starts.
+    let bottom = viewport
+        .bottom()
+        .min(ui.ctx().content_rect().bottom() - crate::theme::PLAYER_BAR_HEIGHT);
+    let edge = 48.0_f32.min((bottom - viewport.top()) / 2.0);
     if edge <= 0.0 {
         return;
     }
     let strength = if pos.y < viewport.top() + edge {
         (viewport.top() + edge - pos.y) / edge
-    } else if pos.y > viewport.bottom() - edge {
-        -(pos.y - viewport.bottom() + edge) / edge
+    } else if pos.y > bottom - edge {
+        -((pos.y - bottom + edge) / edge).min(1.0)
     } else {
         return;
     };

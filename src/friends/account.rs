@@ -273,6 +273,129 @@ impl Client {
             .await
     }
 
+    pub(super) async fn shared_songs(
+        &self,
+        identity: &Identity,
+    ) -> Result<(Vec<crate::shared_songs::SharedSong>, u64, u64), String> {
+        #[derive(Deserialize)]
+        struct Listed {
+            songs: Vec<crate::shared_songs::SharedSong>,
+            #[serde(default)]
+            used: u64,
+            #[serde(default)]
+            capacity: u64,
+        }
+        let listed: Listed = self
+            .request(Method::GET, "/audio", Some(identity), None, None)
+            .await?;
+        Ok((listed.songs, listed.used, listed.capacity))
+    }
+
+    /// Reserves the song's place, sends the file straight to the file store, and
+    /// tells the service it arrived.
+    pub(super) async fn upload_song(
+        &self,
+        identity: &Identity,
+        path: std::path::PathBuf,
+    ) -> Result<crate::shared_songs::SharedSong, String> {
+        #[derive(Deserialize)]
+        struct Reserved {
+            id: String,
+            pathname: String,
+            token: String,
+            content_type: String,
+        }
+        let (info, bytes) = tokio::task::spawn_blocking(move || {
+            let info = crate::shared_songs::inspect(&path)?;
+            let bytes =
+                std::fs::read(&path).map_err(|_| "The file could not be read.".to_owned())?;
+            Ok::<_, String>((info, bytes))
+        })
+        .await
+        .map_err(|_| "The file could not be read.".to_owned())??;
+        let reserved: Reserved = self
+            .request(
+                Method::POST,
+                "/audio",
+                Some(identity),
+                Some(serde_json::json!({
+                    "title": info.title,
+                    "artists": info.artists,
+                    "duration_ms": info.duration_ms,
+                    "size": bytes.len(),
+                    "ext": info.ext,
+                })),
+                None,
+            )
+            .await?;
+        let length = bytes.len();
+        let sent = self
+            .http
+            .client()?
+            .put("https://vercel.com/api/blob/")
+            .query(&[("pathname", reserved.pathname.as_str())])
+            .bearer_auth(&reserved.token)
+            .header("x-api-version", "13")
+            .header("x-vercel-blob-access", "public")
+            .header("x-content-type", &reserved.content_type)
+            .header("x-add-random-suffix", "0")
+            .header("x-allow-overwrite", "0")
+            .header("x-content-length", length)
+            .body(bytes)
+            .timeout(std::time::Duration::from_secs(600))
+            .send()
+            .await
+            .map_err(|_| "The upload was interrupted. Try again.".to_owned())?;
+        if !sent.status().is_success() {
+            log::warn!("A shared song's upload was refused: {}", sent.status());
+            return Err("The file store refused the upload. Try again later.".into());
+        }
+        self.request(
+            Method::POST,
+            &format!("/audio/{}/complete", reserved.id),
+            Some(identity),
+            Some(serde_json::json!({})),
+            None,
+        )
+        .await
+    }
+
+    pub(super) async fn delete_song(&self, identity: &Identity, id: &str) -> Result<(), String> {
+        let _: serde_json::Value = self
+            .request(
+                Method::DELETE,
+                &format!("/audio/{id}"),
+                Some(identity),
+                None,
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
+    /// Where to stream a shared song from. Counts against the month's downloads.
+    pub async fn song_stream(
+        &self,
+        identity: &Identity,
+        id: &str,
+    ) -> Result<(String, String), String> {
+        #[derive(Deserialize)]
+        struct Stream {
+            url: String,
+            content_type: String,
+        }
+        let stream: Stream = self
+            .request(
+                Method::POST,
+                &format!("/audio/{id}/play"),
+                Some(identity),
+                Some(serde_json::json!({})),
+                None,
+            )
+            .await?;
+        Ok((stream.url, stream.content_type))
+    }
+
     pub(super) async fn shared_playlists(
         &self,
         identity: &Identity,

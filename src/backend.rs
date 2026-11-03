@@ -837,6 +837,12 @@ pub enum Command {
             std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>,
     },
     StatsClear,
+    /// Songs chosen in the file dialog, to share with the group.
+    ShareSongs {
+        selected: std::pin::Pin<
+            Box<dyn std::future::Future<Output = Option<Vec<rfd::FileHandle>>> + Send>,
+        >,
+    },
     StatsGenres {
         artists: Vec<(String, Vec<String>)>,
         names: Vec<(String, String)>,
@@ -1218,6 +1224,7 @@ pub enum Event {
     Friends(crate::friends::Event),
     Live(crate::friends::live::Event),
     Stats(crate::stats::Update),
+    SongsToShare(Vec<std::path::PathBuf>),
     /// The share to follow the list ending on `seed`, if Jev picked one.
     GroupPick {
         seed: String,
@@ -1743,6 +1750,16 @@ impl Backend {
             .add_filter("Spotify data", &["zip", "json"])
             .pick_file();
         self.send(Command::StatsImport {
+            selected: Box::pin(selected),
+        });
+    }
+
+    pub fn choose_songs_to_share(&self) {
+        let selected = rfd::AsyncFileDialog::new()
+            .set_title("Choose songs to share")
+            .add_filter("Audio", &crate::shared_songs::EXTENSIONS)
+            .pick_files();
+        self.send(Command::ShareSongs {
             selected: Box::pin(selected),
         });
     }
@@ -2664,6 +2681,22 @@ impl Worker {
                             Box::new(report),
                         )));
                         waker.wake();
+                    });
+                }
+                Command::ShareSongs { selected } => {
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let paths: Vec<_> = selected
+                            .await
+                            .unwrap_or_default()
+                            .iter()
+                            .map(|file| file.path().to_owned())
+                            .collect();
+                        if !paths.is_empty() {
+                            let _ = events.send(Event::SongsToShare(paths));
+                            waker.wake();
+                        }
                     });
                 }
                 Command::StatsImport { selected } => {

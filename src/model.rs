@@ -1416,6 +1416,8 @@ pub enum Action {
         uri: String,
         resume_ms: Option<u32>,
     },
+    /// Open the file dialog for songs to share with the group.
+    ChooseSongsToShare,
     PlayUris {
         uris: Vec<String>,
         index: u32,

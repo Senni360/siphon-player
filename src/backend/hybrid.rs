@@ -705,6 +705,60 @@ impl Worker {
         }
     }
 
+    /// Asks the group service where a shared song is, then plays it like any stream.
+    fn resolve_shared_song(
+        &mut self,
+        tag: PlaybackTag,
+        uri: String,
+        preload: bool,
+        refresh: Option<u64>,
+    ) {
+        let credentials = self.credentials.clone();
+        let http = self.http.clone();
+        let commands = self.commands.clone();
+        let duration_ms = self
+            .hybrid
+            .track
+            .as_ref()
+            .filter(|track| track.uri == uri)
+            .map_or(0, |track| track.duration_ms);
+        let task = tokio::spawn(async move {
+            let result = async {
+                let id = crate::shared_songs::song_id(&uri).ok_or("That song is gone.")?;
+                let identity = crate::friends::saved_identity(&credentials)
+                    .await
+                    .ok_or("Connect to your group to play this song.")?;
+                let client = crate::friends::Client::configured(http)?;
+                let (url, mime) = client.song_stream(&identity, id).await?;
+                Ok::<_, String>(sc::Stream {
+                    uri,
+                    url,
+                    protocol: sc::Protocol::Progressive,
+                    mime,
+                    duration_ms,
+                    is_preview: false,
+                })
+            }
+            .await
+            .map_err(|error| error.to_string());
+            let _ = commands.send(Command::YouTubeStream {
+                tag,
+                preload,
+                refresh,
+                result,
+            });
+        })
+        .abort_handle();
+        let slot = if preload {
+            &mut self.hybrid.youtube_preload
+        } else {
+            &mut self.hybrid.youtube_load
+        };
+        if let Some(old) = slot.replace(task) {
+            old.abort();
+        }
+    }
+
     fn resolve_soundcloud_stream(
         &mut self,
         tag: PlaybackTag,
@@ -716,6 +770,10 @@ impl Worker {
     ) {
         if crate::youtube::is_track_uri(&uri) {
             self.resolve_youtube_stream(tag, uri, preload, refresh);
+            return;
+        }
+        if crate::shared_songs::is_song(&uri) {
+            self.resolve_shared_song(tag, uri, preload, refresh);
             return;
         }
         let account_generation = self.hybrid.account_generation;

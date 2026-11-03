@@ -10,7 +10,9 @@ pub mod pick;
 mod state;
 
 pub use client::{Client, DEFAULT_BASE_URL, Feed, Identity, NewPost, Post, Profile, Reply, Source};
-pub use state::{Action, Event, Model, PENDING_REPLY, PENDING_SHARE, Request, Runtime, SongsFor};
+pub use state::{
+    Action, Event, Model, PENDING_REPLY, PENDING_SHARE, Request, Runtime, SongsFor, saved_identity,
+};
 
 #[cfg(test)]
 mod live_tests;

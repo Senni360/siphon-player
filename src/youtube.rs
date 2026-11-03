@@ -249,7 +249,7 @@ impl Catalogue {
 
 /// Shared decoder dispatch predicate. Spotify always keeps its own audio source.
 pub fn is_external(uri: &str) -> bool {
-    is_track_uri(uri) || crate::soundcloud::is_track_uri(uri)
+    is_track_uri(uri) || crate::soundcloud::is_track_uri(uri) || crate::shared_songs::is_song(uri)
 }
 
 /// Expiring URLs are never persisted or printed. A small margin covers handoff.

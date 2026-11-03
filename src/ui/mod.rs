@@ -13,6 +13,7 @@ mod group_account;
 mod group_live;
 mod group_playlists;
 mod group_shelf;
+mod group_songs;
 mod group_stats;
 pub mod home;
 mod keys;
@@ -98,7 +99,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             .frame(Frame::new())
             .show(ui, |_| {});
         lyrics::fullscreen(app, ui);
-        player_bar::show(app, ui, strip);
+        player_bar::show_in(app, ui, strip);
     } else {
         if app.settings.sidebar_visible {
             sidebar::show(app, ui);
@@ -115,7 +116,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         let mut page = ui.available_rect_before_wrap();
         page.max.y = strip.top();
         central(app, ui);
-        player_bar::show(app, ui, strip);
+        player_bar::show_in(app, ui, strip);
         now_playing::show(app, ui, page, player_bar::island_rect(strip));
         if !app.settings.sidebar_visible {
             sidebar::floating(app, ui, content);

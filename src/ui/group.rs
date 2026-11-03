@@ -172,6 +172,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     });
                 }
                 Tab::Songs => songs(app, ui, &me, divider, &mut actions),
+                Tab::Shared => super::group_songs::show(app, ui, &me, &mut actions),
                 Tab::Playlists => super::group_playlists::show(app, ui, &me, &mut actions),
                 Tab::Stats => super::group_stats::show(app, ui, &me, &mut actions),
                 Tab::People => {
@@ -194,6 +195,7 @@ enum Tab {
     #[default]
     Now,
     Songs,
+    Shared,
     Playlists,
     Stats,
     People,
@@ -214,6 +216,7 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
     ui.horizontal(|ui| {
         let mut all = vec![(Tab::Now, "Now"), (Tab::Songs, "Songs")];
         if accounts {
+            all.push((Tab::Shared, "Shared files"));
             all.push((Tab::Playlists, "Playlists"));
         }
         all.push((Tab::Stats, "Stats"));
@@ -247,6 +250,7 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
 fn demo_tab() -> Tab {
     match std::env::var("SIPHON_DEMO_GROUP_TAB").as_deref() {
         Ok("songs") => Tab::Songs,
+        Ok("shared") => Tab::Shared,
         Ok("playlists") => Tab::Playlists,
         Ok("people") => Tab::People,
         _ => Tab::Now,

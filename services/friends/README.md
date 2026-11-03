@@ -54,6 +54,13 @@ cargo test --locked --features demo friends::tests::local_service_round_trip -- 
    revocation. Verify posts survive a redeployment. Rotate the invite if it
    escapes the group.
 
+Shared songs need a public Vercel Blob store connected to the project, which sets
+`BLOB_READ_WRITE_TOKEN`. Without it, the rest of the service works and the songs
+routes answer 503. The limits in `src/audio.ts` sit below the free plan's 1 GB of
+storage and 10 GB of downloads a month, because going over blocks Blob for 30 days:
+when the store is full the oldest songs are deleted, and plays stop until the next
+month if downloads run out. The file addresses are unguessable but not secret.
+
 Environment variables:
 
 | Variable | Purpose |
