@@ -769,9 +769,13 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
             for device in &account.devices {
                 ui.horizontal(|ui| {
                     let label = if device.current {
-                        format!("{} ({})", device.name, gettext(locale, "this one"))
+                        format!(
+                            "{} ({})",
+                            app.private_text(&device.name),
+                            gettext(locale, "this one")
+                        )
                     } else {
-                        device.name.clone()
+                        app.private_text(&device.name)
                     };
                     theme::text(ui, label, theme::regular(13.0), palette.secondary);
                     if !device.current

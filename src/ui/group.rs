@@ -191,6 +191,12 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     app.actions.extend(actions);
 }
 
+/// Opens the People tab, where a member's account details are.
+#[cfg(test)]
+pub(crate) fn open_people(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp(Id::new("group-tab"), Tab::People));
+}
+
 /// The page's parts. Who is here and what is on first: that is what changes.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 enum Tab {

@@ -1576,7 +1576,8 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
             "sign-in-returning" => {
                 app.auth = AuthStatus::SignedOut;
                 app.user = None;
-                app.settings.web_client_id = Some(DEMO_CLIENT_ID.into());
+                const CLIENT_ID: &str = "0123456789abcdef0123456789abcdef";
+                app.settings.web_client_id = Some(CLIENT_ID.into());
             }
             "sign-in-malformed" => {
                 app.auth = AuthStatus::SignedOut;
@@ -1592,14 +1593,16 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 });
                 app.user = None;
                 if surface != "sign-in-shared-retired" {
-                    app.settings.web_client_id = Some(DEMO_CLIENT_ID.into());
+                    const CLIENT_ID: &str = "0123456789abcdef0123456789abcdef";
+                    app.settings.web_client_id = Some(CLIENT_ID.into());
                 }
             }
             // Settings for a listener still on the shared grant from before
             // 0.14.2, and for one using their own app.
             "shared-grant" => app.shared_grant = true,
             "own-app" => {
-                app.settings.web_client_id = Some(DEMO_CLIENT_ID.into());
+                const CLIENT_ID: &str = "0123456789abcdef0123456789abcdef";
+                app.settings.web_client_id = Some(CLIENT_ID.into());
                 app.web_app = Some(DEMO_CLIENT_ID.into());
             }
             "waiting-for-browser" => {
@@ -2156,6 +2159,78 @@ mod tests {
                 .any(|toast| toast.message == "Shared with your group")
         );
         app.backend.shutdown();
+    }
+
+    /// Streamer mode is only worth trusting if nothing slips through, so this
+    /// reads every word drawn on the pages an account's details could reach.
+    #[test]
+    fn streamer_mode_keeps_identifiers_off_every_page() {
+        let (ctx, mut app) = accessible_app("streamer-audit");
+        app.settings.streamer_mode = true;
+        app.show_devices = true;
+        super::siphon::live(&mut app, true);
+        const CLIENT_ID: &str = "0123456789abcdef0123456789abcdef";
+        app.settings.web_client_id = Some(CLIENT_ID.into());
+        let words = |ctx: &egui::Context, app: &mut App| {
+            let mut found = Vec::new();
+            for _ in 0..3 {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1400.0, 7000.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| app.frame_ui(ui),
+                );
+                output.textures_delta.clear();
+                found.clear();
+                for clipped in &output.shapes {
+                    if let egui::epaint::Shape::Text(text) = &clipped.shape {
+                        found.push(text.galley.job.text.clone());
+                    }
+                }
+            }
+            found
+        };
+        let home = app.dirs.state.display().to_string();
+        let mut leaks = Vec::new();
+        for page in [
+            Page::Home,
+            Page::Settings,
+            Page::Group,
+            Page::Playlist("pl1".into()),
+            Page::Search,
+        ] {
+            app.open(page.clone());
+            for text in words(&ctx, &mut app) {
+                let carmine = text.contains("Carmine") && !text.contains("Paolino");
+                if carmine
+                    || text.contains(CLIENT_ID)
+                    || text.contains("demo-listener")
+                    || text.contains("demo-invite-code")
+                    || text.contains("Kitchen speaker")
+                    || text.contains("DESKTOP")
+                    || text.contains(&home)
+                {
+                    leaks.push(format!("{page:?}: {text}"));
+                }
+            }
+        }
+        app.open(Page::Group);
+        crate::ui::group::open_people(&ctx);
+        for text in words(&ctx, &mut app) {
+            if text.contains("demo-listener")
+                || text.contains("demo-invite-code")
+                || text.contains("DESKTOP")
+                || text.contains("Studio laptop")
+            {
+                leaks.push(format!("People: {text}"));
+            }
+        }
+        app.backend.shutdown();
+        assert!(leaks.is_empty(), "{leaks:#?}");
     }
 
     fn accessible_app(name: &str) -> (egui::Context, App) {

@@ -385,7 +385,7 @@ pub fn apply(app: &mut crate::app::App, scenario: Scenario) {
 }
 
 /// Sample friends for the Group page's Listening now.
-#[cfg(feature = "demo")]
+#[cfg(any(test, feature = "demo"))]
 pub(super) fn live(app: &mut crate::app::App, joined: bool) {
     use crate::friends::live::{Channel, Entry, Presence, Session, Snapshot};
 
