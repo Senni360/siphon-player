@@ -4,6 +4,7 @@ import { configuredStorage } from './storage.js';
 import { createService } from './service.js';
 import { createJev } from './jev.js';
 import { configuredAudioStore } from './audio.js';
+import { SITE_HEADERS, sitePage } from './site.js';
 
 export function createHandler(env: NodeJS.ProcessEnv) {
   let service: ReturnType<typeof createService> | undefined;
@@ -14,6 +15,12 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     req.once('aborted', abort);
     res.once('close', closed);
     try {
+      const page = sitePage(req.method, req.url);
+      if (page) {
+        res.writeHead(page.status, SITE_HEADERS);
+        res.end(req.method === 'HEAD' ? undefined : page.html);
+        return;
+      }
       if (req.aborted || res.destroyed) abort();
       service ??= createService(configuredStorage(env), env.SIPHON_FRIENDS_INVITE_CODE ?? '', createJev(env), undefined, undefined, env.SIPHON_FRIENDS_OWNER_SPOTIFY_ID ?? '', configuredAudioStore(env));
       const headers = new Headers();

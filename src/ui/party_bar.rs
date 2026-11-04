@@ -168,8 +168,11 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             ))
                             .clicked()
                         {
-                            ui.ctx()
-                                .copy_text(format!("siphon://party/{group}/{}", channel.id));
+                            ui.ctx().copy_text(format!(
+                                "{}{group}/{}",
+                                crate::link::PARTY_PAGE,
+                                channel.id
+                            ));
                             actions.push(Action::ShowToast(
                                 gettext(locale, "Invite link copied").into_owned(),
                             ));

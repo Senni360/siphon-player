@@ -18,10 +18,17 @@ const KINDS: [&str; 7] = [
     "prerelease",
 ];
 
+/// The web page that opens a party in Encore. Chat apps make it clickable, which
+/// they don't do for `siphon://`.
+pub const PARTY_PAGE: &str = "https://siphon-friends.vercel.app/party/";
+
 /// The group and party a `siphon://party/GROUP/PARTY` link names. Both are the
 /// service's UUIDs; anything else is not such a link.
 pub fn party(text: &str) -> Option<(String, String)> {
-    let rest = text.trim().strip_prefix("siphon://party/")?;
+    let text = text.trim();
+    let rest = text
+        .strip_prefix("siphon://party/")
+        .or_else(|| text.strip_prefix(PARTY_PAGE))?;
     let (group, party) = rest.trim_end_matches('/').split_once('/')?;
     let uuid = |id: &str| id.len() == 36 && id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-');
     (uuid(group) && uuid(party)).then(|| (group.to_ascii_lowercase(), party.to_ascii_lowercase()))
@@ -272,6 +279,16 @@ fn is_id(id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_party_invite_opens_from_the_web_page_too() {
+        let group = "11111111-1111-4111-8111-111111111111";
+        let party_id = "22222222-2222-4222-8222-222222222222";
+        let page = format!("{PARTY_PAGE}{group}/{party_id}");
+        assert_eq!(party(&page), Some((group.to_owned(), party_id.to_owned())));
+        assert!(party("https://siphon-friends.vercel.app/party/x/y").is_none());
+        assert!(party("https://example.com/party/x/y").is_none());
+    }
 
     #[test]
     fn playlist_items_accept_tracks_and_complete_collections() {

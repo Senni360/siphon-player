@@ -1,0 +1,67 @@
+// The two pages a person can land on from a browser: where to get Encore, and
+// the door a party invite opens. They hold no group data, so nothing here reads
+// storage: a party link names ids only someone already holding the link knows.
+
+const RELEASES = 'https://github.com/Senni360/siphon-player/releases';
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const STYLE = `
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px;
+    background: #0b0b0c; color: #ededef;
+    font: 15px/1.5 Inter, "Segoe UI", system-ui, sans-serif; }
+  main { width: 100%; max-width: 440px; padding: 32px; background: #121214;
+    border: 1px solid #232327; border-radius: 14px; }
+  h1 { margin: 0 0 8px; font-size: 26px; font-weight: 600; letter-spacing: -0.01em; }
+  p { margin: 0 0 20px; color: #a1a1aa; }
+  a.primary { display: inline-block; padding: 10px 18px; border-radius: 999px;
+    background: #fafafa; color: #09090b; font-weight: 500; text-decoration: none; }
+  a.primary:hover { background: #e4e4e7; }
+  a.primary:focus-visible, small a:focus-visible { outline: 2px solid #fafafa; outline-offset: 2px; }
+  small { display: block; margin-top: 20px; color: #8a8a93; font-size: 13px; }
+  small a { color: #ededef; }
+`;
+
+function page(title: string, head: string, body: string): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>${title}</title>${head}<style>${STYLE}</style></head>
+<body><main>${body}</main></body></html>`;
+}
+
+const home = () => page('Encore', '', `<h1>Encore</h1>
+<p>A private music app for friends. One library and one queue for Spotify, SoundCloud and YouTube, shared inside your group. Windows only.</p>
+<a class="primary" href="${RELEASES}">Download for Windows</a>
+<small>Open the newest release and download the zip. You sign in with your own free Spotify app, and Encore shows you how.</small>`);
+
+function party(group: string, id: string): string {
+  const door = `siphon://party/${group.toLowerCase()}/${id.toLowerCase()}`;
+  return page('Join the party', `<meta http-equiv="refresh" content="0;url=${door}">`, `<h1>Join the party</h1>
+<p>Encore should be opening. If it doesn't, press the button.</p>
+<a class="primary" href="${door}">Open in Encore</a>
+<small>Don't have it yet? <a href="${RELEASES}">Download Encore</a>, then open this link again.</small>`);
+}
+
+/** The page for a browser's request, or null when it is the service's to answer. */
+export function sitePage(method: string | undefined, url: string | undefined): { status: number; html: string } | null {
+  if (method !== 'GET' && method !== 'HEAD') return null;
+  const path = new URL(url ?? '/', 'http://localhost').pathname.replace(/\/$/, '');
+  if (path === '') return { status: 200, html: home() };
+  const parts = path.split('/').slice(1);
+  if (parts[0] !== 'party') return null;
+  if (parts.length === 3 && UUID.test(parts[1]) && UUID.test(parts[2])) return { status: 200, html: party(parts[1], parts[2]) };
+  return { status: 404, html: page('Encore', '', `<h1>That link isn't right</h1>
+<p>Ask for a fresh invite from whoever sent it.</p>
+<a class="primary" href="/">Go to Encore</a>`) };
+}
+
+/** Styles sit in the page and nothing else loads, so the policy can say so. */
+export const SITE_HEADERS = {
+  'Content-Type': 'text/html; charset=utf-8',
+  'Cache-Control': 'public, max-age=300',
+  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+};
