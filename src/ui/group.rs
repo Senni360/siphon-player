@@ -230,7 +230,8 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
     all.push((Tab::People, "People"));
     let top = ui.cursor().top();
     let mut underline = None;
-    let row = ui.horizontal(|ui| {
+    // Wraps rather than running off a narrow page.
+    let row = ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 20.0;
         for (each, label) in all {
             let label = gettext(locale, label);
@@ -257,7 +258,7 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
             });
             theme::focus_ring(ui, &response);
             if on {
-                underline = Some((rect.left(), rect.width()));
+                underline = Some((rect.left(), rect.width(), rect.bottom()));
             }
             if response.clicked() && !on {
                 if each == Tab::Stats {
@@ -276,7 +277,7 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
         bottom,
         Stroke::new(1.0, palette.outline),
     );
-    if let Some((left, wide)) = underline {
+    if let Some((left, wide, line)) = underline {
         let time = crate::motion::seconds(ui.ctx(), motion::POPOVER);
         let left = ui
             .ctx()
@@ -285,7 +286,7 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
             .ctx()
             .animate_value_with_time(id.with("line-wide"), wide, time);
         ui.painter().rect_filled(
-            Rect::from_min_size(pos2(left, bottom - 1.0), vec2(wide, 2.0)),
+            Rect::from_min_size(pos2(left, line - 1.0), vec2(wide, 2.0)),
             1.0,
             palette.text,
         );
