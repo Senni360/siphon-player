@@ -1693,27 +1693,54 @@ fn song(
         palette.dim,
         "more",
     );
-    egui::Popup::menu(&more).show(|ui| {
-        ui.set_min_width(200.0);
-        if let Some(uri) =
-            crate::link::parse(&item.url).filter(|uri| uri.starts_with("spotify:track:"))
-            && ui.button(gettext(locale, "Add to queue")).clicked()
-        {
-            actions.push(Action::AddToQueue {
-                uri,
-                label: item.title.clone(),
-            });
-        }
-        if ui.button(gettext(locale, "Open in browser")).clicked() {
-            actions.push(Action::OpenUrl(item.url.clone()));
-        }
-        if ui.button(gettext(locale, "Copy link")).clicked() {
-            ui.ctx().copy_text(item.url.clone());
-        }
-        if post.author_id == me.user_id && ui.button(gettext(locale, "Delete share")).clicked() {
-            actions.push(Action::Friends(Group::Delete(post.id.clone())));
-        }
-    });
+    egui::Popup::menu(&more)
+        .frame(super::widgets::menu_frame(&palette))
+        .show(|ui| {
+            ui.set_min_width(200.0);
+            if let Some(uri) =
+                crate::link::parse(&item.url).filter(|uri| uri.starts_with("spotify:track:"))
+                && super::widgets::menu_item(
+                    ui,
+                    &palette,
+                    Some(Icon::ListEnd),
+                    &gettext(locale, "Add to queue"),
+                )
+            {
+                actions.push(Action::AddToQueue {
+                    uri,
+                    label: item.title.clone(),
+                });
+            }
+            if super::widgets::menu_item(
+                ui,
+                &palette,
+                Some(Icon::ExternalLink),
+                &gettext(locale, "Open in browser"),
+            ) {
+                actions.push(Action::OpenUrl(item.url.clone()));
+            }
+            if super::widgets::menu_item(
+                ui,
+                &palette,
+                Some(Icon::Copy),
+                &gettext(locale, "Copy link"),
+            ) {
+                ui.ctx().copy_text(item.url.clone());
+                actions.push(Action::ShowToast(
+                    gettext(locale, "Link copied").into_owned(),
+                ));
+            }
+            if post.author_id == me.user_id
+                && super::widgets::menu_item(
+                    ui,
+                    &palette,
+                    Some(Icon::Trash),
+                    &gettext(locale, "Delete share"),
+                )
+            {
+                actions.push(Action::Friends(Group::Delete(post.id.clone())));
+            }
+        });
 
     // Replies, with their count.
     let open_id = Id::new(("group-thread-open", &post.id));
