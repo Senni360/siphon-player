@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { sitePage } from '../src/site.js';
+import { downloadUrl, forgetNewestRelease, sitePage } from '../src/site.js';
 
 const GROUP = '11111111-1111-4111-8111-111111111111';
 const PARTY = '22222222-2222-4222-8222-222222222222';
@@ -29,4 +29,24 @@ test('the service keeps its own routes', () => {
   assert.equal(sitePage('GET', '/api/posts'), null);
   assert.equal(sitePage('GET', '/api'), null);
   assert.equal(sitePage('POST', '/'), null);
+});
+
+const ZIP_URL = 'https://github.com/Senni360/siphon-player/releases/download/v1.0.0-pre.1/siphon-v1.0.0-pre.1-x86_64-pc-windows-msvc.zip';
+const github = (releases: unknown, ok = true) => (async () => new Response(JSON.stringify(releases), { status: ok ? 200 : 403 })) as unknown as typeof fetch;
+
+test('the button downloads the newest zip, previews included, and asks GitHub rarely', async () => {
+  forgetNewestRelease();
+  let asked = 0;
+  const ask = (async () => { asked++; return new Response(JSON.stringify([{ draft: true, assets: [{ name: 'siphon-v9-x86_64-pc-windows-msvc.zip', browser_download_url: 'https://github.com/Senni360/siphon-player/draft.zip' }] }, { assets: [{ name: 'checksums.txt' }, { name: 'siphon-v1.0.0-pre.1-x86_64-pc-windows-msvc.zip', browser_download_url: ZIP_URL }] }])); }) as unknown as typeof fetch;
+  assert.equal(await downloadUrl(ask, 1000), ZIP_URL);
+  assert.equal(await downloadUrl(ask, 2000), ZIP_URL);
+  assert.equal(asked, 1);
+});
+
+test('when GitHub cannot say, the releases page still works', async () => {
+  const page = 'https://github.com/Senni360/siphon-player/releases';
+  forgetNewestRelease();
+  assert.equal(await downloadUrl(github([], false), 1000), page);
+  assert.equal(await downloadUrl((async () => { throw new Error('down'); }) as unknown as typeof fetch, 1000), page);
+  assert.equal(await downloadUrl(github([{ assets: [{ name: 'siphon-v1-x86_64-pc-windows-msvc.zip', browser_download_url: 'https://evil.example/a.zip' }] }]), 1000), page);
 });

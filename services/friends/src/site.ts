@@ -33,15 +33,15 @@ function page(title: string, head: string, body: string): string {
 
 const home = () => page('Encore', '', `<h1>Encore</h1>
 <p>A private music app for friends. One library and one queue for Spotify, SoundCloud and YouTube, shared inside your group. Windows only.</p>
-<a class="primary" href="${RELEASES}">Download for Windows</a>
-<small>Open the newest release and download the zip. You sign in with your own free Spotify app, and Encore shows you how.</small>`);
+<a class="primary" href="/download">Download for Windows</a>
+<small>Extract the zip and open <b>siphon.exe</b>. If Windows warns you, choose More info, then Run anyway. Encore then shows you how to sign in with your own free Spotify app.</small>`);
 
 function party(group: string, id: string): string {
   const door = `siphon://party/${group.toLowerCase()}/${id.toLowerCase()}`;
   return page('Join the party', `<meta http-equiv="refresh" content="0;url=${door}">`, `<h1>Join the party</h1>
 <p>Encore should be opening. If it doesn't, press the button.</p>
 <a class="primary" href="${door}">Open in Encore</a>
-<small>Don't have it yet? <a href="${RELEASES}">Download Encore</a>, then open this link again.</small>`);
+<small>Don't have it yet? <a href="/download">Download Encore</a>, then open this link again.</small>`);
 }
 
 /** The page for a browser's request, or null when it is the service's to answer. */
@@ -55,6 +55,38 @@ export function sitePage(method: string | undefined, url: string | undefined): {
   return { status: 404, html: page('Encore', '', `<h1>That link isn't right</h1>
 <p>Ask for a fresh invite from whoever sent it.</p>
 <a class="primary" href="/">Go to Encore</a>`) };
+}
+
+const RELEASES_API = 'https://api.github.com/repos/Senni360/siphon-player/releases?per_page=5';
+const ZIP = /^siphon-v[^/]+-x86_64-pc-windows-msvc\.zip$/;
+const REMEMBER_MS = 5 * 60 * 1000;
+let newest: { url: string; until: number } | null = null;
+
+/** Forgets what was found, between tests. */
+export function forgetNewestRelease() { newest = null; }
+
+/**
+ * Where the download button goes: the newest release's zip, previews included,
+ * as the app's own updater sees them. GitHub's releases page is the way there
+ * if it can't be asked. Remembered for a while, since GitHub limits how often
+ * this service may ask.
+ */
+export async function downloadUrl(ask: typeof fetch = fetch, now = Date.now()): Promise<string> {
+  if (newest && newest.until > now) return newest.url;
+  try {
+    const answer = await ask(RELEASES_API, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'siphon-friends' }, signal: AbortSignal.timeout(4000) });
+    if (answer.ok) {
+      const releases = await answer.json() as { draft?: boolean; assets?: { name?: string; browser_download_url?: string }[] }[];
+      for (const release of releases) {
+        const zip = release.draft ? undefined : release.assets?.find(asset => ZIP.test(asset.name ?? ''));
+        if (zip?.browser_download_url?.startsWith('https://github.com/Senni360/siphon-player/')) {
+          newest = { url: zip.browser_download_url, until: now + REMEMBER_MS };
+          return newest.url;
+        }
+      }
+    }
+  } catch { /* The releases page still works. */ }
+  return RELEASES;
 }
 
 /** Styles sit in the page and nothing else loads, so the policy can say so. */

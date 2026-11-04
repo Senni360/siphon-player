@@ -4,7 +4,7 @@ import { configuredStorage } from './storage.js';
 import { createService } from './service.js';
 import { createJev } from './jev.js';
 import { configuredAudioStore } from './audio.js';
-import { SITE_HEADERS, sitePage } from './site.js';
+import { SITE_HEADERS, downloadUrl, sitePage } from './site.js';
 
 export function createHandler(env: NodeJS.ProcessEnv) {
   let service: ReturnType<typeof createService> | undefined;
@@ -15,6 +15,11 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     req.once('aborted', abort);
     res.once('close', closed);
     try {
+      if (req.method === 'GET' && new URL(req.url ?? '/', 'http://localhost').pathname === '/download') {
+        res.writeHead(302, { Location: await downloadUrl(), 'Cache-Control': 'no-store' });
+        res.end();
+        return;
+      }
       const page = sitePage(req.method, req.url);
       if (page) {
         res.writeHead(page.status, SITE_HEADERS);

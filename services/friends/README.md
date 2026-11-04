@@ -145,7 +145,8 @@ remember the roster.
 
 ### Pages
 
-`GET /` is a download page, and `GET /party/GROUP/PARTY` opens that party in Encore.
+`GET /` is a download page, `GET /download` redirects to the newest release's zip, and
+`GET /party/GROUP/PARTY` opens that party in Encore.
 They read no storage and hold no group data. Party links exist because chat apps
 won't make a `siphon://` link clickable.
 
