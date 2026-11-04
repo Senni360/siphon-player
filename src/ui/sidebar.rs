@@ -1952,6 +1952,19 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 app.actions
                     .push(Action::Open(Page::SoundCloud("youtube:likes".into())));
             }
+            if app.friends_feed.account.is_some()
+                && "shared files".contains(&needle)
+                && nav_row(
+                    ui,
+                    &palette,
+                    Icon::Users,
+                    &gettext(locale, "Shared files"),
+                    false,
+                )
+                .clicked()
+            {
+                app.actions.push(Action::OpenSharedFiles);
+            }
             soundcloud_section(app, ui, &needle);
             if loading {
                 super::widgets::loading_row(ui, &palette, app.locale);
