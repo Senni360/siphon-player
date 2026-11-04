@@ -140,6 +140,8 @@ export async function audioRoute(context: AudioContext): Promise<Response | null
     if (size > MAX_SONG_BYTES) return fail(413, 'That file is too big to share');
     const ext = typeof input.ext === 'string' ? input.ext.toLowerCase() : '';
     const contentType = Object.hasOwn(TYPES, ext) ? TYPES[ext] : fail(415, 'That file type cannot be shared');
+    // The same file twice only wastes the group's room, and the limit is spent on nothing.
+    if ((state.audio ?? []).some(row => row.group_id === groupId && row.url !== null && row.size === size && row.title === title)) return fail(409, `${title} is already shared`);
     if (!await storage.limit(`user:${user.user_id}:audio-upload`, UPLOADS_PER_HOUR, 3600, signal)) return fail(429, 'Too many uploads, try again later', 3600);
     const song: SharedAudio = { id: randomUUID(), group_id: groupId, by: user.user_id, title, artists, duration_ms: duration, size, ext, created_at: clock(), url: null };
     const gone = await change(current => {

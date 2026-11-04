@@ -95,6 +95,14 @@ test('uploads are limited by the hour, not by a personal allowance', async () =>
   assert.equal(await status(send(ben, 'POST', '/audio', upload)), 201, 'without stopping anyone else');
 });
 
+test('the same file is not stored twice, whoever sends it', async () => {
+  const { send, tokens } = harness({ audio: [song('kept', upload.size, 1, { title: upload.title })] });
+  assert.equal(await status(send(ben, 'POST', '/audio', upload)), 409);
+  assert.equal(tokens.length, 0, 'nothing was offered for upload');
+  assert.equal(await status(send(ben, 'POST', '/audio', { ...upload, title: 'Another' })), 201);
+  assert.equal(await status(send(ben, 'POST', '/audio', { ...upload, size: upload.size + 1 })), 201);
+});
+
 test('the oldest songs make room, and a full store never overflows', async () => {
   const size = 30 * 1024 * 1024;
   const songs = Array.from({ length: 30 }, (_, i) => song(`s${String(i).padStart(2, '0')}`, size, i));

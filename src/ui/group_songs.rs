@@ -37,6 +37,20 @@ fn wrapped(ui: &mut Ui, text: String, size: f32, color: egui::Color32) {
     );
 }
 
+/// A deleted file is gone for everyone, and only its owner has it to put back.
+fn confirm_delete(locale: crate::i18n::Locale, song: &SharedSong) -> Action {
+    Action::ShowDialog(crate::model::Dialog::Confirm {
+        title: gettext(locale, "Delete this file?").into_owned(),
+        message: gettext(
+            locale,
+            "“{title}” stops playing for everyone in the group. This can't be undone.",
+        )
+        .replace("{title}", &song.title),
+        confirm: gettext(locale, "Delete").into_owned(),
+        action: Box::new(Action::Friends(Group::DeleteSong(song.id.clone()))),
+    })
+}
+
 /// Who it is by and who put it here, without saying the same name twice.
 fn byline(locale: crate::i18n::Locale, song: &SharedSong) -> String {
     let artists = song.artists.join(", ");
@@ -431,7 +445,7 @@ fn row(
                 &gettext(locale, "Delete"),
             )
         {
-            actions.push(Action::Friends(Group::DeleteSong(song.id.clone())));
+            actions.push(confirm_delete(locale, song));
         }
     });
     let mut line = ui.new_child(
@@ -469,7 +483,7 @@ fn row(
             )
             .clicked()
         {
-            actions.push(Action::Friends(Group::DeleteSong(song.id.clone())));
+            actions.push(confirm_delete(locale, song));
         }
         line.add_space(6.0);
         theme::text(

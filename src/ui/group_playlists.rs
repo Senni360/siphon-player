@@ -164,9 +164,19 @@ fn row(
                         )
                         .clicked()
                     {
-                        actions.push(Action::Friends(Group::DeleteSharedPlaylist(
-                            list.id.clone(),
-                        )));
+                        actions.push(Action::ShowDialog(crate::model::Dialog::Confirm {
+                            title: gettext(locale, "Remove this playlist from the group?")
+                                .into_owned(),
+                            message: gettext(
+                                locale,
+                                "Nobody in the group will see it here anymore.",
+                            )
+                            .into_owned(),
+                            confirm: gettext(locale, "Remove").into_owned(),
+                            action: Box::new(Action::Friends(Group::DeleteSharedPlaylist(
+                                list.id.clone(),
+                            ))),
+                        }));
                     }
                     if theme::soft_button(ui, &palette, None, &gettext(locale, "Save"), false)
                         .on_hover_text(gettext(locale, "Keep a copy in your playlists"))
