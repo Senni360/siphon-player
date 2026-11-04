@@ -820,6 +820,9 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
             || (crate::soundcloud::is_track_uri(&now.uri) && app.can_like_soundcloud()));
     let heart_width = if show_heart { 42.0 } else { 0.0 };
     let text_left = cover_rect.right() + 12.0;
+    // In a tight island the song's name and artist links come first.
+    let show_share = region.right() - text_left - heart_width >= 190.0 && app.can_share_playing();
+    let heart_width = heart_width + if show_share { 30.0 } else { 0.0 };
     let text_width = (region.right() - text_left - heart_width).max(40.0);
     let displayed_text_width: f32 = {
         let title =
@@ -920,6 +923,28 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         }
     }
 
+    if show_share {
+        // Sharing the song on is what the group is for, so it is one press away.
+        let past_text = text_left + displayed_text_width + 21.0;
+        let x = (past_text + if show_heart { 30.0 } else { 0.0 }).min(region.right() - 21.0);
+        let mut share_ui = ui.new_child(
+            UiBuilder::new()
+                .max_rect(Rect::from_center_size(pos2(x, cy), Vec2::splat(30.0)))
+                .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+        );
+        if theme::icon_button(
+            &mut share_ui,
+            Icon::Send,
+            16.0,
+            palette.secondary,
+            palette.text,
+            &gettext(app.locale, "Share with your group"),
+        )
+        .clicked()
+        {
+            app.actions.push(Action::SharePlaying);
+        }
+    }
     if show_heart {
         let saved = app.is_saved(&now.uri).unwrap_or(false);
         // A liked heart stays green under the pointer, like shuffle.
@@ -956,7 +981,8 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         };
         // Sit the heart just past the actual text, not at the region's far
         // edge, so it stays visually attached to the title.
-        let heart_x = (text_left + displayed_text_width + 21.0).min(region.right() - 21.0);
+        let heart_x = (text_left + displayed_text_width + 21.0)
+            .min(region.right() - if show_share { 51.0 } else { 21.0 });
         let heart_rect = Rect::from_center_size(pos2(heart_x, cy), Vec2::splat(30.0));
         let mut heart_ui = ui.new_child(
             UiBuilder::new()

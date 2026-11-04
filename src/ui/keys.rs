@@ -142,6 +142,12 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
     {
         actions.push(Action::ToggleSaved(now.uri));
     }
+    if !editing_text
+        && app.dialog.is_none()
+        && ctx.input_mut(|input| input.consume_key(Modifiers::NONE, Key::G))
+    {
+        actions.push(Action::SharePlaying);
+    }
     // Resolve the "open current artist/album" placeholders.
     for action in actions {
         match action {
@@ -267,6 +273,10 @@ pub fn shortcuts(locale: Locale) -> Vec<(Cow<'static, str>, Cow<'static, str>)> 
         (
             keys("B"),
             gettext(locale, "Like or unlike the playing song"),
+        ),
+        (
+            keys("G"),
+            gettext(locale, "Share the playing song with your group"),
         ),
         (keys("S"), gettext(locale, "Toggle shuffle")),
         (keys("R"), gettext(locale, "Cycle repeat")),

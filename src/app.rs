@@ -2252,6 +2252,44 @@ impl App {
     }
 
     /// Current item for menus, using cached track details when available.
+    /// Whether the playing song can go to the group right now.
+    pub fn can_share_playing(&self) -> bool {
+        self.friends_feed.profile.is_some()
+            && self.now_playing_item().is_some_and(|item| {
+                crate::friends::NewPost::from_item(&item).is_ok()
+                    || (self.friends_feed.account.is_some()
+                        && self.local_file(item.uri()).is_some())
+            })
+    }
+
+    /// Sends the playing song to the group: a post for a song friends can open
+    /// themselves, and the file itself for one only this computer has.
+    fn share_playing(&mut self) {
+        if !self.can_share_playing() {
+            return;
+        }
+        let Some(item) = self.now_playing_item() else {
+            return;
+        };
+        if let Some(path) = self
+            .local_file(item.uri())
+            .map(std::path::Path::to_path_buf)
+        {
+            self.actions
+                .push(Action::Friends(crate::friends::Action::UploadSong(path)));
+            return;
+        }
+        if let Ok(post) = crate::friends::NewPost::from_item(&item) {
+            self.actions
+                .push(Action::Friends(crate::friends::Action::Share(post)));
+            self.toast_with(
+                gettext(self.locale, "Shared with your group"),
+                gettext(self.locale, "Show"),
+                Action::Open(Page::Group),
+            );
+        }
+    }
+
     pub fn now_playing_item(&self) -> Option<PlayableItem> {
         if self.hybrid_owned() {
             return self.hybrid_current_item();
@@ -12064,6 +12102,7 @@ impl App {
                 self.discord_tick(true);
             }
             Action::ChooseSongsToShare => self.backend.choose_songs_to_share(),
+            Action::SharePlaying => self.share_playing(),
             Action::OpenSharedFiles => {
                 self.open_shared_files = true;
                 self.actions.push(Action::Open(Page::Group));
