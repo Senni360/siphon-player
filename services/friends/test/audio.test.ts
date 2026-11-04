@@ -77,6 +77,14 @@ test('a song is reserved, uploaded, finished, listed and played', async () => {
   assert.equal(state.audio_month!.bytes, 7_500_000);
 });
 
+test('every format the app offers is taken', async () => {
+  for (const [ext, type] of [['mp3', 'audio/mpeg'], ['flac', 'audio/flac'], ['m4a', 'audio/mp4'], ['aac', 'audio/aac'], ['wav', 'audio/wav']]) {
+    const { send, tokens } = harness();
+    assert.equal(await status(send(ana, 'POST', '/audio', { ...upload, ext })), 201, ext);
+    assert.equal(tokens[0].contentType, type, ext);
+  }
+});
+
 test('what cannot be shared is refused before anything is stored', async () => {
   const { send, state, tokens } = harness();
   assert.equal(await status(send(ana, 'POST', '/audio', { ...upload, duration_ms: MAX_SONG_MS + 1 })), 413, 'an hour-long song');

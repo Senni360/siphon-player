@@ -200,6 +200,10 @@ impl Decoder {
             "m4a"
         } else if stream.mime.contains("aac") {
             "aac"
+        } else if stream.mime.contains("flac") {
+            "flac"
+        } else if stream.mime.contains("wav") {
+            "wav"
         } else {
             "mp3"
         }

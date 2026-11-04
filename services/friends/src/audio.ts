@@ -18,7 +18,7 @@ export const UPLOADS_PER_HOUR = 40;
 export const RESERVED_MS = 20 * 60 * 1000;
 export const TOKEN_MS = 15 * 60 * 1000;
 
-const TYPES: Record<string, string> = { mp3: 'audio/mpeg', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac' };
+const TYPES: Record<string, string> = { mp3: 'audio/mpeg', flac: 'audio/flac', m4a: 'audio/mp4', aac: 'audio/aac', wav: 'audio/wav' };
 
 /** The file store, separate so tests never reach the network. */
 export interface AudioStore {

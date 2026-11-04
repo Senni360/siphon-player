@@ -133,7 +133,7 @@ protobuf = "3"
 # Reads a local file's embedded cover and lyrics. The same decoder librespot
 # already plays local files with. AAC and ISO MP4 also decode SoundCloud's
 # ADTS and fragmented MP4 HLS streams without a second decoder stack.
-symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "aac", "isomp4"] }
+symphonia = { version = "0.5", default-features = false, features = ["mp3", "flac", "aac", "alac", "isomp4", "pcm", "wav"] }
 # Pure Rust EBU R128 integrated loudness for every external PCM source.
 ebur128 = "0.1.10"
 # Local playback's audio sink is this crate's own (src/sink.rs): librespot's

@@ -170,7 +170,7 @@ fn share_dropped_files(app: &mut App, ctx: &Context) {
     if songs.is_empty() {
         app.toast_error(gettext(
             locale,
-            "Only MP3, FLAC, M4A and AAC files can be shared.",
+            "Only MP3, FLAC, M4A, AAC and WAV files can be shared.",
         ));
         return;
     }
@@ -229,7 +229,7 @@ fn file_drop_overlay(app: &App, ctx: &Context) {
                     gettext(locale, "Drop to share with your group"),
                     gettext(
                         locale,
-                        "Everyone can play them. MP3, FLAC, M4A or AAC, up to 15 minutes each.",
+                        "Everyone can play them. MP3, FLAC, M4A, AAC or WAV, up to 15 minutes each.",
                     ),
                 )
             } else {
@@ -1336,10 +1336,10 @@ mod tests {
     #[test]
     fn only_audio_the_store_takes_counts_as_a_shareable_drop() {
         use std::path::Path;
-        for name in ["a.mp3", "B.FLAC", "c.m4a", "d.aac"] {
+        for name in ["a.mp3", "B.FLAC", "c.m4a", "d.aac", "e.wav"] {
             assert!(super::shareable_file(Path::new(name)), "{name}");
         }
-        for name in ["a.wav", "a.exe", "folder", "a.mp3.txt"] {
+        for name in ["a.ogg", "a.exe", "folder", "a.mp3.txt"] {
             assert!(!super::shareable_file(Path::new(name)), "{name}");
         }
     }

@@ -15,7 +15,7 @@ const SONG_PREFIX: &str = "encore:song:";
 pub const MAX_MS: u32 = 15 * 60 * 1000;
 pub const MAX_BYTES: u64 = 40 * 1024 * 1024;
 /// What the service accepts, which is also what the player decodes.
-pub const EXTENSIONS: [&str; 4] = ["mp3", "flac", "m4a", "aac"];
+pub const EXTENSIONS: [&str; 5] = ["mp3", "flac", "m4a", "aac", "wav"];
 
 /// One shared song. Its file's address comes only when it is played, so that
 /// plays can be counted against the month's downloads.
@@ -90,7 +90,7 @@ pub fn inspect(path: &Path) -> Result<FileInfo, String> {
         .map_or_else(String::new, |ext| ext.to_string_lossy().to_lowercase());
     if !EXTENSIONS.contains(&ext.as_str()) {
         return Err(format!(
-            "{name}: only MP3, FLAC, M4A and AAC files can be shared."
+            "{name}: only MP3, FLAC, M4A, AAC and WAV files can be shared."
         ));
     }
     let size = std::fs::metadata(path)
@@ -98,7 +98,7 @@ pub fn inspect(path: &Path) -> Result<FileInfo, String> {
         .len();
     if size > MAX_BYTES {
         return Err(format!(
-            "{name} is too big to share. The limit is {} MB.",
+            "{name} is too big to share. The limit is {} MB, so try saving it as MP3 or FLAC.",
             MAX_BYTES / (1024 * 1024)
         ));
     }
@@ -218,6 +218,35 @@ mod tests {
         assert_eq!(track.uri, format!("encore:song:{ID}"));
         assert_eq!(track.artists[0].name, "Ana");
         assert!(crate::youtube::is_external(&track.uri));
+    }
+
+    /// Producers bounce to WAV, so it has to get past the door.
+    #[test]
+    fn a_wav_file_can_be_shared() {
+        let rate: u32 = 44_100;
+        let samples = rate; // One second of silence, in 16-bit mono.
+        let data = samples * 2;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&rate.to_le_bytes());
+        wav.extend_from_slice(&(rate * 2).to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data.to_le_bytes());
+        wav.resize(wav.len() + data as usize, 0);
+        let path = std::env::temp_dir().join(format!("encore-bounce-{}.wav", std::process::id()));
+        std::fs::write(&path, wav).unwrap();
+        let info = inspect(&path);
+        let _ = std::fs::remove_file(&path);
+        let info = info.unwrap();
+        assert_eq!(info.ext, "wav");
+        assert_eq!(info.duration_ms, 1000);
     }
 
     #[test]
