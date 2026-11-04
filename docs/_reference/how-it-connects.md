@@ -286,8 +286,9 @@ out, or a reconnection that gives up stops it.
   members on the same song (never their names), unless it came from a private
   SoundCloud link or the switch is off. Discord itself fetches the card's badge
   image, from this repository on GitHub or, while a song plays, from the group
-  service with the colour of the cover's glow in its address; the app does not. No audio goes through it: each listener plays the
-  song on their own account from its own service. A member who shares also sends
+  service with the colour of the cover's glow in its address; the app does not. No audio from any service goes through it: each listener plays
+  the song on their own account from its own service. The exception is a file
+  someone chooses to share, described under Shared files. A member who shares also sends
   their monthly and all-time totals and the top of each list, about once an hour,
   never individual plays. The listening statistics read
   `/me/player/recently-played` every 30 minutes and, on the Stats tab only, an
