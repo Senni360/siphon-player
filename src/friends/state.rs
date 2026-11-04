@@ -428,7 +428,12 @@ impl Model {
                         .filter(|r| r.created_at > seen && Some(r.author_id.as_str()) != me)
                         .count()
             })
-            .sum()
+            .sum::<usize>()
+            + self
+                .shared_songs
+                .iter()
+                .filter(|song| song.created_at > seen && Some(song.by.as_str()) != me)
+                .count()
     }
 
     /// The shares Home leads with: of the newest few, the ones the reader
@@ -448,6 +453,7 @@ impl Model {
             .flat_map(|p| {
                 std::iter::once(p.created_at).chain(p.replies.iter().map(|r| r.created_at))
             })
+            .chain(self.shared_songs.iter().map(|song| song.created_at))
             .max()
             .unwrap_or(0)
     }
@@ -958,6 +964,26 @@ fn device_name() -> String {
 #[cfg(test)]
 mod upload_tests {
     use super::*;
+
+    #[test]
+    fn a_friends_new_file_counts_as_unread_and_your_own_does_not() {
+        let song = |by: &str, created_at| crate::shared_songs::SharedSong {
+            by: by.into(),
+            created_at,
+            ..Default::default()
+        };
+        let mut model = Model {
+            profile: Some(Profile {
+                user_id: "me".into(),
+                display_name: "Me".into(),
+            }),
+            ..Model::default()
+        };
+        model.shared_songs = vec![song("ana", 200), song("me", 300), song("ben", 50)];
+        assert_eq!(model.unread_since(100), 1);
+        assert_eq!(model.unread_since(200), 0);
+        assert_eq!(model.newest(), 300, "opening the page marks it all seen");
+    }
 
     #[test]
     fn uploads_go_one_at_a_time_and_say_how_each_ended() {

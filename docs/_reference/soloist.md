@@ -5,8 +5,6 @@ nav_order: 5
 permalink: /soloist/
 ---
 
-Available in source builds from `main`; not included in Siphon 0.15.0-pre.1.
-
 Siphon can run [Spotify Soloist](https://developer.spotify.com/documentation/soloist)
 as an optional player. The built-in librespot player remains the default.
 Soloist is Spotify's separate software, downloaded from Spotify when you
