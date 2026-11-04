@@ -14,6 +14,9 @@ const MIB: u64 = 1024 * 1024;
 const ROW: f32 = 54.0;
 /// A list this long is worth searching.
 const FILTER_FROM: usize = 8;
+/// How long a friend's file counts as new on Home, and how many show there.
+const RECENT_MS: u64 = 14 * 24 * 60 * 60 * 1000;
+const RECENT_SHOWN: usize = 3;
 
 fn play(index: usize, uri: String) -> Action {
     Action::PlayContext {
@@ -119,51 +122,115 @@ pub fn search_section(app: &mut App, ui: &mut Ui) {
     let palette = app.palette;
     theme::section_title(ui, &palette, &gettext(app.locale, "From your group"));
     for hit in found {
-        let (rect, response) =
-            ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
-        if response.hovered() {
-            ui.painter().rect(
-                rect,
-                8.0,
-                palette.surface_hover,
-                Stroke::NONE,
-                egui::StrokeKind::Inside,
-            );
-        }
-        let icon = Rect::from_center_size(
-            egui::pos2(rect.left() + 22.0, rect.center().y),
-            vec2(18.0, 18.0),
-        );
-        Icon::PlayFilled
-            .image(palette.secondary, 18.0)
-            .paint_at(ui, icon);
-        let painter = ui.painter().with_clip_rect(rect);
-        crate::bidi::paint_line(
-            &painter,
-            rect.left() + 44.0,
-            rect.right() - 12.0,
-            rect.center().y - 9.0,
-            &hit.title,
-            theme::medium(14.0),
-            hit.color,
-        );
-        crate::bidi::paint_line(
-            &painter,
-            rect.left() + 44.0,
-            rect.right() - 12.0,
-            rect.center().y + 10.0,
-            &hit.detail,
-            theme::regular(12.5),
-            palette.secondary,
-        );
-        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-        response
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hit.title));
-        if response.clicked() {
-            app.actions.push(hit.action);
-        }
+        hit_row(app, ui, hit);
     }
     ui.add_space(12.0);
+}
+
+/// Files friends put up lately, so a new one doesn't wait to be found in a tab.
+pub fn home_section(app: &mut App, ui: &mut Ui) {
+    let Some(me) = app
+        .friends_feed
+        .profile
+        .as_ref()
+        .map(|me| me.user_id.clone())
+    else {
+        return;
+    };
+    let now = jiff::Timestamp::now().as_millisecond().max(0) as u64;
+    let locale = app.locale;
+    let found: Vec<Hit> = app
+        .friends_feed
+        .shared_songs
+        .iter()
+        .enumerate()
+        .filter(|(_, song)| song.by != me && now.saturating_sub(song.created_at) < RECENT_MS)
+        .take(RECENT_SHOWN)
+        .map(|(index, song)| Hit {
+            title: song.title.clone(),
+            detail: byline(locale, song),
+            color: app.palette.text,
+            action: play(index, song.uri()),
+        })
+        .collect();
+    if found.is_empty() {
+        return;
+    }
+    let palette = app.palette;
+    ui.horizontal(|ui| {
+        theme::section_title(ui, &palette, &gettext(locale, "New files from friends"));
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            if theme::link(
+                ui,
+                gettext(locale, "All shared files"),
+                theme::regular(13.0),
+                palette.secondary,
+            )
+            .clicked()
+            {
+                app.actions.push(Action::OpenSharedFiles);
+            }
+        });
+    });
+    ui.add_space(4.0);
+    // Side by side where they fit, so Home's other shelves stay in view.
+    if ui.available_width() >= 720.0 {
+        ui.columns(RECENT_SHOWN, |columns| {
+            for (column, hit) in columns.iter_mut().zip(found) {
+                hit_row(app, column, hit);
+            }
+        });
+    } else {
+        for hit in found {
+            hit_row(app, ui, hit);
+        }
+    }
+    ui.add_space(16.0);
+}
+
+fn hit_row(app: &mut App, ui: &mut Ui, hit: Hit) {
+    let palette = app.palette;
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+    if response.hovered() {
+        ui.painter().rect(
+            rect,
+            8.0,
+            palette.surface_hover,
+            Stroke::NONE,
+            egui::StrokeKind::Inside,
+        );
+    }
+    let icon = Rect::from_center_size(
+        egui::pos2(rect.left() + 22.0, rect.center().y),
+        vec2(18.0, 18.0),
+    );
+    Icon::PlayFilled
+        .image(palette.secondary, 18.0)
+        .paint_at(ui, icon);
+    let painter = ui.painter().with_clip_rect(rect);
+    crate::bidi::paint_line(
+        &painter,
+        rect.left() + 44.0,
+        rect.right() - 12.0,
+        rect.center().y - 9.0,
+        &hit.title,
+        theme::medium(14.0),
+        hit.color,
+    );
+    crate::bidi::paint_line(
+        &painter,
+        rect.left() + 44.0,
+        rect.right() - 12.0,
+        rect.center().y + 10.0,
+        &hit.detail,
+        theme::regular(12.5),
+        palette.secondary,
+    );
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hit.title));
+    if response.clicked() {
+        app.actions.push(hit.action);
+    }
 }
 
 /// The room left in the store: the thing that decides when old songs go.

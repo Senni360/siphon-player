@@ -76,7 +76,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         } else {
             gettext(
                 locale,
-                "Nothing shared yet. Share what's playing from Now playing, and it lands here for everyone.",
+                "Nothing shared yet. Press share on the player, or G, and the song lands here for everyone.",
             )
         };
         message(ui, app, &text, None);

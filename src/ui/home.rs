@@ -46,7 +46,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     // Each shelf rises in a beat behind the one above it, on every visit.
     use super::rise;
     // The group's own shares come before anything a service suggests.
-    rise(ui, 0, |ui| super::group_shelf::show(app, ui));
+    rise(ui, 0, |ui| {
+        super::group_shelf::show(app, ui);
+        super::group_songs::home_section(app, ui);
+    });
     rise(ui, 1, |ui| quick_access(app, ui));
     ui.add_space(16.0);
 

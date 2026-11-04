@@ -578,7 +578,7 @@ pub(super) fn live(app: &mut crate::app::App, joined: bool) {
             size: u64::from(seconds) * 40_000,
             by: by.into(),
             by_name: by_name.into(),
-            created_at: 0,
+            created_at: jiff::Timestamp::now().as_millisecond().max(0) as u64,
         }
     };
     app.friends_feed.shared_songs = vec![
