@@ -661,6 +661,16 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
             let offset = vec2((1.0 - enter) * 24.0 * from_side, (1.0 - enter) * 10.0);
             let whole = clip_above_player(ui);
+            // Now playing stops higher than the page does, and covers it: nothing
+            // of the page shows in the gap under its rounded edge.
+            if now_playing::is_open(ui.ctx()) {
+                let mut covered = ui.clip_rect();
+                covered.max.y = covered
+                    .max
+                    .y
+                    .min(ui.ctx().content_rect().bottom() - theme::PLAYER_BAR_HEIGHT - CARD_RADIUS);
+                ui.set_clip_rect(covered);
+            }
             let scroll = crate::autoscroll::show(
                 ui,
                 egui::ScrollArea::vertical()

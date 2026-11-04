@@ -215,7 +215,10 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
     if !steps {
         theme::text(
             ui,
-            gettext(locale, "A native Spotify client."),
+            gettext(
+                locale,
+                "Spotify, SoundCloud and YouTube, shared with your friends.",
+            ),
             theme::regular(14.5),
             palette.secondary,
         );
