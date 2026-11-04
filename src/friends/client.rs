@@ -6,6 +6,11 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::api::models::PlayableItem;
 use crate::http::Http;
 
+pub(super) const NOT_ALLOWED: &str =
+    "That isn't allowed: the code is wrong, or only an admin can do it.";
+pub(super) const TOO_MANY_REQUESTS: &str =
+    "Friends is receiving too many requests. Try again later.";
+
 /// Siphon's group, on the owner's Vercel deployment. SIPHON_FRIENDS_URL,
 /// including /api, points a copy at another deployment or a local runner.
 pub const DEFAULT_BASE_URL: &str = "https://siphon-friends.vercel.app/api";
@@ -321,9 +326,9 @@ impl Client {
             // Never display arbitrary server errors, URLs, or authorization responses.
             return Err(match status.as_u16() {
                 401 => "Your sign-in here is no longer valid. Connect Spotify again.",
-                403 => "That isn't allowed: the code is wrong, or only an admin can do it.",
+                403 => NOT_ALLOWED,
                 404 => "That group or song is gone.",
-                429 => "Friends is receiving too many requests. Try again later.",
+                429 => TOO_MANY_REQUESTS,
                 400 | 413 | 415 => {
                     "Check the name, link and note. The service rejected this request."
                 }

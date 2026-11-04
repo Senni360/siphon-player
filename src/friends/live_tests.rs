@@ -773,3 +773,41 @@ async fn every_request_works_against_a_running_service() {
     client.leave(&ana).await.unwrap();
     client.leave(&bo).await.unwrap();
 }
+
+/// The app's own code against a local service and the real file store. Run the
+/// service with `BLOB_READ_WRITE_TOKEN` and `SIPHON_FRIENDS_INVITE_CODE` set, set
+/// `SIPHON_FRIENDS_URL` and the invite here too, and run with `--ignored`.
+#[tokio::test]
+#[ignore = "needs a local service connected to a real Blob store"]
+async fn a_file_goes_up_plays_and_is_deleted_through_the_real_store() {
+    let base = std::env::var("SIPHON_FRIENDS_URL").unwrap();
+    let invite = std::env::var("SIPHON_FRIENDS_INVITE_CODE").unwrap();
+    let http = crate::http::Http::default();
+    let client = super::Client::new(http.clone(), &base).unwrap();
+    let identity = client.join(&invite, "Upload check").await.unwrap();
+
+    let file =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/testdata/soundcloud/tone.mp3");
+    let bytes = std::fs::read(&file).unwrap();
+    let song = client.upload_song(&identity, file.clone()).await.unwrap();
+    assert!(crate::shared_songs::is_song(&song.uri()), "{}", song.id);
+    assert_eq!(song.size, bytes.len() as u64);
+    assert!(song.duration_ms > 0);
+
+    let (songs, used, capacity) = client.shared_songs(&identity).await.unwrap();
+    assert_eq!(songs.len(), 1);
+    assert_eq!(used, bytes.len() as u64);
+    assert!(capacity > 0);
+
+    let (url, mime) = client.song_stream(&identity, &song.id).await.unwrap();
+    assert_eq!(mime, "audio/mpeg");
+    let got = http.client().unwrap().get(&url).send().await.unwrap();
+    assert!(got.status().is_success());
+    assert_eq!(got.bytes().await.unwrap().as_ref(), bytes.as_slice());
+
+    let again = client.upload_song(&identity, file).await.unwrap_err();
+    assert!(again.contains("already shared"), "{again}");
+
+    client.delete_song(&identity, &song.id).await.unwrap();
+    assert!(client.shared_songs(&identity).await.unwrap().0.is_empty());
+}

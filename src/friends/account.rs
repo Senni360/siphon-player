@@ -313,6 +313,14 @@ impl Client {
         })
         .await
         .map_err(|_| "The file could not be read.".to_owned())??;
+        // Asked here to say so plainly: this client doesn't show the service's own words.
+        let (songs, _, _) = self.shared_songs(identity).await?;
+        if songs
+            .iter()
+            .any(|song| song.title == info.title && song.size == bytes.len() as u64)
+        {
+            return Err(format!("{} is already shared.", info.title));
+        }
         let reserved: Reserved = self
             .request(
                 Method::POST,
@@ -327,7 +335,16 @@ impl Client {
                 })),
                 None,
             )
-            .await?;
+            .await
+            .map_err(|error| match error.as_str() {
+                super::client::TOO_MANY_REQUESTS => {
+                    "You've shared a lot of songs this hour. Try the rest later.".to_owned()
+                }
+                super::client::NOT_ALLOWED => {
+                    "You can't share files in this group. Ask an admin.".to_owned()
+                }
+                _ => error,
+            })?;
         let length = bytes.len();
         let sent = self
             .http
@@ -392,7 +409,15 @@ impl Client {
                 Some(serde_json::json!({})),
                 None,
             )
-            .await?;
+            .await
+            .map_err(|error| {
+                if error == super::client::TOO_MANY_REQUESTS {
+                    "Shared files have used up this month's downloads. They come back next month."
+                        .to_owned()
+                } else {
+                    error
+                }
+            })?;
         Ok((stream.url, stream.content_type))
     }
 
