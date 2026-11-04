@@ -57,7 +57,7 @@ export function sitePage(method: string | undefined, url: string | undefined): {
 <a class="primary" href="/">Go to Encore</a>`) };
 }
 
-const RELEASES_API = 'https://api.github.com/repos/Senni360/siphon-player/releases?per_page=5';
+const RELEASES_API = 'https://api.github.com/repos/Senni360/siphon-player/releases?per_page=20';
 const ZIP = /^siphon-v[^/]+-x86_64-pc-windows-msvc\.zip$/;
 const REMEMBER_MS = 5 * 60 * 1000;
 let newest: { url: string; until: number } | null = null;
@@ -76,13 +76,16 @@ export async function downloadUrl(ask: typeof fetch = fetch, now = Date.now()): 
   try {
     const answer = await ask(RELEASES_API, { headers: { accept: 'application/vnd.github+json', 'user-agent': 'siphon-friends' }, signal: AbortSignal.timeout(4000) });
     if (answer.ok) {
-      const releases = await answer.json() as { draft?: boolean; assets?: { name?: string; browser_download_url?: string }[] }[];
-      for (const release of releases) {
-        const zip = release.draft ? undefined : release.assets?.find(asset => ZIP.test(asset.name ?? ''));
-        if (zip?.browser_download_url?.startsWith('https://github.com/Senni360/siphon-player/')) {
-          newest = { url: zip.browser_download_url, until: now + REMEMBER_MS };
-          return newest.url;
-        }
+      const releases = await answer.json() as { draft?: boolean; published_at?: string; assets?: { name?: string; browser_download_url?: string }[] }[];
+      // By date: GitHub's own order puts pre.9 above pre.10.
+      const found = releases
+        .filter(release => !release.draft && release.published_at)
+        .sort((a, b) => Date.parse(b.published_at!) - Date.parse(a.published_at!))
+        .map(release => release.assets?.find(asset => ZIP.test(asset.name ?? ''))?.browser_download_url)
+        .find(url => url?.startsWith('https://github.com/Senni360/siphon-player/'));
+      if (found) {
+        newest = { url: found, until: now + REMEMBER_MS };
+        return found;
       }
     }
   } catch { /* The releases page still works. */ }

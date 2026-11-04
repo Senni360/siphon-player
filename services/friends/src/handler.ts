@@ -15,7 +15,7 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     req.once('aborted', abort);
     res.once('close', closed);
     try {
-      if (req.method === 'GET' && new URL(req.url ?? '/', 'http://localhost').pathname === '/download') {
+      if ((req.method === 'GET' || req.method === 'HEAD') && new URL(req.url ?? '/', 'http://localhost').pathname === '/download') {
         res.writeHead(302, { Location: await downloadUrl(), 'Cache-Control': 'no-store' });
         res.end();
         return;

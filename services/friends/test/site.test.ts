@@ -37,7 +37,13 @@ const github = (releases: unknown, ok = true) => (async () => new Response(JSON.
 test('the button downloads the newest zip, previews included, and asks GitHub rarely', async () => {
   forgetNewestRelease();
   let asked = 0;
-  const ask = (async () => { asked++; return new Response(JSON.stringify([{ draft: true, assets: [{ name: 'siphon-v9-x86_64-pc-windows-msvc.zip', browser_download_url: 'https://github.com/Senni360/siphon-player/draft.zip' }] }, { assets: [{ name: 'checksums.txt' }, { name: 'siphon-v1.0.0-pre.1-x86_64-pc-windows-msvc.zip', browser_download_url: ZIP_URL }] }])); }) as unknown as typeof fetch;
+  const old = 'https://github.com/Senni360/siphon-player/releases/download/v1.0.0-pre.9/siphon-v1.0.0-pre.9-x86_64-pc-windows-msvc.zip';
+  const ask = (async () => { asked++; return new Response(JSON.stringify([
+    { draft: true, published_at: '2030-01-01T00:00:00Z', assets: [{ name: 'siphon-v9-x86_64-pc-windows-msvc.zip', browser_download_url: 'https://github.com/Senni360/siphon-player/draft.zip' }] },
+    // GitHub really does list pre.9 above pre.10.
+    { published_at: '2026-01-01T00:00:00Z', assets: [{ name: 'siphon-v1.0.0-pre.9-x86_64-pc-windows-msvc.zip', browser_download_url: old }] },
+    { published_at: '2026-02-01T00:00:00Z', assets: [{ name: 'checksums.txt' }, { name: 'siphon-v1.0.0-pre.1-x86_64-pc-windows-msvc.zip', browser_download_url: ZIP_URL }] },
+  ])); }) as unknown as typeof fetch;
   assert.equal(await downloadUrl(ask, 1000), ZIP_URL);
   assert.equal(await downloadUrl(ask, 2000), ZIP_URL);
   assert.equal(asked, 1);
@@ -48,5 +54,5 @@ test('when GitHub cannot say, the releases page still works', async () => {
   forgetNewestRelease();
   assert.equal(await downloadUrl(github([], false), 1000), page);
   assert.equal(await downloadUrl((async () => { throw new Error('down'); }) as unknown as typeof fetch, 1000), page);
-  assert.equal(await downloadUrl(github([{ assets: [{ name: 'siphon-v1-x86_64-pc-windows-msvc.zip', browser_download_url: 'https://evil.example/a.zip' }] }]), 1000), page);
+  assert.equal(await downloadUrl(github([{ published_at: '2026-01-01T00:00:00Z', assets: [{ name: 'siphon-v1-x86_64-pc-windows-msvc.zip', browser_download_url: 'https://evil.example/a.zip' }] }]), 1000), page);
 });
