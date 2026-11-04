@@ -1713,27 +1713,6 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
         }
     });
     let sort = selected_sort(app, filter);
-    ui.add_space(4.0);
-    ui.horizontal_wrapped(|ui| {
-        sort_menu(app, ui, filter, sort);
-        if filter == Filter::Playlists {
-            // Translators: Library filter for playlists created by the signed-in user.
-            let label = gettext(locale, "By You");
-            let by_you = app.settings.library_by_you;
-            let response = theme::soft_button(ui, &palette, None, &label, by_you);
-            response.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::Button,
-                    ui.is_enabled(),
-                    by_you,
-                    &*label,
-                )
-            });
-            if response.clicked() {
-                app.actions.push(Action::SetLibraryByYou(!by_you));
-            }
-        }
-    });
     ui.data_mut(|data| {
         data.insert_temp(filter_id, filter);
         data.insert_temp(show_search_id, show_search);
@@ -1938,6 +1917,28 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             {
                 super::widgets::scroll_during_drag(ui);
             }
+            // Scrolls away with the list, so a short window keeps its room for rows.
+            ui.horizontal_wrapped(|ui| {
+                sort_menu(app, ui, filter, sort);
+                if filter == Filter::Playlists {
+                    // Translators: Library filter for playlists created by the signed-in user.
+                    let label = gettext(locale, "By You");
+                    let by_you = app.settings.library_by_you;
+                    let response = theme::soft_button(ui, &palette, None, &label, by_you);
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::WidgetType::Button,
+                            ui.is_enabled(),
+                            by_you,
+                            &*label,
+                        )
+                    });
+                    if response.clicked() {
+                        app.actions.push(Action::SetLibraryByYou(!by_you));
+                    }
+                }
+            });
+            ui.add_space(6.0);
             if "youtube likes".contains(&needle)
                 && nav_row(
                     ui,
