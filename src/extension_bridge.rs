@@ -35,16 +35,18 @@ pub async fn resolve_soundcloud(
 /// Publish this executable on each launch, before the event loop starts.
 /// Registry access happens on a worker, and discovery must never prevent startup.
 pub fn register_player() {
+    // A development build must not take over the desktop from the real app:
+    // not its web links, its `siphon://` links, or what the extension finds.
+    if cfg!(debug_assertions) {
+        return;
+    }
     #[cfg(windows)]
     if let Ok(worker) = std::thread::Builder::new()
         .name("extension-discovery".into())
         .spawn(|| {
             register_windows_player();
             register_windows_links();
-            // A development build must not take over the desktop's web links.
-            if !cfg!(debug_assertions)
-                && let Ok(exe) = std::env::current_exe()
-            {
+            if let Ok(exe) = std::env::current_exe() {
                 crate::web_links::register(&exe);
             }
         })
