@@ -83,6 +83,28 @@ fn tiles(ui: &mut Ui, palette: &Palette, items: &[(String, String)]) {
 }
 
 /// Upright bars with a label under some of them.
+/// `2026-01` as a chart's axis says it: the month, and the year where it turns.
+fn month_label(month: &str) -> String {
+    const NAMES: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
+    let Some((year, number)) = month.split_once('-') else {
+        return month.to_owned();
+    };
+    let Some(name) = number
+        .parse::<usize>()
+        .ok()
+        .and_then(|number| NAMES.get(number.wrapping_sub(1)))
+    else {
+        return month.to_owned();
+    };
+    if number == "01" {
+        format!("{name} {}", year.get(2..).unwrap_or(year))
+    } else {
+        (*name).to_owned()
+    }
+}
+
 fn columns(ui: &mut Ui, palette: &Palette, values: &[u64], labels: &[String], id: &str) {
     let height = 96.0;
     let width = ui.available_width();
@@ -383,7 +405,7 @@ fn own_report(app: &App, ui: &mut Ui, report: &Report, actions: &mut Vec<Action>
         let labels: Vec<String> = report
             .months
             .iter()
-            .map(|(month, _)| month.clone())
+            .map(|(month, _)| month_label(month))
             .collect();
         columns(ui, &palette, &values, &labels, "group-stats-months");
     }

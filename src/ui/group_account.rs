@@ -11,7 +11,7 @@ use crate::i18n::gettext;
 use crate::model::Action;
 use crate::theme::{self, Icon};
 
-use super::group::{card, chip, field};
+use super::group::{card, field};
 
 fn account_op(op: Op) -> Action {
     Action::Friends(Group::Account(op))
@@ -184,31 +184,38 @@ fn new_or_join(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
     ui.data_mut(|data| data.insert_temp(id, (name, code)));
 }
 
-/// The groups to choose between, as chips. Hidden when there is only one to see.
+/// The group being looked at, and the others to move to. Hidden when there is
+/// only one.
 pub fn switcher(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Action>) {
     if account.groups.len() < 2 {
         return;
     }
     let palette = app.palette;
     let chosen = account::current_group();
-    ui.horizontal_wrapped(|ui| {
-        for group in &account.groups {
-            let selected = chosen.as_deref() == Some(group.id.as_str());
-            if chip(
-                ui,
-                &palette,
-                &group.name,
-                selected,
-                Id::new(("group-switch", &group.id)),
-            )
-            .clicked()
-                && !selected
-            {
-                actions.push(Action::Friends(Group::SelectGroup(group.id.clone())));
+    let current = account
+        .chosen_group(chosen.as_deref())
+        .map_or("", |group| group.name.as_str());
+    let response = ui.add(
+        egui::Button::image_and_text(
+            Icon::ChevronDown.image(palette.text, 15.0),
+            egui::RichText::new(current).font(theme::medium(13.0)),
+        )
+        .fill(palette.surface)
+        .corner_radius(12)
+        .min_size(egui::vec2(0.0, 28.0)),
+    );
+    egui::Popup::menu(&response)
+        .frame(super::widgets::menu_frame(&palette))
+        .show(|ui| {
+            ui.set_min_width(180.0);
+            for group in &account.groups {
+                let selected = chosen.as_deref() == Some(group.id.as_str());
+                let icon = selected.then_some(Icon::Check);
+                if super::widgets::menu_item(ui, &palette, icon, &group.name) && !selected {
+                    actions.push(Action::Friends(Group::SelectGroup(group.id.clone())));
+                }
             }
-        }
-    });
-    ui.add_space(12.0);
+        });
 }
 
 fn role_label(app: &App, role: Role) -> String {

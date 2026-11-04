@@ -57,12 +57,21 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.add_space(8.0);
             ui.label(egui::RichText::new(gettext(locale, "Soloist makes its own Spotify connections. Encore's proxy settings do not route its audio traffic.")).small().color(palette.secondary));
             ui.add_space(8.0);
-            ui.add(
-                egui::TextEdit::singleline(&mut app.soloist_key)
-                    .password(true)
-                    .desired_width(ui.available_width())
-                    .hint_text(gettext(locale, "Paste your personal Soloist key")),
-            );
+            egui::Frame::new()
+                .fill(palette.surface)
+                .stroke(theme::field_stroke(&palette))
+                .corner_radius(egui::CornerRadius::same(8))
+                .inner_margin(egui::Margin::symmetric(12, 9))
+                .show(ui, |ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut app.soloist_key)
+                            .password(true)
+                            .frame(egui::Frame::NONE)
+                            .font(theme::regular(14.0))
+                            .desired_width(ui.available_width())
+                            .hint_text(gettext(locale, "Paste your personal Soloist key")),
+                    );
+                });
             ui.add_space(8.0);
             let retry = app.settings.soloist_enabled
                 && app.soloist_key.is_empty()

@@ -769,6 +769,12 @@ pub fn circle_spinner(
     }
 }
 
+/// The edge of a text field, plain enough to see on any surface, so a field
+/// never reads as a line of text.
+pub fn field_stroke(palette: &Palette) -> Stroke {
+    Stroke::new(1.0, palette.text.gamma_multiply(0.16))
+}
+
 /// A pill-shaped text button: filled for the primary action, outlined otherwise.
 pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: bool) -> Response {
     let font = semibold(13.0);

@@ -73,6 +73,7 @@ fn eq_preset_controls(app: &mut App, ui: &mut egui::Ui, current: Option<&str>) {
         ui.spacing_mut().item_spacing = Vec2::splat(8.0);
         let field = Frame::new()
             .fill(palette.surface)
+            .stroke(theme::field_stroke(&palette))
             .corner_radius(CornerRadius::same(6))
             .inner_margin(Margin::symmetric(10, 6))
             .show(ui, |ui| {
@@ -552,6 +553,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             filtered_row(ui, &palette, &needle, &account, &account_rows[0], |ui| {
                 let response = Frame::new()
                     .fill(palette.surface)
+                    .stroke(theme::field_stroke(&palette))
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(Margin::symmetric(10, 6))
                     .show(ui, |ui| {
@@ -813,6 +815,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             filtered_row(ui, &palette, &needle, &playback, &playback_rows[1], |ui| {
                 let response = Frame::new()
                     .fill(palette.surface)
+                    .stroke(theme::field_stroke(&palette))
                     .corner_radius(CornerRadius::same(6))
                     .inner_margin(Margin::symmetric(10, 6))
                     .show(ui, |ui| {

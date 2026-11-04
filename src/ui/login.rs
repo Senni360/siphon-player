@@ -64,7 +64,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, connecting: bool) {
                 rect
             };
             fastframe_titlebar::drag(ui, drag_rect);
-            let top = super::blend(palette.window, palette.accent, 0.10);
+            let top = super::blend(palette.window, palette.accent, 0.03);
             super::widgets::paint_vertical_gradient(ui, rect, top, palette.window);
             let waiting = connecting || matches!(app.auth, AuthStatus::WaitingForBrowser { .. });
             let steps = !waiting && show_steps(app, &ctx);
@@ -360,10 +360,12 @@ fn client_id_field(app: &mut App, ui: &mut egui::Ui) {
     let mut client_id = app.settings.web_client_id.clone().unwrap_or_default();
     let response = Frame::new()
         .fill(palette.surface)
+        .stroke(theme::field_stroke(&palette))
         .corner_radius(CornerRadius::same(8))
         .inner_margin(Margin::symmetric(12, 9))
         .show(ui, |ui| {
-            super::widgets::text_edit(
+            let paste = client_id.is_empty();
+            let field = super::widgets::text_edit(
                 ui,
                 locale,
                 egui::TextEdit::singleline(&mut client_id)
@@ -373,7 +375,33 @@ fn client_id_field(app: &mut App, ui: &mut egui::Ui) {
                     .font(theme::regular(14.0))
                     .frame(egui::Frame::NONE)
                     .desired_width(ui.available_width()),
-            )
+            );
+            // One click from copying it in Spotify's dashboard. It sits over the
+            // field's empty end, so the card keeps its height.
+            if paste {
+                let label = ui.painter().layout_no_wrap(
+                    gettext(locale, "Paste").into_owned(),
+                    theme::medium(13.0),
+                    palette.text,
+                );
+                let rect = egui::Rect::from_min_size(
+                    egui::pos2(
+                        field.rect.right() - label.size().x,
+                        field.rect.center().y - label.size().y / 2.0,
+                    ),
+                    label.size(),
+                );
+                let button = ui
+                    .interact(rect, field.id.with("paste"), egui::Sense::click())
+                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                ui.painter().galley(rect.min, label, palette.text);
+                if button.clicked() {
+                    field.request_focus();
+                    ui.ctx()
+                        .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                }
+            }
+            field
         })
         .inner;
     if response.changed() {

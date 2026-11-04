@@ -120,7 +120,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         ui.add_space(margin);
         ui.vertical(|ui| {
             ui.set_width(width);
-            super::rise(ui, 0, |ui| header(app, ui));
+            super::rise(ui, 0, |ui| header(app, ui, &mut actions));
             ui.add_space(16.0);
 
             let feed = &app.friends_feed;
@@ -144,7 +144,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                     super::group_account::people(app, ui, &mut actions);
                     return;
                 }
-                super::group_account::switcher(app, ui, account, &mut actions);
             }
             // The feed is read: the newest thing in it is now seen. The line
             // marking what was new keeps the time from when the page opened.
@@ -216,25 +215,45 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
     if app.stats.tab == StatsTab::Stats && tab != Tab::Stats {
         tab = Tab::Stats;
     }
-    ui.horizontal(|ui| {
-        let mut all = vec![(Tab::Now, "Now"), (Tab::Songs, "Songs")];
-        if accounts {
-            all.push((Tab::Shared, "Shared files"));
-            all.push((Tab::Playlists, "Playlists"));
-        }
-        all.push((Tab::Stats, "Stats"));
-        all.push((Tab::People, "People"));
+    let mut all = vec![(Tab::Now, "Now"), (Tab::Songs, "Songs")];
+    if accounts {
+        all.push((Tab::Shared, "Shared files"));
+        all.push((Tab::Playlists, "Playlists"));
+    }
+    all.push((Tab::Stats, "Stats"));
+    all.push((Tab::People, "People"));
+    let top = ui.cursor().top();
+    let mut underline = None;
+    let row = ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 20.0;
         for (each, label) in all {
-            if chip(
-                ui,
-                &palette,
-                &gettext(locale, label),
-                tab == each,
-                id.with(label),
-            )
-            .clicked()
-                && tab != each
-            {
+            let label = gettext(locale, label);
+            let galley = ui.painter().layout_no_wrap(
+                label.to_string(),
+                theme::medium(14.0),
+                Color32::PLACEHOLDER,
+            );
+            let (rect, response) =
+                ui.allocate_exact_size(vec2(galley.size().x, 32.0), Sense::click());
+            let on = tab == each;
+            let color = if on || response.hovered() {
+                palette.text
+            } else {
+                palette.secondary
+            };
+            ui.painter().galley(
+                pos2(rect.left(), rect.center().y - galley.size().y / 2.0),
+                galley,
+                color,
+            );
+            response.widget_info(|| {
+                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, on, &*label)
+            });
+            theme::focus_ring(ui, &response);
+            if on {
+                underline = Some((rect.left(), rect.width()));
+            }
+            if response.clicked() && !on {
                 if each == Tab::Stats {
                     actions.push(Action::Stats(Stats::Tab(StatsTab::Stats)));
                 } else if tab == Tab::Stats {
@@ -244,6 +263,27 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
             }
         }
     });
+    let bottom = row.response.rect.bottom().max(top + 32.0);
+    let width = ui.available_width();
+    ui.painter().hline(
+        ui.max_rect().left()..=ui.max_rect().left() + width,
+        bottom,
+        Stroke::new(1.0, palette.outline),
+    );
+    if let Some((left, wide)) = underline {
+        let time = crate::motion::seconds(ui.ctx(), motion::POPOVER);
+        let left = ui
+            .ctx()
+            .animate_value_with_time(id.with("line-left"), left, time);
+        let wide = ui
+            .ctx()
+            .animate_value_with_time(id.with("line-wide"), wide, time);
+        ui.painter().rect_filled(
+            Rect::from_min_size(pos2(left, bottom - 1.0), vec2(wide, 2.0)),
+            1.0,
+            palette.text,
+        );
+    }
     ui.data_mut(|data| data.insert_temp(id, tab));
     tab
 }
@@ -419,7 +459,7 @@ fn songs(app: &mut App, ui: &mut Ui, me: &Profile, divider: u64, actions: &mut V
 
 /// The page title, and the members as a stack of initials that spreads
 /// out when pointed at so each name can be read.
-fn header(app: &App, ui: &mut Ui) {
+fn header(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
     let palette = app.palette;
     let locale = app.locale;
     let members = &app.friends_feed.members;
@@ -431,6 +471,10 @@ fn header(app: &App, ui: &mut Ui) {
             theme::medium(28.0),
             palette.text,
         );
+        if let Some(account) = &app.friends_feed.account {
+            ui.add_space(6.0);
+            super::group_account::switcher(app, ui, account, actions);
+        }
         if members.is_empty() {
             return;
         }
@@ -525,7 +569,7 @@ pub(super) fn field(
 ) -> egui::Response {
     egui::Frame::new()
         .fill(palette.surface)
-        .stroke(Stroke::new(1.0, palette.outline))
+        .stroke(theme::field_stroke(palette))
         .corner_radius(CornerRadius::same(theme::RADIUS))
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {

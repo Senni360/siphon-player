@@ -569,6 +569,32 @@ pub(super) fn live(app: &mut crate::app::App, joined: bool) {
     }))
     .ok();
     crate::friends::account::set_current_group(Some("g1".into()));
+    let shared = |id: u8, title: &str, artist: &str, by: &str, by_name: &str, seconds: u32| {
+        crate::shared_songs::SharedSong {
+            id: format!("00000000-0000-4000-8000-0000000000{id:02}"),
+            title: title.into(),
+            artists: vec![artist.into()],
+            duration_ms: seconds * 1000,
+            size: u64::from(seconds) * 40_000,
+            by: by.into(),
+            by_name: by_name.into(),
+            created_at: 0,
+        }
+    };
+    app.friends_feed.shared_songs = vec![
+        shared(1, "basement take 3", "Maya", "maya", "Maya", 184),
+        shared(
+            2,
+            "Glass Ceiling (rough mix)",
+            "Jonas",
+            "jonas",
+            "Jonas",
+            241,
+        ),
+        shared(3, "untitled loop 92bpm", "", "teo", "Teo", 96),
+    ];
+    app.friends_feed.songs_used = 412 * 1024 * 1024;
+    app.friends_feed.songs_capacity = 900 * 1024 * 1024;
 }
 
 /// A season of sample plays, and friends who share theirs.

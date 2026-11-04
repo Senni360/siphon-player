@@ -4033,6 +4033,7 @@ pub fn labeled_field(
             ui.add_space(6.0);
             Frame::new()
                 .fill(palette.surface)
+                .stroke(theme::field_stroke(palette))
                 .corner_radius(CornerRadius::same(8))
                 .inner_margin(Margin::symmetric(12, 10))
                 .show(ui, |ui| {

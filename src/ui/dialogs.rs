@@ -48,7 +48,7 @@ fn soundcloud_connect(app: &mut App, ui: &mut egui::Ui) {
             ui.label(gettext(locale, "2. Open DevTools (F12), then Application > Cookies > https://soundcloud.com. In Firefox, use Storage > Cookies."));
             ui.label(gettext(locale, "3. Copy the value of oauth_token and paste it below."));
             ui.label(egui::RichText::new(gettext(locale, "This token can act as your SoundCloud account. Treat it like a password. It is saved in your computer's protected credential store.")).color(palette.secondary));
-            let token = Frame::new().fill(palette.surface).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
+            let token = Frame::new().fill(palette.surface).stroke(theme::field_stroke(&palette)).corner_radius(CornerRadius::same(6)).inner_margin(Margin::symmetric(12, 8)).show(ui, |ui| {
                 super::widgets::text_edit(ui, locale, egui::TextEdit::singleline(&mut draft.token).id(crate::soundcloud::connect::token_field_id()).password(true).font(theme::regular(14.0)).frame(egui::Frame::NONE).hint_text(egui::RichText::new(gettext(locale, "Session token")).color(palette.dim)).desired_width(f32::INFINITY))
             }).inner;
             if ui.memory(|memory| memory.focused().is_none()) { token.request_focus(); }
@@ -466,6 +466,7 @@ fn text_field(
 ) -> egui::Response {
     let response = Frame::new()
         .fill(palette.surface)
+        .stroke(theme::field_stroke(palette))
         .corner_radius(CornerRadius::same(6))
         .inner_margin(Margin::symmetric(12, 8))
         .show(ui, |ui| {
@@ -687,6 +688,7 @@ fn edit_playlist(app: &mut App, ui: &mut egui::Ui) {
             );
             Frame::new()
                 .fill(palette.surface)
+                .stroke(theme::field_stroke(&palette))
                 .corner_radius(CornerRadius::same(6))
                 .inner_margin(Margin::symmetric(12, 8))
                 .show(ui, |ui| {

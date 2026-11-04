@@ -153,6 +153,27 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         {
                             actions.push(Action::Live(if ends { Live::End } else { Live::Leave }));
                         }
+                        if let (Session::Channel(_), Some(channel), Some(group)) =
+                            (&session, &channel, crate::friends::account::current_group())
+                            && theme::soft_button(
+                                ui,
+                                &palette,
+                                Some(Icon::Copy),
+                                &gettext(locale, "Copy invite"),
+                                false,
+                            )
+                            .on_hover_text(gettext(
+                                locale,
+                                "Copies a link. Anyone in the group who opens it joins this party.",
+                            ))
+                            .clicked()
+                        {
+                            ui.ctx()
+                                .copy_text(format!("siphon://party/{group}/{}", channel.id));
+                            actions.push(Action::ShowToast(
+                                gettext(locale, "Invite link copied").into_owned(),
+                            ));
+                        }
                         if app.page() != &Page::Group
                             && theme::soft_button(
                                 ui,
