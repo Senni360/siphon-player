@@ -331,6 +331,21 @@ out, or a reconnection that gives up stops it.
   macOS security assessment. Apps running from a disk image or an App Translocation
   directory must be moved to a writable installation directory first.
 
+## Shared files
+
+Only a song someone chooses to share leaves the computer. Encore checks the file
+locally, asks the group service for a place, and sends the file straight to
+Vercel Blob with a token that allows that one path and that one size. Then it
+tells the service the upload finished.
+
+Listing shared files sends nothing but the group's own request, and returns no
+file addresses. Playing one asks the service for the address, which counts the
+song's size against the month's downloads, then streams it from Blob like any
+other song. A file's address is hard to guess but works for anyone who has it.
+
+Without a Blob store on the service, these requests answer 503 and nothing is
+uploaded. The limits are in `services/friends/src/audio.ts`.
+
 ## Collection loading and artwork
 
 Since 0.9.0, opening a playlist, album, artist, or podcast keeps any

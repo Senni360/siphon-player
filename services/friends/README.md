@@ -143,6 +143,12 @@ app. Owners and admins may also delete anyone's shares and replies in their grou
 A removed member's live access lasts at most the 60 seconds another instance may
 remember the roster.
 
+### Pages
+
+`GET /` is a download page, and `GET /party/GROUP/PARTY` opens that party in Encore.
+They read no storage and hold no group data. Party links exist because chat apps
+won't make a `siphon://` link clickable.
+
 ### Shared playlists
 
 | Method and route | Body / result |
