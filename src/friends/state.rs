@@ -954,3 +954,47 @@ fn device_name() -> String {
         clean
     }
 }
+
+#[cfg(test)]
+mod upload_tests {
+    use super::*;
+
+    #[test]
+    fn uploads_go_one_at_a_time_and_say_how_each_ended() {
+        let mut model = Model::default();
+        let first = model
+            .begin(Action::UploadSong("C:/music/one.mp3".into()))
+            .expect("the first goes straight away");
+        assert_eq!(model.uploading.as_deref(), Some("one.mp3"));
+        assert!(
+            model
+                .begin(Action::UploadSong("C:/music/two.flac".into()))
+                .is_none()
+        );
+        assert_eq!(model.uploads_waiting(), 1);
+
+        model.receive(Event {
+            generation: first.generation,
+            result: Err("The file store refused the upload.".into()),
+        });
+        assert_eq!(model.uploading, None);
+        assert_eq!(
+            model.upload_result.take(),
+            Some(Err("The file store refused the upload.".to_owned()))
+        );
+
+        // One failing does not lose the next.
+        let second = model.next_request().expect("the next one goes");
+        assert_eq!(model.uploading.as_deref(), Some("two.flac"));
+        assert_eq!(model.uploads_waiting(), 0);
+        model.receive(Event {
+            generation: second.generation,
+            result: Ok(Update::SongUploaded(crate::shared_songs::SharedSong {
+                title: "Two".into(),
+                ..Default::default()
+            })),
+        });
+        assert_eq!(model.upload_result, Some(Ok("Two".to_owned())));
+        assert_eq!(model.shared_songs.len(), 1);
+    }
+}
