@@ -2135,6 +2135,29 @@ mod tests {
     use crate::settings::Settings;
     use std::sync::Arc;
 
+    /// One press is the point: the button has to be there at an ordinary size.
+    #[test]
+    fn the_player_offers_sharing_the_playing_song_in_one_press() {
+        use egui::accesskit::{Action as AccessibleAction, Role};
+        let (ctx, mut app) = accessible_app("player-share");
+        assert!(app.can_share_playing(), "the demo plays a shareable song");
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let share = accessible_node(&tree, "Share with your group", Role::Button);
+        accessible_frame(
+            &ctx,
+            &mut app,
+            vec![accessible_action(share, AccessibleAction::Click, None)],
+        );
+        accessible_frame(&ctx, &mut app, vec![]);
+        assert!(
+            app.toasts
+                .iter()
+                .any(|toast| toast.message == "Shared with your group")
+        );
+        app.backend.shutdown();
+    }
+
     fn accessible_app(name: &str) -> (egui::Context, App) {
         let root =
             std::env::temp_dir().join(format!("spotifast-a11y-{name}-{}", std::process::id()));
