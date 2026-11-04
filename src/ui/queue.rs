@@ -471,7 +471,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
             &palette,
             Icon::ListVideo,
             &gettext(app.locale, "Nothing queued"),
-            &gettext(app.locale, "Queued songs appear here."),
+            &gettext(app.locale, "Right-click a song and choose Add to queue."),
         );
         return;
     }

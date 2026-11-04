@@ -345,8 +345,10 @@ pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
     egui::CentralPanel::default()
         .frame(Frame::new().fill(theme::Palette::dark().window))
         .show(ui, |ui| {
-            let rect = ui.max_rect();
+            // The backdrop runs behind the player; the words stop above it.
+            let mut rect = ui.max_rect();
             background(app, ui, rect);
+            rect.max.y -= theme::PLAYER_BAR_HEIGHT;
             let top = theme::titlebar_inset(ui.ctx()) + 24.0;
             if app.now_playing().is_some() && rect.width() >= COVER_BESIDE_MIN_WIDTH {
                 with_cover(app, ui, rect, top);

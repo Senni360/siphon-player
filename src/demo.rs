@@ -3324,7 +3324,7 @@ mod tests {
                     Loadable::Loaded(Queue::default()),
                     vec![
                         gettext(locale, "Nothing queued").into_owned(),
-                        gettext(locale, "Queued songs appear here.").into_owned(),
+                        gettext(locale, "Right-click a song and choose Add to queue.").into_owned(),
                     ],
                 ),
             ] {

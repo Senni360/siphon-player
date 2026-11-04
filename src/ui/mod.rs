@@ -93,13 +93,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let mut content = ui.available_rect_before_wrap();
     content.max.y = strip.top();
     if app.lyrics_fullscreen.is_some() {
-        // A full-screen view has nothing to scroll out from under the player.
-        egui::Panel::bottom("player-room")
-            .exact_size(theme::PLAYER_BAR_HEIGHT)
-            .resizable(false)
-            .show_separator_line(false)
-            .frame(Frame::new())
-            .show(ui, |_| {});
         lyrics::fullscreen(app, ui);
         player_bar::show_in(app, ui, strip);
     } else {
