@@ -60,6 +60,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         return;
     }
     ui.add_space(12.0);
+    if app.search.filter == SearchFilter::All {
+        super::group_songs::search_section(app, ui);
+    }
     // A pasted link is a direct result, ahead of either service's shelves.
     let resolved = (app.search.source != SearchSource::Spotify)
         .then(|| {

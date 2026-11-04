@@ -12,6 +12,8 @@ use crate::theme::{self, Icon};
 
 const MIB: u64 = 1024 * 1024;
 const ROW: f32 = 54.0;
+/// A list this long is worth searching.
+const FILTER_FROM: usize = 8;
 
 fn play(index: usize, uri: String) -> Action {
     Action::PlayContext {
@@ -41,6 +43,127 @@ fn byline(locale: crate::i18n::Locale, song: &SharedSong) -> String {
     gettext(locale, "{artists}, from {name}")
         .replace("{artists}", &artists)
         .replace("{name}", &song.by_name)
+}
+
+/// Something the group has that answers a search.
+struct Hit {
+    title: String,
+    detail: String,
+    color: egui::Color32,
+    action: Action,
+}
+
+const MOST_HITS: usize = 5;
+
+/// What the group has shared that answers `query`: files first, since nowhere
+/// else has them, then songs shared from elsewhere, each song once.
+fn hits(
+    feed: &crate::friends::Model,
+    palette: &theme::Palette,
+    locale: crate::i18n::Locale,
+    query: &str,
+) -> Vec<Hit> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+    let has = |text: &str| text.to_lowercase().contains(&needle);
+    let matches = |title: &str, artists: &[String]| has(title) || artists.iter().any(|a| has(a));
+    let files = feed
+        .shared_songs
+        .iter()
+        .enumerate()
+        .filter(|(_, song)| matches(&song.title, &song.artists))
+        .map(|(index, song)| Hit {
+            title: song.title.clone(),
+            detail: byline(locale, song),
+            color: palette.text,
+            action: play(index, song.uri()),
+        });
+    let mut seen = std::collections::HashSet::new();
+    let posts = feed
+        .posts
+        .iter()
+        .filter(|post| matches(&post.item.title, &post.item.artists))
+        .filter(|post| seen.insert(post.item.url.clone()))
+        .map(|post| {
+            let item = &post.item;
+            Hit {
+                title: item.title.clone(),
+                detail: gettext(locale, "{artists}, from {name}")
+                    .replace("{artists}", &item.artists.join(", "))
+                    .replace("{name}", &post.author_name),
+                color: match item.source {
+                    crate::friends::Source::Spotify => super::kit::Source::Spotify,
+                    crate::friends::Source::Soundcloud => super::kit::Source::SoundCloud,
+                    crate::friends::Source::Youtube => super::kit::Source::YouTube,
+                }
+                .color(palette),
+                action: super::group::play_action(&item.url),
+            }
+        });
+    files.chain(posts).take(MOST_HITS).collect()
+}
+
+/// The top of a search: what friends shared comes before any service's results.
+pub fn search_section(app: &mut App, ui: &mut Ui) {
+    let found = hits(
+        &app.friends_feed,
+        &app.palette,
+        app.locale,
+        &app.search.committed,
+    );
+    if found.is_empty() {
+        return;
+    }
+    let palette = app.palette;
+    theme::section_title(ui, &palette, &gettext(app.locale, "From your group"));
+    for hit in found {
+        let (rect, response) =
+            ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+        if response.hovered() {
+            ui.painter().rect(
+                rect,
+                8.0,
+                palette.surface_hover,
+                Stroke::NONE,
+                egui::StrokeKind::Inside,
+            );
+        }
+        let icon = Rect::from_center_size(
+            egui::pos2(rect.left() + 22.0, rect.center().y),
+            vec2(18.0, 18.0),
+        );
+        Icon::PlayFilled
+            .image(palette.secondary, 18.0)
+            .paint_at(ui, icon);
+        let painter = ui.painter().with_clip_rect(rect);
+        crate::bidi::paint_line(
+            &painter,
+            rect.left() + 44.0,
+            rect.right() - 12.0,
+            rect.center().y - 9.0,
+            &hit.title,
+            theme::medium(14.0),
+            hit.color,
+        );
+        crate::bidi::paint_line(
+            &painter,
+            rect.left() + 44.0,
+            rect.right() - 12.0,
+            rect.center().y + 10.0,
+            &hit.detail,
+            theme::regular(12.5),
+            palette.secondary,
+        );
+        let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        response
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &hit.title));
+        if response.clicked() {
+            app.actions.push(hit.action);
+        }
+    }
+    ui.add_space(12.0);
 }
 
 /// The room left in the store: the thing that decides when old songs go.
@@ -152,7 +275,35 @@ pub fn show(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>)
             account.chosen_group(crate::friends::account::current_group().as_deref())
         })
         .is_some_and(|group| group.role.manages());
+    let filter_id = egui::Id::new("shared-files-filter");
+    let mut filter = ui
+        .data(|data| data.get_temp::<String>(filter_id))
+        .unwrap_or_default();
+    if songs.len() >= FILTER_FROM {
+        super::widgets::search_field(
+            ui,
+            &palette,
+            locale,
+            filter_id.with("field"),
+            &mut filter,
+            &gettext(locale, "Find a song, artist or person"),
+            ui.available_width().min(320.0),
+        );
+        ui.add_space(8.0);
+        ui.data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+    }
+    let needle = filter.trim().to_lowercase();
     for (index, song) in songs.iter().enumerate() {
+        if !needle.is_empty()
+            && !song.title.to_lowercase().contains(&needle)
+            && !song.by_name.to_lowercase().contains(&needle)
+            && !song
+                .artists
+                .iter()
+                .any(|artist| artist.to_lowercase().contains(&needle))
+        {
+            continue;
+        }
         row(
             app,
             ui,
@@ -290,5 +441,26 @@ mod tests {
         assert_eq!(byline(locale, &song), "from Maya");
         song.artists = vec!["Bonobo".into()];
         assert_eq!(byline(locale, &song), "Bonobo, from Maya");
+    }
+
+    #[test]
+    fn a_search_finds_a_file_by_title_or_artist_and_nothing_for_no_query() {
+        let mut feed = crate::friends::Model::default();
+        feed.shared_songs = (0..8)
+            .map(|index| SharedSong {
+                id: format!("00000000-0000-4000-8000-0000000000{index:02}"),
+                title: format!("loop {index}"),
+                artists: vec!["Teo".into()],
+                by_name: "Teo".into(),
+                ..SharedSong::default()
+            })
+            .collect();
+        let palette = theme::Palette::dark();
+        let locale = crate::i18n::Locale::English;
+        let hits = |query: &str| hits(&feed, &palette, locale, query);
+        assert!(hits("  ").is_empty());
+        assert_eq!(hits("LOOP 3")[0].title, "loop 3");
+        assert_eq!(hits("teo").len(), MOST_HITS, "the section stays short");
+        assert!(hits("nobody").is_empty());
     }
 }

@@ -592,6 +592,7 @@ pub(super) fn live(app: &mut crate::app::App, joined: bool) {
             241,
         ),
         shared(3, "untitled loop 92bpm", "", "teo", "Teo", 96),
+        shared(4, "Bonobo flip (rough)", "Dev", "dev", "Dev", 203),
     ];
     app.friends_feed.songs_used = 412 * 1024 * 1024;
     app.friends_feed.songs_capacity = 900 * 1024 * 1024;
