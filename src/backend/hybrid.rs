@@ -380,6 +380,8 @@ impl Worker {
                         "youtube"
                     } else if crate::soundcloud::is_track_uri(&track.uri) {
                         "soundcloud"
+                    } else if crate::shared_songs::is_song(&track.uri) {
+                        "shared"
                     } else {
                         "spotify"
                     },

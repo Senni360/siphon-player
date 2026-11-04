@@ -13,11 +13,17 @@ pub enum Source {
     Spotify,
     SoundCloud,
     YouTube,
+    /// A file someone shared with the group. No service is behind it, so it
+    /// takes no service's colour.
+    Shared,
 }
 
 impl Source {
     /// The service behind `uri`, as playback decides it.
     pub fn of(uri: &str) -> Self {
+        if crate::shared_songs::is_song(uri) {
+            return Self::Shared;
+        }
         match crate::soundcloud::Source::of(uri) {
             crate::soundcloud::Source::Spotify => Self::Spotify,
             crate::soundcloud::Source::SoundCloud => Self::SoundCloud,
@@ -30,6 +36,7 @@ impl Source {
             Self::Spotify => "Spotify",
             Self::SoundCloud => "SoundCloud",
             Self::YouTube => "YouTube",
+            Self::Shared => "Shared file",
         }
     }
 
@@ -43,6 +50,7 @@ impl Source {
             (Self::Spotify, false) => Color32::from_rgb(0x09, 0x7f, 0x3a),
             (Self::SoundCloud, false) => Color32::from_rgb(0xb8, 0x4d, 0x00),
             (Self::YouTube, false) => Color32::from_rgb(0xcc, 0x1f, 0x26),
+            (Self::Shared, _) => palette.text,
         }
     }
 
@@ -53,6 +61,7 @@ impl Source {
             Self::Spotify => Color32::from_rgb(0x3e, 0xe2, 0x7a),
             Self::SoundCloud => Color32::from_rgb(0xff, 0x9a, 0x3d),
             Self::YouTube => Color32::from_rgb(0xff, 0x5a, 0x5a),
+            Self::Shared => Color32::WHITE,
         }
     }
 }
@@ -132,6 +141,10 @@ mod tests {
         assert_eq!(Source::of("soundcloud:track:123456"), Source::SoundCloud);
         assert_eq!(Source::of("youtube:video:dQw4w9WgXcQ"), Source::YouTube);
         assert_eq!(Source::of(""), Source::Spotify);
+        assert_eq!(
+            Source::of("encore:song:0f8fad5b-d9cb-469f-a165-70867728950e"),
+            Source::Shared
+        );
     }
 
     /// Titles are body text, so they need the same 4.5:1 as any text, on
