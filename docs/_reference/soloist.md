@@ -39,7 +39,7 @@ While Soloist is enabled, built-in audio, EQ and visualization settings are
 hidden. Shared controls for the tray, startup and Siphon updates remain
 under **Application**. The Soloist card keeps version, expiry and limitations
 under **Details**, while pairing instructions and errors remain visible.
-The saved key and pairing are retained for **Enable with saved key** next time; signing out of Siphon
+The saved key and pairing are retained for **I already saved a key** next time; signing out of Siphon
 removes them. Closing Siphon completely stops the child player. Closing to
 the tray leaves both running.
 

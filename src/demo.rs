@@ -9455,7 +9455,7 @@ mod tests {
         app.backend.set_offline(true);
         app.open(Page::Settings);
         let tree = accessible_frame(&ctx, &mut app, vec![]);
-        let button = accessible_node(&tree, "Enable with saved key", Role::Button);
+        let button = accessible_node(&tree, "I already saved a key", Role::Link);
         accessible_frame(
             &ctx,
             &mut app,

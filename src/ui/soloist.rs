@@ -1,6 +1,19 @@
 //! Guided setup for the optional Spotify player, inside Settings.
 use crate::{app::App, i18n::gettext, model::Action, soloist::Status, theme};
 
+/// One numbered line of the setup.
+fn step(ui: &mut egui::Ui, palette: &theme::Palette, number: u8, text: &str) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new(format!("{number}. {text}"))
+                .font(theme::medium(13.5))
+                .color(palette.text),
+        )
+        .wrap(),
+    );
+    ui.add_space(6.0);
+}
+
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let locale = app.locale;
     let palette = app.palette;
@@ -40,11 +53,20 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 ui.label(error);
                 ui.add_space(8.0);
             }
+            step(
+                ui,
+                &palette,
+                1,
+                &gettext(
+                    locale,
+                    "Create a Soloist key in Spotify's developer dashboard. It's separate from your app's Client ID.",
+                ),
+            );
             if theme::soft_button(
                 ui,
                 &palette,
-                None,
-                &gettext(locale, "1. Get your Soloist key from Spotify"),
+                Some(theme::Icon::ExternalLink),
+                &gettext(locale, "Open Spotify's dashboard"),
                 false,
             )
             .clicked()
@@ -53,33 +75,61 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     "https://developer.spotify.com/dashboard/soloist".into(),
                 ));
             }
-            ui.label(gettext(locale, "Create a Soloist key in Spotify's developer dashboard. This is separate from your Web API app's Client ID."));
-            ui.add_space(8.0);
-            ui.label(egui::RichText::new(gettext(locale, "Soloist makes its own Spotify connections. Encore's proxy settings do not route its audio traffic.")).small().color(palette.secondary));
-            ui.add_space(8.0);
+            ui.add_space(12.0);
+            step(ui, &palette, 2, &gettext(locale, "Paste the key here."));
             egui::Frame::new()
                 .fill(palette.surface)
                 .stroke(theme::field_stroke(&palette))
                 .corner_radius(egui::CornerRadius::same(8))
                 .inner_margin(egui::Margin::symmetric(12, 9))
                 .show(ui, |ui| {
-                    ui.add(
+                    let empty = app.soloist_key.is_empty();
+                    let field = ui.add(
                         egui::TextEdit::singleline(&mut app.soloist_key)
                             .password(true)
                             .frame(egui::Frame::NONE)
                             .font(theme::regular(14.0))
                             .desired_width(ui.available_width())
-                            .hint_text(gettext(locale, "Paste your personal Soloist key")),
+                            .hint_text(gettext(locale, "Your personal Soloist key")),
                     );
+                    if empty {
+                        let label = ui.painter().layout_no_wrap(
+                            gettext(locale, "Paste").into_owned(),
+                            theme::medium(13.0),
+                            palette.text,
+                        );
+                        let rect = egui::Rect::from_min_size(
+                            egui::pos2(
+                                field.rect.right() - label.size().x,
+                                field.rect.center().y - label.size().y / 2.0,
+                            ),
+                            label.size(),
+                        );
+                        let paste = ui
+                            .interact(rect, field.id.with("paste"), egui::Sense::click())
+                            .on_hover_cursor(egui::CursorIcon::PointingHand);
+                        ui.painter().galley(rect.min, label, palette.text);
+                        if paste.clicked() {
+                            field.request_focus();
+                            ui.ctx()
+                                .send_viewport_cmd(egui::ViewportCommand::RequestPaste);
+                        }
+                    }
                 });
-            ui.add_space(8.0);
+            ui.add_space(12.0);
+            step(
+                ui,
+                &palette,
+                3,
+                &gettext(locale, "Download Soloist and turn it on."),
+            );
             let retry = app.settings.soloist_enabled
                 && app.soloist_key.is_empty()
                 && !matches!(app.soloist_status, Status::NeedsKey);
             let label = if retry {
                 gettext(locale, "Retry with saved key")
             } else {
-                gettext(locale, "2. Download and enable Soloist")
+                gettext(locale, "Download and enable Soloist")
             };
             ui.add_enabled_ui(retry || !app.soloist_key.trim().is_empty(), |ui| {
                 if theme::pill_button(ui, &palette, &label, true).clicked() {
@@ -92,12 +142,11 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             });
             if matches!(app.soloist_status, Status::Off)
                 && app.soloist_key.trim().is_empty()
-                && theme::soft_button(
+                && theme::link(
                     ui,
-                    &palette,
-                    None,
-                    &gettext(locale, "Enable with saved key"),
-                    false,
+                    gettext(locale, "I already saved a key"),
+                    theme::regular(13.0),
+                    palette.secondary,
                 )
                 .clicked()
             {
