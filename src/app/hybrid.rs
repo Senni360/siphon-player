@@ -1112,6 +1112,15 @@ impl App {
     }
 
     pub(super) fn hybrid_track(&self, uri: &str, label: Option<&str>) -> Track {
+        // A shared file's details are in the group's list, not any service's.
+        if let Some(song) = self
+            .friends_feed
+            .shared_songs
+            .iter()
+            .find(|song| song.uri() == uri)
+        {
+            return song.to_track();
+        }
         self.hybrid_cached_track(uri).unwrap_or_else(|| Track {
             uri: uri.into(),
             id: uri.strip_prefix("spotify:track:").map(str::to_owned),

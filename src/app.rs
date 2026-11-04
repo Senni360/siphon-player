@@ -23041,6 +23041,24 @@ mod tests {
         );
     }
 
+    /// Queued from anywhere, a shared file keeps its artist and length.
+    #[test]
+    fn a_queued_shared_song_keeps_its_details() {
+        let mut app = test_app("shared-song-queued");
+        let song = crate::shared_songs::SharedSong {
+            id: "0f8fad5b-d9cb-469f-a165-70867728950e".into(),
+            title: "Midnight".into(),
+            artists: vec!["Ana".into()],
+            duration_ms: 180_000,
+            ..Default::default()
+        };
+        app.friends_feed.shared_songs = vec![song.clone()];
+        let track = app.hybrid_track(&song.uri(), Some("Midnight"));
+        app.backend.shutdown();
+        assert_eq!(track.duration_ms, 180_000);
+        assert_eq!(track.artists[0].name, "Ana");
+    }
+
     /// Soloist steps aside for a mixed playlist and comes back by itself.
     #[test]
     fn soloist_comes_back_after_mixed_playback() {
