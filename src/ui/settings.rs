@@ -307,20 +307,28 @@ fn frame_rate_dial(
     }
 }
 
-/// The page is long: these go straight to a section, as searching does for a setting.
-fn jump_chips(ui: &mut egui::Ui, palette: &Palette, locale: crate::i18n::Locale) {
+/// The page is long: these go straight to a section, as searching does for a
+/// setting. Each jumps to the section with that exact title.
+fn jump_chips(ui: &mut egui::Ui, palette: &Palette, locale: crate::i18n::Locale, built_in: bool) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-        for title in [
-            "Account",
-            "Playback",
-            "Appearance",
-            "Equalizer",
-            "Storage",
-            "About",
+        let playback = if built_in {
+            "Playback on this computer"
+        } else {
+            "Application"
+        };
+        for (label, title) in [
+            ("Account", "Account"),
+            ("Soloist", "Spotify Soloist"),
+            ("Playback", playback),
+            ("Streamer mode", "Streamer mode"),
+            ("Appearance", "Appearance"),
+            ("Equalizer", "Equalizer"),
+            ("Storage", "Storage"),
+            ("About", "About"),
         ] {
-            let title = gettext(locale, title);
-            if theme::soft_button(ui, palette, None, &title, false).clicked() {
+            if theme::soft_button(ui, palette, None, &gettext(locale, label), false).clicked() {
+                let title = gettext(locale, title).into_owned();
                 ui.data_mut(|data| data.insert_temp(egui::Id::new(SETTINGS_JUMP_ID), title));
             }
         }
@@ -418,7 +426,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.data_mut(|data| data.insert_temp(egui::Id::new(SETTINGS_FILTER_ID), filter));
     ui.add_space(8.0);
     if needle.is_empty() {
-        jump_chips(ui, &palette, locale);
+        jump_chips(ui, &palette, locale, !app.settings.soloist_enabled);
     }
     ui.add_space(4.0);
     let dirty_id = egui::Id::new(PLAYBACK_DIRTY_ID);
@@ -823,6 +831,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                             ui,
                             locale,
                             egui::TextEdit::singleline(&mut app.settings.device_name)
+                                .password(app.settings.streamer_mode)
                                 .font(theme::regular(14.0))
                                 .frame(egui::Frame::NONE)
                                 .desired_width(200.0),

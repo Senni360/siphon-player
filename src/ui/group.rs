@@ -888,6 +888,18 @@ fn composer(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>)
                             draft.attached = Some(post);
                             motion::begin(&ctx, Id::new("group-attach"), motion::ENTER);
                         }
+                        if app.friends_feed.account.is_some()
+                            && theme::soft_button(
+                                ui,
+                                &palette,
+                                Some(Icon::Plus),
+                                &gettext(locale, "Share a file"),
+                                false,
+                            )
+                            .clicked()
+                        {
+                            actions.push(Action::ChooseSongsToShare);
+                        }
                     });
                 }
             }
@@ -2246,12 +2258,13 @@ fn identity(app: &App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>) {
         });
         ui.add_space(12.0);
         let mut sharing = app.settings.group_sharing == Some(true);
-        if ui
-            .checkbox(
-                &mut sharing,
-                gettext(locale, "Share what I'm playing with the group"),
-            )
-            .changed()
+        if super::widgets::switch_line(
+            ui,
+            &palette,
+            &gettext(locale, "Share what I'm playing with the group"),
+            &mut sharing,
+        )
+        .changed()
         {
             actions.push(Action::Live(crate::friends::live::Action::SetSharing(
                 sharing,

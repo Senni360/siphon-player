@@ -380,10 +380,10 @@ fn member_row(
     let mut rights: Rights = member.rights;
     ui.indent(open_id.with("rights"), |ui| {
         let mut changed = false;
-        changed |= ui.checkbox(&mut rights.share, gettext(locale, "Can share songs and playlists")).changed();
-        changed |= ui.checkbox(&mut rights.host, gettext(locale, "Can host parties")).changed();
-        changed |= ui.checkbox(&mut rights.queue, gettext(locale, "Can add to a party's queue")).changed();
-        changed |= ui.checkbox(&mut rights.invite, gettext(locale, "Can make invite codes")).changed();
+        changed |= super::widgets::switch_line(ui, &palette, &gettext(locale, "Can share songs and playlists"), &mut rights.share).changed();
+        changed |= super::widgets::switch_line(ui, &palette, &gettext(locale, "Can host parties"), &mut rights.host).changed();
+        changed |= super::widgets::switch_line(ui, &palette, &gettext(locale, "Can add to a party's queue"), &mut rights.queue).changed();
+        changed |= super::widgets::switch_line(ui, &palette, &gettext(locale, "Can make invite codes"), &mut rights.invite).changed();
         if changed {
             actions.push(account_op(Op::SetRights {
                 group: group.id.clone(),
@@ -734,24 +734,26 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
         });
         ui.add_space(10.0);
         let mut sharing = app.settings.group_sharing == Some(true);
-        if ui
-            .checkbox(
-                &mut sharing,
-                gettext(locale, "Share what I'm playing with my groups"),
-            )
-            .changed()
+        if super::widgets::switch_line(
+            ui,
+            &palette,
+            &gettext(locale, "Share what I'm playing with my groups"),
+            &mut sharing,
+        )
+        .changed()
         {
             actions.push(Action::Live(crate::friends::live::Action::SetSharing(
                 sharing,
             )));
         }
         let mut discord = app.settings.discord_presence;
-        if ui
-            .checkbox(
-                &mut discord,
-                gettext(locale, "Show what I'm playing on Discord"),
-            )
-            .changed()
+        if super::widgets::switch_line(
+            ui,
+            &palette,
+            &gettext(locale, "Show what I'm playing on Discord"),
+            &mut discord,
+        )
+        .changed()
         {
             actions.push(Action::SetDiscordPresence(discord));
         }

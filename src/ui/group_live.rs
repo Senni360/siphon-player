@@ -580,9 +580,13 @@ fn guests(app: &App, ui: &mut Ui, channel: &Channel, me: &Profile, actions: &mut
         ui.horizontal(|ui| {
             line(ui, name_of(app, guest), theme::regular(13.0), palette.text);
             let mut allowed = channel.controllers.contains(guest);
-            if ui
-                .checkbox(&mut allowed, gettext(locale, "Can control"))
-                .changed()
+            if super::widgets::switch_line(
+                ui,
+                &palette,
+                &gettext(locale, "Can control"),
+                &mut allowed,
+            )
+            .changed()
             {
                 actions.push(Action::Live(Live::SetController {
                     user: guest.clone(),

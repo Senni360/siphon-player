@@ -3914,14 +3914,43 @@ pub fn switch(ui: &mut Ui, palette: &Palette, label: &str, on: &mut bool) -> egu
         ui.painter()
             .rect_filled(rect, rect.height() / 2.0, Color32::from(fill));
         let knob_x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, t);
+        // The knob takes the colour made for the accent, or a white knob
+        // vanishes on a white track.
+        let knob = egui::lerp(
+            egui::Rgba::from(Color32::WHITE)..=egui::Rgba::from(palette.on_accent),
+            t,
+        );
         ui.painter()
-            .circle_filled(pos2(knob_x, rect.center().y), 8.0, Color32::WHITE);
+            .circle_filled(pos2(knob_x, rect.center().y), 8.0, Color32::from(knob));
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label)
     });
     theme::focus_ring(ui, &response);
     response
+}
+
+/// A switch with its words beside it, for a setting inside a card. The words
+/// are part of the control.
+pub fn switch_line(ui: &mut Ui, palette: &Palette, label: &str, on: &mut bool) -> egui::Response {
+    ui.horizontal(|ui| {
+        let mut response = switch(ui, palette, label, on);
+        let words = ui.add(
+            egui::Label::new(
+                egui::RichText::new(label)
+                    .font(theme::regular(13.5))
+                    .color(palette.text),
+            )
+            .selectable(false)
+            .sense(Sense::click()),
+        );
+        if words.clicked() {
+            *on = !*on;
+            response.mark_changed();
+        }
+        response
+    })
+    .inner
 }
 
 /// The author's website, linked from the credit line.
