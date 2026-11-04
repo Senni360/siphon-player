@@ -30,13 +30,17 @@ pub fn show(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>)
         {
             actions.push(Action::ChooseSongsToShare);
         }
-        if feed.busy {
-            theme::text(
-                ui,
-                gettext(locale, "Working…"),
-                theme::regular(13.0),
-                palette.dim,
-            );
+        if let Some(file) = &feed.uploading {
+            ui.spinner();
+            let waiting = feed.uploads_waiting();
+            let mut line = gettext(locale, "Uploading {file}").replace("{file}", file);
+            if waiting > 0 {
+                line.push_str(
+                    &gettext(locale, ", {count} more waiting")
+                        .replace("{count}", &waiting.to_string()),
+                );
+            }
+            theme::text(ui, line, theme::regular(13.0), palette.secondary);
         }
     });
     ui.add_space(6.0);
@@ -44,7 +48,7 @@ pub fn show(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>)
         ui,
         gettext(
             locale,
-            "Up to {minutes} minutes and {size} MB a song. When the shared space fills up, the oldest songs are deleted to make room.",
+            "Or drop audio files anywhere in Encore. Up to {minutes} minutes and {size} MB a song. When the shared space fills up, the oldest songs are deleted to make room.",
         )
         .replace("{minutes}", &(MAX_MS / 60_000).to_string())
         .replace("{size}", &(MAX_BYTES / MIB).to_string()),
@@ -60,10 +64,6 @@ pub fn show(app: &mut App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>)
             theme::regular(12.0),
             palette.dim,
         );
-    }
-    if let Some(error) = &feed.error {
-        ui.add_space(4.0);
-        theme::text(ui, error.clone(), theme::regular(13.0), palette.danger);
     }
     ui.add_space(12.0);
     if feed.shared_songs.is_empty() {

@@ -14,6 +14,7 @@ use super::widgets;
 const PLAYBACK_DIRTY_ID: &str = "playback-settings-dirty";
 pub(crate) const PERSONAL_APP_FOCUS_ID: &str = "focus-personal-app-setup";
 const SETTINGS_FILTER_ID: &str = "settings-filter";
+const SETTINGS_JUMP_ID: &str = "settings-jump";
 
 /// Whether a settings row matches the filter query (case-insensitive).
 /// An empty query matches everything, so the page reads exactly as
@@ -305,12 +306,37 @@ fn frame_rate_dial(
     }
 }
 
+/// The page is long: these go straight to a section, as searching does for a setting.
+fn jump_chips(ui: &mut egui::Ui, palette: &Palette, locale: crate::i18n::Locale) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+        for title in [
+            "Account",
+            "Playback",
+            "Appearance",
+            "Equalizer",
+            "Storage",
+            "About",
+        ] {
+            let title = gettext(locale, title);
+            if theme::soft_button(ui, palette, None, &title, false).clicked() {
+                ui.data_mut(|data| data.insert_temp(egui::Id::new(SETTINGS_JUMP_ID), title));
+            }
+        }
+    });
+}
+
 fn section(
     ui: &mut egui::Ui,
     palette: &Palette,
     title: &str,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) {
+    let jump = egui::Id::new(SETTINGS_JUMP_ID);
+    if ui.data(|data| data.get_temp::<String>(jump)).as_deref() == Some(title) {
+        ui.scroll_to_cursor(Some(egui::Align::TOP));
+        ui.data_mut(|data| data.remove_temp::<String>(jump));
+    }
     ui.add_space(10.0);
     theme::text(ui, title, theme::bold(18.0), palette.text);
     ui.add_space(8.0);
@@ -389,6 +415,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     );
     let needle = filter.trim().to_lowercase();
     ui.data_mut(|data| data.insert_temp(egui::Id::new(SETTINGS_FILTER_ID), filter));
+    ui.add_space(8.0);
+    if needle.is_empty() {
+        jump_chips(ui, &palette, locale);
+    }
     ui.add_space(4.0);
     let dirty_id = egui::Id::new(PLAYBACK_DIRTY_ID);
     let mut playback_dirty = ui
@@ -400,42 +430,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .unwrap_or(false);
     let mut changed = false;
     let mut any_visible = false;
-    let soloist = gettext(locale, "Spotify Soloist");
-    if row_matches(
-        &needle,
-        &soloist,
-        &gettext(locale, "Playback lossless setup key download updates"),
-    ) {
-        any_visible = true;
-        section(ui, &palette, &soloist, |ui| super::soloist::show(app, ui));
-    }
-    let streamer = gettext(locale, "Streamer mode");
-    if row_matches(
-        &needle,
-        &streamer,
-        &gettext(
-            locale,
-            "Hide client id spotify name account invite code privacy stream",
-        ),
-    ) {
-        any_visible = true;
-        section(ui, &palette, &streamer, |ui| {
-            if widgets::switch(
-                ui,
-                &palette,
-                &gettext(
-                    locale,
-                    "Hide your Client ID, account names and invite codes",
-                ),
-                &mut app.settings.streamer_mode,
-            )
-            .changed()
-            {
-                changed = true;
-            }
-        });
-    }
-
     let open_folder = gettext(locale, "Open folder");
 
     let wanted = app
@@ -498,15 +492,19 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             if row_matches(&needle, &format!("{sign_out} {account}"), "") {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 14.0;
-                    let avatar = app.user.as_ref().and_then(|user| {
-                        pick_image(&user.images, app.art_px(56.0)).map(str::to_string)
-                    });
+                    let avatar = app
+                        .user
+                        .as_ref()
+                        .filter(|_| !app.settings.streamer_mode)
+                        .and_then(|user| {
+                            pick_image(&user.images, app.art_px(56.0)).map(str::to_string)
+                        });
                     widgets::cover(ui, &palette, avatar.as_deref(), 56.0, 28.0, Icon::User);
                     ui.vertical(|ui| {
                         let name = app
                             .user
                             .as_ref()
-                            .map(|user| user.name().to_string())
+                            .map(|user| app.private_text(user.name()))
                             .unwrap_or_default();
                         theme::text(ui, name, theme::semibold(16.0), palette.text);
                         let product = app
@@ -658,6 +656,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     } else {
         gettext(locale, "Application")
     };
+    let soloist = gettext(locale, "Spotify Soloist");
+    if row_matches(
+        &needle,
+        &soloist,
+        &gettext(locale, "Playback lossless setup key download updates"),
+    ) {
+        any_visible = true;
+        section(ui, &palette, &soloist, |ui| super::soloist::show(app, ui));
+    }
     let normalize_volume = gettext(locale, "Normalize volume");
     let autoplay = gettext(locale, "Autoplay");
     let gapless = gettext(locale, "Gapless playback");
@@ -1159,6 +1166,36 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     }
                 });
             }
+        });
+    }
+
+    let streamer = gettext(locale, "Streamer mode");
+    if row_matches(
+        &needle,
+        &streamer,
+        &gettext(
+            locale,
+            "Hide client id spotify name account invite code privacy stream",
+        ),
+    ) {
+        any_visible = true;
+        section(ui, &palette, &streamer, |ui| {
+            widgets::setting_row(
+                ui,
+                &palette,
+                &streamer,
+                &gettext(
+                    locale,
+                    "Hide your Client ID, account names, invite codes and device names, so they don't show on a stream.",
+                ),
+                |ui| {
+                    if widgets::switch(ui, &palette, &streamer, &mut app.settings.streamer_mode)
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                },
+            );
         });
     }
 

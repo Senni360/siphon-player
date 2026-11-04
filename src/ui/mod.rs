@@ -40,6 +40,7 @@ mod update;
 pub mod widgets;
 pub mod winamp;
 
+use crate::i18n::gettext;
 use egui::{Align2, Color32, Context, CornerRadius, Frame, Id, Margin, Rect, Stroke, vec2};
 
 use crate::app::App;
@@ -54,6 +55,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     for path in winamp::dropped_skins(ctx) {
         app.actions.push(Action::InstallSkin(path));
     }
+    share_dropped_files(app, ctx);
     let signed_in = app.is_connected() && app.user.is_some();
     let connecting = matches!(app.auth, AuthStatus::Connecting | AuthStatus::Starting)
         || (app.is_connected() && app.user.is_none());
@@ -135,8 +137,139 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     widgets::drag_ghost(ctx, &app.palette, app.locale);
     kit::flight::paint(ctx, &app.palette);
     toasts(app, ctx, theme::PLAYER_BAR_HEIGHT + 16.0);
+    file_drop_overlay(app, ctx);
     caption_buttons(ui, &app.palette, app.locale);
     fastframe_titlebar::resize(ui);
+}
+
+/// Whether `path` is a file the group's store takes.
+fn shareable_file(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            crate::shared_songs::EXTENSIONS.contains(&extension.to_lowercase().as_str())
+        })
+}
+
+/// Audio dropped anywhere in the window goes up to the group, one at a time.
+fn share_dropped_files(app: &mut App, ctx: &Context) {
+    let dropped: Vec<std::path::PathBuf> = ctx.input(|input| {
+        input
+            .raw
+            .dropped_files
+            .iter()
+            .map(|file| file.path().to_path_buf())
+            .filter(|path| !crate::winamp::is_skin_file(path))
+            .collect()
+    });
+    if dropped.is_empty() {
+        return;
+    }
+    let locale = app.locale;
+    if !app.is_connected() || app.friends_feed.account.is_none() {
+        app.toast_error(gettext(locale, "Join a group to share files with friends."));
+        return;
+    }
+    let songs: Vec<_> = dropped
+        .into_iter()
+        .filter(|path| shareable_file(path))
+        .collect();
+    if songs.is_empty() {
+        app.toast_error(gettext(
+            locale,
+            "Only MP3, FLAC, M4A and AAC files can be shared.",
+        ));
+        return;
+    }
+    let count = songs.len();
+    for path in songs {
+        app.actions
+            .push(Action::Friends(crate::friends::Action::UploadSong(path)));
+    }
+    app.toast_with(
+        if count == 1 {
+            gettext(locale, "Sharing 1 song with your group").into_owned()
+        } else {
+            gettext(locale, "Sharing {count} songs with your group")
+                .replace("{count}", &count.to_string())
+        },
+        gettext(locale, "Show"),
+        Action::OpenSharedFiles,
+    );
+}
+
+/// Says what letting go will do, while files are held over the window.
+fn file_drop_overlay(app: &App, ctx: &Context) {
+    let hovering = ctx.input(|input| {
+        input.raw.hovered_files.iter().any(|file| {
+            file.path
+                .as_deref()
+                .is_some_and(|path| !crate::winamp::is_skin_file(path))
+        })
+    });
+    #[cfg(feature = "demo")]
+    let hovering = hovering || std::env::var_os("SIPHON_DEMO_FILE_DROP").is_some();
+    if !hovering {
+        return;
+    }
+    let palette = app.palette;
+    let locale = app.locale;
+    let window = ctx.content_rect();
+    egui::Area::new(Id::new("file-drop"))
+        .order(egui::Order::Foreground)
+        .fixed_pos(window.min)
+        .interactable(false)
+        .show(ctx, |ui| {
+            let painter = ui.painter();
+            painter.rect_filled(window, 0.0, Color32::from_black_alpha(150));
+            let card = Rect::from_center_size(window.center(), vec2(420.0, 132.0));
+            painter.rect(
+                card,
+                14.0,
+                palette.panel.to_opaque(),
+                Stroke::new(1.0, palette.outline),
+                egui::StrokeKind::Inside,
+            );
+            let ready = app.friends_feed.account.is_some();
+            let (title, detail) = if ready {
+                (
+                    gettext(locale, "Drop to share with your group"),
+                    gettext(
+                        locale,
+                        "Everyone can play them. MP3, FLAC, M4A or AAC, up to 15 minutes each.",
+                    ),
+                )
+            } else {
+                (
+                    gettext(locale, "Join a group to share files"),
+                    gettext(locale, "Open Group in the sidebar to join or start one."),
+                )
+            };
+            let center = card.center();
+            theme::Icon::Users.image(palette.text, 24.0).paint_at(
+                ui,
+                Rect::from_center_size(center - vec2(0.0, 36.0), vec2(24.0, 24.0)),
+            );
+            painter.text(
+                center - vec2(0.0, 2.0),
+                egui::Align2::CENTER_CENTER,
+                title,
+                theme::semibold(16.0),
+                palette.text,
+            );
+            let wrapped = painter.layout(
+                detail.into_owned(),
+                theme::regular(12.5),
+                palette.secondary,
+                card.width() - 48.0,
+            );
+            let rows = wrapped.size();
+            painter.galley(
+                egui::pos2(center.x - rows.x / 2.0, center.y + 18.0),
+                wrapped,
+                palette.secondary,
+            );
+        });
 }
 
 /// Sends a cover flying from the pointer to where a song went this frame:
@@ -337,29 +470,52 @@ pub(crate) fn glass_fill(palette: &theme::Palette, fill: Color32) -> Color32 {
     Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha)
 }
 
+/// Stops a panel's scrolling contents just above the player, when the player
+/// lies over that panel, so nothing shows in slivers around it. Returns the
+/// clip to put back once the contents are drawn.
+pub(crate) fn clip_above_player(ui: &mut egui::Ui) -> Rect {
+    let clip = ui.clip_rect();
+    let window = ui.ctx().content_rect();
+    let strip = Rect::from_min_max(
+        egui::pos2(window.left(), window.bottom() - theme::PLAYER_BAR_HEIGHT),
+        window.max,
+    );
+    let island = player_bar::island_rect(strip);
+    let panel = ui.max_rect();
+    if panel.right() > island.left() && panel.left() < island.right() {
+        let mut above = clip;
+        above.max.y = above.max.y.min(island.top() - 6.0);
+        ui.set_clip_rect(above);
+    }
+    clip
+}
+
 /// The light catching a glass card's top edge: a bright hairline and a
 /// faint sheen just under it.
 pub(crate) fn glass_sheen(ui: &egui::Ui, rect: Rect, radius: f32) {
-    let painter = ui.painter();
-    let inset = radius * 0.6;
-    let width = (rect.width() - inset * 2.0).max(0.0);
-    painter.rect_filled(
-        Rect::from_min_size(rect.min + vec2(inset, 0.0), vec2(width, 1.0)),
-        0.0,
-        Color32::from_white_alpha(28),
-    );
-    // A few faint bands under it, fading down: plain rects, so the sheen
-    // costs no mesh.
-    for band in 0..4u8 {
-        painter.rect_filled(
-            Rect::from_min_size(
-                rect.min + vec2(inset, 1.0 + f32::from(band) * 6.0),
-                vec2(width, 6.0),
-            ),
-            0.0,
-            Color32::from_white_alpha(8 - band * 2),
-        );
-    }
+    let left = rect.left() + radius * 0.5;
+    let right = rect.right() - radius * 0.5;
+    let fade = (radius * 2.0).min((right - left) / 2.0).max(0.0);
+    let mut mesh = egui::Mesh::default();
+    // A bright hairline, then a faint band under it that fades downward, each
+    // fading out toward both ends.
+    let mut band = |top: f32, bottom: f32, from: u8, to: u8| {
+        let xs = [left, left + fade, right - fade, right];
+        let alpha = [0, 1, 1, 0];
+        let base = mesh.vertices.len() as u32;
+        for (x, on) in xs.iter().zip(alpha) {
+            mesh.colored_vertex(egui::pos2(*x, top), Color32::from_white_alpha(from * on));
+            mesh.colored_vertex(egui::pos2(*x, bottom), Color32::from_white_alpha(to * on));
+        }
+        for column in 0..3 {
+            let at = base + column * 2;
+            mesh.add_triangle(at, at + 1, at + 2);
+            mesh.add_triangle(at + 1, at + 2, at + 3);
+        }
+    };
+    band(rect.top(), rect.top() + 1.0, 28, 28);
+    band(rect.top() + 1.0, rect.top() + 24.0, 8, 0);
+    ui.painter().add(egui::Shape::mesh(mesh));
 }
 
 /// The colour a cover lends the glow. Pale and greyish cool tones read as
@@ -511,6 +667,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             // in from the side travelled toward.
             let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
             let offset = vec2((1.0 - enter) * 24.0 * from_side, (1.0 - enter) * 10.0);
+            let whole = clip_above_player(ui);
             let scroll = crate::autoscroll::show(
                 ui,
                 egui::ScrollArea::vertical()
@@ -572,6 +729,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     }
                 },
             );
+            ui.set_clip_rect(whole);
             ui.ctx()
                 .data_mut(|data| data.insert_temp(scrolled_id, scroll.state.offset.y));
             header_shadow(ui, scroll.inner_rect, scroll.state.offset.y, palette.dark);
@@ -1152,6 +1310,17 @@ mod window_chrome_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_audio_the_store_takes_counts_as_a_shareable_drop() {
+        use std::path::Path;
+        for name in ["a.mp3", "B.FLAC", "c.m4a", "d.aac"] {
+            assert!(super::shareable_file(Path::new(name)), "{name}");
+        }
+        for name in ["a.wav", "a.exe", "folder", "a.mp3.txt"] {
+            assert!(!super::shareable_file(Path::new(name)), "{name}");
+        }
+    }
+
     use super::*;
 
     /// A custom palette's wash fades in at the top of a page; the plain

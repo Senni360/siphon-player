@@ -163,6 +163,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 recovery(ui, &palette, &secret, &mut actions);
                 ui.add_space(16.0);
             }
+            if std::mem::take(&mut app.open_shared_files) && account.is_some() {
+                ui.data_mut(|data| data.insert_temp(Id::new("group-tab"), Tab::Shared));
+            }
             let tab = tabs(app, ui, account.is_some(), &mut actions);
             ui.add_space(16.0);
             match tab {
@@ -1052,9 +1055,9 @@ pub(super) fn chip(
         ui.painter()
             .layout_no_wrap(label.to_owned(), theme::medium(12.5), Color32::PLACEHOLDER);
     let check = 14.0;
-    let size = vec2(galley.size().x + 20.0 + check + 4.0, 28.0);
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let t = motion::toward(ui.ctx(), id, on, motion::FEEDBACK);
+    let size = vec2(galley.size().x + 20.0 + (check + 4.0) * t, 28.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
     let scale = motion::press_scale(ui.ctx(), &response);
     let rect = Rect::from_center_size(rect.center(), rect.size() * scale);
     let fill = super::blend(

@@ -1418,6 +1418,8 @@ pub enum Action {
     },
     /// Open the file dialog for songs to share with the group.
     ChooseSongsToShare,
+    /// Go to the songs people shared from their own files.
+    OpenSharedFiles,
     PlayUris {
         uris: Vec<String>,
         index: u32,

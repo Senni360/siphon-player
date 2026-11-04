@@ -609,6 +609,8 @@ pub struct App {
     accent_pending: HashSet<String>,
 
     pub dialog: Option<Dialog>,
+    /// The Group page opens on the Shared files tab next time it draws.
+    pub open_shared_files: bool,
     cover_request: u64,
     cover_uploads: HashMap<String, u64>,
     /// Successful uploads stay visible while Spotify propagates the new image.
@@ -1295,6 +1297,7 @@ impl App {
             art_palettes: HashMap::new(),
             accent_pending: HashSet::new(),
             dialog: None,
+            open_shared_files: false,
             cover_request: 0,
             cover_uploads: HashMap::new(),
             uploaded_covers: Default::default(),
@@ -2021,6 +2024,19 @@ impl App {
         } else {
             text.to_owned()
         }
+    }
+
+    /// Whose a playlist is, for a byline. In streamer mode your own name stays
+    /// off your own playlists.
+    pub fn playlist_owner<'a>(&'a self, playlist: &'a Playlist) -> &'a str {
+        if self.settings.streamer_mode && self.owns(playlist) {
+            return "You";
+        }
+        playlist.owner_name()
+    }
+
+    fn owns(&self, playlist: &Playlist) -> bool {
+        self.user.as_ref().map(|user| user.id.as_str()) == playlist.owner.id.as_deref()
     }
 
     /// Presentation only: Soloist's own local process still uses the remote
@@ -2852,6 +2868,16 @@ impl App {
                 Event::Friends(event) => {
                     self.friends_feed.receive(event);
                     self.group_after_event();
+                    match self.friends_feed.upload_result.take() {
+                        Some(Ok(title)) => self.toast_with(
+                            gettext(self.locale, "{title} is shared with your group")
+                                .replace("{title}", &title),
+                            gettext(self.locale, "Show"),
+                            Action::OpenSharedFiles,
+                        ),
+                        Some(Err(error)) => self.toast_error(error),
+                        None => {}
+                    }
                     // A write made while another ran goes out now.
                     if let Some(request) = self.friends_feed.next_request() {
                         self.backend.send(Command::Friends(request));
@@ -12038,6 +12064,10 @@ impl App {
                 self.discord_tick(true);
             }
             Action::ChooseSongsToShare => self.backend.choose_songs_to_share(),
+            Action::OpenSharedFiles => {
+                self.open_shared_files = true;
+                self.actions.push(Action::Open(Page::Group));
+            }
             Action::ShowToast(message) => self.toast(message),
             Action::Friends(action) => {
                 if matches!(

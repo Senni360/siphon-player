@@ -197,6 +197,10 @@ pub struct Model {
     pub songs_capacity: u64,
     /// Songs fetched for a purpose, for the app to act on.
     pub songs_ready: Option<(String, Vec<NewPost>, SongsFor)>,
+    /// The file on its way up, for the Shared files tab to name.
+    pub uploading: Option<String>,
+    /// How the last upload ended, for the app to say once wherever you are.
+    pub upload_result: Option<Result<String, String>>,
     pub next_cursor: Option<String>,
     pub busy: bool,
     pub error: Option<String>,
@@ -271,6 +275,13 @@ impl Model {
         }
         self.generation = generation;
         self.in_flight_reply = pending;
+        self.uploading = match &action {
+            Action::UploadSong(path) => Some(
+                path.file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned()),
+            ),
+            _ => None,
+        };
         self.busy = true;
         self.reading = action.is_read();
         self.error = None;
@@ -373,6 +384,14 @@ impl Model {
         None
     }
 
+    /// Files chosen to share that are still waiting behind the one going up.
+    pub fn uploads_waiting(&self) -> usize {
+        self.queued
+            .iter()
+            .filter(|(action, _)| matches!(action, Action::UploadSong(_)))
+            .count()
+    }
+
     /// The next write made while another was in flight, once that one has
     /// answered. Call after `receive`.
     pub fn next_request(&mut self) -> Option<Request> {
@@ -439,6 +458,11 @@ impl Model {
         }
         self.busy = false;
         self.reading = false;
+        if self.uploading.take().is_some()
+            && let Err(error) = &event.result
+        {
+            self.upload_result = Some(Err(error.clone()));
+        }
         match event.result {
             Ok(update) => {
                 self.failures = 0;
@@ -516,6 +540,7 @@ impl Model {
                         self.shared_playlists.insert(0, list);
                     }
                     Update::SongUploaded(song) => {
+                        self.upload_result = Some(Ok(song.title.clone()));
                         self.songs_used += song.size;
                         self.shared_songs.retain(|row| row.id != song.id);
                         self.shared_songs.insert(0, song);

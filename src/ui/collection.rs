@@ -214,7 +214,21 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                 }
                 for (index, (text, page)) in hero.byline.iter().enumerate() {
                     if index > 0 {
-                        theme::text(ui, "•", theme::regular(13.5), palette.secondary);
+                        // A bullet leads to what follows, so it never ends a line.
+                        let next = ui
+                            .painter()
+                            .layout_no_wrap(
+                                text.to_string(),
+                                theme::semibold(13.5),
+                                palette.secondary,
+                            )
+                            .size()
+                            .x;
+                        if ui.available_size_before_wrap().x < next + 16.0 {
+                            ui.end_row();
+                        } else {
+                            theme::text(ui, "•", theme::regular(13.5), palette.secondary);
+                        }
                     }
                     match page {
                         Some(page) => {

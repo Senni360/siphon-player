@@ -573,7 +573,7 @@ fn all(app: &mut App, ui: &mut egui::Ui, results: &SearchResults) {
                     TopResultSubtitle::Text(
                         // Translators: {owner} is the name of the playlist's owner.
                         &gettext(locale, "Playlist • {owner}")
-                            .replace("{owner}", playlist.owner_name()),
+                            .replace("{owner}", app.playlist_owner(playlist)),
                     ),
                     false,
                     Some(playlist.uri.clone()),
@@ -981,7 +981,7 @@ fn playlist_card(app: &mut App, ui: &mut egui::Ui, playlist: &crate::api::models
         pick_image(&playlist.images, card_art),
         &playlist.name,
         // Translators: {owner} is the name of the playlist's owner.
-        &gettext(app.locale, "By {owner}").replace("{owner}", playlist.owner_name()),
+        &gettext(app.locale, "By {owner}").replace("{owner}", app.playlist_owner(playlist)),
         widgets::CardCover::square(playing_here),
     );
     if card.play {

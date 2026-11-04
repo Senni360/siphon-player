@@ -1132,11 +1132,24 @@ fn item_menu_at(
             &palette,
             Some(Icon::Users),
             "Share with friends",
-            app.friends_feed.profile.is_some() && !app.friends_feed.busy,
+            app.friends_feed.profile.is_some(),
         )
     {
         app.actions
             .push(Action::Friends(crate::friends::Action::Share(post)));
+    }
+    // A file on this computer goes up itself, so friends can play it.
+    if let Some(path) = app.local_file(&uri).map(std::path::Path::to_path_buf)
+        && app.friends_feed.account.is_some()
+        && menu_item(
+            ui,
+            &palette,
+            Some(Icon::Users),
+            &gettext(locale, "Share this file with the group"),
+        )
+    {
+        app.actions
+            .push(Action::Friends(crate::friends::Action::UploadSong(path)));
     }
     if app.download_source(item).is_some() && download_menu_item(ui, app, "Download") {
         app.actions.push(Action::Download(vec![item.clone()]));
@@ -1465,7 +1478,7 @@ pub(super) fn share_playlist_item(ui: &mut Ui, app: &mut App, uri: &str, name: &
         &palette,
         Some(Icon::Users),
         &gettext(app.locale, "Share with friends"),
-        app.friends_feed.profile.is_some() && !app.friends_feed.busy,
+        app.friends_feed.profile.is_some(),
     ) {
         app.actions.push(Action::GroupPlaylist {
             uri: uri.to_owned(),

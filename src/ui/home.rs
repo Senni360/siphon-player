@@ -197,9 +197,13 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
 
 fn quick_access(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
-    let tiles = quick_access_tiles(app);
+    let mut tiles = quick_access_tiles(app);
     let available = ui.available_width();
     let columns = ((available / 300.0).floor() as usize).clamp(2, 4);
+    // A last row with a gap in it looks like something failed to load.
+    if tiles.len() > columns {
+        tiles.truncate(tiles.len() / columns * columns);
+    }
     let gap = 10.0;
     let tile_width = (available - gap * (columns as f32 - 1.0)) / columns as f32;
     let rows = tiles.len().div_ceil(columns);
@@ -467,7 +471,7 @@ fn playlist_cards(app: &mut App, ui: &mut egui::Ui, menu: &str, playlists: &[Pla
             .filter(|d| !d.is_empty())
             .unwrap_or_else(|| {
                 // Translators: {owner} is the name of the playlist's owner.
-                gettext(app.locale, "By {owner}").replace("{owner}", playlist.owner_name())
+                gettext(app.locale, "By {owner}").replace("{owner}", app.playlist_owner(playlist))
             });
         let context_here = app.playing_context_uri().as_deref() == Some(playlist.uri.as_str());
         let playing_here = context_here && app.believed_playing();

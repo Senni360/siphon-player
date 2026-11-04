@@ -290,7 +290,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 .and_then(|now| now.device_kind.as_deref())
                 .map_or(Icon::Speaker, crate::ui::devices::device_icon);
             let device_galley = remote_now.map(|now| {
-                let label = match now.device_name {
+                let label = match now.device_name.filter(|_| !app.settings.streamer_mode) {
                     Some(device) => {
                         // Translators: {device} is the name of the device playing the music.
                         gettext(locale, "Playing on {device}").replace("{device}", &device)
@@ -397,8 +397,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     .as_ref()
                     .map(|user| {
                         (
-                            user.name().to_string(),
-                            pick_image(&user.images, app.art_px(28.0)).map(str::to_string),
+                            app.private_text(user.name()),
+                            pick_image(&user.images, app.art_px(28.0))
+                                .filter(|_| !app.settings.streamer_mode)
+                                .map(str::to_string),
                         )
                     })
                     .unwrap_or_default();

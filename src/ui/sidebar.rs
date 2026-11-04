@@ -1070,6 +1070,8 @@ fn folder_playlists(rootlist: &[crate::player::RootlistEntry], id: &str) -> usiz
 struct EntryArt {
     row: u32,
     grid: u32,
+    /// Streamer mode: your own name stays off your own playlists.
+    hide_own_name: bool,
 }
 
 impl EntryArt {
@@ -1077,6 +1079,7 @@ impl EntryArt {
         Self {
             row: app.art_px(ROW_ART),
             grid: app.art_px(super::widgets::CARD_ART),
+            hide_own_name: app.settings.streamer_mode,
         }
     }
 }
@@ -1090,13 +1093,18 @@ fn playlist_entry(
     depth: u8,
     art: EntryArt,
 ) -> Entry {
+    let owner = if art.hide_own_name && playlist.owned_by(user_id) {
+        "You"
+    } else {
+        playlist.owner_name()
+    };
     Entry {
         image: pick_image(&playlist.images, art.row).map(str::to_string),
         grid_image: pick_image(&playlist.images, art.grid).map(str::to_string),
         name: playlist.name.clone(),
         // Translators: {owner} is the name of the playlist's owner.
-        subtitle: gettext(locale, "Playlist • {owner}").replace("{owner}", playlist.owner_name()),
-        grid_subtitle: playlist.owner_name().to_string(),
+        subtitle: gettext(locale, "Playlist • {owner}").replace("{owner}", owner),
+        grid_subtitle: owner.to_string(),
         page: Page::from_uri(&playlist.uri).unwrap_or(Page::Search),
         uri: playlist.uri.clone(),
         round: false,
@@ -1693,6 +1701,12 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             (Filter::Artists, gettext(locale, "Artists")),
             (Filter::Podcasts, gettext(locale, "Podcasts")),
         ] {
+            if value == Filter::Podcasts
+                && filter != Filter::Podcasts
+                && app.library.shows.items.is_empty()
+            {
+                continue;
+            }
             if theme::soft_button(ui, &palette, None, &label, filter == value).clicked() {
                 filter = value;
             }
@@ -1906,6 +1920,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     let current_page = app.page().clone();
 
     begin_step(ui, reveal, 0.55);
+    super::clip_above_player(ui);
     crate::autoscroll::show(
         ui,
         egui::ScrollArea::vertical()
@@ -2876,7 +2891,11 @@ mod ordering_tests {
     use crate::api::models::Playlist;
     use crate::settings::Settings;
 
-    const TEST_ART: EntryArt = EntryArt { row: 64, grid: 300 };
+    const TEST_ART: EntryArt = EntryArt {
+        row: 64,
+        grid: 300,
+        hide_own_name: false,
+    };
 
     /// Create an isolated demo application with deliberately nonalphabetical rows
     /// and known recent plays so ordering tests can distinguish each sort mode.

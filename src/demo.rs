@@ -1522,6 +1522,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                 app.library.filter = "No matching playlist".into();
             }
             "queue" => app.show_queue_panel = true,
+            "streamer" => app.settings.streamer_mode = true,
             "sidebar-hidden" => app.settings.sidebar_visible = false,
             "friends" => {
                 app.show_friends_panel = true;

@@ -91,6 +91,15 @@ fn name_devices(devices: &mut [Device], receivers: &[crate::zeroconf::Receiver])
     }
 }
 
+/// What a device is, in place of its name.
+fn kind_name(kind: &str) -> String {
+    let words = kind.replace('_', " ");
+    let mut letters = words.chars();
+    letters.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(letters).collect()
+    })
+}
+
 pub fn device_icon(kind: &str) -> Icon {
     match kind.to_ascii_lowercase().as_str() {
         "computer" => Icon::Laptop,
@@ -196,7 +205,11 @@ fn receiver_row(app: &mut App, ui: &mut egui::Ui, receiver: &crate::zeroconf::Re
         rect.left() + 48.0,
         rect.right() - 12.0,
         rect.center().y - 9.0,
-        &receiver.name,
+        &if app.settings.streamer_mode {
+            gettext(app.locale, "Speaker").into_owned()
+        } else {
+            receiver.name.clone()
+        },
         theme::medium(14.0),
         palette.text,
     );
@@ -543,6 +556,13 @@ pub fn popup(app: &mut App, ctx: &egui::Context) {
                                 let active = device.id.is_some() && device.id == active_id;
                                 let name = if is_soloist {
                                     gettext(locale, "This computer").into_owned()
+                                } else if app.settings.streamer_mode {
+                                    // Device names often carry a real name.
+                                    if is_local {
+                                        gettext(locale, "This computer").into_owned()
+                                    } else {
+                                        kind_name(&device.kind)
+                                    }
                                 } else if is_local {
                                     // Translators: {name} is the name this computer uses in Spotify Connect.
                                     gettext(locale, "{name} (this computer)")
