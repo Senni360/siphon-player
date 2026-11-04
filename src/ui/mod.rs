@@ -865,6 +865,38 @@ fn slow_banner(app: &mut App, ui: &mut egui::Ui) {
 fn audio_key_banner(app: &mut App, ui: &mut egui::Ui) {
     use crate::i18n::gettext;
     let locale = app.locale;
+    // Soloist is Spotify's own player, so it's the way past this when it's off.
+    let offer_soloist = !app.settings.soloist_enabled && crate::soloist::install::supported();
+    let text = if offer_soloist {
+        gettext(
+            locale,
+            "Spotify refused the key that unlocks the audio. Soloist, Spotify's own player, should get around this, and needs a key of your own from Spotify. SoundCloud, YouTube and shared files still play.",
+        )
+    } else {
+        gettext(
+            locale,
+            "Spotify refused the key that unlocks the audio. Encore can't fix that, but it sometimes clears up on its own. You can still play on your phone or another Spotify device.",
+        )
+    };
+    let second = if offer_soloist {
+        (
+            gettext(locale, "Play on another device"),
+            Action::PlayOnAnotherDevice,
+        )
+    } else {
+        (
+            gettext(locale, "Why?"),
+            Action::OpenUrl(AUDIO_KEY_GUIDE.into()),
+        )
+    };
+    let first = if offer_soloist {
+        (gettext(locale, "Set up Soloist"), Action::OpenSoloistSetup)
+    } else {
+        (
+            gettext(locale, "Play on another device"),
+            Action::PlayOnAnotherDevice,
+        )
+    };
     banner(
         app,
         ui,
@@ -872,20 +904,8 @@ fn audio_key_banner(app: &mut App, ui: &mut egui::Ui) {
             locale,
             "Spotify won't let this computer play this song right now.",
         ),
-        &gettext(
-            locale,
-            "Spotify refused the key that unlocks the audio. Encore can't fix that, but it sometimes clears up on its own. You can still play on your phone or another Spotify device.",
-        ),
-        [
-            (
-                gettext(locale, "Play on another device"),
-                Action::PlayOnAnotherDevice,
-            ),
-            (
-                gettext(locale, "Why?"),
-                Action::OpenUrl(AUDIO_KEY_GUIDE.into()),
-            ),
-        ],
+        &text,
+        [first, second],
         Action::CloseAudioKeyBanner,
     );
 }

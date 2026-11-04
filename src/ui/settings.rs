@@ -307,6 +307,11 @@ fn frame_rate_dial(
     }
 }
 
+/// Scrolls Settings to the section with this exact title when it next draws.
+pub(crate) fn jump_to(ctx: &egui::Context, title: &str) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new(SETTINGS_JUMP_ID), title.to_owned()));
+}
+
 /// The page is long: these go straight to a section, as searching does for a
 /// setting. Each jumps to the section with that exact title.
 fn jump_chips(ui: &mut egui::Ui, palette: &Palette, locale: crate::i18n::Locale, built_in: bool) {

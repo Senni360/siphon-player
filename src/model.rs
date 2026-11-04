@@ -1418,6 +1418,8 @@ pub enum Action {
     },
     /// Open the file dialog for songs to share with the group.
     ChooseSongsToShare,
+    /// Go to Soloist's setup steps in Settings.
+    OpenSoloistSetup,
     /// Send the playing song to the group.
     SharePlaying,
     /// Go to the songs people shared from their own files.

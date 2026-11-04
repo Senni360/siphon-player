@@ -4209,6 +4209,25 @@ mod tests {
         }
     }
 
+    /// Refused a key, the next step is one press away.
+    #[test]
+    fn a_refused_audio_key_leads_to_soloist_setup() {
+        use egui::accesskit::{Action as AccessibleAction, Role};
+        let (ctx, mut app) = accessible_app("audio-key-soloist");
+        app.audio_key_banner = true;
+        accessible_frame(&ctx, &mut app, vec![]);
+        let tree = accessible_frame(&ctx, &mut app, vec![]);
+        let button = accessible_node(&tree, "Set up Soloist", Role::Button);
+        accessible_frame(
+            &ctx,
+            &mut app,
+            vec![accessible_action(button, AccessibleAction::Click, None)],
+        );
+        accessible_frame(&ctx, &mut app, vec![]);
+        assert_eq!(app.page(), &Page::Settings);
+        app.backend.shutdown();
+    }
+
     #[test]
     fn audio_key_banner_opens_the_device_picker_or_closes() {
         use egui::accesskit::{Action as AccessibleAction, Role};

@@ -12113,6 +12113,10 @@ impl App {
             }
             Action::ChooseSongsToShare => self.backend.choose_songs_to_share(),
             Action::SharePlaying => self.share_playing(),
+            Action::OpenSoloistSetup => {
+                crate::ui::settings::jump_to(ctx, &gettext(self.locale, "Spotify Soloist"));
+                self.actions.push(Action::Open(Page::Settings));
+            }
             Action::OpenSharedFiles => {
                 self.open_shared_files = true;
                 self.actions.push(Action::Open(Page::Group));
