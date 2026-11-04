@@ -1945,7 +1945,7 @@ fn file_chip(
     let response = ui
         .interact(rect, id, Sense::click_and_drag())
         .on_hover_cursor(egui::CursorIcon::Grab)
-        .on_hover_text(path.display().to_string());
+        .on_hover_text(app.private_path(&path));
     let lifted = motion::toward(
         ui.ctx(),
         id.with("lift"),

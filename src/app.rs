@@ -2026,6 +2026,16 @@ impl App {
         }
     }
 
+    /// A path as streamer mode allows it on screen: a Windows path names the
+    /// account it is under.
+    pub fn private_path(&self, path: &std::path::Path) -> String {
+        if self.settings.streamer_mode {
+            gettext(self.locale, "a folder on this computer").into_owned()
+        } else {
+            path.display().to_string()
+        }
+    }
+
     /// Whose a playlist is, for a byline. In streamer mode your own name stays
     /// off your own playlists.
     pub fn playlist_owner<'a>(&'a self, playlist: &'a Playlist) -> &'a str {

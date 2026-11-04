@@ -383,7 +383,7 @@ fn local_files_detail(app: &App) -> String {
         )
         .into_owned();
     };
-    let folder = folder.display().to_string();
+    let folder = app.private_path(&folder);
     match &app.local_files {
         Some((_, uris)) => ngettext(
             locale,
@@ -1797,7 +1797,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 // Translators: {folder} is the path of the skins folder.
                 "Installed skins are in {folder}. Find more at the Winamp Skin Museum.",
             )
-            .replace("{folder}", &skins_folder.display().to_string()),
+            .replace("{folder}", &app.private_path(&skins_folder)),
         ),
         RowText::new(
             gettext(locale, "Size"),
@@ -2082,15 +2082,13 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             gettext(locale, "Artwork cache"),
             // Translators: {folder} is the path of a cache folder.
             gettext(locale, "Stored in {folder}")
-                .replace("{folder}", &app.dirs.art_cache_dir().display().to_string()),
+                .replace("{folder}", &app.private_path(&app.dirs.art_cache_dir())),
         ),
         RowText::new(
             audio_cache.clone(),
             // Translators: {folder} is the path of a cache folder.
-            gettext(locale, "Stored in {folder}").replace(
-                "{folder}",
-                &app.dirs.audio_cache_dir().display().to_string(),
-            ),
+            gettext(locale, "Stored in {folder}")
+                .replace("{folder}", &app.private_path(&app.dirs.audio_cache_dir())),
         )
         .when(built_in),
         RowText::new(
@@ -2100,7 +2098,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 // Translators: {file} is the path of the play history file.
                 "Tracks played here are stored in {file}. This file is never uploaded.",
             )
-            .replace("{file}", &app.dirs.history_file().display().to_string()),
+            .replace("{file}", &app.private_path(&app.dirs.history_file())),
         ),
         RowText::new(
             gettext(locale, "Sign-in"),

@@ -3822,6 +3822,14 @@ pub fn search_field(
             Stroke::new(1.5, palette.text.gamma_multiply(0.6)),
             egui::StrokeKind::Inside,
         );
+    } else {
+        // A field, not a line of words, on every surface it sits on.
+        ui.painter().rect_stroke(
+            rect,
+            height / 2.0,
+            theme::field_stroke(palette),
+            egui::StrokeKind::Inside,
+        );
     }
     let icon_rect =
         Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
