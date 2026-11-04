@@ -215,3 +215,15 @@ controls: a day-grouped feed with threads, a composer that recognises
 pasted links and the playing song, sends to everyone or picked friends,
 and per-share download whose file drags into a DAW on Windows
 (`src/drag_out.rs`).
+
+## What changed (4 November)
+
+- **Panels run to the window's bottom** and the island floats over them. A
+  panel under the island stops its scrolling contents just above it, so nothing
+  shows in slivers around it. A wider window's side panels keep the full height.
+- **Tabs and chips differ.** A page's tabs are quiet words with a sliding line
+  (Group). Chips are filters, and an unselected chip has no room kept for its
+  check.
+- **Text fields have a visible edge** (`theme::field_stroke`), on every surface.
+- **Sharing is one action**: a share button on the island, G, right-click, or
+  dropping audio files anywhere in the window.
