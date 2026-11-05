@@ -59,6 +59,23 @@ pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
             .request_repaint_after(std::time::Duration::from_secs(1));
         return;
     }
+    // A phone joins this computer's group account, so there has to be one.
+    if app.friends_feed.account.is_none() {
+        theme::text(
+            ui,
+            gettext(
+                locale,
+                "Connect to your group first. Your phone joins the same account.",
+            ),
+            theme::regular(13.0),
+            palette.secondary,
+        );
+        ui.add_space(6.0);
+        if theme::soft_button(ui, &palette, None, &gettext(locale, "Open Group"), false).clicked() {
+            actions.push(Action::Open(crate::model::Page::Group));
+        }
+        return;
+    }
     if let Some(Err(problem)) = &app.phone.code {
         theme::text(ui, problem, theme::regular(13.0), palette.warning);
         ui.add_space(4.0);
