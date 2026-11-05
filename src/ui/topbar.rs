@@ -602,6 +602,26 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     );
                     // Without its label the badge still has to say where
                     // playback went.
+                    // Playback moving to another device catches the eye.
+                    let moved = egui::Id::new("topbar-device-moved");
+                    let was = ui.ctx().data(|data| data.get_temp::<String>(moved));
+                    if was.is_some_and(|was| was != device) {
+                        super::kit::motion::begin(
+                            ui.ctx(),
+                            moved.with("glint"),
+                            super::kit::motion::GLINT * 1.5,
+                        );
+                    }
+                    ui.ctx()
+                        .data_mut(|data| data.insert_temp(moved, device.clone()));
+                    if let Some(t) = super::kit::motion::running(ui.ctx(), moved.with("glint")) {
+                        super::kit::motion::glint(
+                            ui.painter(),
+                            response.rect,
+                            super::kit::motion::unease(t),
+                            palette.text.gamma_multiply(0.25),
+                        );
+                    }
                     let response = if fit.labels {
                         response
                     } else {

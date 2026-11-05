@@ -163,8 +163,8 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                 ui.painter(),
                 ui.clip_rect(),
                 rect.center(),
-                rect.width() * (0.72 + 0.14 * glow),
-                tint.gamma_multiply(if palette.dark { 0.34 } else { 0.22 } * glow),
+                rect.width() * (1.15 + 0.2 * glow),
+                tint.gamma_multiply(if palette.dark { 0.7 } else { 0.4 } * glow),
             );
         }
         let handed_over = super::kit::shared::land(ui, &palette, rect, radius);
