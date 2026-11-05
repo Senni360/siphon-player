@@ -2230,10 +2230,11 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
 mod tests {
     use super::*;
 
-    /// The now-playing cover on the player island, in the 1280 by 800 test
-    /// window: the island is 1120 wide and centred, with the cover at its
-    /// left after 14 points of padding.
-    const NOW_PLAYING_COVER: egui::Pos2 = egui::pos2(124.0, 750.0);
+    /// The cover in the island, wherever the page's panels have put the island.
+    fn now_playing_cover(ctx: &egui::Context) -> egui::Pos2 {
+        let island = crate::ui::player_bar::island_on_screen(ctx).expect("a frame was drawn");
+        egui::pos2(island.left() + 44.0, 750.0)
+    }
     /// Empty island beside that cover: the visualizer's click target.
     #[cfg(feature = "demo")]
     const ISLAND_EMPTY: egui::Pos2 = egui::pos2(86.0, 750.0);
@@ -10272,7 +10273,7 @@ mod tests {
             frame(&ctx, &mut app);
         }
 
-        let start = NOW_PLAYING_COVER;
+        let start = now_playing_cover(&ctx);
         frame_events(
             &ctx,
             &mut app,
@@ -10346,7 +10347,7 @@ mod tests {
 
         // Drag the now-playing song from the bottom-left player, same
         // starting point as the equivalent playlist-insert test.
-        let start = NOW_PLAYING_COVER;
+        let start = now_playing_cover(&ctx);
         frame_events(
             &ctx,
             &mut app,
@@ -10416,7 +10417,7 @@ mod tests {
         // close/save buttons and tab chips.
         let end = egui::pos2(1100.0, 300.0);
 
-        let start = NOW_PLAYING_COVER;
+        let start = now_playing_cover(&ctx);
         frame_events(
             &ctx,
             &mut app,
@@ -11041,7 +11042,7 @@ mod tests {
         let button = bounds_of(button);
 
         let drag_to = |app: &mut App, end: egui::Pos2| {
-            let start = NOW_PLAYING_COVER;
+            let start = now_playing_cover(&ctx);
             frame_events(
                 &ctx,
                 app,
@@ -11132,7 +11133,7 @@ mod tests {
         let target_row = row_rect("Queued 1");
         let end = egui::pos2(target_row.left() + 130.0, target_row.top() + 1.0);
 
-        let start = NOW_PLAYING_COVER;
+        let start = now_playing_cover(&ctx);
         frame_events(
             &ctx,
             &mut app,
@@ -11210,7 +11211,7 @@ mod tests {
         // still appends at the end, ignoring the row it landed on.
         let end = egui::pos2(bounds.x0 as f32 + 130.0, bounds.y0 as f32 + 2.0);
 
-        let start = NOW_PLAYING_COVER;
+        let start = now_playing_cover(&ctx);
         frame_events(
             &ctx,
             &mut app,
@@ -11568,7 +11569,7 @@ mod tests {
             let tree = accessible_frame(&ctx, &mut app, vec![]);
             let target = row(&tree, "Liked Songs").center();
             app.saved.insert("spotify:track:trk0".into(), false);
-            let source = NOW_PLAYING_COVER;
+            let source = now_playing_cover(&ctx);
             accessible_frame(
                 &ctx,
                 &mut app,
@@ -11673,7 +11674,7 @@ mod tests {
                         let row = row_rect(source_item.name());
                         egui::pos2(row.left() + 80.0, row.center().y)
                     } else {
-                        NOW_PLAYING_COVER
+                        now_playing_cover(&ctx)
                     };
                     let row = row_rect(&format!("Destination {}", position.min(3)));
                     let end = egui::pos2(

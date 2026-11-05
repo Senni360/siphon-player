@@ -112,6 +112,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         }
         let mut page = ui.available_rect_before_wrap();
         page.max.y = strip.top();
+        // The island floats over the page, not over the library beside it, unless
+        // that would leave it too narrow for its controls.
+        let strip = if page.width() >= ISLAND_NEEDS {
+            Rect::from_min_max(
+                egui::pos2(page.left(), strip.top()),
+                egui::pos2(page.right(), strip.bottom()),
+            )
+        } else {
+            strip
+        };
         central(app, ui);
         // Now playing grows behind the island, which floats over it as it floats
         // over the page: while the view shows, the island needs a layer above it.
@@ -573,6 +583,9 @@ pub(crate) fn glow_color(tint: Color32) -> Color32 {
 }
 
 /// How long the glow takes to become the next song's colour.
+/// The narrowest page the player island still fits over.
+const ISLAND_NEEDS: f32 = 900.0;
+
 const GLOW_CHANGE: f32 = 0.9;
 
 /// The window behind the cards: black (or the light theme's grey) with

@@ -542,6 +542,12 @@ fn eased_fill(ctx: &egui::Context, panel: Color32, tint: Option<Color32>) -> Col
 /// Where the island was last drawn.
 const ISLAND_RECT_KEY: &str = "player-island-rect";
 
+/// Where the island was last drawn.
+#[cfg(test)]
+pub(crate) fn island_on_screen(ctx: &egui::Context) -> Option<Rect> {
+    ctx.data(|data| data.get_temp::<Rect>(egui::Id::new(ISLAND_RECT_KEY)))
+}
+
 /// Whether the pointer is on the island, so what scrolls under it is not hovered.
 pub(crate) fn pointer_on_island(ctx: &egui::Context) -> bool {
     let island = ctx.data(|data| data.get_temp::<Rect>(egui::Id::new(ISLAND_RECT_KEY)));
