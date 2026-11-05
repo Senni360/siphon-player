@@ -84,6 +84,23 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
         kit_motion::ENTER * 1.5,
         0.1,
     );
+    // As the page rushes past under it, the whole island (its shadow, its glass
+    // and its controls together) settles down a little, and comes back up when
+    // the page rests. It never moves sideways: scrolling only goes up and down.
+    let scrolled = super::scrolled_page(ui.ctx());
+    let was_scrolled = egui::Id::new("island-was-scrolled");
+    let was = ui.ctx().data_mut(|data| {
+        std::mem::replace(
+            data.get_temp_mut_or_insert_with(was_scrolled, || scrolled),
+            scrolled,
+        )
+    });
+    let dip = kit_motion::spring(
+        ui.ctx(),
+        egui::Id::new("island-scroll-dip"),
+        scroll_dip(scrolled - was),
+        kit_motion::FOLLOW,
+    );
     let layer = ui.layer_id();
     let before = kit_motion::mark(ui.ctx(), layer);
     ui.scope_builder(
@@ -92,29 +109,19 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             let island = island_rect(ui.max_rect());
             ui.ctx()
                 .data_mut(|data| data.insert_temp(egui::Id::new(ISLAND_RECT_KEY), island));
-            // As the page rushes past under it the card draws in a little,
-            // and settles out again when the page comes to rest.
-            let scrolled = super::scrolled_page(ui.ctx());
-            let was = ui.ctx().data_mut(|data| {
-                std::mem::replace(
-                    data.get_temp_mut_or_insert_with(ui.id().with("was-scrolled"), || scrolled),
-                    scrolled,
-                )
-            });
-            let squeeze = kit_motion::spring(
-                ui.ctx(),
-                ui.id().with("scroll-squeeze"),
-                ((scrolled - was).abs() / 30.0).min(1.0),
-                kit_motion::FOLLOW,
-            );
-            let card = island.shrink2(vec2(squeeze * 7.0, squeeze * 1.5));
-            super::widgets::paint_shadow(ui, &palette, card, ISLAND_RADIUS);
-            // The page scrolls on behind the card, so what passes under it
+            super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
+            // The page scrolls on behind the island, so what passes under it
             // is frosted before the island's own glass goes on top, and the
             // words stay clear of it. Without the blur the glass is nearly solid.
-            super::kit::glass::backdrop(ui.ctx(), ui.painter(), card, ISLAND_RADIUS, palette.dark);
+            super::kit::glass::backdrop(
+                ui.ctx(),
+                ui.painter(),
+                island,
+                ISLAND_RADIUS,
+                palette.dark,
+            );
             ui.painter()
-                .rect_filled(card, ISLAND_RADIUS, island_glass(&palette, fill));
+                .rect_filled(island, ISLAND_RADIUS, island_glass(&palette, fill));
             // The island is a surface: a press on its empty space never reaches
             // the row scrolling under it.
             ui.interact(
@@ -122,9 +129,9 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
                 ui.id().with("player-bar-surface"),
                 Sense::click_and_drag(),
             );
-            super::glass_sheen(ui, card, ISLAND_RADIUS);
+            super::glass_sheen(ui, island, ISLAND_RADIUS);
             ui.painter().rect_stroke(
-                card,
+                island,
                 ISLAND_RADIUS,
                 egui::Stroke::new(1.0, palette.outline),
                 egui::StrokeKind::Inside,
@@ -135,7 +142,7 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             {
                 kit_motion::edge_light(
                     ui.painter(),
-                    card,
+                    island,
                     ISLAND_RADIUS,
                     pointer,
                     170.0,
@@ -220,7 +227,23 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             extras(app, &mut right_ui, now.as_ref(), transport_right);
         },
     );
-    kit_motion::shift_since(ui.ctx(), layer, before, vec2(0.0, (1.0 - rising) * 64.0));
+    kit_motion::shift_since(
+        ui.ctx(),
+        layer,
+        before,
+        vec2(0.0, (1.0 - rising) * 64.0 + dip),
+    );
+}
+
+/// How far the island settles down when the page moved by `delta` in a frame. A
+/// jump far bigger than scrolling makes is a new page, not movement.
+fn scroll_dip(delta: f32) -> f32 {
+    const MOST: f32 = 3.0;
+    let speed = delta.abs();
+    if speed > 400.0 {
+        return 0.0;
+    }
+    (speed / 30.0).min(1.0) * MOST
 }
 
 /// Draws the chosen spectrum or waveform of the song playing on this
@@ -1839,6 +1862,15 @@ mod player_bar_tint_tests {
         );
         output.textures_delta.clear();
         fill
+    }
+
+    #[test]
+    fn scrolling_only_settles_the_island_a_little() {
+        assert_eq!(scroll_dip(0.0), 0.0);
+        assert!(scroll_dip(15.0) > 0.0);
+        assert_eq!(scroll_dip(-90.0), scroll_dip(90.0));
+        assert!(scroll_dip(90.0) <= 3.0);
+        assert_eq!(scroll_dip(2000.0), 0.0, "a new page is not scrolling");
     }
 
     #[test]

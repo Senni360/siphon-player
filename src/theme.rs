@@ -997,7 +997,20 @@ pub fn pill_group<R>(
     add: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
     use crate::ui::kit::motion;
-    let id = ui.id().with("pill-group");
+    // Several groups can share a parent, as Search's two rows do: each has its
+    // own pill, by its order among them.
+    let frame = ui.ctx().cumulative_frame_nr();
+    let count = ui.id().with("pill-groups-this-frame");
+    let nth = ui.ctx().data_mut(|data| {
+        let entry = data.get_temp_mut_or_insert_with(count, || (frame, 0_u32));
+        if entry.0 != frame {
+            *entry = (frame, 0);
+        }
+        entry.1 += 1;
+        entry.1
+    });
+    let id = ui.id().with(("pill-group", nth));
+    let origin = ui.max_rect().min;
     let slot = ui.painter().add(egui::Shape::Noop);
     ui.ctx()
         .data_mut(|data| data.insert_temp(pill_group_key(), PillGroup::default()));
@@ -1009,9 +1022,11 @@ pub fn pill_group<R>(
         let ctx = ui.ctx();
         let glide =
             |name: &str, target: f32| motion::spring(ctx, id.with(name), target, motion::LIVELY);
-        let left = glide("left", selected.left());
-        let right = glide("right", selected.right());
-        let top = glide("top", selected.top());
+        // Measured from the row, not the window, so scrolling carries the pill
+        // along exactly: only a change of chip moves it.
+        let left = origin.x + glide("left", selected.left() - origin.x);
+        let right = origin.x + glide("right", selected.right() - origin.x);
+        let top = origin.y + glide("top", selected.top() - origin.y);
         let rect = egui::Rect::from_min_size(
             egui::pos2(left, top),
             egui::vec2(right - left, selected.height()),

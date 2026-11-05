@@ -398,7 +398,9 @@ pub struct Settings {
     /// Windows and X11: keep a taskbar button while the Winamp window is visible.
     pub winamp_show_taskbar: bool,
     /// Windows and Linux: draw Siphon's own title bar and window buttons
-    /// instead of the desktop frame.
+    /// instead of the desktop frame. On by default; a saved choice is kept.
+    // A settings file holds every field, so files saved before this default keep
+    // the off they were given.
     pub custom_titlebar: bool,
     /// Skin file or folder name. `None` selects the built-in skin.
     pub skin: Option<String>,
@@ -540,7 +542,7 @@ impl Default for Settings {
             zoom: 1.0,
             winamp_window: false,
             winamp_show_taskbar: true,
-            custom_titlebar: false,
+            custom_titlebar: true,
             skin: None,
             random_skin: false,
             skin_scale: None,

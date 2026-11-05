@@ -6521,3 +6521,61 @@ mod tests {
         assert_eq!(meta.options.mipmap_mode, Some(egui::TextureFilter::Linear));
     }
 }
+
+#[cfg(test)]
+mod pill_tests {
+    use super::*;
+
+    /// The pills drawn this frame, as filled rects in the text colour.
+    fn pills(palette: &Palette, shapes: &[egui::epaint::ClippedShape]) -> Vec<Rect> {
+        shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Rect(rect) if rect.fill == palette.text => Some(rect.rect),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Search draws two rows of chips in one parent. Each row keeps its own pill
+    /// under its own chip, and scrolling the page carries both along exactly: a
+    /// pill measured from the window would trail behind, and two sharing one
+    /// place would chase each other.
+    #[test]
+    fn each_row_of_chips_keeps_its_pill_and_scrolls_with_it() {
+        let ctx = egui::Context::default();
+        theme::install(&ctx);
+        let palette = Palette::dark();
+        let frame = |top: f32| {
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let area = Rect::from_min_size(pos2(0.0, top), vec2(800.0, 100.0));
+                let mut child = ui.new_child(UiBuilder::new().max_rect(area));
+                child.horizontal_wrapped(|ui| {
+                    theme::pill_group(ui, &palette, |ui| {
+                        theme::soft_button(ui, &palette, None, "All", true);
+                        theme::soft_button(ui, &palette, None, "Spotify", false);
+                    });
+                    theme::pill_group(ui, &palette, |ui| {
+                        theme::soft_button(ui, &palette, None, "Songs", false);
+                        theme::soft_button(ui, &palette, None, "Artists", true);
+                    });
+                });
+            });
+            output.textures_delta.clear();
+            pills(&palette, &output.shapes)
+        };
+        frame(100.0);
+        let at_rest = frame(100.0);
+        assert_eq!(at_rest.len(), 2, "one pill for each row: {at_rest:?}");
+        assert!(at_rest[1].left() > at_rest[0].right(), "{at_rest:?}");
+        let scrolled = frame(40.0);
+        for (before, after) in at_rest.iter().zip(&scrolled) {
+            assert_eq!(
+                after.top(),
+                before.top() - 60.0,
+                "the pill trailed the page"
+            );
+            assert_eq!(after.left(), before.left());
+        }
+    }
+}
