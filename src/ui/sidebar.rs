@@ -2053,6 +2053,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             // are laid out, so it can glide from the row that was open.
             let highlight_slot = ui.painter().add(egui::Shape::Noop);
             let mut active_rect = None;
+            super::widgets::wave_on_change(ui.ctx(), format!("{filter:?} {sort:?}"));
             super::widgets::virtual_rows(ui, entries.len(), row_height, |ui, index| {
                 let entry = &entries[index];
                 if !app.settings.sidebar_compact
@@ -2282,9 +2283,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                             pos2(rect.right() - 16.0, rect.center().y),
                             Vec2::splat(16.0),
                         );
-                        Icon::Volume2
-                            .image(palette.accent, 16.0)
-                            .paint_at(ui, icon_rect);
+                        super::kit::motion::equalizer(ui, icon_rect, palette.accent);
                     } else if pinned {
                         let icon_rect = Rect::from_center_size(
                             pos2(rect.right() - 16.0, rect.center().y),

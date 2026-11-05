@@ -419,6 +419,7 @@ pub fn virtual_rows(
     }
     // One light serves the whole list and glides from row to row after the
     // pointer. It is painted behind them, in a place kept for it here.
+    let playing_slot = ui.painter().add(egui::Shape::Noop);
     let glide_slot = ui.painter().add(egui::Shape::Noop);
     let outer_glide = ui.ctx().data_mut(|data| {
         let outer = data.remove_temp::<RowGlide>(row_glide_key());
@@ -434,10 +435,16 @@ pub fn virtual_rows(
     } else {
         0.0
     };
+    let wave = ui
+        .ctx()
+        .data_mut(|data| data.remove_temp::<WaveStart>(wave_key()))
+        .map(|wave| wave.0);
     for index in first..last {
+        let top = start_y + index as f32 * row_height;
         let t = if entering {
-            let top = start_y + index as f32 * row_height;
             super::entering(ui.ctx(), late + entrance_delay(top, clip))
+        } else if let Some(wave) = wave {
+            wave_progress(ui.ctx(), wave, entrance_delay(top, clip))
         } else {
             1.0
         };
@@ -448,7 +455,8 @@ pub fn virtual_rows(
             ui.set_opacity(opacity);
             continue;
         }
-        ui.multiply_opacity(t);
+        // Never quite nothing: egui leaves out what is wholly transparent.
+        ui.multiply_opacity(t.max(0.02));
         let layer = ui.layer_id();
         let start = super::kit::motion::mark(ui.ctx(), layer);
         row(ui, index);
@@ -465,10 +473,49 @@ pub fn virtual_rows(
         glide
     });
     paint_row_glide(ui, glide_slot, glide_id, glide, start_y);
+    paint_playing_light(ui, playing_slot, glide_id, glide.playing, start_y);
     if last < count {
         ui.allocate_space(vec2(width, (count - last) as f32 * row_height));
     }
     ui.spacing_mut().item_spacing = previous_spacing;
+}
+
+/// When a list drawn outside a page's entrance last changed its contents.
+#[derive(Clone, Copy, Default)]
+struct WaveStart(f64);
+
+fn wave_key() -> egui::Id {
+    egui::Id::new("rows-wave")
+}
+
+/// Brings the next list in as a wave whenever `key` (what it shows) changes.
+pub(crate) fn wave_on_change(ctx: &egui::Context, key: String) {
+    let id = egui::Id::new(("rows-wave-key", ctx.viewport_id()));
+    let before = ctx.data(|data| data.get_temp::<String>(id));
+    let now = ctx.input(|input| input.time);
+    ctx.data_mut(|data| {
+        if before.is_some_and(|before| before != key) {
+            data.insert_temp(id.with("at"), now);
+        }
+        data.insert_temp(id, key);
+        if let Some(at) = data.get_temp::<f64>(id.with("at")) {
+            data.insert_temp(wave_key(), WaveStart(at));
+        }
+    });
+}
+
+fn wave_progress(ctx: &egui::Context, started: f64, delay: f32) -> f32 {
+    use super::kit::motion;
+    let length = crate::motion::seconds(ctx, motion::ENTER);
+    if length <= 0.0 {
+        return 1.0;
+    }
+    let elapsed = (ctx.input(|input| input.time) - started) as f32 - delay;
+    let t = motion::ease(elapsed / length);
+    if t < 1.0 {
+        ctx.request_repaint();
+    }
+    t
 }
 
 /// A name for this list that stays the same from frame to frame, by its order
@@ -511,6 +558,8 @@ struct RowGlide {
     /// The row under the pointer or the keyboard.
     target: Option<Rect>,
     color: Option<Color32>,
+    /// The row of the song that is playing, while it is on screen.
+    playing: Option<Rect>,
 }
 
 fn row_glide_key() -> egui::Id {
@@ -529,15 +578,85 @@ pub(crate) fn claim_row_glide(ctx: &egui::Context, rect: Rect, color: Color32) -
         if data.get_temp::<RowGlide>(row_glide_key()).is_none() {
             return false;
         }
-        data.insert_temp(
-            row_glide_key(),
-            RowGlide {
-                target: Some(rect),
-                color: Some(color),
-            },
-        );
+        let glide = data.get_temp_mut_or_default::<RowGlide>(row_glide_key());
+        glide.target = Some(rect);
+        glide.color = Some(color);
         true
     })
+}
+
+/// Marks `rect` as the playing song's row, if a list is being drawn.
+fn claim_playing_row(ctx: &egui::Context, rect: Rect) {
+    ctx.data_mut(|data| {
+        if data.get_temp::<RowGlide>(row_glide_key()).is_some() {
+            data.get_temp_mut_or_default::<RowGlide>(row_glide_key())
+                .playing = Some(rect);
+        }
+    });
+}
+
+/// A faint band and an accent stroke on the playing song's row. When the song
+/// changes they travel down the list to the next song's row.
+fn paint_playing_light(
+    ui: &Ui,
+    slot: egui::layers::ShapeIdx,
+    id: egui::Id,
+    playing: Option<Rect>,
+    start_y: f32,
+) {
+    use super::kit::motion;
+    let ctx = ui.ctx();
+    let id = id.with("playing");
+    let lit = motion::toward(ctx, id.with("lit"), playing.is_some(), motion::POPOVER);
+    if let Some(rect) = playing {
+        ctx.data_mut(|data| {
+            data.insert_temp(id.with("edges"), (rect.left(), rect.right(), rect.height()));
+            data.insert_temp(id.with("aim"), rect.top() - start_y);
+        });
+        if lit < 0.02 {
+            motion::spring_jump(ctx, id.with("top"), rect.top() - start_y);
+        }
+    }
+    if lit <= 0.0 {
+        return;
+    }
+    let edges = ctx.data(|data| data.get_temp::<(f32, f32, f32)>(id.with("edges")));
+    let aim = ctx.data(|data| data.get_temp::<f32>(id.with("aim")));
+    let (Some((left, right, height)), Some(aim)) = (edges, aim) else {
+        return;
+    };
+    let top = start_y
+        + motion::spring(
+            ctx,
+            id.with("top"),
+            aim,
+            motion::Spring {
+                period: 0.4,
+                bounce: 0.1,
+            },
+        );
+    let rect = Rect::from_min_size(pos2(left, top), vec2(right - left, height));
+    let accent = ui.visuals().selection.bg_fill;
+    ui.painter().set(
+        slot,
+        egui::Shape::Vec(vec![
+            egui::epaint::RectShape::filled(
+                rect,
+                CornerRadius::same(6),
+                accent.gamma_multiply(0.09 * lit),
+            )
+            .into(),
+            egui::epaint::RectShape::filled(
+                Rect::from_center_size(
+                    pos2(rect.left() + 1.5, rect.center().y),
+                    vec2(3.0, (height - 18.0).max(8.0)),
+                ),
+                CornerRadius::same(2),
+                accent.gamma_multiply(lit),
+            )
+            .into(),
+        ]),
+    );
 }
 
 /// Paints a list's light where its row is, gliding from where it was. It is kept
@@ -2203,6 +2322,9 @@ fn track_row_contents(
             .is_some_and(|uri| uri == row.item.uri());
     let pending = played_copy && app.play_pending(row.item.uri());
     let playing = is_current && app.believed_playing();
+    if is_current {
+        claim_playing_row(ui.ctx(), rect);
+    }
     let hovered = ui.is_enabled() && (super::pointer_over(ui, rect) || response.has_focus());
     if row.picked {
         // Keep the existing translucent selection, using a neutral palette
@@ -2262,7 +2384,11 @@ fn track_row_contents(
             };
             theme::paint_icon(ui, icon, cell, 14.0, palette.text);
         } else if playing {
-            theme::paint_icon(ui, Icon::AudioLines, cell, 16.0, palette.accent);
+            super::kit::motion::equalizer(
+                ui,
+                Rect::from_center_size(cell.center(), Vec2::splat(16.0)),
+                palette.accent,
+            );
         } else {
             let color = if is_current {
                 palette.accent
@@ -2328,7 +2454,11 @@ fn track_row_contents(
                 theme::paint_icon(ui, icon, cover_rect, 16.0, Color32::WHITE);
             } else if playing {
                 scrim(110);
-                theme::paint_icon(ui, Icon::AudioLines, cover_rect, 16.0, palette.accent);
+                super::kit::motion::equalizer(
+                    ui,
+                    Rect::from_center_size(cover_rect.center(), Vec2::splat(18.0)),
+                    palette.accent,
+                );
             }
         }
         x += cols.cover;
@@ -2937,12 +3067,24 @@ pub fn drag_ghost(ctx: &egui::Context, palette: &Palette, locale: Locale) {
     let Some(pos) = ctx.pointer_latest_pos() else {
         return;
     };
+    // Picked up, the chip comes up out of the row and trails the pointer a little.
+    use super::kit::motion;
+    let id = egui::Id::new("drag-ghost-motion");
+    let lifted = motion::opening(ctx, id, motion::POPOVER);
+    if lifted < 0.02 {
+        motion::spring_jump(ctx, id.with("x"), pos.x);
+        motion::spring_jump(ctx, id.with("y"), pos.y + 10.0);
+    }
+    let trail = pos2(
+        motion::spring(ctx, id.with("x"), pos.x, motion::FOLLOW),
+        motion::spring(ctx, id.with("y"), pos.y, motion::FOLLOW),
+    );
     egui::Area::new(egui::Id::new("drag-ghost"))
         .order(egui::Order::Tooltip)
         .interactable(false)
-        .fixed_pos(pos + vec2(16.0, 6.0))
+        .fixed_pos(trail + vec2(16.0, 6.0))
         .show(ctx, |ui| {
-            ui.set_opacity(0.9);
+            ui.set_opacity(0.9 * lifted.max(0.02));
             egui::Frame::new()
                 .fill(palette.overlay)
                 .stroke(Stroke::new(1.0, palette.outline))
@@ -3865,13 +4007,24 @@ pub fn error_row(ui: &mut Ui, app: &mut App, message: &str, retry: Option<Page>)
 }
 
 pub fn empty_state(ui: &mut Ui, palette: &Palette, icon: Icon, title: &str, body: &str) {
+    use super::kit::motion;
     ui.add_space(48.0);
+    let id = egui::Id::new(("empty-state", title));
+    let t = motion::opening(ui.ctx(), id, motion::ENTER);
+    let settled = t.max(0.02);
     ui.vertical_centered(|ui| {
-        theme::icon(ui, icon, 40.0, palette.dim);
+        // The icon drops in with a little bounce, the words a beat after it.
+        ui.multiply_opacity(settled);
+        let size = motion::spring(ui.ctx(), id.with("icon"), 40.0, motion::LIVELY);
+        let (slot, _) = ui.allocate_exact_size(Vec2::splat(40.0), Sense::hover());
+        theme::paint_icon(ui, icon, slot, size * (0.7 + 0.3 * t), palette.dim);
         ui.add_space(8.0);
+        let layer = ui.layer_id();
+        let start = motion::mark(ui.ctx(), layer);
         theme::text(ui, title, theme::semibold(16.0), palette.text);
         ui.add_space(2.0);
         theme::text(ui, body, theme::regular(13.5), palette.secondary);
+        motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 10.0));
     });
 }
 

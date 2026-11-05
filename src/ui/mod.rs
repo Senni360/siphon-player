@@ -310,6 +310,16 @@ fn launch_flights(app: &App, ctx: &Context) {
             Action::Friends(crate::friends::Action::Share(post)) => {
                 kit::flight::launch(ctx, post.artwork_url.clone(), from, kit::flight::GROUP);
             }
+            Action::PlayNext { items } => {
+                let art = items
+                    .first()
+                    .and_then(|item| item.image(64))
+                    .map(str::to_owned);
+                kit::flight::launch(ctx, art, from, kit::flight::QUEUE);
+            }
+            Action::AddToQueue { .. } | Action::QueueMany { .. } => {
+                kit::flight::launch(ctx, None, from, kit::flight::QUEUE);
+            }
             _ => {}
         }
     }
@@ -781,7 +791,20 @@ fn back_to_top_id() -> Id {
     Id::new("page-back-to-top")
 }
 
-/// A long way down a page, a small round button drops in at its top to go back.
+/// What a page's big cover and title are, for the pill that stands for them once
+/// they have scrolled away.
+pub(crate) fn remember_hero(ctx: &Context, title: &str, art: Option<&str>) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|data| {
+        data.insert_temp(
+            Id::new("page-hero"),
+            (frame, title.to_string(), art.map(str::to_string)),
+        );
+    });
+}
+
+/// A long way down a page, a frosted pill drops in at its top with the page's
+/// cover and title; it says where you are, and goes back to the top when pressed.
 fn back_to_top(
     ui: &mut egui::Ui,
     view: Rect,
@@ -789,43 +812,77 @@ fn back_to_top(
     palette: &theme::Palette,
     locale: crate::i18n::Locale,
 ) {
-    let id = back_to_top_id().with("button");
+    let ctx = ui.ctx().clone();
+    let id = back_to_top_id().with("pill");
+    let frame = ctx.cumulative_frame_nr();
+    let hero = ctx
+        .data(|data| data.get_temp::<(u64, String, Option<String>)>(Id::new("page-hero")))
+        .filter(|(seen, _, _)| frame.saturating_sub(*seen) <= 1);
+    let wanted = scrolled > if hero.is_some() { 320.0 } else { 700.0 };
     let shown = kit::motion::spring(
-        ui.ctx(),
+        &ctx,
         id.with("shown"),
-        if scrolled > 700.0 { 1.0 } else { 0.0 },
+        if wanted { 1.0 } else { 0.0 },
         kit::motion::LIVELY,
     );
     if shown < 0.01 {
         return;
     }
-    let center = egui::pos2(view.center().x, view.top() + 24.0 - (1.0 - shown) * 44.0);
-    let rect = Rect::from_center_size(center, egui::Vec2::splat(36.0));
-    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
-        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
-    ));
-    child.set_opacity(shown.clamp(0.0, 1.0));
-    widgets::paint_shadow(&child, palette, rect, 18.0);
-    child.painter().circle(
-        center,
-        18.0,
-        palette.overlay,
-        Stroke::new(1.0, palette.outline),
-    );
+    let title = hero.as_ref().map(|(_, title, _)| title.as_str());
+    let galley = title
+        .map(|title| widgets::ellipsized(ui, title, theme::medium(13.0), palette.text, 280.0, 1));
+    let text = galley
+        .as_ref()
+        .map_or(0.0, |galley| galley.size().x + 34.0 + 10.0);
+    let size = vec2(text + 36.0, 36.0);
+    let center = egui::pos2(view.center().x, view.top() + 26.0 - (1.0 - shown) * 48.0);
+    let rect = Rect::from_center_size(center, size);
     let label = crate::i18n::gettext(locale, "Back to top");
-    if theme::icon_button(
-        &mut child,
-        Icon::ChevronUp,
-        18.0,
-        palette.text,
-        palette.text,
-        &label,
-    )
-    .clicked()
-    {
-        ui.ctx()
-            .data_mut(|data| data.insert_temp(back_to_top_id(), true));
+    let response = ui.interact(rect, id, egui::Sense::click());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label.as_ref()));
+    if response.clicked() {
+        ctx.data_mut(|data| data.insert_temp(back_to_top_id(), true));
     }
+    let lit = kit::motion::toward(
+        &ctx,
+        id.with("lit"),
+        response.hovered(),
+        kit::motion::FEEDBACK,
+    );
+    let rect = rect.expand(lit * 1.5);
+    let radius = rect.height() / 2.0;
+    let opacity = shown.clamp(0.0, 1.0);
+    widgets::paint_shadow(ui, palette, rect, radius);
+    kit::glass::backdrop(&ctx, ui.painter(), rect, radius, palette.dark);
+    ui.painter().rect(
+        rect,
+        radius,
+        glass_fill(palette, palette.panel).gamma_multiply(opacity),
+        Stroke::new(1.0, palette.outline.gamma_multiply(opacity)),
+        egui::StrokeKind::Inside,
+    );
+    let mut x = rect.left() + 6.0;
+    if let (Some(galley), Some((_, _, art))) = (galley, hero.as_ref()) {
+        let cover = Rect::from_min_size(
+            egui::pos2(x, rect.center().y - 12.0),
+            egui::Vec2::splat(24.0),
+        );
+        widgets::paint_cover(ui, palette, art.as_deref(), cover, 12.0, Icon::Music, None);
+        x = cover.right() + 10.0;
+        let at = egui::pos2(x, rect.center().y - galley.size().y / 2.0);
+        x += galley.size().x;
+        ui.painter().galley(at, galley, palette.text);
+    }
+    let arrow = Rect::from_center_size(
+        egui::pos2(rect.right() - 18.0, rect.center().y - lit * 1.5),
+        egui::Vec2::splat(16.0),
+    );
+    let _ = x;
+    Icon::ChevronUp
+        .image(palette.text, 16.0)
+        .paint_at(ui, arrow);
+    response.on_hover_text(label);
 }
 
 fn page_opened_id() -> Id {
@@ -1029,6 +1086,12 @@ fn banner(
     use crate::i18n::gettext;
     let palette = app.palette;
     let locale = app.locale;
+    // A banner slides down from under the bar when it comes.
+    let slid = kit::motion::opening(ui.ctx(), Id::new(("banner", title)), kit::motion::ENTER);
+    let layer = ui.layer_id();
+    let start = kit::motion::mark(ui.ctx(), layer);
+    let opacity = ui.opacity();
+    ui.multiply_opacity(slid.max(0.02));
     Frame::new()
         .outer_margin(Margin {
             left: widgets::PAGE_PADDING as i8,
@@ -1090,6 +1153,8 @@ fn banner(
                 });
             });
         });
+    ui.set_opacity(opacity);
+    kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (slid - 1.0) * 14.0));
 }
 
 /// The gradient behind a page's header, top to bottom: a custom palette's

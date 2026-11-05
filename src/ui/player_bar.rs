@@ -769,6 +769,8 @@ fn queue_tiles(
         pos2(region.right(), region.center().y + TILE_SIZE / 2.0 + 4.0),
     );
     let response = ui.interact(area, egui::Id::new("island-queue-tiles"), Sense::click());
+    super::kit::flight::target(ui.ctx(), super::kit::flight::QUEUE, area);
+    super::kit::flight::paint_landing(ui, &palette, super::kit::flight::QUEUE, area, 9.0);
     let spread = ui.ctx().animate_bool_with_time(
         egui::Id::new("island-queue-spread"),
         response.hovered(),

@@ -17,6 +17,8 @@ pub const LANDING: f32 = 0.45;
 
 /// The key flights to the Group row use.
 pub const GROUP: &str = "group";
+/// The queue's tiles on the player.
+pub const QUEUE: &str = "queue";
 
 #[derive(Clone, Debug)]
 struct Flight {

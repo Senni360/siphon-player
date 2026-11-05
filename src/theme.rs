@@ -677,7 +677,38 @@ pub fn icon_button(
         );
         use crate::ui::kit::motion;
         let gesture = icon_gesture(icon);
-        if gesture == motion::Gesture::default() {
+        // A control that changes its icon (a heart filling, volume muted) pops
+        // the new one up through the old.
+        let swap_id = response.id.with("swap");
+        let was = ui.ctx().data(|data| data.get_temp::<Icon>(swap_id));
+        if was.is_some_and(|was| was != icon) {
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(swap_id.with("from"), was));
+            motion::begin(ui.ctx(), swap_id.with("run"), motion::POP);
+        }
+        ui.ctx().data_mut(|data| data.insert_temp(swap_id, icon));
+        let swapping = motion::running(ui.ctx(), swap_id.with("run"));
+        if let Some(t) = swapping {
+            if let Some(from) = ui
+                .ctx()
+                .data(|data| data.get_temp::<Icon>(swap_id.with("from")))
+            {
+                paint_icon(
+                    ui,
+                    from,
+                    rect,
+                    size * (1.0 - 0.5 * t),
+                    tint.gamma_multiply(1.0 - t),
+                );
+            }
+            paint_icon(
+                ui,
+                icon,
+                rect,
+                size * (0.5 + 0.5 * t) * motion::pop(t),
+                tint.gamma_multiply(t),
+            );
+        } else if gesture == motion::Gesture::default() {
             paint_icon(ui, icon, rect, size * scale, tint);
         } else {
             let hover = motion::spring(
@@ -1036,8 +1067,17 @@ fn soft_button_inner(
         let rest = crate::ui::blend(palette.surface, palette.surface_hover, lit);
         let fill = crate::ui::blend(rest, palette.text, on);
         let color = crate::ui::blend(palette.text, palette.window, on);
-        let shown =
-            egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * pressed));
+        let was_on = response.id.with("was-on");
+        if ui.ctx().data(|data| data.get_temp::<bool>(was_on)) == Some(false) && active {
+            motion::begin(ui.ctx(), was_on.with("pop"), motion::POP);
+        }
+        ui.ctx().data_mut(|data| data.insert_temp(was_on, active));
+        let popped = motion::running(ui.ctx(), was_on.with("pop"))
+            .map_or(0.0, |t| (motion::pop(t) - 1.0) * 0.18);
+        let shown = egui::Rect::from_center_size(
+            rect.center(),
+            rect.size() * (1.0 - 0.03 * pressed + popped),
+        );
         ui.painter().rect_filled(shown, shown.height() / 2.0, fill);
         motion::ripple(ui, &response, shown, color);
         let mut x = rect.left() + padding.x;
@@ -1208,10 +1248,21 @@ pub fn link(
     response
         .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Link, ui.is_enabled(), &text));
     focus_ring(ui, &response);
-    if response.hovered() {
+    // The underline draws out from the start of the words, and back when left.
+    let drawn = crate::ui::kit::motion::toward(
+        ui.ctx(),
+        response.id.with("underline"),
+        response.hovered(),
+        crate::ui::kit::motion::POPOVER,
+    );
+    if drawn > 0.0 {
         let rect = response.rect;
-        ui.painter()
-            .hline(rect.x_range(), rect.bottom() - 1.0, Stroke::new(1.0, color));
+        let end = rect.left() + rect.width() * drawn;
+        ui.painter().hline(
+            rect.left()..=end,
+            rect.bottom() - 1.0,
+            Stroke::new(1.0, color),
+        );
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

@@ -98,6 +98,7 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
         .images
         .thumbnail
         .and_then(|uri| app.softened_covers.texture(ui.ctx(), &art, uri));
+    super::remember_hero(ui.ctx(), hero.title, hero.images.image);
     ui.add_space(12.0);
     let cover_size = if ui.available_width() > 720.0 {
         HERO_ART

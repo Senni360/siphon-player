@@ -193,6 +193,35 @@ pub fn shift_since(
     });
 }
 
+/// Small bars dancing in `rect`: this is the song that is playing. They only ask
+/// for a few frames a second, and rest when less motion is asked for.
+pub fn equalizer(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
+    const BARS: [(f32, f32); 4] = [(9.1, 0.0), (6.7, 1.7), (11.3, 3.1), (7.9, 4.6)];
+    let moving = crate::motion::seconds(ui.ctx(), 1.0) > 0.0;
+    let clock = if moving {
+        ui.input(|input| input.time) as f32
+    } else {
+        0.6
+    };
+    let bar = rect.width() * 0.16;
+    let gap = rect.width() * 0.09;
+    let total = bar * BARS.len() as f32 + gap * (BARS.len() as f32 - 1.0);
+    let mut x = rect.center().x - total / 2.0;
+    for (speed, phase) in BARS {
+        let swing = ((clock * speed + phase).sin() * 0.5 + 0.5) * 0.65 + 0.35;
+        let height = rect.height() * 0.8 * swing;
+        let shape = egui::Rect::from_min_max(
+            egui::pos2(x, rect.center().y + rect.height() * 0.4 - height),
+            egui::pos2(x + bar, rect.center().y + rect.height() * 0.4),
+        );
+        ui.painter().rect_filled(shape, bar / 2.0, color);
+        x += bar + gap;
+    }
+    if moving {
+        crate::theme::repaint_after(ui.ctx(), std::time::Duration::from_millis(66));
+    }
+}
+
 /// A ring opening out of `center` as `t` goes from 0 to 1.
 pub fn ring(
     painter: &egui::Painter,
