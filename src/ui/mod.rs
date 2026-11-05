@@ -463,6 +463,11 @@ pub(crate) fn glass_fill(palette: &theme::Palette, fill: Color32) -> Color32 {
     Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha)
 }
 
+/// Whether the pointer is on `rect` and not on the player floating over it.
+pub(crate) fn pointer_over(ui: &egui::Ui, rect: Rect) -> bool {
+    ui.rect_contains_pointer(rect) && !player_bar::pointer_on_island(ui.ctx())
+}
+
 /// The light catching a glass card's top edge: a bright hairline and a
 /// faint sheen just under it.
 pub(crate) fn glass_sheen(ui: &egui::Ui, rect: Rect, radius: f32) {

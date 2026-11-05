@@ -287,7 +287,7 @@ pub fn episode_row(
     if !ui.is_rect_visible(rect) {
         return;
     }
-    let hovered = ui.rect_contains_pointer(rect);
+    let hovered = super::pointer_over(ui, rect);
     if hovered {
         ui.painter().rect_filled(
             rect,

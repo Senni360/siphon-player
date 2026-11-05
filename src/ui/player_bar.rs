@@ -81,6 +81,8 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
         UiBuilder::new().id_salt("player-bar").max_rect(strip),
         |ui| {
             let island = island_rect(ui.max_rect());
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(egui::Id::new(ISLAND_RECT_KEY), island));
             super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
             // The page scrolls on behind the island, so what passes under it
             // is frosted before the island's own glass goes on top, and the
@@ -108,6 +110,19 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
                 egui::Stroke::new(1.0, palette.outline),
                 egui::StrokeKind::Inside,
             );
+            // The edge nearest the pointer catches the light.
+            if let Some((pointer, strength)) =
+                kit_motion::pointer_light(ui, ui.id().with("island-light"), island)
+            {
+                kit_motion::edge_light(
+                    ui.painter(),
+                    island,
+                    ISLAND_RADIUS,
+                    pointer,
+                    170.0,
+                    palette.text.gamma_multiply(0.45 * strength),
+                );
+            }
             let rect = island.shrink2(vec2(14.0, 0.0));
             let now = app.now_playing();
             // The whole island, behind everything else.
@@ -458,6 +473,18 @@ fn eased_fill(ctx: &egui::Context, panel: Color32, tint: Option<Color32>) -> Col
     } else {
         Color32::from_rgba_unmultiplied(eased[0], eased[1], eased[2], target.a())
     }
+}
+
+/// Where the island was last drawn.
+const ISLAND_RECT_KEY: &str = "player-island-rect";
+
+/// Whether the pointer is on the island, so what scrolls under it is not hovered.
+pub(crate) fn pointer_on_island(ctx: &egui::Context) -> bool {
+    let island = ctx.data(|data| data.get_temp::<Rect>(egui::Id::new(ISLAND_RECT_KEY)));
+    let pointer = ctx.input(|input| input.pointer.hover_pos());
+    island
+        .zip(pointer)
+        .is_some_and(|(island, pos)| island.contains(pos))
 }
 
 /// The island's fill: glass like the other cards over the frosted backdrop, and

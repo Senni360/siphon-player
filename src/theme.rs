@@ -610,13 +610,21 @@ pub fn icon_button(
             motion,
         );
         let tint = crate::ui::blend(color, hover, lit);
-        let press = crate::ui::kit::motion::toward(
+        // Pointing lifts the icon a little and pressing sinks it, both on a
+        // spring, so it bounces back into place when released.
+        let scale = crate::ui::kit::motion::spring(
             ui.ctx(),
-            response.id.with("press"),
-            response.is_pointer_button_down_on(),
-            crate::ui::kit::motion::PRESS,
+            response.id.with("scale"),
+            if response.is_pointer_button_down_on() {
+                0.84
+            } else if response.hovered() {
+                1.1
+            } else {
+                1.0
+            },
+            crate::ui::kit::motion::LIVELY,
         );
-        paint_icon(ui, icon, rect, size * (1.0 - 0.1 * press), tint);
+        paint_icon(ui, icon, rect, size * scale, tint);
     }
     focus_ring(ui, &response);
     if tooltip.is_empty() {
@@ -701,6 +709,27 @@ pub fn circle_button(
         );
         let radius = diameter / 2.0 * (1.0 + 0.05 * hovered - 0.06 * pressed);
         let fill = crate::ui::blend(fill, fill_hover, hovered);
+        // The disc leans toward the pointer, as if drawn to it.
+        let pull = response
+            .hover_pos()
+            .map_or(Vec2::ZERO, |pos| (pos - rect.center()) * 0.14);
+        let drift = Vec2::new(
+            motion::spring(ctx, response.id.with("drift-x"), pull.x, motion::LIVELY),
+            motion::spring(ctx, response.id.with("drift-y"), pull.y, motion::LIVELY),
+        );
+        let rect = rect.translate(drift);
+        // A press sends a ring out from the disc.
+        let ring = response.id.with("ring");
+        if response.clicked() {
+            motion::begin(ctx, ring, motion::RIPPLE);
+        }
+        if let Some(t) = motion::running(ctx, ring) {
+            ui.painter().circle_stroke(
+                rect.center(),
+                diameter / 2.0 + 12.0 * t,
+                Stroke::new(2.0 * (1.0 - t), fill.gamma_multiply(0.5 * (1.0 - t))),
+            );
+        }
         ui.painter().circle_filled(rect.center(), radius, fill);
         // A new icon (Play becoming Pause) grows in while the old one
         // shrinks away, so the change reads as the press taking effect.
@@ -810,6 +839,14 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
         if primary {
             let fill = crate::ui::blend(palette.accent, palette.accent_hover, lit);
             ui.painter().rect_filled(shown, radius, fill);
+            if let Some(t) = motion::glint_on_hover(ui.ctx(), response.id, response.hovered()) {
+                let shine = if palette.dark {
+                    Color32::from_black_alpha(26)
+                } else {
+                    Color32::from_white_alpha(56)
+                };
+                motion::glint(ui.painter(), shown.shrink(1.0), t, shine);
+            }
         } else {
             let stroke_color = crate::ui::blend(palette.dim, palette.text, lit);
             ui.painter().rect_stroke(
@@ -917,6 +954,7 @@ fn soft_button_inner(
         let shown =
             egui::Rect::from_center_size(rect.center(), rect.size() * (1.0 - 0.03 * pressed));
         ui.painter().rect_filled(shown, shown.height() / 2.0, fill);
+        motion::ripple(ui, &response, shown, color);
         let mut x = rect.left() + padding.x;
         if let Some(icon) = icon {
             let icon = if dismiss.is_some() && hovered {

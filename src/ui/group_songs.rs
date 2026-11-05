@@ -409,7 +409,7 @@ fn row(
     let uri = song.uri();
     let playing = app.now_playing().is_some_and(|now| now.uri == uri);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
-    let inside = ui.rect_contains_pointer(rect);
+    let inside = super::pointer_over(ui, rect);
     if inside || playing {
         ui.painter().rect(
             rect,

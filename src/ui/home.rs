@@ -229,7 +229,7 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                 let (rect, response) =
                     ui.allocate_exact_size(vec2(tile_width, TILE_HEIGHT), Sense::click());
                 if ui.is_rect_visible(rect) {
-                    let hovered = ui.rect_contains_pointer(rect);
+                    let hovered = super::pointer_over(ui, rect);
                     let fill = if hovered {
                         palette.surface_hover
                     } else {

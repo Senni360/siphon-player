@@ -372,6 +372,7 @@ pub fn virtual_rows(
     if count == 0 {
         return;
     }
+    let glide_id = ui.next_auto_id().with("row-glide");
     let previous_spacing = ui.spacing().item_spacing;
     ui.spacing_mut().item_spacing.y = 0.0;
     let clip = ui.clip_rect();
@@ -385,6 +386,14 @@ pub fn virtual_rows(
     if first > 0 {
         ui.allocate_space(vec2(width, first as f32 * row_height));
     }
+    // One light serves the whole list and glides from row to row after the
+    // pointer. It is painted behind them, in a place kept for it here.
+    let glide_slot = ui.painter().add(egui::Shape::Noop);
+    let outer_glide = ui.ctx().data_mut(|data| {
+        let outer = data.remove_temp::<RowGlide>(row_glide_key());
+        data.insert_temp(row_glide_key(), RowGlide::default());
+        outer
+    });
     // Every row on screen when a page opens comes in, top to bottom. The wave
     // goes by where a row sits in the window, not by how many there are, so it
     // reaches the last visible row on any screen and at any zoom.
@@ -408,10 +417,110 @@ pub fn virtual_rows(
         super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 8.0));
         ui.set_opacity(opacity);
     }
+    let glide = ui.ctx().data_mut(|data| {
+        let glide = data
+            .remove_temp::<RowGlide>(row_glide_key())
+            .unwrap_or_default();
+        if let Some(outer) = outer_glide {
+            data.insert_temp(row_glide_key(), outer);
+        }
+        glide
+    });
+    paint_row_glide(ui, glide_slot, glide_id, glide, start_y);
     if last < count {
         ui.allocate_space(vec2(width, (count - last) as f32 * row_height));
     }
     ui.spacing_mut().item_spacing = previous_spacing;
+}
+
+/// What a list's rows ask of its gliding light this frame.
+#[derive(Clone, Copy, Default)]
+struct RowGlide {
+    /// The row under the pointer or the keyboard.
+    target: Option<Rect>,
+    color: Option<Color32>,
+}
+
+fn row_glide_key() -> egui::Id {
+    egui::Id::new("row-glide-frame")
+}
+
+/// Whether a list with a gliding light is being drawn.
+fn in_row_list(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<RowGlide>(row_glide_key()).is_some())
+}
+
+/// Has the list's gliding light come to `rect`, if a list is being drawn.
+/// Returns whether it did; a row outside any list lights itself.
+fn claim_row_glide(ctx: &egui::Context, rect: Rect, color: Color32) -> bool {
+    ctx.data_mut(|data| {
+        if data.get_temp::<RowGlide>(row_glide_key()).is_none() {
+            return false;
+        }
+        data.insert_temp(
+            row_glide_key(),
+            RowGlide {
+                target: Some(rect),
+                color: Some(color),
+            },
+        );
+        true
+    })
+}
+
+/// Paints a list's light where its row is, gliding from where it was. It is kept
+/// relative to the list so that scrolling carries it along without lag.
+fn paint_row_glide(
+    ui: &Ui,
+    slot: egui::layers::ShapeIdx,
+    id: egui::Id,
+    glide: RowGlide,
+    start_y: f32,
+) {
+    use super::kit::motion;
+    let ctx = ui.ctx();
+    let lit = motion::toward(
+        ctx,
+        id.with("lit"),
+        glide.target.is_some(),
+        motion::FEEDBACK,
+    );
+    if let Some(target) = glide.target {
+        ctx.data_mut(|data| {
+            data.insert_temp(
+                id.with("rect"),
+                (target.left(), target.right(), target.height()),
+            )
+        });
+        if let Some(color) = glide.color {
+            ctx.data_mut(|data| data.insert_temp(id.with("color"), color));
+        }
+        // The light appears on the row it arrives at, and travels from there.
+        if lit < 0.02 {
+            motion::spring_jump(ctx, id.with("top"), target.top() - start_y);
+        }
+    }
+    if lit <= 0.0 {
+        return;
+    }
+    let Some((left, right, height)) =
+        ctx.data(|data| data.get_temp::<(f32, f32, f32)>(id.with("rect")))
+    else {
+        return;
+    };
+    let Some(color) = ctx.data(|data| data.get_temp::<Color32>(id.with("color"))) else {
+        return;
+    };
+    let last = ctx
+        .data(|data| data.get_temp::<f32>(id.with("last")))
+        .unwrap_or(0.0);
+    let aim = glide.target.map_or(last, |target| target.top() - start_y);
+    ctx.data_mut(|data| data.insert_temp(id.with("last"), aim));
+    let top = start_y + motion::spring(ctx, id.with("top"), aim, motion::FOLLOW);
+    let rect = Rect::from_min_size(pos2(left, top), vec2(right - left, height));
+    let shape =
+        egui::epaint::RectShape::filled(rect, CornerRadius::same(6), color.gamma_multiply(lit));
+    ui.painter().set(slot, shape);
 }
 
 /// How long the entrance takes to travel from the top of the window to its foot.
@@ -1980,7 +2089,7 @@ fn track_row_contents(
             .is_some_and(|uri| uri == row.item.uri());
     let pending = played_copy && app.play_pending(row.item.uri());
     let playing = is_current && app.believed_playing();
-    let hovered = ui.is_enabled() && (ui.rect_contains_pointer(rect) || response.has_focus());
+    let hovered = ui.is_enabled() && (super::pointer_over(ui, rect) || response.has_focus());
     if row.picked {
         // Keep the existing translucent selection, using a neutral palette
         // color so selecting a song does not mark it as playing.
@@ -1994,22 +2103,24 @@ fn track_row_contents(
     } else {
         // The hover fill eases in and out, so moving down a list reads as
         // one light passing over the rows.
+        let light = palette
+            .surface_hover
+            .gamma_multiply(if palette.dark { 0.7 } else { 1.0 });
         let lit = super::kit::motion::toward(
             ui.ctx(),
             response.id.with("hover"),
             hovered,
             super::kit::motion::FEEDBACK,
         );
-        if lit > 0.0 {
-            ui.painter().rect_filled(
-                rect,
-                CornerRadius::same(6),
-                palette
-                    .surface_hover
-                    .gamma_multiply(if palette.dark { 0.7 } else { 1.0 } * lit),
-            );
+        if !(hovered && claim_row_glide(ui.ctx(), rect, light))
+            && lit > 0.0
+            && !in_row_list(ui.ctx())
+        {
+            ui.painter()
+                .rect_filled(rect, CornerRadius::same(6), light.gamma_multiply(lit));
         }
     }
+    super::kit::motion::ripple(ui, &response, rect, palette.text);
     if let Some(t) = super::kit::motion::running(ui.ctx(), response.id.with("played")) {
         paint_sweep(ui.painter(), rect, t, palette.text);
     }
@@ -3182,7 +3293,7 @@ pub fn card(
     }
     let mut play = false;
     if ui.is_rect_visible(rect) {
-        let hovered = ui.rect_contains_pointer(rect);
+        let hovered = super::pointer_over(ui, rect);
         // The card lights and its play button rises in as the pointer
         // arrives, and both settle away as it leaves.
         let lit = super::kit::motion::toward(
@@ -3200,8 +3311,48 @@ pub fn card(
                     .gamma_multiply(if palette.dark { 0.8 } else { 1.0 } * lit),
             );
         }
+        // The light follows the pointer across the card, and the nearest
+        // stretch of its edge catches it.
+        if let Some((pointer, strength)) =
+            super::kit::motion::pointer_light(ui, response.id.with("spotlight"), rect)
+        {
+            let shine = if palette.dark {
+                Color32::from_white_alpha(22)
+            } else {
+                Color32::from_black_alpha(12)
+            };
+            super::kit::motion::spotlight(
+                ui.painter(),
+                rect,
+                pointer,
+                150.0,
+                shine.gamma_multiply(strength),
+            );
+            super::kit::motion::edge_light(
+                ui.painter(),
+                rect,
+                theme::RADIUS as f32,
+                pointer,
+                130.0,
+                palette.text.gamma_multiply(0.5 * strength),
+            );
+        }
+        // The cover rises out of the card under the pointer and sinks when pressed.
+        let lift = super::kit::motion::spring(
+            ui.ctx(),
+            response.id.with("cover-lift"),
+            if response.is_pointer_button_down_on() {
+                -3.0
+            } else if hovered {
+                4.0
+            } else {
+                0.0
+            },
+            super::kit::motion::LIVELY,
+        );
         let image_rect = Rect::from_min_size(rect.min + vec2(PAD, PAD), Vec2::splat(image_size));
         let radius = if circular { image_size / 2.0 } else { 6.0 };
+        let image_rect = image_rect.expand(lift);
         paint_shadow(ui, &palette, image_rect, radius);
         paint_cover(
             ui,
@@ -3274,6 +3425,7 @@ pub fn card(
             .clicked();
         }
     }
+    super::kit::motion::ripple(ui, &response, rect, palette.text);
     crate::autoscroll::row(ui, &response);
     theme::focus_ring(ui, &response);
     CardResponse {

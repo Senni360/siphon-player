@@ -175,6 +175,325 @@ pub fn glide(ctx: &Context, id: Id, target: f32, duration: f32) -> f32 {
     ctx.animate_value_with_time(id, target, crate::motion::seconds(ctx, duration))
 }
 
+/// How a [`spring`] moves: how long one swing takes, in seconds, and how much
+/// it overshoots, from 0 (settles without passing) to about 0.5 (a lively bounce).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spring {
+    pub period: f32,
+    pub bounce: f32,
+}
+
+/// Follows without overshooting, for what the pointer drags along.
+pub const FOLLOW: Spring = Spring {
+    period: 0.22,
+    bounce: 0.0,
+};
+/// A small lively bounce, for what answers a hover or a press.
+pub const LIVELY: Spring = Spring {
+    period: 0.26,
+    bounce: 0.35,
+};
+
+/// One step of a spring from `position` and `velocity` toward `target`.
+fn spring_step(position: f32, velocity: f32, target: f32, spring: Spring, dt: f32) -> (f32, f32) {
+    let omega = std::f32::consts::TAU / spring.period.max(0.01);
+    let damping = 2.0 * (1.0 - spring.bounce).clamp(0.05, 1.0) * omega;
+    let (mut position, mut velocity) = (position, velocity);
+    // Short steps keep a slow frame from throwing it past where it should be.
+    let steps = (dt / (1.0 / 240.0)).ceil().clamp(1.0, 16.0);
+    let dt = dt / steps;
+    for _ in 0..steps as usize {
+        velocity += (omega * omega * (target - position) - damping * velocity) * dt;
+        position += velocity * dt;
+    }
+    (position, velocity)
+}
+
+/// A number that follows `target` as if on a spring, keeping its speed when the
+/// target changes mid-way, so an interrupted motion never jumps. It starts at the
+/// first target, asks for frames only while it moves, and goes straight to the
+/// target when less motion is asked for.
+pub fn spring(ctx: &Context, id: Id, target: f32, spring: Spring) -> f32 {
+    if crate::motion::seconds(ctx, 1.0) <= 0.0 {
+        return target;
+    }
+    let (position, velocity) = ctx
+        .data(|data| data.get_temp::<(f32, f32)>(id))
+        .unwrap_or((target, 0.0));
+    if position == target && velocity == 0.0 {
+        ctx.data_mut(|data| data.insert_temp(id, (position, velocity)));
+        return target;
+    }
+    let dt = ctx
+        .input(|input| input.stable_dt)
+        .clamp(1.0 / 480.0, 1.0 / 20.0);
+    let (mut position, mut velocity) = spring_step(position, velocity, target, spring, dt);
+    let scale = (target.abs() + 1.0) * 0.0005;
+    if (position - target).abs() < scale && velocity.abs() < scale * 20.0 {
+        position = target;
+        velocity = 0.0;
+    } else {
+        ctx.request_repaint();
+    }
+    ctx.data_mut(|data| data.insert_temp(id, (position, velocity)));
+    position
+}
+
+/// Sets where a [`spring`] is, with no speed, for something that appears
+/// somewhere new rather than travelling there.
+pub fn spring_jump(ctx: &Context, id: Id, position: f32) {
+    ctx.data_mut(|data| data.insert_temp(id, (position, 0.0_f32)));
+}
+
+/// How strong a hover is on its own: the pointer's position when it is within
+/// `rect`, and how far the hover has eased in.
+pub fn pointer_light(ui: &egui::Ui, id: Id, rect: egui::Rect) -> Option<(egui::Pos2, f32)> {
+    let pointer = ui.input(|input| input.pointer.hover_pos());
+    let inside = pointer
+        .filter(|pos| rect.contains(*pos) && ui.clip_rect().contains(*pos) && ui.is_enabled());
+    let lit = toward(ui.ctx(), id, inside.is_some(), FEEDBACK * 1.5);
+    if lit <= 0.0 {
+        return None;
+    }
+    if let Some(pos) = inside {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(id.with("at"), pos));
+    }
+    let pos = ui
+        .ctx()
+        .data(|data| data.get_temp::<egui::Pos2>(id.with("at")))?;
+    Some((pos, lit))
+}
+
+/// A soft round light at `center`, fading out over `radius`, kept inside `rect`.
+pub fn spotlight(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    center: egui::Pos2,
+    radius: f32,
+    color: egui::Color32,
+) {
+    const SEGMENTS: u32 = 28;
+    let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, color);
+    // The light falls off in two steps, which reads as a curve and not a cone.
+    let middle = color.gamma_multiply(0.38);
+    for ring in [0.5_f32, 1.0] {
+        for segment in 0..SEGMENTS {
+            let angle = segment as f32 / SEGMENTS as f32 * std::f32::consts::TAU;
+            let shade = if ring < 1.0 {
+                middle
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            mesh.colored_vertex(center + egui::Vec2::angled(angle) * radius * ring, shade);
+        }
+    }
+    for segment in 0..SEGMENTS {
+        let next = (segment + 1) % SEGMENTS;
+        mesh.add_triangle(0, 1 + segment, 1 + next);
+        let (a, b) = (1 + segment, 1 + next);
+        let (c, d) = (1 + SEGMENTS + segment, 1 + SEGMENTS + next);
+        mesh.add_triangle(a, c, d);
+        mesh.add_triangle(a, d, b);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// The outline of a rounded rectangle as points, clockwise from its top left.
+fn rounded_outline(rect: egui::Rect, radius: f32) -> Vec<egui::Pos2> {
+    use std::f32::consts::{FRAC_PI_2, PI};
+    let radius = radius.min(rect.width() / 2.0).min(rect.height() / 2.0);
+    let corners = [
+        (egui::pos2(rect.left() + radius, rect.top() + radius), PI),
+        (
+            egui::pos2(rect.right() - radius, rect.top() + radius),
+            PI + FRAC_PI_2,
+        ),
+        (
+            egui::pos2(rect.right() - radius, rect.bottom() - radius),
+            0.0,
+        ),
+        (
+            egui::pos2(rect.left() + radius, rect.bottom() - radius),
+            FRAC_PI_2,
+        ),
+    ];
+    let mut points = Vec::with_capacity(64);
+    let mut last: Option<egui::Pos2> = None;
+    for (center, start) in corners {
+        for step in 0..=5 {
+            let angle = start + step as f32 / 5.0 * FRAC_PI_2;
+            let point = center + egui::Vec2::angled(angle) * radius;
+            // Long edges get points along them, so a light can fade along them.
+            if step == 0
+                && let Some(last) = last
+            {
+                let pieces = ((point - last).length() / 16.0).ceil().max(1.0) as usize;
+                for piece in 1..pieces {
+                    points.push(last + (point - last) * (piece as f32 / pieces as f32));
+                }
+            }
+            points.push(point);
+            last = Some(point);
+        }
+    }
+    if let (Some(&first), Some(&end)) = (points.first(), points.last()) {
+        let pieces = ((first - end).length() / 16.0).ceil().max(1.0) as usize;
+        for piece in 1..pieces {
+            points.push(end + (first - end) * (piece as f32 / pieces as f32));
+        }
+    }
+    points
+}
+
+/// Paints a card's edge with a strength for each point along it.
+fn paint_edge(
+    painter: &egui::Painter,
+    points: &[egui::Pos2],
+    width: f32,
+    color: impl Fn(usize, egui::Pos2) -> egui::Color32,
+) {
+    let count = points.len() as u32;
+    if count < 3 {
+        return;
+    }
+    let center = points
+        .iter()
+        .fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2())
+        / count as f32;
+    let mut mesh = egui::Mesh::default();
+    for (index, point) in points.iter().enumerate() {
+        let inward = (center - point.to_vec2()).normalized();
+        let shade = color(index, *point);
+        mesh.colored_vertex(*point, shade);
+        mesh.colored_vertex(*point + inward * width, shade);
+    }
+    for index in 0..count {
+        let next = (index + 1) % count;
+        mesh.add_triangle(index * 2, index * 2 + 1, next * 2 + 1);
+        mesh.add_triangle(index * 2, next * 2 + 1, next * 2);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// The stretch of a card's edge nearest the pointer catches the light.
+pub fn edge_light(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    radius: f32,
+    pointer: egui::Pos2,
+    reach: f32,
+    color: egui::Color32,
+) {
+    let points = rounded_outline(rect, radius);
+    paint_edge(painter, &points, 1.2, |_, point| {
+        let near = (1.0 - (point - pointer).length() / reach).clamp(0.0, 1.0);
+        color.gamma_multiply(near * near)
+    });
+}
+
+/// How long a light takes to run around a card's edge.
+pub const EDGE_RUN: f32 = 0.9;
+
+/// A light running once around a card's edge in both directions from its
+/// bottom left, meeting at the far side, as `t` goes from 0 to 1.
+pub fn edge_run(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    radius: f32,
+    t: f32,
+    color: egui::Color32,
+) {
+    if t <= 0.0 || t >= 1.0 {
+        return;
+    }
+    let points = rounded_outline(rect, radius);
+    let count = points.len() as f32;
+    // The outline starts at the top left: this is near the song's cover.
+    let start = count * 0.82;
+    let head = t * 0.5;
+    let fade = (1.0 - t) * (t * 8.0).min(1.0);
+    paint_edge(painter, &points, 1.6, |index, _| {
+        let along = ((index as f32 - start) / count).rem_euclid(1.0);
+        let along = along.min(1.0 - along);
+        // A bright head with a tail reaching back to where it set out.
+        let behind = head - along;
+        if behind < 0.0 {
+            return egui::Color32::TRANSPARENT;
+        }
+        let strength = (1.0 - behind / 0.28).clamp(0.0, 1.0);
+        color.gamma_multiply(strength * strength * fade)
+    });
+}
+
+/// How long a press's ripple takes to spread.
+pub const RIPPLE: f32 = 0.5;
+
+/// A ripple from where `response` was pressed, spreading across `rect`.
+pub fn ripple(ui: &egui::Ui, response: &egui::Response, rect: egui::Rect, color: egui::Color32) {
+    let id = response.id.with("ripple");
+    if (response.clicked() || response.secondary_clicked())
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(id.with("at"), pos));
+        begin(ui.ctx(), id, RIPPLE);
+    }
+    let Some(t) = running(ui.ctx(), id) else {
+        return;
+    };
+    let Some(at) = ui
+        .ctx()
+        .data(|data| data.get_temp::<egui::Pos2>(id.with("at")))
+    else {
+        return;
+    };
+    let reach = (at - rect.center()).length() + rect.size().length() / 2.0;
+    let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
+    painter.circle_filled(at, reach * t, color.gamma_multiply(0.14 * (1.0 - t)));
+}
+
+/// How long the light takes to cross a button that is pointed at.
+pub const GLINT: f32 = 0.6;
+
+/// A slanted light passing once across `rect` as `t` goes from 0 to 1.
+pub fn glint(painter: &egui::Painter, rect: egui::Rect, t: f32, color: egui::Color32) {
+    if t <= 0.0 || t >= 1.0 {
+        return;
+    }
+    let width = rect.height() * 1.4;
+    let slant = rect.height() * 0.5;
+    let left = rect.left() - width - slant + (rect.width() + width + slant * 2.0) * t;
+    let painter = painter.with_clip_rect(rect.intersect(painter.clip_rect()));
+    let mut mesh = egui::Mesh::default();
+    let clear = egui::Color32::TRANSPARENT;
+    for (offset, shade) in [(0.0, clear), (0.5, color), (1.0, clear)] {
+        let x = left + width * offset;
+        mesh.colored_vertex(egui::pos2(x + slant, rect.top()), shade);
+        mesh.colored_vertex(egui::pos2(x, rect.bottom()), shade);
+    }
+    mesh.add_triangle(0, 1, 2);
+    mesh.add_triangle(1, 2, 3);
+    mesh.add_triangle(2, 3, 4);
+    mesh.add_triangle(3, 4, 5);
+    painter.add(egui::Shape::mesh(mesh));
+}
+
+/// Starts a [`GLINT`] whenever the pointer arrives on something, and returns
+/// its progress while it runs.
+pub fn glint_on_hover(ctx: &Context, id: Id, hovered: bool) -> Option<f32> {
+    let was = ctx
+        .data(|data| data.get_temp::<bool>(id.with("was")))
+        .unwrap_or(false);
+    if hovered && !was {
+        begin(ctx, id.with("glint"), GLINT);
+    }
+    ctx.data_mut(|data| data.insert_temp(id.with("was"), hovered));
+    running(ctx, id.with("glint"))
+}
+
 /// How long a changed count takes to roll to its new value.
 pub const ROLL: f32 = 0.32;
 
@@ -479,6 +798,55 @@ mod tests {
         let transition = Transition::start(&ctx, ENTER).delayed(0.2);
         assert!(transition.finished_at(0.0));
         assert_eq!(transition.progress_at(0.0), 1.0);
+    }
+
+    /// A spring reaches its target from either side and comes to rest there,
+    /// a bouncy one passing it on the way and a following one never.
+    #[test]
+    fn a_spring_settles_on_its_target() {
+        for (spring, passes) in [(LIVELY, true), (FOLLOW, false)] {
+            let (mut position, mut velocity) = (0.0, 0.0);
+            let mut furthest = 0.0_f32;
+            for _ in 0..240 {
+                (position, velocity) = spring_step(position, velocity, 1.0, spring, 1.0 / 120.0);
+                furthest = furthest.max(position);
+            }
+            assert!(
+                (position - 1.0).abs() < 0.001,
+                "{spring:?} ended at {position}"
+            );
+            assert_eq!(furthest > 1.001, passes, "{spring:?} reached {furthest}");
+        }
+    }
+
+    /// A slow frame cannot throw a spring off: it stays near its range.
+    #[test]
+    fn a_slow_frame_does_not_throw_a_spring() {
+        let (position, _) = spring_step(0.0, 0.0, 1.0, LIVELY, 1.0 / 20.0);
+        assert!((0.0..1.5).contains(&position), "{position}");
+    }
+
+    #[test]
+    fn with_less_motion_a_spring_is_at_its_target() {
+        let ctx = egui::Context::default();
+        crate::motion::apply(&ctx, true);
+        let id = Id::new("spring-test");
+        assert_eq!(spring(&ctx, id, 1.0, LIVELY), 1.0);
+        assert_eq!(spring(&ctx, id, 5.0, LIVELY), 5.0);
+    }
+
+    /// A card's outline runs around the whole card, on its edge.
+    #[test]
+    fn a_rounded_outline_stays_on_the_card() {
+        let rect = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(300.0, 80.0));
+        let points = rounded_outline(rect, 12.0);
+        assert!(points.len() > 24);
+        for point in &points {
+            assert!(rect.expand(0.01).contains(*point), "{point:?}");
+        }
+        for pair in points.windows(2) {
+            assert!((pair[1] - pair[0]).length() < 17.0, "{pair:?}");
+        }
     }
 
     #[test]
