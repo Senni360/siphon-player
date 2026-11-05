@@ -8148,7 +8148,7 @@ mod tests {
                 let section = if selected == SearchFilter::All {
                     filter.label(crate::i18n::Locale::English)
                 } else {
-                    "All".into()
+                    "All types".into()
                 };
                 check_card_menu(
                     &mut app,

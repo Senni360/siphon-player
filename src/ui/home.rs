@@ -660,7 +660,18 @@ fn made_for_you(app: &mut App, ui: &mut egui::Ui) {
             {
                 widgets::error_row(ui, app, message, Some(Page::Home));
             }
-            playlist_cards(app, ui, "home-made_for_you-menu", &playlists);
+            // Already in the tiles above, unless that would leave nothing here.
+            let tiled: std::collections::HashSet<Option<String>> = quick_access_tiles(app)
+                .into_iter()
+                .map(|tile| tile.uri)
+                .collect();
+            let fresh: Vec<_> = playlists
+                .iter()
+                .filter(|list| !tiled.contains(&Some(list.uri.clone())))
+                .cloned()
+                .collect();
+            let shown = if fresh.is_empty() { &playlists } else { &fresh };
+            playlist_cards(app, ui, "home-made_for_you-menu", shown);
         },
     );
 }

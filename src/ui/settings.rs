@@ -683,15 +683,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     } else {
         gettext(locale, "Application")
     };
-    let soloist = gettext(locale, "Spotify Soloist");
-    if row_matches(
-        &needle,
-        &soloist,
-        &gettext(locale, "Playback lossless setup key download updates"),
-    ) {
-        any_visible = true;
-        section(ui, &palette, &soloist, |ui| super::soloist::show(app, ui));
-    }
     let normalize_volume = gettext(locale, "Normalize volume");
     let autoplay = gettext(locale, "Autoplay");
     let gapless = gettext(locale, "Gapless playback");
@@ -1196,6 +1187,16 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 });
             }
         });
+    }
+
+    let soloist = gettext(locale, "Spotify Soloist");
+    if row_matches(
+        &needle,
+        &soloist,
+        &gettext(locale, "Playback lossless setup key download updates"),
+    ) {
+        any_visible = true;
+        section(ui, &palette, &soloist, |ui| super::soloist::show(app, ui));
     }
 
     let streamer = gettext(locale, "Streamer mode");

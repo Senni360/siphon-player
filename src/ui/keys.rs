@@ -52,6 +52,7 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             );
         }
         key(Modifiers::COMMAND, Key::F, Action::FocusSearch);
+        key(Modifiers::COMMAND, Key::K, Action::FocusSearch);
         if matches!(app.page(), Page::Search) && app.dialog.is_none() {
             key(
                 Modifiers::COMMAND | Modifiers::SHIFT,
@@ -308,10 +309,10 @@ pub fn shortcuts(locale: Locale) -> Vec<(Cow<'static, str>, Cow<'static, str>)> 
         (
             if cfg!(target_os = "macos") {
                 // Translators: Keep the key names. Only the word "or" is translated.
-                gettext(locale, "Cmd+F  or  /")
+                gettext(locale, "Cmd+K  or  /")
             } else {
                 // Translators: Keep the key names. Only the word "or" is translated.
-                gettext(locale, "Ctrl+F  or  /")
+                gettext(locale, "Ctrl+K  or  /")
             },
             gettext(locale, "Search"),
         ),

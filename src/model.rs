@@ -865,7 +865,7 @@ impl SearchFilter {
     pub fn label(self, locale: crate::i18n::Locale) -> std::borrow::Cow<'static, str> {
         use crate::i18n::{gettext, pgettext};
         match self {
-            Self::All => pgettext(locale, "filter", "All"),
+            Self::All => pgettext(locale, "filter", "All types"),
             Self::Songs => gettext(locale, "Songs"),
             Self::Artists => gettext(locale, "Artists"),
             Self::Albums => gettext(locale, "Albums"),
@@ -892,7 +892,7 @@ impl SearchSource {
     pub fn label(self, locale: crate::i18n::Locale) -> std::borrow::Cow<'static, str> {
         use crate::i18n::{gettext, pgettext};
         match self {
-            Self::All => pgettext(locale, "filter", "All"),
+            Self::All => pgettext(locale, "filter", "All sources"),
             Self::Spotify => gettext(locale, "Spotify"),
             Self::SoundCloud => gettext(locale, "SoundCloud"),
             Self::YouTube => gettext(locale, "YouTube"),

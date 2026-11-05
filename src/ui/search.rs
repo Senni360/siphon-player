@@ -101,7 +101,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         soundcloud_results(app, ui, &resolved, true);
         if app.search.source == SearchSource::All {
             ui.add_space(16.0);
-            theme::section_title(ui, &palette, &gettext(app.locale, "Spotify"));
+            source_label(ui, &palette, "Spotify");
             spotify(app, ui);
         }
         return;
@@ -129,7 +129,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     if app.search.source != SearchSource::SoundCloud {
         if app.search.source == SearchSource::All {
-            theme::section_title(ui, &palette, &gettext(app.locale, "Spotify"));
+            source_label(ui, &palette, "Spotify");
             ui.add_space(8.0);
         }
         spotify(app, ui);
@@ -138,7 +138,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         && SearchSource::SoundCloud.supports(app.search.filter)
     {
         ui.add_space(16.0);
-        theme::section_title(ui, &palette, &gettext(app.locale, "SoundCloud"));
+        source_label(ui, &palette, "SoundCloud");
         ui.add_space(8.0);
         soundcloud(app, ui);
     }
@@ -147,13 +147,18 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
+/// Which service the results under it are from: quieter than the headings inside it.
+fn source_label(ui: &mut egui::Ui, palette: &theme::Palette, name: &str) {
+    theme::text(ui, name, theme::medium(13.0), palette.secondary);
+}
+
 /// YouTube under the other sources, where its filter applies, and then Spotify's
 /// podcasts, at the very foot of the page.
 fn youtube_brief(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     if SearchSource::YouTube.supports(app.search.filter) {
         ui.add_space(16.0);
-        theme::section_title(ui, &palette, &gettext(app.locale, "YouTube"));
+        source_label(ui, &palette, "YouTube");
         ui.add_space(8.0);
         super::source_page::youtube_results(app, ui, true);
     }
