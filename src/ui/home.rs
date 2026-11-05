@@ -1060,7 +1060,6 @@ fn top_tracks(app: &mut App, ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     /// A tile's cover is 60 points. Spotify's 64 pixel rendition would be
     /// blurry even at 100%, so the tile takes the 300 pixel one and scales
