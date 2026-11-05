@@ -708,7 +708,7 @@ pub(crate) fn run() -> eframe::Result<()> {
                     );
                 }
             }
-            crate::ui::kit::motion::welcome(&cc.egui_ctx);
+            spotifast::ui::kit::motion::welcome(&cc.egui_ctx);
             let mut app = lease.take(&cc.egui_ctx);
             // Built once per window, before the first frame; the
             // handler wakes the loop so a menu pick is not held until
