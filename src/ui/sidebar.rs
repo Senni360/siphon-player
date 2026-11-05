@@ -235,6 +235,16 @@ fn finish_entry_interaction(
     custom_order: bool,
     drop_allowed: bool,
 ) {
+    if entry.liked {
+        super::kit::flight::target(ui.ctx(), super::kit::flight::LIKED, response.rect);
+        super::kit::flight::paint_landing(
+            ui,
+            &app.palette,
+            super::kit::flight::LIKED,
+            response.rect,
+            8.0,
+        );
+    }
     // Songs added to this playlist fly here, and the row pulses as they land.
     if !entry.uri.is_empty() {
         super::kit::flight::target(ui.ctx(), &entry.uri, response.rect);
@@ -1747,6 +1757,15 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     });
     if show_search {
         ui.add_space(4.0);
+        let opened = super::kit::motion::opening(
+            ui.ctx(),
+            egui::Id::new("sidebar-search-open"),
+            super::kit::motion::POPOVER * 1.5,
+        );
+        let layer = ui.layer_id();
+        let start = super::kit::motion::mark(ui.ctx(), layer);
+        let opacity = ui.opacity();
+        ui.multiply_opacity(opened.max(0.02));
         let response = super::widgets::search_field(
             ui,
             &palette,
@@ -1756,6 +1775,8 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             &gettext(locale, "Search in Your Library"),
             ui.available_width() - 4.0,
         );
+        ui.set_opacity(opacity);
+        super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (opened - 1.0) * 10.0));
         if focus_search {
             response.request_focus();
         }
@@ -2062,7 +2083,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
             // are laid out, so it can glide from the row that was open.
             let highlight_slot = ui.painter().add(egui::Shape::Noop);
             let mut active_rect = None;
-            super::widgets::wave_on_change(ui.ctx(), format!("{filter:?} {sort:?}"));
+            super::widgets::wave_on_change(ui.ctx(), "sidebar", format!("{filter:?} {sort:?}"));
             super::widgets::virtual_rows(ui, entries.len(), row_height, |ui, index| {
                 let entry = &entries[index];
                 if !app.settings.sidebar_compact

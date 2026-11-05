@@ -156,6 +156,17 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
             super::kit::motion::LIVELY,
         );
         let rect = rect.expand(lift);
+        // The cover's own colour glows out from behind it as the page opens.
+        if let Some(tint) = app.tint_for(hero.images.image) {
+            let glow = super::entering(ui.ctx(), 0.12) * (1.0 + lift * 0.08);
+            super::kit::motion::spotlight(
+                ui.painter(),
+                ui.clip_rect(),
+                rect.center(),
+                rect.width() * (0.72 + 0.14 * glow),
+                tint.gamma_multiply(if palette.dark { 0.34 } else { 0.22 } * glow),
+            );
+        }
         let handed_over = super::kit::shared::land(ui, &palette, rect, radius);
         widgets::paint_shadow(ui, &palette, rect, radius);
         if handed_over {
@@ -263,7 +274,10 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                             }
                         }
                         None => {
-                            theme::text(ui, text, theme::regular(13.5), palette.secondary);
+                            // Figures tick up as the page comes in.
+                            let counted =
+                                super::kit::motion::counting(text, super::entering(ui.ctx(), 0.08));
+                            theme::text(ui, counted, theme::regular(13.5), palette.secondary);
                         }
                     }
                 }

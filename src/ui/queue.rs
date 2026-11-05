@@ -113,6 +113,7 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
             app.actions.push(Action::SaveQueueAsPlaylist);
         }
         ui.add_space(8.0);
+        super::widgets::wave_on_change(ui.ctx(), "queue", format!("{:?}", app.queue_tab));
         // Lazy load recents when tab becomes visible.
         if app.queue_tab == QueueTab::Recents
             && !app.recents.loading

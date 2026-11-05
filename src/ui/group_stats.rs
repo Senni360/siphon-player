@@ -71,7 +71,7 @@ fn tiles(ui: &mut Ui, palette: &Palette, items: &[(String, String)]) {
             painter.text(
                 rect.left_top() + vec2(12.0, 12.0),
                 egui::Align2::LEFT_TOP,
-                value,
+                super::kit::motion::counting(value.as_ref(), rose),
                 theme::medium(19.0),
                 palette.text,
             );

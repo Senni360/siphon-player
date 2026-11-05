@@ -331,6 +331,17 @@ fn launch_flights(app: &App, ctx: &Context) {
                     .map(str::to_owned);
                 kit::flight::launch(ctx, art, from, kit::flight::QUEUE);
             }
+            // Only a song being given a heart, not one losing it.
+            Action::ToggleSaved(uri)
+                if crate::util::uri_kind(uri) == Some("track")
+                    && app.is_saved(uri) == Some(false) =>
+            {
+                let art = app
+                    .now_playing()
+                    .filter(|now| now.uri == *uri)
+                    .and_then(|now| now.art_small);
+                kit::flight::launch(ctx, art, from, kit::flight::LIKED);
+            }
             Action::AddToQueue { .. } | Action::QueueMany { .. } => {
                 kit::flight::launch(ctx, None, from, kit::flight::QUEUE);
             }

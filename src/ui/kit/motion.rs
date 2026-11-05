@@ -222,6 +222,48 @@ pub fn equalizer(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
     }
 }
 
+/// `text` with each of its numbers counted up to `t` of its value, keeping its
+/// thousands separators, for figures that tick up as they come into view.
+pub fn counting(text: &str, t: f32) -> String {
+    if t >= 1.0 {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut run = String::new();
+    let flush = |run: &mut String, out: &mut String| {
+        if run.is_empty() {
+            return;
+        }
+        let spaced = run.contains(',');
+        let digits: String = run.chars().filter(char::is_ascii_digit).collect();
+        let value = digits.parse::<f64>().unwrap_or(0.0) * f64::from(t.max(0.0));
+        let shown = (value as u64).to_string();
+        if spaced {
+            for (index, digit) in shown.chars().enumerate() {
+                if index > 0 && (shown.len() - index).is_multiple_of(3) {
+                    out.push(',');
+                }
+                out.push(digit);
+            }
+        } else {
+            out.push_str(&shown);
+        }
+        run.clear();
+    };
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        let inside = c == ',' && !run.is_empty() && chars.peek().is_some_and(char::is_ascii_digit);
+        if c.is_ascii_digit() || inside {
+            run.push(c);
+        } else {
+            flush(&mut run, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut run, &mut out);
+    out
+}
+
 /// A ring opening out of `center` as `t` goes from 0 to 1.
 pub fn ring(
     painter: &egui::Painter,
@@ -957,6 +999,15 @@ mod tests {
         }
         assert_eq!(ease(-1.0), 0.0);
         assert_eq!(ease(2.0), 1.0);
+    }
+
+    /// Counting changes only the numbers, and ends at the words it was given.
+    #[test]
+    fn numbers_count_up_and_the_words_stay() {
+        assert_eq!(counting("12,346 saves", 1.0), "12,346 saves");
+        assert_eq!(counting("12,346 saves", 0.5), "6,173 saves");
+        assert_eq!(counting("3 hr 13 min", 0.0), "0 hr 0 min");
+        assert_eq!(counting("no figures, here", 0.5), "no figures, here");
     }
 
     #[test]

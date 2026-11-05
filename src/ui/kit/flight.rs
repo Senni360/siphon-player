@@ -17,6 +17,8 @@ pub const LANDING: f32 = 0.45;
 
 /// The key flights to the Group row use.
 pub const GROUP: &str = "group";
+/// The Liked Songs row in the library.
+pub const LIKED: &str = "liked";
 /// The queue's tiles on the player.
 pub const QUEUE: &str = "queue";
 

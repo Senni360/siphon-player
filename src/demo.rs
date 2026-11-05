@@ -7051,10 +7051,11 @@ mod tests {
                 .filter(|shape| matches!(&shape.shape, egui::Shape::Path(_)))
                 .count()
         };
+        // The glass sheen is a small untextured mesh too; a visualizer's is large.
         let drawn = |output: &egui::FullOutput| {
             output.shapes.iter().any(|shape| {
                 matches!(&shape.shape, egui::Shape::Mesh(mesh)
-                    if mesh.texture_id == egui::TextureId::default() && !mesh.vertices.is_empty())
+                    if mesh.texture_id == egui::TextureId::default() && mesh.vertices.len() > 64)
             })
         };
         let spectrum = |output: &egui::FullOutput| drawn(output) && lines(output) < 20;

@@ -213,7 +213,11 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
     for row in 0..rows {
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
+            let opacity = ui.opacity();
             for column in 0..columns {
+                // They light up across and down, as the page comes in.
+                let across = (row + column) as f32 * super::kit::motion::STAGGER;
+                ui.set_opacity(opacity * super::entering(ui.ctx(), across).max(0.02));
                 let Some(Tile {
                     image,
                     name,

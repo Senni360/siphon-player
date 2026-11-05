@@ -302,6 +302,17 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                 };
                 crate::autoscroll::row(ui, &response);
                 let rect = response.rect;
+                // A note for the band playing on bobs while it is their turn.
+                let bob = if is_active
+                    && line.text.is_empty()
+                    && crate::motion::seconds(ui.ctx(), 1.0) > 0.0
+                {
+                    crate::theme::repaint_after(ui.ctx(), std::time::Duration::from_millis(33));
+                    (ui.input(|input| input.time) * 3.5).sin() as f32 * 3.0
+                } else {
+                    0.0
+                };
+                super::kit::motion::shift_since(ui.ctx(), layer, painted, egui::vec2(0.0, bob));
                 // The sung line steps forward. Text stays at its size, so it stays sharp.
                 super::kit::motion::shift_since(
                     ui.ctx(),

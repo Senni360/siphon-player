@@ -353,7 +353,9 @@ fn section(
         super::kit::motion::begin(ui.ctx(), jump.with(title), 1.1);
     }
     ui.add_space(10.0);
-    let heading = theme::text(ui, title, theme::bold(18.0), palette.text);
+    let heading = super::rise_here(ui, |ui| {
+        theme::text(ui, title, theme::bold(18.0), palette.text)
+    });
     // The section jumped to lights up, so the eye lands on it.
     if let Some(t) = super::kit::motion::running(ui.ctx(), jump.with(title)) {
         let rect = heading

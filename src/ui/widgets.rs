@@ -442,7 +442,15 @@ pub fn virtual_rows(
     for index in first..last {
         let top = start_y + index as f32 * row_height;
         let t = if entering {
-            super::entering(ui.ctx(), late + entrance_delay(top, clip))
+            // A row first reached by scrolling comes up once, quickly; it never
+            // goes fully clear, so a fast scroll still reads.
+            let reached = super::kit::motion::appear(
+                ui.ctx(),
+                glide_id.with(("reached", index)),
+                super::kit::motion::POPOVER * 1.3,
+                0.0,
+            );
+            super::entering(ui.ctx(), late + entrance_delay(top, clip)).min(0.35 + 0.65 * reached)
         } else if let Some(wave) = wave {
             wave_progress(ui.ctx(), wave, entrance_delay(top, clip))
         } else {
@@ -489,8 +497,8 @@ fn wave_key() -> egui::Id {
 }
 
 /// Brings the next list in as a wave whenever `key` (what it shows) changes.
-pub(crate) fn wave_on_change(ctx: &egui::Context, key: String) {
-    let id = egui::Id::new(("rows-wave-key", ctx.viewport_id()));
+pub(crate) fn wave_on_change(ctx: &egui::Context, list: &str, key: String) {
+    let id = egui::Id::new(("rows-wave-key", list));
     let before = ctx.data(|data| data.get_temp::<String>(id));
     let now = ctx.input(|input| input.time);
     ctx.data_mut(|data| {
@@ -4645,6 +4653,10 @@ pub fn setting_row_sized(
             );
         }
     };
+    // The row lights behind its words and control while the pointer is on it,
+    // so the eye can follow from a label across to its control.
+    let light = ui.painter().add(egui::Shape::Noop);
+    let top = ui.cursor().top();
     if ui.available_width() - reserved < SETTING_TEXT_MIN_WIDTH {
         ui.vertical(|ui| {
             text(ui);
@@ -4664,6 +4676,24 @@ pub fn setting_row_sized(
             });
             ui.with_layout(Layout::right_to_left(Align::Center), control);
         });
+    }
+    let row = Rect::from_x_y_ranges(ui.max_rect().x_range(), top..=ui.cursor().top())
+        .expand2(vec2(8.0, 3.0));
+    let lit = super::kit::motion::toward(
+        ui.ctx(),
+        ui.id().with(("setting-row-light", label)),
+        super::pointer_over(ui, row),
+        super::kit::motion::FEEDBACK,
+    );
+    if lit > 0.0 {
+        ui.painter().set(
+            light,
+            egui::epaint::RectShape::filled(
+                row,
+                CornerRadius::same(8),
+                palette.surface_hover.gamma_multiply(0.7 * lit),
+            ),
+        );
     }
     ui.add_space(10.0);
 }
