@@ -160,6 +160,8 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .transport .side { color: var(--dim); }
 .transport .side[aria-pressed="true"] { color: var(--text); }
 .transport .side svg { width: 22px; height: 22px; }
+.transport .side { position: relative; }
+.transport .side.one::after { content: "1"; position: absolute; top: 9px; right: 9px; font-size: 9px; font-weight: 700; line-height: 1; }
 .transport .main { width: 72px; height: 72px; border-radius: 50%; background: var(--inverse); color: var(--on-inverse); }
 .volume { display: flex; align-items: center; gap: 10px; color: var(--dim); flex: none; }
 .volume svg { width: 20px; height: 20px; flex: none; }

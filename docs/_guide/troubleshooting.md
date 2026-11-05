@@ -1,7 +1,7 @@
 ---
 title: When Something Goes Wrong
 description: "What \"Spotify refused the audio key\" and \"Spotify is being slow\" mean, and what you can do about them."
-nav_order: 7
+nav_order: 8
 ---
 
 Each section starts with the words you see in Siphon or in its log, so you

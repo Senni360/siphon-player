@@ -1,7 +1,7 @@
 ---
 title: Make It Even Faster
 description: "Scrolling performance and reducing loading delays with your own Spotify connection."
-nav_order: 6
+nav_order: 7
 ---
 
 ## Scrolling and large libraries

@@ -535,6 +535,8 @@ function openSheet() {
     heart.setAttribute('aria-pressed', String(!!state.liked));
     shuffle.setAttribute('aria-pressed', String(!!state.shuffle));
     repeat.setAttribute('aria-pressed', String(state.repeat !== 'off'));
+    repeat.classList.toggle('one', state.repeat === 'one');
+    repeat.setAttribute('aria-label', state.repeat === 'one' ? 'Repeat one' : state.repeat === 'all' ? 'Repeat all' : 'Repeat');
     if (wasPlaying !== state.playing) {
       wasPlaying = state.playing;
       main.replaceChildren(icon(state.playing ? 'pause' : 'play'));
@@ -671,6 +673,12 @@ function back() {
   current = trail.pop() ?? { page: 'home' };
   render();
 }
+// On a computer's browser, Escape closes what's on top.
+addEventListener('keydown', event => {
+  if (event.key !== 'Escape') return;
+  if (document.querySelector('.actions')) document.querySelector('.scrim')?.click();
+  else if (player.sheet) player.sheet.close();
+});
 addEventListener('popstate', () => {
   if (document.querySelector('.actions')) { document.querySelector('.scrim')?.click(); return; }
   if (player.sheet) player.sheet.close();
