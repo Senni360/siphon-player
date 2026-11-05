@@ -281,11 +281,16 @@ fn links_lead_back_from_accounts_but_not_from_a_refusal() {
             name: "Slayer".into(),
             soundcloud: Some(Link::Chosen(account)),
             youtube: Some(Link::NotThere),
+            alternates: vec![Account {
+                uri: "soundcloud:user:2".into(),
+                ..Default::default()
+            }],
         },
     );
     let back = links.back();
-    assert_eq!(back.len(), 1);
+    assert_eq!(back.len(), 2);
     assert_eq!(back["soundcloud:user:1"].1, "Slayer");
+    assert_eq!(back["soundcloud:user:2"].1, "Slayer");
 }
 
 #[test]
@@ -489,4 +494,59 @@ fn an_older_saved_finding_without_the_newer_lists_still_reads() {
     assert_eq!(found.on_spotify, 3);
     assert!(found.unreleased.is_empty());
     assert!(found.produced.is_empty());
+}
+
+#[test]
+fn a_bio_names_a_handle_only_as_a_handle_or_a_link() {
+    assert!(bio_names(
+        "https://www.instagram.com/countdragons/",
+        "countdragons"
+    ));
+    assert!(bio_names("ig: @countdragons", "CountDragons"));
+    assert!(bio_names(
+        "instagram.com/countdragons?hl=en",
+        "countdragons"
+    ));
+    assert!(!bio_names(
+        "I love count dragons and countdragons music",
+        "countdragons"
+    ));
+    assert!(!bio_names(
+        "https://instagram.com/countdragons2",
+        "countdragons"
+    ));
+    assert!(!bio_names("@abc", "abc"), "too short to mean anything");
+    assert!(!bio_names("", "countdragons"));
+}
+
+fn sized(uri: &str, name: &str, followers: u64) -> Account {
+    Account {
+        uri: uri.to_owned(),
+        name: name.to_owned(),
+        followers: Some(followers),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn only_the_artists_own_bio_makes_an_account_theirs() {
+    let main = sized("soundcloud:user:1", "slayr", 83_000);
+    let alt = sized("soundcloud:user:2", "countdragons", 10_000);
+    let tied = |named_in_bio, follows_main, reposts| AccountTies {
+        named_in_bio,
+        follows_main,
+        reposts,
+    };
+    assert!(is_alternate(&main, &alt, tied(true, true, 5)));
+    assert!(is_alternate(&main, &alt, tied(true, true, 0)));
+    assert!(is_alternate(&main, &alt, tied(true, false, 2)));
+    // A close collaborator does all of this, except be named in the bio.
+    assert!(!is_alternate(&main, &alt, tied(false, true, 50)));
+    // A bio can name anyone.
+    assert!(!is_alternate(&main, &alt, tied(true, false, 1)));
+    let bigger = sized("soundcloud:user:3", "famous", 900_000);
+    assert!(!is_alternate(&main, &bigger, tied(true, true, 5)));
+    let label = sized("soundcloud:user:4", "Dragon Records", 900);
+    assert!(!is_alternate(&main, &label, tied(true, true, 5)));
+    assert!(!is_alternate(&main, &main, tied(true, true, 5)));
 }

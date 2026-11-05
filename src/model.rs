@@ -1208,6 +1208,9 @@ pub struct ArtistSources {
     pub produced: Vec<Track>,
     /// Accounts that keep posting their unreleased songs.
     pub archives: Vec<crate::artist_sources::Account>,
+    /// Other accounts they post on themselves, and what's on them.
+    pub alternates: Vec<crate::artist_sources::Account>,
+    pub alternate_songs: Vec<Track>,
     /// The lists opened past their first few.
     pub opened: std::collections::HashSet<ElsewhereList>,
 }
@@ -1216,6 +1219,7 @@ pub struct ArtistSources {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ElsewhereList {
     Songs,
+    Alternates,
     Edits,
     Unreleased,
     Produced,
@@ -1272,6 +1276,21 @@ impl ArtistSources {
             [&produced[0][..], &produced[1][..]],
         ));
         self.archives = archives;
+        // Songs on their other accounts are theirs, so they aren't also listed as
+        // something someone else posted or that they produced for someone.
+        let alternate = sound
+            .map(|found| found.alternate_songs.clone())
+            .unwrap_or_default();
+        let theirs: std::collections::HashSet<&str> =
+            alternate.iter().map(|track| track.uri.as_str()).collect();
+        self.produced
+            .retain(|track| !theirs.contains(track.uri.as_str()));
+        self.unreleased
+            .retain(|track| !theirs.contains(track.uri.as_str()));
+        self.alternates = sound
+            .map(|found| found.alternates.clone())
+            .unwrap_or_default();
+        self.alternate_songs = crate::artist_sources::without_songs(artist, alternate, &self.songs);
     }
 }
 

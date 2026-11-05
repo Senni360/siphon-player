@@ -151,7 +151,13 @@ impl Reader {
         show(&finding);
         let beyond = match side {
             Side::SoundCloud => {
-                sources::soundcloud_beyond(&self.client, &request.name, catalogue).await
+                sources::soundcloud_beyond(
+                    &self.client,
+                    &request.name,
+                    catalogue,
+                    finding.account.as_ref(),
+                )
+                .await
             }
             Side::YouTube => sources::youtube_beyond(&resolver, &request.name, catalogue).await,
         };
@@ -224,6 +230,9 @@ impl Reader {
                     let Some(finding) = finding else { continue };
                     if finding.error.is_some() {
                         continue;
+                    }
+                    if side == Side::SoundCloud {
+                        linked.alternates = finding.alternates.clone();
                     }
                     let slot = linked.side_mut(side);
                     if matches!(slot, Some(Link::Chosen(_) | Link::NotThere)) {

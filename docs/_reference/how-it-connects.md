@@ -122,7 +122,9 @@ titles with the artist's songs, whose release listings it reads over the playbac
 session. Nothing replaces a Spotify song; a song only on SoundCloud plays from there.
 It also searches for the artist's snippets, leaks and scrapped songs, reads through the
 few accounts that keep posting them, and looks for songs crediting the artist as
-producer in their titles (Spotify has no such list). What's found is kept for a day in
+producer in their titles (Spotify has no such list). From the artist's SoundCloud account
+it reads their bio, reposts and followings to find another account they post on, which
+counts only if the bio gives its name as a handle and the two are connected. What's found is kept for a day in
 `artist-sources` under the cache folder. Which account
 is whose stays in `artist-links.json`, where a listener's choice outranks any search.
 

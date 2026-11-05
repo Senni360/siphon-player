@@ -104,6 +104,11 @@ pub struct Finding {
     /// Songs by others that credit this artist as producer.
     #[serde(default)]
     pub produced: Vec<Track>,
+    /// Other accounts the artist posts on, and what's there that Spotify lacks.
+    #[serde(default)]
+    pub alternates: Vec<Account>,
+    #[serde(default)]
+    pub alternate_songs: Vec<Track>,
     #[serde(default)]
     pub error: Option<String>,
 }
@@ -132,6 +137,9 @@ pub struct Linked {
     pub soundcloud: Option<Link>,
     #[serde(default)]
     pub youtube: Option<Link>,
+    /// Other accounts they post on.
+    #[serde(default)]
+    pub alternates: Vec<Account>,
 }
 
 impl Linked {
@@ -160,6 +168,9 @@ impl Links {
                 if let Link::Found(account) | Link::Chosen(account) = link {
                     back.insert(account.uri.clone(), (id.clone(), linked.name.clone()));
                 }
+            }
+            for account in &linked.alternates {
+                back.insert(account.uri.clone(), (id.clone(), linked.name.clone()));
             }
         }
         back
@@ -673,6 +684,71 @@ pub fn sort_produced(artist: &str, found: Vec<Track>, side: Side) -> Vec<Track> 
     all
 }
 
+/// What connects an artist's main account to another one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AccountTies {
+    /// Their bio has the other's name as a handle or at the end of a link.
+    pub named_in_bio: bool,
+    pub follows_main: bool,
+    /// How many of the main account's recent reposts are from the other.
+    pub reposts: usize,
+}
+
+/// Fewest letters in a name to be read as a handle in a bio: short ones turn up by
+/// chance inside other words and links.
+const SHORTEST_HANDLE: usize = 5;
+/// Fewest of the main account's reposts that count as a tie.
+const REPOSTS_FOR_TIE: usize = 2;
+/// Names of labels, managers and the like, which a bio names for other reasons.
+const NOT_A_PERSON: &[&str] = &[
+    "records",
+    "recordings",
+    "label",
+    "mgmt",
+    "management",
+    "booking",
+    "publishing",
+    "radio",
+    "collective",
+    "official",
+];
+
+/// Whether a bio gives `name` as a handle: `@name`, or the last part of a link such
+/// as `instagram.com/name`. A plain word in a sentence doesn't count.
+pub fn bio_names(bio: &str, name: &str) -> bool {
+    let wanted = name.to_lowercase();
+    if wanted.chars().count() < SHORTEST_HANDLE
+        || !wanted
+            .chars()
+            .all(|character| character.is_alphanumeric() || matches!(character, '_' | '.' | '-'))
+    {
+        return false;
+    }
+    bio.to_lowercase().split_whitespace().any(|word| {
+        let word = word.trim_matches(|character: char| {
+            !character.is_alphanumeric() && !matches!(character, '@' | '_')
+        });
+        let word = word.split(['?', '#']).next().unwrap_or(word);
+        word.strip_prefix('@') == Some(wanted.as_str())
+            || (word.contains('/') && word.rsplit('/').next() == Some(wanted.as_str()))
+    })
+}
+
+/// Whether another account is the artist's own. A collaborator also reposts them,
+/// follows them and credits them, so only the artist's own bio giving that name can
+/// say so. The account then has to show a tie of its own, as a bio can name anyone,
+/// and be smaller than the main one, which a label or a crew usually isn't.
+pub fn is_alternate(main: &Account, other: &Account, ties: AccountTies) -> bool {
+    let words = tokens(&other.name);
+    ties.named_in_bio
+        && (ties.follows_main || ties.reposts >= REPOSTS_FOR_TIE)
+        && other.uri != main.uri
+        && other.followers.unwrap_or(0) <= main.followers.unwrap_or(0)
+        && !words
+            .iter()
+            .any(|word| NOT_A_PERSON.contains(&word.as_str()))
+}
+
 /// The songs Spotify has of an artist.
 #[derive(Clone, Debug, Default)]
 pub struct Catalogue {
@@ -979,6 +1055,7 @@ impl Finding {
             &mut self.edits,
             &mut self.unreleased,
             &mut self.produced,
+            &mut self.alternate_songs,
         ] {
             *list = std::mem::take(list)
                 .into_iter()
@@ -1284,9 +1361,84 @@ async fn read_soundcloud(client: &Client, id: u64) -> Vec<Track> {
     tracks
 }
 
+/// How many of an account's recent reposts came from whom.
+async fn reposted_by(client: &Client, id: u64) -> Vec<(models::User, usize)> {
+    const REPOSTS_READ: u32 = 100;
+    let url =
+        format!("https://api-v2.soundcloud.com/stream/users/{id}/reposts?limit={REPOSTS_READ}");
+    let Ok(page) = client.next_page::<serde_json::Value>(&url).await else {
+        return Vec::new();
+    };
+    let mut counts: HashMap<u64, (models::User, usize)> = HashMap::new();
+    for item in &page.collection {
+        let user = item
+            .pointer("/track/user")
+            .or_else(|| item.pointer("/playlist/user"))
+            .and_then(|user| serde_json::from_value::<models::User>(user.clone()).ok());
+        if let Some(user) = user {
+            counts.entry(user.id).or_insert_with(|| (user, 0)).1 += 1;
+        }
+    }
+    counts.into_values().collect()
+}
+
+/// Other accounts the artist posts on, found from their own main account.
+pub async fn soundcloud_alternates(client: &Client, main: &Account) -> Vec<(Account, AccountTies)> {
+    let Ok(id) = main.id.parse::<u64>() else {
+        return Vec::new();
+    };
+    let (profile, reposted, followed) = tokio::join!(
+        client.user(id),
+        reposted_by(client, id),
+        client.user_followings(id, 200, 0),
+    );
+    let bio = profile
+        .ok()
+        .and_then(|profile| profile.description)
+        .unwrap_or_default();
+    if bio.trim().is_empty() {
+        return Vec::new();
+    }
+    let mut named: Vec<(models::User, usize)> = reposted
+        .into_iter()
+        .filter(|(user, _)| bio_names(&bio, &user.username))
+        .collect();
+    if let Ok(page) = followed {
+        for user in page.collection {
+            if bio_names(&bio, &user.username)
+                && !named.iter().any(|(known, _)| known.id == user.id)
+            {
+                named.push((user, 0));
+            }
+        }
+    }
+    let mut alternates = Vec::new();
+    for (user, reposts) in named {
+        let follows_main = client
+            .user_followings(user.id, 200, 0)
+            .await
+            .is_ok_and(|page| page.collection.iter().any(|followed| followed.id == id));
+        let account = soundcloud_account(&user);
+        let ties = AccountTies {
+            named_in_bio: true,
+            follows_main,
+            reposts,
+        };
+        if is_alternate(main, &account, ties) {
+            alternates.push((account, ties));
+        }
+    }
+    alternates
+}
+
 /// What people other than the artist post: SoundCloud's snippets, leaks and scrapped
 /// songs, the accounts that keep posting them, and songs crediting the artist.
-pub async fn soundcloud_beyond(client: &Client, artist: &str, catalogue: &Catalogue) -> Beyond {
+pub async fn soundcloud_beyond(
+    client: &Client,
+    artist: &str,
+    catalogue: &Catalogue,
+    main: Option<&Account>,
+) -> Beyond {
     let search = |word: &'static str| {
         let query = format!("{artist} {word}");
         async move {
@@ -1308,6 +1460,18 @@ pub async fn soundcloud_beyond(client: &Client, artist: &str, catalogue: &Catalo
         client.search_tracks(&also_query, BEYOND_SEARCH, 0),
     );
     let found: Vec<models::Track> = [snippets, leaks, unreleased, scrapped].concat();
+    let alternates = match main {
+        Some(main) => soundcloud_alternates(client, main).await,
+        None => Vec::new(),
+    };
+    let mut alternate_songs = Vec::new();
+    for (account, _) in &alternates {
+        let uploads = read_soundcloud(client, account.id.parse().unwrap_or(0)).await;
+        let (songs, edits, _) = sort_uploads(artist, catalogue, uploads, Side::SoundCloud);
+        alternate_songs.extend(songs);
+        alternate_songs.extend(edits);
+    }
+    alternate_songs.sort_by_key(|track| std::cmp::Reverse(plays(track)));
 
     // Who keeps posting them.
     let mut posters: HashMap<u64, (models::User, usize)> = HashMap::new();
@@ -1358,6 +1522,8 @@ pub async fn soundcloud_beyond(client: &Client, artist: &str, catalogue: &Catalo
             .map(|(user, _)| soundcloud_account(user))
             .collect(),
         produced: sort_produced(artist, produced_found, Side::SoundCloud),
+        alternates: alternates.into_iter().map(|(account, _)| account).collect(),
+        alternate_songs,
     }
 }
 
@@ -1382,6 +1548,7 @@ pub async fn youtube_beyond(resolver: &Resolver, artist: &str, catalogue: &Catal
         ),
         archives: Vec::new(),
         produced: sort_produced(artist, produced.unwrap_or_default(), Side::YouTube),
+        ..Default::default()
     }
 }
 
@@ -1391,6 +1558,8 @@ pub struct Beyond {
     pub unreleased: Vec<Track>,
     pub archives: Vec<Account>,
     pub produced: Vec<Track>,
+    pub alternates: Vec<Account>,
+    pub alternate_songs: Vec<Track>,
 }
 
 impl Finding {
@@ -1398,6 +1567,8 @@ impl Finding {
         self.unreleased = beyond.unreleased;
         self.archives = beyond.archives;
         self.produced = beyond.produced;
+        self.alternates = beyond.alternates;
+        self.alternate_songs = beyond.alternate_songs;
     }
 }
 

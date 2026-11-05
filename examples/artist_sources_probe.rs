@@ -28,6 +28,13 @@ fn show(side: &str, finding: &Finding, took: std::time::Duration) {
     for track in finding.edits.iter().take(6) {
         println!("  {} [{:?}]", track.name, track.play_count);
     }
+    for alternate in &finding.alternates {
+        println!(
+            "ALSO POSTS AS: {} ({:?})",
+            alternate.name, alternate.followers
+        );
+    }
+    println!("alternate songs: {}", finding.alternate_songs.len());
     println!("unreleased: {}", finding.unreleased.len());
     for track in finding.unreleased.iter().take(14) {
         println!(
@@ -64,7 +71,8 @@ async fn main() -> anyhow::Result<()> {
     let resolver = Resolver::default();
     let started = std::time::Instant::now();
     let mut found = sources::soundcloud(&client, &artist, &catalogue, None).await;
-    found.add(sources::soundcloud_beyond(&client, &artist, &catalogue).await);
+    let main = found.account.clone();
+    found.add(sources::soundcloud_beyond(&client, &artist, &catalogue, main.as_ref()).await);
     show("SoundCloud", &found, started.elapsed());
     let started = std::time::Instant::now();
     let mut found = sources::youtube(&resolver, &artist, &catalogue, None).await;

@@ -6157,6 +6157,7 @@ impl App {
         self.cache_soundcloud_tracks(&finding.edits);
         self.cache_soundcloud_tracks(&finding.unreleased);
         self.cache_soundcloud_tracks(&finding.produced);
+        self.cache_soundcloud_tracks(&finding.alternate_songs);
         let Some(page) = self.artist_pages.get_mut(&artist) else {
             return;
         };

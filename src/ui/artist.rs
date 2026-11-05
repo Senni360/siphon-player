@@ -528,6 +528,13 @@ fn accounts_row(app: &mut App, ui: &mut egui::Ui, id: &str, artist: &Artist, pag
                 _ => {}
             }
         }
+        for account in &sources.alternates {
+            let (response, _) = account_pill(app, ui, Side::SoundCloud, account, 0.0);
+            if response.clicked() {
+                app.actions
+                    .push(Action::Open(Page::SoundCloud(account.uri.clone())));
+            }
+        }
     });
     for side in SIDES {
         if let Loadable::Loaded(found) = sources.finding(side)
@@ -861,6 +868,23 @@ fn elsewhere_songs(app: &mut App, ui: &mut egui::Ui, id: &str, page: &ArtistPage
         &sources.songs,
         sources,
     );
+    if !sources.alternates.is_empty() && !sources.alternate_songs.is_empty() {
+        let names: Vec<&str> = sources
+            .alternates
+            .iter()
+            .map(|account| account.name.as_str())
+            .collect();
+        let title = gettext(locale, "Also posts as {name}").replace("{name}", &names.join(", "));
+        elsewhere_list(
+            app,
+            ui,
+            id,
+            ElsewhereList::Alternates,
+            &title,
+            &sources.alternate_songs,
+            sources,
+        );
+    }
 }
 
 /// What other people post of theirs, after the discography: what they've produced,
