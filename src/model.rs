@@ -1189,6 +1189,70 @@ pub struct ArtistPage {
     pub related: Loadable<Vec<Artist>>,
     pub filter: DiscographyFilter,
     pub show_all_top: bool,
+    pub sources: ArtistSources,
+}
+
+/// What an artist has beyond Spotify, on their page.
+#[derive(Default)]
+pub struct ArtistSources {
+    /// The latest ask for SoundCloud and YouTube. None yet is (0, 0).
+    pub asks: (u64, u64),
+    pub soundcloud: Loadable<crate::artist_sources::Finding>,
+    pub youtube: Loadable<crate::artist_sources::Finding>,
+    /// A choice was made and its songs are on their way.
+    pub reading: std::collections::HashSet<crate::artist_sources::Side>,
+    /// Both sources' songs as one list, and their edits.
+    pub songs: Vec<Track>,
+    pub edits: Vec<Track>,
+    pub show_all: bool,
+    pub show_all_edits: bool,
+}
+
+impl ArtistSources {
+    pub fn finding(
+        &self,
+        side: crate::artist_sources::Side,
+    ) -> &Loadable<crate::artist_sources::Finding> {
+        match side {
+            crate::artist_sources::Side::SoundCloud => &self.soundcloud,
+            crate::artist_sources::Side::YouTube => &self.youtube,
+        }
+    }
+
+    /// Whether something is still on its way that could add to the lists.
+    pub fn looking(&self) -> bool {
+        !self.reading.is_empty()
+            || matches!(self.soundcloud, Loadable::Loading)
+            || matches!(self.youtube, Loadable::Loading)
+    }
+
+    /// Makes the lists from what each source has so far.
+    pub fn settle(&mut self, artist: &str) {
+        let sound = self.soundcloud.get();
+        let video = self.youtube.get();
+        let empty: &[Track] = &[];
+        let list = |found: Option<&crate::artist_sources::Finding>, edits: bool| {
+            found.map_or(empty.to_vec(), |found| {
+                if edits {
+                    found.edits.clone()
+                } else {
+                    found.exclusives.clone()
+                }
+            })
+        };
+        let (sound_songs, video_songs) = (list(sound, false), list(video, false));
+        let (sound_edits, video_edits) = (list(sound, true), list(video, true));
+        self.songs = crate::artist_sources::merged(artist, [&sound_songs[..], &video_songs[..]]);
+        self.edits = crate::artist_sources::merged_edits([&sound_edits[..], &video_edits[..]]);
+    }
+}
+
+/// What the listener says about an artist's account on a source.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ArtistChoice {
+    Account(crate::artist_sources::Account),
+    NotThere,
+    SearchAgain,
 }
 
 /// A radio page: the songs Spotify mixed for its seed, which are the songs
@@ -1410,6 +1474,15 @@ impl Toast {
 pub enum Action {
     /// Get a YouTube song ready, since the pointer has settled on it.
     WarmYouTube(String),
+    ChooseArtistAccount {
+        artist_id: String,
+        side: crate::artist_sources::Side,
+        choice: ArtistChoice,
+    },
+    ToggleShowAllElsewhere {
+        artist_id: String,
+        edits: bool,
+    },
     Friends(crate::friends::Action),
     /// Listening together with the group. See [`crate::friends::live`].
     Live(crate::friends::live::Action),

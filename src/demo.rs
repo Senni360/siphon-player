@@ -21,6 +21,64 @@ use crate::app::{App, RemoteSnapshot};
 use crate::backend::AuthStatus;
 use crate::model::*;
 
+/// An artist found on SoundCloud for sure, and asked about on YouTube.
+fn demo_artist_sources(tracks: &[Track]) -> ArtistSources {
+    use crate::artist_sources::{Account, Confidence, Finding};
+    let upload = |index: usize, uri: String, name: &str, plays: u64| Track {
+        name: name.to_owned(),
+        uri,
+        play_count: Some(plays),
+        duration_ms: 170_000,
+        ..tracks[index % tracks.len()].clone()
+    };
+    let account = |uri: &str, name: &str, followers: u64| Account {
+        uri: uri.to_owned(),
+        id: "1".into(),
+        name: name.to_owned(),
+        image: image(40).first().map(|image| image.url.clone()),
+        followers: Some(followers),
+        verified: false,
+    };
+    let mut sources = ArtistSources {
+        asks: (1, 1),
+        soundcloud: Loadable::Loaded(Finding {
+            account: Some(account("soundcloud:user:1", "Tourist", 83_025)),
+            confidence: Some(Confidence::Sure),
+            exclusives: vec![
+                upload(0, "soundcloud:track:1".into(), "Scrapped Song", 3_192_526),
+                upload(
+                    1,
+                    "soundcloud:track:2".into(),
+                    "Never Going Down",
+                    1_726_695,
+                ),
+                upload(2, "soundcloud:track:3".into(), "Demo From 2019", 918_000),
+                upload(3, "soundcloud:track:4".into(), "Toxic", 892_304),
+                upload(4, "soundcloud:track:5".into(), "Late Night Idea", 412_000),
+                upload(5, "soundcloud:track:6".into(), "Set In Stone", 198_000),
+            ],
+            edits: vec![upload(
+                6,
+                "soundcloud:track:7".into(),
+                "Tourist - Rosewood (Club Edit)",
+                41_100,
+            )],
+            on_spotify: 12,
+            ..Default::default()
+        }),
+        youtube: Loadable::Loaded(Finding {
+            candidates: vec![
+                account("youtube:channel:UC1", "Tourist", 2_400),
+                account("youtube:channel:UC2", "TOURIST", 1_100),
+            ],
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    sources.settle("Tourist");
+    sources
+}
+
 fn image(seed: u32) -> Vec<Image> {
     vec![
         Image {
@@ -620,6 +678,7 @@ pub fn populate(app: &mut App) {
     artist_page
         .albums
         .insert(DiscographyFilter::All.groups().to_string(), albums);
+    artist_page.sources = demo_artist_sources(&tracks);
     app.artist_pages.insert("art0".into(), artist_page);
     app.saved.insert("spotify:artist:art0".into(), true);
 

@@ -518,6 +518,9 @@ pub struct App {
     /// Home's recommendations, and when they were asked for.
     pub for_you: Loadable<crate::for_you::ForYou>,
     pub for_you_asked: Option<Instant>,
+    /// Which artist each SoundCloud and YouTube account page leads back to.
+    pub artist_links: HashMap<String, (String, String)>,
+    artist_links_asked: bool,
     /// Local play history. See [`crate::history`].
     pub plays: crate::history::History,
     /// Writes settings, session and history off the UI thread.
@@ -1243,6 +1246,8 @@ impl App {
             home: HomeData::default(),
             for_you: Loadable::NotLoaded,
             for_you_asked: None,
+            artist_links: HashMap::new(),
+            artist_links_asked: false,
             plays,
             files: std::sync::Arc::new(fastframe_file::Writer::new()),
             mixed_playlists: mixed.unwrap_or_default(),
@@ -2891,6 +2896,8 @@ impl App {
                     | Event::SoundCloudSearch { .. }
                     | Event::YouTubeSearch { .. }
                     | Event::ForYou(..)
+                    | Event::ArtistSource { .. }
+                    | Event::ArtistLinks(..)
             );
             #[cfg(not(all(feature = "demo", not(test))))]
             let browsing = false;
@@ -3075,6 +3082,13 @@ impl App {
                     self.handle_hybrid_context(generation, result)
                 }
                 Event::YouTubeAccount(response) => self.handle_youtube_account(response),
+                Event::ArtistSource {
+                    artist,
+                    ask,
+                    side,
+                    finding,
+                } => self.artist_source_found(artist, ask, side, *finding),
+                Event::ArtistLinks(links) => self.artist_links = links,
                 Event::ForYou(shown) => {
                     let tracks: Vec<Track> = shown
                         .picks
@@ -6094,6 +6108,142 @@ impl App {
     }
 
     /// Starts a new Home refresh while preserving cards already on screen.
+    /// Asks once what an artist has elsewhere, when their page knows enough of
+    /// what Spotify has to tell the two apart.
+    pub(crate) fn ask_artist_sources(&mut self, id: &str) {
+        if !self.network_reachable {
+            return;
+        }
+        let Some(page) = self.artist_pages.get_mut(id) else {
+            return;
+        };
+        if page.sources.asks != (0, 0) {
+            return;
+        }
+        let Loadable::Loaded(artist) = &page.artist else {
+            return;
+        };
+        let settled = !matches!(page.top_tracks, Loadable::NotLoaded | Loadable::Loading)
+            && page
+                .albums
+                .values()
+                .any(|list| list.loaded_once || list.error.is_some());
+        if !settled {
+            return;
+        }
+        page.sources.asks = (1, 1);
+        page.sources.soundcloud = Loadable::Loading;
+        page.sources.youtube = Loadable::Loading;
+        let request = artist_request(id, artist.name.clone(), page, 1);
+        self.backend.send(Command::ArtistSources(request));
+    }
+
+    fn artist_source_found(
+        &mut self,
+        artist: String,
+        ask: u64,
+        side: crate::artist_sources::Side,
+        finding: crate::artist_sources::Finding,
+    ) {
+        use crate::artist_sources::Side;
+        self.cache_soundcloud_tracks(&finding.exclusives);
+        self.cache_soundcloud_tracks(&finding.edits);
+        let Some(page) = self.artist_pages.get_mut(&artist) else {
+            return;
+        };
+        let current = match side {
+            Side::SoundCloud => page.sources.asks.0,
+            Side::YouTube => page.sources.asks.1,
+        };
+        // From before the listener chose another account.
+        if ask != current {
+            return;
+        }
+        let name = page.artist.get().map(|artist| artist.name.clone());
+        page.sources.reading.remove(&side);
+        let finding = Loadable::Loaded(finding);
+        match side {
+            Side::SoundCloud => page.sources.soundcloud = finding,
+            Side::YouTube => page.sources.youtube = finding,
+        }
+        page.sources.settle(name.as_deref().unwrap_or_default());
+    }
+
+    fn choose_artist_account(
+        &mut self,
+        id: String,
+        side: crate::artist_sources::Side,
+        choice: crate::model::ArtistChoice,
+    ) {
+        use crate::artist_sources::{Confidence, Finding, Link, Side};
+        use crate::model::ArtistChoice;
+        let Some(page) = self.artist_pages.get_mut(&id) else {
+            return;
+        };
+        let Some(name) = page.artist.get().map(|artist| artist.name.clone()) else {
+            return;
+        };
+        let ask = {
+            let asks = &mut page.sources.asks;
+            let ask = match side {
+                Side::SoundCloud => &mut asks.0,
+                Side::YouTube => &mut asks.1,
+            };
+            *ask += 1;
+            *ask
+        };
+        let slot = match side {
+            Side::SoundCloud => &mut page.sources.soundcloud,
+            Side::YouTube => &mut page.sources.youtube,
+        };
+        let mut candidates = slot.get().map(|old| {
+            let mut all = old.candidates.clone();
+            all.extend(old.account.clone());
+            all
+        });
+        let candidates = candidates.take().unwrap_or_default();
+        // The page shows the choice at once and fills in behind it.
+        let (shown, link) = match choice {
+            ArtistChoice::Account(account) => (
+                Finding {
+                    candidates: candidates
+                        .into_iter()
+                        .filter(|other| other.uri != account.uri)
+                        .collect(),
+                    account: Some(account.clone()),
+                    confidence: Some(Confidence::Chosen),
+                    ..Default::default()
+                },
+                Some(Link::Chosen(account)),
+            ),
+            ArtistChoice::NotThere => (
+                Finding {
+                    not_there: true,
+                    ..Default::default()
+                },
+                Some(Link::NotThere),
+            ),
+            ArtistChoice::SearchAgain => (Finding::default(), None),
+        };
+        *slot = Loadable::Loaded(shown);
+        page.sources.reading.insert(side);
+        page.sources.settle(&name);
+        let request = artist_request(&id, name, page, ask);
+        self.backend.send(Command::ChooseArtistAccount {
+            request,
+            side,
+            link,
+        });
+    }
+
+    /// Learns which artists accounts lead back to, the first time it matters.
+    pub(crate) fn ask_artist_links(&mut self) {
+        if !self.artist_links_asked {
+            self.artist_links_asked = true;
+            self.backend.send(Command::ArtistLinks);
+        }
+    }
+
     /// Asks for Home's recommendations, unless they're fresh.
     pub(crate) fn ask_for_you(&mut self) {
         const FRESH: Duration = Duration::from_secs(30 * 60);
@@ -13179,6 +13329,21 @@ impl App {
                 }
             }
             Action::WarmYouTube(uri) => self.backend.send(Command::WarmYouTube(uri)),
+            Action::ChooseArtistAccount {
+                artist_id,
+                side,
+                choice,
+            } => self.choose_artist_account(artist_id, side, choice),
+            Action::ToggleShowAllElsewhere { artist_id, edits } => {
+                if let Some(page) = self.artist_pages.get_mut(&artist_id) {
+                    let flag = if edits {
+                        &mut page.sources.show_all_edits
+                    } else {
+                        &mut page.sources.show_all
+                    };
+                    *flag = !*flag;
+                }
+            }
             Action::LoadMore(Page::SoundCloud(uri)) => self.load_soundcloud_page(uri, true),
             Action::LoadMore(page) => self.load_more(page),
             Action::LoadWindow { page, position } => self.load_window(page, position),
@@ -15129,6 +15294,30 @@ pub fn on_top_window_level(on_top: bool) -> egui::WindowLevel {
 /// Winamp window opens.
 fn winamp_on_top_level(winamp_window: bool, on_top: bool) -> Option<egui::WindowLevel> {
     winamp_window.then_some(on_top_window_level(on_top))
+}
+
+fn artist_request(
+    id: &str,
+    name: String,
+    page: &ArtistPage,
+    ask: u64,
+) -> crate::artist_sources::Request {
+    crate::artist_sources::Request {
+        id: id.to_owned(),
+        name,
+        ask,
+        titles: page
+            .top_tracks
+            .get()
+            .map(|tracks| tracks.iter().map(|track| track.name.clone()).collect())
+            .unwrap_or_default(),
+        albums: page
+            .albums
+            .values()
+            .flat_map(|list| list.items.iter().cloned())
+            .collect(),
+        fresh: false,
+    }
 }
 
 fn page_related_needs_load(pages: &HashMap<String, ArtistPage>, id: &str) -> bool {
@@ -36045,5 +36234,6 @@ mod tests {
         app.backend.shutdown();
     }
     include!("app/youtube_tests.rs");
+    include!("app/artist_sources_tests.rs");
     include!("app/hybrid_reliability_tests.rs");
 }

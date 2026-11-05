@@ -504,6 +504,42 @@ const VIDEOS: &str = "EgIQAQ==";
 const CHANNELS: &str = "EgIQAg==";
 const PLAYLISTS: &str = "EgIQAw==";
 
+/// Channels found by name, each with its follower count.
+pub async fn channels(
+    resolver: &Resolver,
+    query: &str,
+) -> Result<Vec<(SourceCard, Option<u64>)>, String> {
+    let read = async {
+        let url = results_url(query, CHANNELS).ok_or(Error::Metadata)?;
+        parse_listing(&resolver.listing(&url, 1, 8).await?)
+    };
+    let listing = read.await.map_err(|error: Error| error.to_string())?;
+    let followers: std::collections::HashMap<String, Option<u64>> = listing
+        .entries
+        .iter()
+        .flatten()
+        .map(|entry| (channel_uri(&entry.id), entry.channel_follower_count))
+        .collect();
+    Ok(channel_cards(&listing)
+        .into_iter()
+        .map(|card| {
+            let count = followers.get(&card.uri).copied().flatten();
+            (card, count)
+        })
+        .collect())
+}
+
+/// The videos a search finds, and nothing else.
+pub async fn videos_for(resolver: &Resolver, query: &str) -> Result<Vec<Track>, String> {
+    let read = async {
+        let url = results_url(query, VIDEOS).ok_or(Error::Metadata)?;
+        parse_listing(&resolver.listing(&url, 1, PAGE).await?)
+    };
+    read.await
+        .map(|listing: Listing| videos(&listing))
+        .map_err(|error: Error| error.to_string())
+}
+
 /// A search. A further page of videos leaves channels and playlists out.
 pub async fn search(
     resolver: &Resolver,

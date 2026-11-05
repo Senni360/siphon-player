@@ -439,6 +439,13 @@ fn profile_header(
         ui.spacing_mut().item_spacing.x = 10.0;
         play_all_button(app, ui, &content.tracks);
         follow_button(app, ui, uri, profile);
+        app.ask_artist_links();
+        if let Some((id, name)) = app.artist_links.get(uri).cloned() {
+            let label = gettext(locale, "All of {name}").replace("{name}", &name);
+            if theme::soft_button(ui, &palette, Some(Icon::User), &label, false).clicked() {
+                app.actions.push(Action::Open(Page::Artist(id)));
+            }
+        }
         if let Some(link) = &profile.link {
             let open = if uri.starts_with("youtube:") {
                 gettext(locale, "Open on YouTube")

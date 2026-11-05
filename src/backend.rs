@@ -812,6 +812,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
     fastframe_autostart::Autostart::new(crate::brand::SLUG, crate::brand::STABLE_NAME)
 }
 
+mod artist_sources;
 mod download_jobs;
 mod hybrid;
 pub(crate) mod soundcloud_library;
@@ -875,6 +876,14 @@ pub enum Command {
     },
     /// A row has been hovered: its song may well be pressed next.
     WarmYouTube(String),
+    /// What an artist has on SoundCloud and YouTube.
+    ArtistSources(crate::artist_sources::Request),
+    ChooseArtistAccount {
+        request: crate::artist_sources::Request,
+        side: crate::artist_sources::Side,
+        link: Option<crate::artist_sources::Link>,
+    },
+    ArtistLinks,
     YouTubeStream {
         tag: crate::player::PlaybackTag,
         preload: bool,
@@ -1312,6 +1321,14 @@ pub enum Event {
     SoundCloudLibrary(soundcloud_library::Response),
     YouTubeAccount(youtube_account::Response),
     ForYou(Box<crate::for_you::ForYou>),
+    ArtistSource {
+        artist: String,
+        ask: u64,
+        side: crate::artist_sources::Side,
+        finding: Box<crate::artist_sources::Finding>,
+    },
+    /// Account page to the artist it belongs to, by Spotify id and name.
+    ArtistLinks(std::collections::HashMap<String, (String, String)>),
     SoundCloudSaveFailed,
     Soloist(crate::soloist::Update),
     /// The folder picked in the local files dialog; `None` when cancelled.
@@ -1742,6 +1759,9 @@ impl Backend {
                 | Command::YouTubeFeed { .. }
                 | Command::YouTubeSearch { .. }
                 | Command::ForYou(..)
+                | Command::ArtistSources(..)
+                | Command::ChooseArtistAccount { .. }
+                | Command::ArtistLinks
         );
         #[cfg(not(all(feature = "demo", not(test))))]
         let browsing = false;
@@ -2928,6 +2948,13 @@ impl Worker {
                     });
                 }
                 Command::WarmYouTube(uri) => self.warm_youtube(uri),
+                Command::ArtistSources(request) => self.artist_sources(request),
+                Command::ChooseArtistAccount {
+                    request,
+                    side,
+                    link,
+                } => self.choose_artist_account(request, side, link),
+                Command::ArtistLinks => self.artist_links(),
                 Command::YouTubeStream {
                     tag,
                     preload,

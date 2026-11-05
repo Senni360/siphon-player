@@ -73,6 +73,7 @@ pub(super) struct HybridRuntime {
     pub(super) youtube_tracks: HashMap<String, tokio::task::AbortHandle>,
     /// Audio links found this session, shared by everything that plays.
     pub(super) youtube_links: Arc<crate::youtube::Links>,
+    pub(super) artist_links: Arc<tokio::sync::Mutex<Option<crate::artist_sources::Links>>>,
     pub(super) youtube_warming: Arc<std::sync::atomic::AtomicUsize>,
     soundcloud_load: Option<tokio::task::AbortHandle>,
     soundcloud_preload: Option<tokio::task::AbortHandle>,

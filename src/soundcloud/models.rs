@@ -41,6 +41,8 @@ pub struct User {
     pub description: Option<String>,
     #[serde(default)]
     pub visuals: Option<Visuals>,
+    #[serde(default)]
+    pub verified: bool,
 }
 
 /// The wide pictures across the top of a profile.

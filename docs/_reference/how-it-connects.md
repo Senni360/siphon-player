@@ -114,6 +114,15 @@ app using that port, then choose **Try again**. Since 0.13.2, playback setup
 does the same with its port, 8898: if another app holds it, Settings shows the
 error, the browser stays closed, and a saved playback approval is kept.
 
+An artist's page also reads what they have elsewhere, so it can list what Spotify
+doesn't have. It searches SoundCloud's and YouTube's public listings for the artist's
+name and reads the likeliest accounts' uploads, with the same requests their own pages
+make: no account is needed and only the artist's name is sent. It compares those
+titles with the artist's songs, whose release listings it reads over the playback
+session. Nothing replaces a Spotify song; a song only on SoundCloud plays from there.
+What's found is kept for a day in `artist-sources` under the cache folder. Which account
+is whose stays in `artist-links.json`, where a listener's choice outranks any search.
+
 Artist pages read popular tracks over the verified account's local playback
 session when it is ready. The list uses that account's country, or Spotify's
 worldwide (`ZZ`) ranking when its country is absent, and keeps the first ten
