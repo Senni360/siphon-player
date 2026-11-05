@@ -299,9 +299,18 @@ async function pollState() {
       const wasOnline = player.online;
       player.online = !!fresh;
       if (fresh) {
+        const sought = player.sought;
         player.state = state;
         player.direct = false;
         player.at = Date.now() - Math.max(0, now - state.at);
+        // An answer from before a seek still has the old place: keep the new one a while.
+        if (sought && Date.now() < sought.until && sought.uri === state.song?.uri) {
+          const expected = sought.ms + (state.playing ? Date.now() - sought.at : 0);
+          if (Math.abs(position(state) - expected) > 2500) {
+            player.state = { ...state, position_ms: expected };
+            player.at = Date.now();
+          } else player.sought = null;
+        }
       } else if (hasSpotify()) {
         await pollSpotify();
       } else {
@@ -384,6 +393,14 @@ function markPlaying() {
 }
 /** A small knock under the thumb, where the phone can. */
 const knock = () => navigator.vibrate?.(8);
+/** Moves to `ms` now, and holds it there until the computer agrees. */
+function seekTo(ms) {
+  if (!player.state) return;
+  player.state.position_ms = ms;
+  player.at = Date.now();
+  player.sought = { ms, at: Date.now(), until: Date.now() + HOLD_MS, uri: player.state.song?.uri };
+  act('seek', { ms });
+}
 function togglePlay() {
   knock();
   const state = shown();
@@ -415,13 +432,7 @@ function openSheet() {
     hold('liked', !state.liked);
     act('like', { uri: state.song.uri });
   } }, icon('heart'));
-  const seek = range(0, 1000, ms => {
-    const state = shown();
-    if (!state) return;
-    player.state.position_ms = ms;
-    player.at = Date.now();
-    act('seek', { ms });
-  }, 'Position');
+  const seek = range(0, 1000, seekTo, 'Position');
   const elapsed = h('span');
   const total = h('span');
   const main = h('button', { class: 'main', 'aria-label': 'Play or pause', onclick: togglePlay });
@@ -445,7 +456,13 @@ function openSheet() {
     lyricsBox.replaceChildren(bones(5));
     try {
       if (!player.online) throw new Error('Lyrics come from Encore on your computer.');
-      const found = await ask('lyrics');
+      let found = await ask('lyrics');
+      // Just after a change the computer may still hold the last song's words.
+      for (let tries = 0; found.uri && found.uri !== forUri && tries < 4; tries++) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (lyrics.uri !== forUri) return;
+        found = await ask('lyrics');
+      }
       if (lyrics.uri !== forUri) return;
       lyrics.lines = found.lines ?? [];
       if (!lyrics.lines.length) {
@@ -454,9 +471,7 @@ function openSheet() {
       }
       lyricsBox.replaceChildren(...lyrics.lines.map(line => (found.synced
         ? h('button', { text: line.text || '♪', onclick: () => {
-          player.state.position_ms = line.at_ms;
-          player.at = Date.now();
-          act('seek', { ms: line.at_ms });
+          seekTo(line.at_ms);
         } })
         : h('p', { text: line.text || ' ' }))));
       lyrics.synced = found.synced;
