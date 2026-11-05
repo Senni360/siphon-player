@@ -65,6 +65,13 @@ const QUEUE_WAIT: Duration = Duration::from_millis(50);
 /// Maximum time `stop` waits for the queue to drain.
 const DRAIN_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// Past the device's buffer, how long a stopping output keeps running, for
+/// the sound server's own period and a callback that comes a little late.
+const FLUSH_MARGIN: Duration = Duration::from_millis(30);
+
+/// The most a device's reported latency can stretch that wait.
+const FLUSH_LATENCY_LIMIT: Duration = Duration::from_secs(1);
+
 /// Length of each side of an interrupted-track fade.
 const INTERRUPT_FADE: Duration = Duration::from_millis(50);
 
@@ -305,6 +312,10 @@ impl Sink for ExternalPcm {
             .start()
     }
     fn stop(&mut self) -> SinkResult<()> {
+        // The next sound may be another song, and a stop fades what would
+        // have followed this history anyway.
+        self.eq.reset();
+        self.limiter = crate::limiter::Limiter::new(f64::from(SAMPLE_RATE));
         self.tap.clear();
         self.sink
             .lock()
@@ -778,6 +789,12 @@ impl Envelope {
     }
 }
 
+/// How long a device must keep running, once nothing but silence is going
+/// into it, before all it holds is silence.
+fn flush_time(buffer_ms: u32, latency: Duration) -> Duration {
+    Duration::from_millis(u64::from(buffer_ms)).max(latency.min(FLUSH_LATENCY_LIMIT)) + FLUSH_MARGIN
+}
+
 /// The per-frame movement that crosses the whole range in `frames`.
 fn step_over(frames: u32) -> u32 {
     SCALE.div_ceil(frames.max(1)).max(1)
@@ -1214,6 +1231,7 @@ impl Sink for RodioSink {
     /// Never fails: librespot exits the process when a sink cannot stop.
     fn stop(&mut self) -> SinkResult<()> {
         if let Some(output) = &mut self.output {
+            let running = !output.device.is_paused();
             // The drain below plays the queue out, so the ramp is cut to
             // what is in it. During steady playback that is the whole
             // 50 ms; just after a seek or a track change it is whatever has
@@ -1223,11 +1241,21 @@ impl Sink for RodioSink {
             while !output.sink.empty() && !output.failed() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(10));
             }
+            // An empty queue is not yet silence: the device still holds a
+            // buffer of what it was given, and pausing it keeps that for
+            // Play, so the old song would sound again before the next one.
+            // Silence pushes it through first.
+            if running && !output.failed() {
+                thread::sleep(flush_time(self.buffer_ms, output.device.clock().latency()));
+            }
             output.sink.pause();
             // With the queue played out, the device can stop asking for
             // sound until Play: a paused app costs no audio work (#636).
             output.device.pause();
             output.transport.close();
+            // Nothing that follows a stop continues what came before it, and
+            // the converter's history is still the old song.
+            output.resampler = converter_to(output.sample_rate);
             output.fed = false;
             output.last_write = None;
         }
@@ -2141,6 +2169,51 @@ mod tests {
         }
         assert_eq!(envelope.next_gain(), 0.0);
         assert!(envelope.silent());
+    }
+
+    /// With a 200 ms device buffer, Pause left the last of the fade in the
+    /// device, and Play sounded it before the next song.
+    #[test]
+    fn a_stopping_device_is_left_holding_only_silence() {
+        const BUFFER_MS: u32 = 200;
+        let held = (RATE * BUFFER_MS / 1_000) as usize * NUM_CHANNELS as usize;
+        let (sink, mut output) = rodio::Sink::new();
+        let (interrupt, transport) = wide_open();
+        let queued = Queued::new();
+        sink.append(chunk(RATE / 5, &interrupt, &transport, &queued));
+        transport.fade_out_over(queued.frames());
+
+        let mut device = Vec::new();
+        while !sink.empty() {
+            device.push(output.next().unwrap());
+            assert!(device.len() < held * 4, "the queue never finished");
+        }
+        assert!(
+            device[device.len() - held..].iter().any(|s| *s != 0.0),
+            "an empty queue still leaves sound in the device"
+        );
+
+        let flush = flush_time(BUFFER_MS, Duration::ZERO);
+        let frames = u64::from(RATE) * flush.as_millis() as u64 / 1_000;
+        device.extend(
+            output
+                .by_ref()
+                .take(frames as usize * NUM_CHANNELS as usize),
+        );
+        assert!(device[device.len() - held..].iter().all(|s| *s == 0.0));
+    }
+
+    #[test]
+    fn the_flush_outlasts_the_buffer_and_what_the_device_reports() {
+        let buffer = Duration::from_millis(100);
+        assert!(flush_time(100, Duration::ZERO) > buffer);
+        let reported = Duration::from_millis(340);
+        assert!(flush_time(100, reported) > reported);
+        assert_eq!(
+            flush_time(100, Duration::from_secs(60)),
+            FLUSH_LATENCY_LIMIT + FLUSH_MARGIN,
+            "a nonsense report cannot hold the player thread for long"
+        );
     }
 
     #[test]

@@ -174,6 +174,10 @@ impl Sink for Tapped {
     }
 
     fn stop(&mut self) -> SinkResult<()> {
+        // The next sound may be another song, and a stop fades what would
+        // have followed this history anyway.
+        self.eq.reset();
+        self.limiter = crate::limiter::Limiter::new(f64::from(SAMPLE_RATE));
         self.tap.clear();
         self.inner.stop()
     }
@@ -762,18 +766,41 @@ mod tests {
     }
 
     #[test]
-    fn natural_track_changes_and_pause_keep_the_limiter_tail() {
+    fn natural_track_changes_keep_the_limiter_tail() {
         let control = crate::sink::AudioControl::new(crate::sink::DEFAULT_BUFFER_MS);
         let (mut tapped, recorded) = recorded_tap(Arc::clone(&control), crate::eq::shared());
         write_level(&mut tapped, 0.25);
         control.track_changed();
-        tapped.stop().unwrap();
-        tapped.start().unwrap();
         recorded.lock().unwrap().clear();
         write_level(&mut tapped, 0.0);
         let samples = recorded.lock().unwrap();
         assert!(samples[..706].iter().all(|sample| *sample == 0.25));
         assert!(samples[706..].iter().all(|sample| *sample == 0.0));
+    }
+
+    /// Pause, skip, Play: nothing tells the sink about the skip, and the
+    /// first sound after Play is the next song.
+    #[test]
+    fn nothing_held_before_a_pause_reaches_what_plays_after_it() {
+        for equalizer_on in [false, true] {
+            let control = crate::sink::AudioControl::new(crate::sink::DEFAULT_BUFFER_MS);
+            let eq = crate::eq::shared();
+            {
+                let mut settings = eq.lock().unwrap();
+                settings.on = equalizer_on;
+                settings.bands_db[0] = 12.0;
+            }
+            let (mut tapped, recorded) = recorded_tap(Arc::clone(&control), eq);
+            write_level(&mut tapped, 0.25);
+            tapped.stop().unwrap();
+            tapped.start().unwrap();
+            recorded.lock().unwrap().clear();
+            write_level(&mut tapped, 0.0);
+            assert!(
+                recorded.lock().unwrap().iter().all(|sample| *sample == 0.0),
+                "the old limiter delay and equalizer tail must not reach the new track"
+            );
+        }
     }
     fn sine(hz: f32, amplitude: f32, count: usize) -> Vec<f32> {
         (0..count)
