@@ -5,7 +5,7 @@ use egui::{Align, CornerRadius, Frame, Layout, Margin, Stroke};
 use crate::app::App;
 use crate::i18n::{Locale, gettext, ngettext};
 use crate::model::{Action, Dialog};
-use crate::theme;
+use crate::theme::{self, Icon};
 
 fn soundcloud_connect(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
@@ -158,6 +158,13 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 }
                 // Drawn by cover_art above.
                 Dialog::CoverArt { .. } => {}
+                Dialog::YouTubeConnect(_) => {
+                    let height = (ctx.viewport_rect().height() - 96.0).max(120.0);
+                    ui.set_max_height(height);
+                    egui::ScrollArea::vertical()
+                        .max_height(height)
+                        .show(ui, |ui| youtube_connect(app, ui));
+                }
                 Dialog::SoundCloudConnect(_) => {
                     let height = (ctx.viewport_rect().height() - 96.0).max(120.0);
                     // A modal's initial area is small. Let this scroller use
@@ -931,6 +938,160 @@ fn grow_in(ctx: &egui::Context, response: &egui::Response) {
 
 /// A page's header cover, as large as the window allows, over the dimmed
 /// page. A click anywhere, on the cover or around it, or Esc closes it.
+/// Connects YouTube through the listener's own Google project, a few plain steps,
+/// the way the Spotify app setup goes.
+fn youtube_connect(app: &mut App, ui: &mut egui::Ui) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let connected = app.youtube_account().map(|profile| profile.name.clone());
+    let local = app.youtube_local_only();
+    ui.set_max_width(520.0);
+    theme::text(ui, "Connect YouTube", theme::bold(20.0), palette.text);
+    ui.add_space(8.0);
+    if let Some(name) = connected {
+        ui.label(gettext(locale, "Connected as {name}").replace("{name}", &name));
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(
+                "Your subscriptions and likes sync with YouTube. Following or liking here changes your account.",
+            )
+            .color(palette.secondary),
+        );
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if theme::soft_button(ui, &palette, Some(Icon::Refresh), "Sync now", false).clicked() {
+                app.actions.push(Action::SyncYouTube);
+            }
+            if theme::soft_button(ui, &palette, Some(Icon::LogOut), "Disconnect", false).clicked() {
+                app.actions.push(Action::DisconnectYouTube);
+            }
+        });
+        if local > 0 {
+            ui.add_space(12.0);
+            ui.label(
+                egui::RichText::new(format!(
+                    "{local} follows and likes are only on this computer. Adding them changes your YouTube account."
+                ))
+                .color(palette.secondary),
+            );
+            ui.add_space(6.0);
+            if theme::soft_button(ui, &palette, Some(Icon::Plus), "Add them to YouTube", false)
+                .clicked()
+            {
+                app.actions.push(Action::SendYouTubeLocalUp);
+            }
+        }
+        ui.add_space(16.0);
+        if theme::pill_button(ui, &palette, &gettext(locale, "Close"), true).clicked() {
+            app.actions.push(Action::CloseDialog);
+        }
+        return;
+    }
+    ui.label(
+        egui::RichText::new(
+            "Optional. Browsing and playing need none of this. Connected, your subscriptions and likes sync with your real YouTube account. It takes a free Google project of your own, about 10 minutes, once.",
+        )
+        .color(palette.secondary),
+    );
+    ui.add_space(12.0);
+    let step = |ui: &mut egui::Ui, app: &mut App, text: &str, link: Option<(&str, &str)>| {
+        ui.label(text);
+        if let Some((label, url)) = link
+            && theme::link(ui, label, theme::regular(13.0), palette.text).clicked()
+        {
+            app.actions.push(Action::OpenUrl(url.to_owned()));
+        }
+        ui.add_space(8.0);
+    };
+    step(
+        ui,
+        app,
+        "1. Create a project in Google Cloud. Any name works.",
+        Some((
+            "Create a project",
+            "https://console.cloud.google.com/projectcreate",
+        )),
+    );
+    step(
+        ui,
+        app,
+        "2. Turn on the YouTube Data API v3 for it.",
+        Some((
+            "Open the API page",
+            "https://console.cloud.google.com/apis/library/youtube.googleapis.com",
+        )),
+    );
+    step(
+        ui,
+        app,
+        "3. Set up Google Auth Platform: give the app a name, choose External, then under Audience press Publish app. Unpublished, Google signs you out every 7 days.",
+        Some((
+            "Open Google Auth Platform",
+            "https://console.cloud.google.com/auth/overview",
+        )),
+    );
+    step(
+        ui,
+        app,
+        "4. Under Clients, create a client of the type Desktop app, then copy its Client ID and Client secret.",
+        Some((
+            "Open Clients",
+            "https://console.cloud.google.com/auth/clients",
+        )),
+    );
+    ui.label("5. Paste them here and sign in. Google warns that the app isn't verified: it's yours, so choose Advanced, then Go to your app.");
+    ui.add_space(10.0);
+    let Some(Dialog::YouTubeConnect(draft)) = &mut app.dialog else {
+        return;
+    };
+    let busy = draft.busy;
+    ui.add_enabled_ui(!busy, |ui| {
+        theme::text(ui, "Client ID", theme::medium(13.0), palette.text);
+        text_field(
+            ui,
+            &palette,
+            locale,
+            "youtube-client-id",
+            &mut draft.client_id,
+            "",
+            false,
+        );
+        ui.add_space(8.0);
+        theme::text(ui, "Client secret", theme::medium(13.0), palette.text);
+        Frame::new()
+            .fill(palette.surface)
+            .stroke(theme::field_stroke(&palette))
+            .corner_radius(egui::CornerRadius::same(6))
+            .inner_margin(egui::Margin::symmetric(8, 6))
+            .show(ui, |ui| {
+                super::widgets::text_edit(
+                    ui,
+                    locale,
+                    egui::TextEdit::singleline(&mut draft.client_secret)
+                        .password(true)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(f32::INFINITY),
+                );
+            });
+    });
+    if let Some(error) = &draft.error {
+        ui.add_space(8.0);
+        ui.label(egui::RichText::new(error).color(palette.danger));
+    }
+    ui.add_space(14.0);
+    ui.horizontal(|ui| {
+        if busy {
+            super::widgets::loading_row(ui, &palette, locale);
+            ui.label("Finish signing in in your browser.");
+        } else if theme::pill_button(ui, &palette, "Sign in with Google", true).clicked() {
+            app.actions.push(Action::ConnectYouTube);
+        }
+        if theme::pill_button(ui, &palette, &gettext(locale, "Cancel"), false).clicked() {
+            app.actions.push(Action::CancelYouTubeConnect);
+        }
+    });
+}
+
 fn cover_art(app: &mut App, ctx: &egui::Context, url: &str, shown: Option<&str>, title: &str) {
     let palette = app.palette;
     let side = cover_art_side(ctx.content_rect().size());

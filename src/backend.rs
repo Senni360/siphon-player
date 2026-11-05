@@ -817,6 +817,7 @@ mod hybrid;
 pub(crate) mod soundcloud_library;
 mod track_details;
 mod youtube;
+pub mod youtube_account;
 pub use hybrid::HybridCommand;
 
 pub enum Command {
@@ -891,6 +892,7 @@ pub enum Command {
     },
     Hybrid(HybridCommand),
     SoundCloudLibrary(soundcloud_library::Request),
+    YouTubeAccount(youtube_account::Request),
     SoundCloudAccount(crate::soundcloud::account::Account),
     AcceptSoundCloudAccount {
         account: crate::soundcloud::account::Account,
@@ -1305,6 +1307,7 @@ pub enum Event {
         request: u64,
     },
     SoundCloudLibrary(soundcloud_library::Response),
+    YouTubeAccount(youtube_account::Response),
     SoundCloudSaveFailed,
     Soloist(crate::soloist::Update),
     /// The folder picked in the local files dialog; `None` when cancelled.
@@ -2255,6 +2258,8 @@ impl PlaylistHeaderLookup {
 }
 
 struct Worker {
+    youtube_session: youtube_account::SharedSession,
+    youtube_login: Option<tokio::sync::watch::Sender<bool>>,
     friends_feed: Option<mpsc::UnboundedSender<(crate::friends::Request, Http)>>,
     live: Option<mpsc::UnboundedSender<crate::friends::live::Request>>,
     discord: Option<Option<mpsc::UnboundedSender<Option<crate::discord::Status>>>>,
@@ -2401,6 +2406,8 @@ impl Worker {
             credentials: CredentialStore::new(dirs.clone()),
             #[cfg(test)]
             credentials: CredentialStore::in_memory(dirs.clone()),
+            youtube_session: Default::default(),
+            youtube_login: None,
             web_tokens: [None, None],
             playback_grant: None,
             pending_playback_grant: None,
@@ -2844,6 +2851,7 @@ impl Worker {
                 }
                 Command::Hybrid(command) => self.hybrid_command(command).await,
                 Command::SoundCloudLibrary(request) => self.soundcloud_library(request),
+                Command::YouTubeAccount(request) => self.youtube_account(request),
                 Command::SoundCloudAccount(account) => {
                     self.credentials.invalidate(CredentialSlot::SoundCloud);
                     self.set_soundcloud_account(account, 0);

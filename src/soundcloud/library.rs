@@ -17,10 +17,20 @@ pub struct Snapshot {
     pub artists: Vec<Artist>,
 }
 
+#[derive(Clone)]
+pub struct PendingFollow {
+    pub following: bool,
+    /// The person, whichever way this goes.
+    pub artist: Artist,
+}
+
 #[derive(Default)]
 pub struct Library {
     pub following: super::following::State,
     pub repost_edits: super::reposts::Edits,
+    /// Follows and unfollows not answered yet: what the listener chose, and what
+    /// to put back if SoundCloud refuses. A read from before must not undo them.
+    pub pending_follows: std::collections::HashMap<u64, PendingFollow>,
     pub snapshot: Snapshot,
     pub generation: u64,
     pub revision: u64,

@@ -163,10 +163,15 @@ pub struct Flow {
     pub url: String,
 }
 
-fn random_token(bytes: usize) -> String {
+pub(crate) fn random_token(bytes: usize) -> String {
     let mut buffer = vec![0u8; bytes];
     rand::rng().fill_bytes(&mut buffer);
     URL_SAFE_NO_PAD.encode(buffer)
+}
+
+/// The PKCE challenge of `verifier`.
+pub(crate) fn pkce_challenge(verifier: &str) -> String {
+    URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()))
 }
 
 pub fn begin(grant: Grant) -> Flow {

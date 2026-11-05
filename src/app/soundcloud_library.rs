@@ -269,19 +269,23 @@ impl App {
             Response::Followed {
                 id,
                 following,
-                result: Err(error),
+                result,
                 ..
             } => {
-                // It did not happen: stop showing that it did.
-                let uri = crate::soundcloud::user_uri(id);
                 let library = &mut self.soundcloud_library;
-                if following {
+                let pending = library.pending_follows.remove(&id);
+                if let Err(error) = result {
+                    // It did not happen: stop showing that it did.
+                    let uri = crate::soundcloud::user_uri(id);
                     library.snapshot.artists.retain(|artist| artist.uri != uri);
+                    if let (false, Some(pending)) = (following, pending) {
+                        library.snapshot.artists.insert(0, pending.artist);
+                    }
+                    library.revision = library.revision.wrapping_add(1);
+                    self.toast_error(format!("Couldn't change that on SoundCloud. {error}"));
                 }
-                library.revision = library.revision.wrapping_add(1);
-                self.toast_error(error);
+                self.save_soundcloud_library();
             }
-            Response::Followed { .. } => {}
             Response::Cached {
                 snapshot: Some(mut snapshot),
                 ..
@@ -400,7 +404,15 @@ impl App {
                 Err(error) => self.toast_error(error),
             },
             Response::Artists { result, .. } => match result {
-                Ok(artists) => {
+                Ok(mut artists) => {
+                    // A read from before an unanswered follow must not undo it.
+                    for (id, pending) in &self.soundcloud_library.pending_follows {
+                        let uri = crate::soundcloud::user_uri(*id);
+                        artists.retain(|artist| artist.uri != uri);
+                        if pending.following {
+                            artists.insert(0, pending.artist.clone());
+                        }
+                    }
                     self.soundcloud_library.snapshot.artists = artists;
                     self.save_soundcloud_library();
                 }
@@ -505,33 +517,51 @@ impl App {
         image: Option<String>,
     ) {
         if !self.can_like_soundcloud() {
+            self.toast_error("Following people on SoundCloud needs a session. Paste yours here.");
             self.actions
                 .push(Action::ShowDialog(Dialog::SoundCloudConnect(
-                    Default::default(),
+                    crate::soundcloud::connect::Draft {
+                        advanced: true,
+                        ..Default::default()
+                    },
                 )));
             return;
         }
         let uri = crate::soundcloud::user_uri(id);
         let following = !self.follows_soundcloud_user(id);
         let library = &mut self.soundcloud_library;
+        if library.pending_follows.contains_key(&id) {
+            return;
+        }
+        let artist = library
+            .snapshot
+            .artists
+            .iter()
+            .find(|artist| artist.uri == uri)
+            .cloned()
+            .unwrap_or_else(|| Artist {
+                id: id.to_string(),
+                name,
+                uri: uri.clone(),
+                images: image
+                    .map(|url| {
+                        vec![crate::api::models::Image {
+                            url,
+                            ..Default::default()
+                        }]
+                    })
+                    .unwrap_or_default(),
+                ..Default::default()
+            });
+        library.pending_follows.insert(
+            id,
+            crate::soundcloud::library::PendingFollow {
+                following,
+                artist: artist.clone(),
+            },
+        );
         if following {
-            library.snapshot.artists.insert(
-                0,
-                Artist {
-                    id: id.to_string(),
-                    name,
-                    uri,
-                    images: image
-                        .map(|url| {
-                            vec![crate::api::models::Image {
-                                url,
-                                ..Default::default()
-                            }]
-                        })
-                        .unwrap_or_default(),
-                    ..Default::default()
-                },
-            );
+            library.snapshot.artists.insert(0, artist);
         } else {
             library.snapshot.artists.retain(|artist| artist.uri != uri);
         }

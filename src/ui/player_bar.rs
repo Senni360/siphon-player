@@ -136,17 +136,18 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
                 egui::Stroke::new(1.0, palette.outline),
                 egui::StrokeKind::Inside,
             );
-            // The edge nearest the pointer catches the light.
+            // Pointed at, its whole edge lights, brightest nearest the pointer.
             if let Some((pointer, strength)) =
                 kit_motion::pointer_light(ui, ui.id().with("island-light"), island)
             {
-                kit_motion::edge_light(
+                kit_motion::edge_ring(
                     ui.painter(),
                     island,
                     ISLAND_RADIUS,
                     pointer,
-                    170.0,
-                    palette.text.gamma_multiply(0.45 * strength),
+                    260.0,
+                    0.35,
+                    palette.text.gamma_multiply(0.5 * strength),
                 );
             }
             let rect = island.shrink2(vec2(14.0, 0.0));

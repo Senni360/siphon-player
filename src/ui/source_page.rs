@@ -486,6 +486,7 @@ fn follow_button(app: &mut App, ui: &mut Ui, uri: &str, profile: &SourceProfile)
                 id: profile.id.clone(),
                 name: profile.name.clone(),
                 image: profile.image.clone(),
+                subscription: None,
             },
         ));
     } else if let Some(id) = id {
@@ -1045,6 +1046,17 @@ fn youtube_home(
             app.actions
                 .push(Action::SetSearchSource(SearchSource::YouTube));
             app.actions.push(Action::FocusSearch);
+        }
+        let label = if app.youtube_account().is_some() {
+            "YouTube account"
+        } else {
+            "Connect YouTube"
+        };
+        if theme::soft_button(ui, &palette, Some(Icon::User), label, false).clicked() {
+            app.actions
+                .push(Action::ShowDialog(crate::model::Dialog::YouTubeConnect(
+                    Default::default(),
+                )));
         }
     });
     ui.add_space(12.0);

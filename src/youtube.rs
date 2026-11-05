@@ -1,8 +1,10 @@
 //! Audio-only YouTube catalogue and helper-managed yt-dlp adapter.
 //!
-//! No Google credentials or video downloads. Metadata is durable; signed audio
+//! No video downloads, and no Google credentials here; an optional account
+//! connection lives in `account`. Metadata is durable; signed audio
 //! URLs stay in memory and are refreshed by the shared external PCM engine.
 
+pub mod account;
 pub mod browse;
 pub mod likes;
 mod resolver;

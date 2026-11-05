@@ -1294,8 +1294,26 @@ pub enum GroupPlaylistUse {
     PartyBackground,
 }
 
+/// What's typed into the YouTube connection dialog. Debug leaves the keys out.
+#[derive(Clone, Default)]
+pub struct YouTubeDraft {
+    pub client_id: String,
+    pub client_secret: String,
+    pub busy: bool,
+    pub error: Option<String>,
+}
+
+impl std::fmt::Debug for YouTubeDraft {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("YouTubeDraft")
+            .field("busy", &self.busy)
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Dialog {
+    YouTubeConnect(YouTubeDraft),
     /// Are you sure, for anything that cannot be taken back or that starts by itself.
     Confirm {
         title: String,
@@ -1662,6 +1680,13 @@ pub enum Action {
         name: String,
         image: Option<String>,
     },
+    /// Sign in to YouTube with the keys in the dialog.
+    ConnectYouTube,
+    CancelYouTubeConnect,
+    DisconnectYouTube,
+    SyncYouTube,
+    /// Add the follows and likes kept only here to the connected account.
+    SendYouTubeLocalUp,
     /// Follow a YouTube channel, here in the app, or stop.
     ToggleYouTubeFollow(crate::youtube::likes::Channel),
     /// Search YouTube for the committed query, or its next page.

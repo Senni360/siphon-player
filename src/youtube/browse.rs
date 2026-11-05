@@ -198,7 +198,7 @@ struct Entry {
 
 /// A thumbnail or avatar on YouTube's own image hosts, over HTTPS. Avatars come
 /// without a scheme.
-fn image_url(url: &str) -> Option<String> {
+pub(super) fn image_url(url: &str) -> Option<String> {
     let url = if url.starts_with("//") {
         format!("https:{url}")
     } else {

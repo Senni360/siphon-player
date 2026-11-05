@@ -19,10 +19,52 @@ pub struct Likes {
     /// them; they live only in this file, like the likes.
     #[serde(default)]
     pub channels: Vec<Channel>,
+    /// Which of `tracks` are liked on the connected YouTube account, as last read.
+    /// The rest are likes kept only here.
+    #[serde(default)]
+    pub remote_likes: Vec<String>,
 }
 
 /// A channel followed, as much of it as the library shows without asking YouTube.
 impl Likes {
+    /// Takes in what the account holds. The account decides everything it knows
+    /// about, so something undone on YouTube goes here too. What was only ever kept
+    /// here stays, until the listener chooses to send it up. Returns whether the
+    /// channels changed.
+    pub fn apply_remote(&mut self, channels: Vec<Channel>, tracks: Vec<Track>) -> bool {
+        let before: Vec<String> = self.channels.iter().map(|each| each.id.clone()).collect();
+        let local: Vec<Channel> = std::mem::take(&mut self.channels)
+            .into_iter()
+            .filter(|each| {
+                each.subscription.is_none() && !channels.iter().any(|new| new.id == each.id)
+            })
+            .collect();
+        let mut merged = channels;
+        merged.extend(local);
+        self.channels = merged;
+        let remote: Vec<String> = tracks.iter().map(|track| track.uri.clone()).collect();
+        let old_remote = std::mem::replace(&mut self.remote_likes, remote);
+        let kept: Vec<Track> = std::mem::take(&mut self.tracks)
+            .into_iter()
+            .filter(|track| {
+                !old_remote.contains(&track.uri) && !self.remote_likes.contains(&track.uri)
+            })
+            .collect();
+        self.tracks = tracks;
+        self.tracks.extend(kept);
+        let after: Vec<&String> = self.channels.iter().map(|each| &each.id).collect();
+        before.iter().collect::<Vec<_>>() != after
+    }
+
+    /// Likes kept only here, which the account doesn't have yet.
+    pub fn local_likes(&self) -> Vec<Track> {
+        self.tracks
+            .iter()
+            .filter(|track| !self.remote_likes.contains(&track.uri))
+            .cloned()
+            .collect()
+    }
+
     /// Songs saved before channels were kept have no link to theirs. It is found
     /// through the video when the link is opened.
     fn link_channels(&mut self) {
@@ -45,6 +87,10 @@ pub struct Channel {
     pub name: String,
     #[serde(default)]
     pub image: Option<String>,
+    /// The subscription on the connected YouTube account. Without one, the follow
+    /// is kept only here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subscription: Option<String>,
 }
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -142,6 +188,7 @@ impl Default for Likes {
             version: 1,
             tracks: Vec::new(),
             channels: Vec::new(),
+            remote_likes: Vec::new(),
         }
     }
 }

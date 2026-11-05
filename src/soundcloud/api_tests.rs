@@ -2132,3 +2132,23 @@ async fn browse_search_keeps_successful_sections_when_one_fails() {
     );
     assert_eq!(task.await.unwrap().len(), 3);
 }
+
+/// SoundCloud answers PUT here with "not found": follows are POST and DELETE.
+#[tokio::test]
+async fn following_uses_the_methods_soundcloud_accepts() {
+    let (client, task) = server(vec![(200, String::new(), ""), (200, String::new(), "")]).await;
+    let http = crate::http::build_collection_client(&crate::settings::ProxyConfig::Off).unwrap();
+    client.set_following(&http, 7, true).await.unwrap();
+    client.set_following(&http, 7, false).await.unwrap();
+    let requests = task.await.unwrap();
+    assert!(
+        requests[0].starts_with("POST /me/followings/7?"),
+        "{}",
+        requests[0]
+    );
+    assert!(
+        requests[1].starts_with("DELETE /me/followings/7?"),
+        "{}",
+        requests[1]
+    );
+}

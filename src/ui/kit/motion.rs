@@ -557,13 +557,15 @@ fn paint_edge(
     if count < 3 {
         return;
     }
-    let center = points
-        .iter()
-        .fold(egui::Vec2::ZERO, |sum, point| sum + point.to_vec2())
-        / count as f32;
     let mut mesh = egui::Mesh::default();
     for (index, point) in points.iter().enumerate() {
-        let inward = (center - point.to_vec2()).normalized();
+        // Inward across this stretch of the edge. The outline runs clockwise, so
+        // that is its direction turned right; aiming at the card's middle instead
+        // leaves almost no width along the long edges of a wide card.
+        let before = points[(index + points.len() - 1) % points.len()];
+        let after = points[(index + 1) % points.len()];
+        let along = (after - before).normalized();
+        let inward = egui::vec2(-along.y, along.x);
         let shade = color(index, *point);
         mesh.colored_vertex(*point, shade);
         mesh.colored_vertex(*point + inward * width, shade);
@@ -589,6 +591,23 @@ pub fn edge_light(
     paint_edge(painter, &points, 1.2, |_, point| {
         let near = (1.0 - (point - pointer).length() / reach).clamp(0.0, 1.0);
         color.gamma_multiply(near * near)
+    });
+}
+
+/// A card's whole edge lit, brightest where the pointer is.
+pub fn edge_ring(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    radius: f32,
+    pointer: egui::Pos2,
+    reach: f32,
+    base: f32,
+    color: egui::Color32,
+) {
+    let points = rounded_outline(rect, radius);
+    paint_edge(painter, &points, 1.2, |_, point| {
+        let near = (1.0 - (point - pointer).length() / reach).clamp(0.0, 1.0);
+        color.gamma_multiply(base + (1.0 - base) * near * near)
     });
 }
 
@@ -1080,6 +1099,41 @@ mod tests {
         let id = Id::new("spring-test");
         assert_eq!(spring(&ctx, id, 1.0, LIVELY), 1.0);
         assert_eq!(spring(&ctx, id, 5.0, LIVELY), 5.0);
+    }
+
+    /// Every stretch of the outline has its full width pointing inward. Aimed at
+    /// the card's middle, the long edges of a wide card had none.
+    #[test]
+    fn the_edge_is_as_thick_along_the_long_sides_as_anywhere() {
+        let ctx = egui::Context::default();
+        let rect = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1100.0, 76.0));
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            let painter = ui.painter().clone();
+            edge_ring(
+                &painter,
+                rect,
+                22.0,
+                rect.center(),
+                170.0,
+                0.3,
+                egui::Color32::WHITE,
+            );
+        });
+        output.textures_delta.clear();
+        let mesh = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Mesh(mesh) => Some(mesh.clone()),
+                _ => None,
+            })
+            .expect("the ring");
+        for pair in mesh.vertices.chunks(2) {
+            let width = (pair[1].pos - pair[0].pos).length();
+            assert!((width - 1.2).abs() < 0.01, "{width} at {:?}", pair[0].pos);
+            assert!(pair[0].color.a() > 0, "lit all the way round");
+            assert!(rect.expand(0.01).contains(pair[1].pos), "inward, not out");
+        }
     }
 
     /// A card's outline runs around the whole card, on its edge.

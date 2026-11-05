@@ -824,8 +824,13 @@ YouTube pages and searches run the helper's yt-dlp, which reads YouTube directly
 see [YouTube audio](/youtube/). **New uploads** asks YouTube's public feed
 (`youtube.com/feeds/videos.xml`) about each channel followed when the page opens,
 through the configured HTTP client. Which channels are followed stays on this
-computer, but those requests do tell YouTube their ids. No request carries a Google
-or Spotify credential.
+computer, but those requests do tell YouTube their ids. No browsing request carries
+a Google or Spotify credential.
+
+A listener can also connect their YouTube account, through their own Google project
+(see [YouTube audio](/youtube/)). That sends their subscriptions and likes both ways
+between this computer and `www.googleapis.com`, with tokens from
+`oauth2.googleapis.com`. No grant ever leaves this computer otherwise.
 
 ## Web links
 

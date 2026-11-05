@@ -33,11 +33,12 @@ pub enum Slot {
     SoundCloud,
     Friends,
     Soloist,
+    YouTube,
 }
 
 impl Slot {
     pub const SPOTIFY: [Self; 3] = [Self::Shared, Self::Personal, Self::Playback];
-    pub const ALL: [Self; 7] = [
+    pub const ALL: [Self; 8] = [
         Self::Shared,
         Self::Personal,
         Self::Playback,
@@ -45,6 +46,7 @@ impl Slot {
         Self::SoundCloud,
         Self::Friends,
         Self::Soloist,
+        Self::YouTube,
     ];
     pub(crate) fn index(self) -> usize {
         self as usize
@@ -58,6 +60,7 @@ impl Slot {
             Self::SoundCloud => "soundcloud-session",
             Self::Friends => "friends-session",
             Self::Soloist => "soloist-key",
+            Self::YouTube => "youtube-account",
         }
     }
 }
@@ -882,7 +885,10 @@ impl Store {
     }
 
     fn legacy_paths(&self, slot: Slot) -> Vec<PathBuf> {
-        if matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::Soloist) {
+        if matches!(
+            slot,
+            Slot::SoundCloud | Slot::Friends | Slot::Soloist | Slot::YouTube
+        ) {
             return Vec::new();
         }
         if slot == Slot::Proxy {
@@ -898,6 +904,7 @@ impl Store {
             Slot::SoundCloud => unreachable!("SoundCloud has no legacy plaintext grant"),
             Slot::Friends => unreachable!("Friends has no legacy plaintext grant"),
             Slot::Soloist => unreachable!("Soloist has no legacy files"),
+            Slot::YouTube => unreachable!("YouTube has no legacy files"),
         };
         let mut paths = vec![path.clone(), path.with_extension("json.tmp")];
         if slot != Slot::Playback {
@@ -1153,7 +1160,7 @@ impl Lease {
     /// SoundCloud and Friends use this format. Their callers validate bytes.
     pub(crate) async fn load_secret(&self) -> Result<Option<Vec<u8>>, Error> {
         self.request(true, |lease, backend| {
-            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends) {
+            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube) {
                 return Err(Error::Invalid);
             }
             if lease.store.marker(lease.slot)?.is_some_and(|m| m.revoked) {
@@ -1166,7 +1173,9 @@ impl Lease {
 
     pub(crate) async fn save_secret(&self, secret: Vec<u8>) -> Result<(), Error> {
         self.request(true, move |lease, backend| {
-            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends) || secret.is_empty() {
+            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube)
+                || secret.is_empty()
+            {
                 return Err(Error::Invalid);
             }
             lease.save_bytes(backend, &secret)
@@ -1184,7 +1193,7 @@ impl Lease {
         guard_generation: bool,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), Error>> + Send>> {
         self.request(guard_generation, move |lease, backend| {
-            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends) {
+            if !matches!(lease.slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube) {
                 return Err(Error::Invalid);
             }
             {
@@ -1537,7 +1546,7 @@ mod tests {
         ];
         for (slot, grant) in Slot::ALL
             .into_iter()
-            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube))
             .zip(&grants)
         {
             old.store.lease(slot).save(grant.clone()).await.unwrap();
@@ -1550,6 +1559,11 @@ mod tests {
         old.store
             .lease(Slot::Friends)
             .save_secret(b"dummy-friends-identity".to_vec())
+            .await
+            .unwrap();
+        old.store
+            .lease(Slot::YouTube)
+            .save_secret(b"dummy-youtube-grant".to_vec())
             .await
             .unwrap();
         let new: AppDirs =
@@ -1565,7 +1579,7 @@ mod tests {
         );
         for (slot, grant) in Slot::ALL
             .into_iter()
-            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube))
             .zip(grants)
         {
             assert!(store.lease(slot).load().await.unwrap().grant == Some(grant));
@@ -1577,6 +1591,10 @@ mod tests {
         assert_eq!(
             store.lease(Slot::Friends).load_secret().await.unwrap(),
             Some(b"dummy-friends-identity".to_vec())
+        );
+        assert_eq!(
+            store.lease(Slot::YouTube).load_secret().await.unwrap(),
+            Some(b"dummy-youtube-grant".to_vec())
         );
         for slot in Slot::ALL {
             let key = old.store.lease(slot).key();
@@ -2153,7 +2171,7 @@ mod tests {
         ];
         for (slot, grant) in Slot::ALL
             .into_iter()
-            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube))
             .zip(grants.iter())
         {
             store.lease(slot).save(grant.clone()).await.unwrap();
@@ -2170,7 +2188,7 @@ mod tests {
         );
         for (slot, grant) in Slot::ALL
             .into_iter()
-            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube))
             .zip(grants)
         {
             assert!(restarted.lease(slot).load().await.unwrap().grant == Some(grant));
@@ -2289,7 +2307,7 @@ mod tests {
         ];
         for (slot, grant) in Slot::ALL
             .into_iter()
-            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube))
             .zip(grants.iter())
         {
             store.lease(slot).save(grant.clone()).await.unwrap();
@@ -2298,7 +2316,7 @@ mod tests {
         let restarted = with_sealed_copy(&f);
         for (slot, grant) in Slot::ALL
             .into_iter()
-            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends))
+            .filter(|slot| !matches!(slot, Slot::SoundCloud | Slot::Friends | Slot::YouTube))
             .zip(grants)
         {
             let loaded = restarted.lease(slot).load().await.unwrap();

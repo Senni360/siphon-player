@@ -1450,7 +1450,31 @@ fn youtube_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
     if header.clicked() {
         ui.ctx().data_mut(|data| data.insert_temp(open_id, !shown));
     }
+    header.context_menu(|ui| {
+        let label = if let Some(profile) = app.youtube_account() {
+            ui.label(
+                gettext(locale, "Connected as {name}")
+                    .replace("{name}", &app.private_text(&profile.name)),
+            );
+            "YouTube account"
+        } else {
+            "Connect YouTube"
+        };
+        if super::widgets::menu_item(ui, &palette, Some(Icon::User), label) {
+            app.actions.push(Action::ShowDialog(Dialog::YouTubeConnect(
+                Default::default(),
+            )));
+        }
+    });
     if shown {
+        if app.youtube_account().is_none()
+            && needle.is_empty()
+            && nav_row(ui, &palette, Icon::User, "Connect YouTube", false).clicked()
+        {
+            app.actions.push(Action::ShowDialog(Dialog::YouTubeConnect(
+                Default::default(),
+            )));
+        }
         let rows = youtube_rows(app, needle);
         super::widgets::virtual_rows(ui, rows.len(), 40.0, |ui, index| {
             let (name, page, icon) = &rows[index];

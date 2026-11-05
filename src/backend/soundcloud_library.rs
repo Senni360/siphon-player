@@ -238,7 +238,7 @@ impl Worker {
                     let result = if session && lease.current() {
                         match write_client {
                             Ok(http) => client
-                                .set_following(&http, user_id, id, following)
+                                .set_following(&http, id, following)
                                 .await
                                 .map_err(|error| error.to_string()),
                             Err(error) => Err(error),

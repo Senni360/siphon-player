@@ -8,10 +8,38 @@ playlists. A channel's page has its banner, picture and subscribers, its videos
 as a grid of thumbnails, and its playlists; a video's channel name links to it.
 Pasting a channel or playlist link opens its page. Any video can start a mix.
 
-Following a channel stays on this computer, beside the likes, with no account
-behind it. **New uploads** in the sidebar lists what the channels followed last
+Following a channel stays on this computer, beside the likes, unless a YouTube
+account is connected (below). **New uploads** in the sidebar lists what the channels followed last
 uploaded, read from YouTube's public feed of each channel
 (`youtube.com/feeds/videos.xml`). There is no page of recommendations.
+
+## Connecting a YouTube account
+
+Connecting is optional, and takes the listener's own Google Cloud project: the
+dialog walks through creating it, turning on the YouTube Data API v3, publishing
+its consent screen (unpublished, Google ends sign-ins after 7 days) and creating a
+Desktop client. Each listener uses their own keys. No key is built into the app and
+nothing goes through a server. Google warns that the app is unverified, as it is.
+
+Sign-in is the authorization code flow with PKCE, on a loopback port chosen for the
+occasion. The Client ID, secret and refresh token live only in the system
+credential store, in `youtube-account`. The scope is `youtube`, as nothing narrower
+allows changing subscriptions and ratings.
+
+Connected, a sync reads subscriptions and liked videos (up to 1,000 and 500) when
+the account connects and when YouTube's pages open, at most every 5 minutes, or
+from Sync now. The account decides whatever it knows about, so something undone on
+YouTube disappears here. Following and liking show at once and change the account
+behind it; a refusal puts them back and says why. A sync read before a change
+still in flight is dropped and asked again. Follows and likes made before connecting
+stay local until **Add them to YouTube** sends them, 40 at most a press.
+
+Listing costs 1 quota unit a page, and a follow or like 50, out of the project's
+10,000 a day. Disconnecting revokes the grant and keeps what was synced as local.
+Google's YouTube API rules restrict separating audio from video; playback here still
+goes through yt-dlp, never this API, but Google could still act against a project.
+
+## Browsing
 
 Browsing runs yt-dlp's flat listing (`--flat-playlist -J --playlist-items`), at
 most 30 videos a page, with the same deadline, output limit and running lock as

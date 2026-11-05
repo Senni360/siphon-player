@@ -3068,6 +3068,7 @@ impl App {
                 Event::HybridContext { generation, result } => {
                     self.handle_hybrid_context(generation, result)
                 }
+                Event::YouTubeAccount(response) => self.handle_youtube_account(response),
                 Event::SoundCloudLibrary(response) => self.handle_soundcloud_library(response),
                 Event::SoundCloudSaveFailed => self.toast_error(gettext(self.locale, "Could not save the SoundCloud connection or library on this computer. Try again.")),
                 Event::SoundCloudConnectFailed { error, request } => {
@@ -12592,6 +12593,16 @@ impl App {
                 self.toggle_youtube_like(&uri)
             }
             Action::ToggleYouTubeFollow(channel) => self.toggle_youtube_follow(channel),
+            Action::ConnectYouTube => self.connect_youtube(),
+            Action::CancelYouTubeConnect => {
+                self.backend.send(Command::YouTubeAccount(
+                    crate::backend::youtube_account::Request::CancelConnect,
+                ));
+                self.dialog = None;
+            }
+            Action::DisconnectYouTube => self.disconnect_youtube(),
+            Action::SyncYouTube => self.sync_youtube(true),
+            Action::SendYouTubeLocalUp => self.send_youtube_local_up(),
             Action::ToggleSoundCloudFollow { id, name, image } => {
                 self.toggle_soundcloud_follow(id, name, image)
             }

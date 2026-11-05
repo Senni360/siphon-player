@@ -608,16 +608,18 @@ impl Client {
     pub async fn set_following(
         &self,
         http: &reqwest::Client,
-        user: u64,
         target: u64,
         following: bool,
     ) -> Result<()> {
-        self.set_membership(
-            http,
-            &format!("users/{user}/followings/{target}"),
-            following,
-        )
-        .await
+        // What SoundCloud's own web app calls. PUT, which likes use, is "not found"
+        // here (checked against the live API, 2026-11-05).
+        let method = if following {
+            reqwest::Method::POST
+        } else {
+            reqwest::Method::DELETE
+        };
+        self.membership_request(http, &format!("me/followings/{target}"), method)
+            .await
     }
 
     pub async fn user_followings(&self, id: u64, limit: u32, offset: u32) -> Result<Page<User>> {
@@ -717,6 +719,20 @@ impl Client {
         path: &str,
         enabled: bool,
     ) -> Result<()> {
+        let method = if enabled {
+            reqwest::Method::PUT
+        } else {
+            reqwest::Method::DELETE
+        };
+        self.membership_request(http, path, method).await
+    }
+
+    async fn membership_request(
+        &self,
+        http: &reqwest::Client,
+        path: &str,
+        method: reqwest::Method,
+    ) -> Result<()> {
         let token = self.oauth_token.as_ref().ok_or(Error::NotSignedIn)?;
         if self.access.expired.load(Ordering::SeqCst) || self.access.revoked.load(Ordering::SeqCst)
         {
@@ -750,11 +766,6 @@ impl Client {
         {
             return Err(Error::SessionExpired);
         }
-        let method = if enabled {
-            reqwest::Method::PUT
-        } else {
-            reqwest::Method::DELETE
-        };
         let response = http
             .request(method, url)
             .header(header::AUTHORIZATION, authorization)
