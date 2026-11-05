@@ -1215,6 +1215,8 @@ pub struct ArtistSources {
     pub alternate_songs: Vec<Track>,
     /// The lists opened past their first few.
     pub opened: std::collections::HashSet<ElsewhereList>,
+    /// "Not on Spotify" by date rather than plays.
+    pub newest_first: bool,
 }
 
 /// One of the lists of what an artist has beyond Spotify.
@@ -1541,6 +1543,10 @@ pub enum Action {
     ToggleShowAllElsewhere {
         artist_id: String,
         list: ElsewhereList,
+    },
+    SortElsewhereByDate {
+        artist_id: String,
+        newest: bool,
     },
     Friends(crate::friends::Action),
     /// Listening together with the group. See [`crate::friends::live`].

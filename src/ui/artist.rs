@@ -892,7 +892,11 @@ fn elsewhere_songs(app: &mut App, ui: &mut egui::Ui, id: &str, page: &ArtistPage
         id,
         ElsewhereList::Songs,
         &gettext(locale, "Not on Spotify"),
-        &sources.songs,
+        &if sources.newest_first {
+            crate::artist_sources::newest_first(&sources.songs)
+        } else {
+            sources.songs.clone()
+        },
         sources,
     );
     if !sources.alternates.is_empty() && !sources.alternate_songs.is_empty() {
@@ -1025,6 +1029,23 @@ fn elsewhere_list(
     let open = sources.opened.contains(&list);
     theme::section_title(ui, &palette, title);
     theme::subtle(ui, &palette, &from_where(locale, songs));
+    if list == ElsewhereList::Songs && songs.iter().any(|song| song.release_date.is_some()) {
+        ui.add_space(6.0);
+        let options = [
+            (false, gettext(locale, "Most played")),
+            (true, gettext(locale, "Newest")),
+        ];
+        let options: Vec<(bool, &str)> = options
+            .iter()
+            .map(|(newest, label)| (*newest, label.as_ref()))
+            .collect();
+        if let Some(newest) = widgets::chips(ui, &palette, &options, sources.newest_first) {
+            app.actions.push(Action::SortElsewhereByDate {
+                artist_id: id.to_string(),
+                newest,
+            });
+        }
+    }
     ui.add_space(4.0);
     elsewhere_rows(app, ui, songs, if open { songs.len() } else { SHOWN_SONGS });
     if songs.len() > SHOWN_SONGS {

@@ -1235,6 +1235,19 @@ pub fn without_songs(artist: &str, unreleased: Vec<Track>, songs: &[Track]) -> V
         .collect()
 }
 
+/// The same songs, the latest first. Songs with no date keep their order, after the rest.
+pub fn newest_first(songs: &[Track]) -> Vec<Track> {
+    let mut sorted = songs.to_vec();
+    // Dates are ISO, from a day to a full time, so they sort as text.
+    sorted.sort_by(|a, b| match (&a.release_date, &b.release_date) {
+        (Some(a), Some(b)) => b.get(..10).cmp(&a.get(..10)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    });
+    sorted
+}
+
 /// Edits from each source as one list: the title has to match for two to be the
 /// same, as two people's edits of one song aren't one edit.
 pub fn merged_edits<'a>(lists: impl IntoIterator<Item = &'a [Track]>) -> Vec<Track> {

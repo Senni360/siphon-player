@@ -519,6 +519,23 @@ fn only_sets_spotify_lacks_are_listed_with_albums_first() {
 }
 
 #[test]
+fn the_newest_songs_come_first_and_undated_ones_last() {
+    let dated = |name: &str, date: Option<&str>| Track {
+        name: name.to_owned(),
+        release_date: date.map(str::to_owned),
+        ..Default::default()
+    };
+    let sorted = newest_first(&[
+        dated("old", Some("2023-01-02")),
+        dated("none", None),
+        dated("new", Some("2026-10-01T12:00:00Z")),
+        dated("mid", Some("2025-05-05")),
+    ]);
+    let names: Vec<_> = sorted.iter().map(|track| track.name.as_str()).collect();
+    assert_eq!(names, ["new", "mid", "old", "none"]);
+}
+
+#[test]
 fn an_older_saved_finding_without_the_newer_lists_still_reads() {
     let found: Finding = serde_json::from_str(r#"{"on_spotify":3}"#).unwrap();
     assert_eq!(found.on_spotify, 3);

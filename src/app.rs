@@ -13440,6 +13440,11 @@ impl App {
                 side,
                 choice,
             } => self.choose_artist_account(artist_id, side, choice),
+            Action::SortElsewhereByDate { artist_id, newest } => {
+                if let Some(page) = self.artist_pages.get_mut(&artist_id) {
+                    page.sources.newest_first = newest;
+                }
+            }
             Action::ToggleShowAllElsewhere { artist_id, list } => {
                 if let Some(page) = self.artist_pages.get_mut(&artist_id)
                     && !page.sources.opened.remove(&list)
