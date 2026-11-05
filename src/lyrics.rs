@@ -211,9 +211,42 @@ async fn fetch_strict_from(
     if let Some(Some(cached)) = read_cache(&path) {
         return Ok(Some(cached));
     }
-    let found = lookup_strict(http, api, query).await?;
+    let mut found = lookup_strict(http, api, query).await?;
+    // An upload's title usually carries its artist and tags such as "Official Video".
+    // Read as the song it is, it's asked once more, as strictly.
+    if found.is_none()
+        && let Some(song) = upload_query(query)
+    {
+        found = lookup_strict(http, api, &song).await?;
+    }
     write_cache(&path, &found);
     Ok(found)
+}
+
+/// An upload's title as the song it is: "slayr - Holding (Official Video)" posted by
+/// anyone is Holding by slayr. Versions such as a remix or a live take keep their
+/// words, so the strict match still tells them apart. None when nothing changes.
+pub fn upload_query(query: &Query) -> Option<Query> {
+    let track = crate::api::models::Track {
+        name: query.title.clone(),
+        artists: vec![crate::api::models::ArtistRef {
+            name: query.artist.clone(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let song = crate::artist_sources::tidied(track, &query.artist);
+    let artist = song
+        .artists
+        .first()
+        .map_or_else(|| query.artist.clone(), |artist| artist.name.clone());
+    let changed = Query {
+        artist,
+        title: song.name,
+        album: query.album.clone(),
+        duration_ms: query.duration_ms,
+    };
+    (changed != *query && !changed.title.trim().is_empty()).then_some(changed)
 }
 
 async fn lookup_strict(http: &reqwest::Client, api: &str, query: &Query) -> Result<Option<Lyrics>> {
@@ -773,6 +806,34 @@ mod tests {
     use super::*;
 
     /// A local LRCLIB that gives each request, in turn, one of `answers`.
+    #[test]
+    fn an_uploads_title_is_asked_again_as_the_song_it_is() {
+        let ask = |title: &str, artist: &str| Query {
+            artist: artist.into(),
+            title: title.into(),
+            album: String::new(),
+            duration_ms: 180_000,
+        };
+        let song =
+            super::upload_query(&ask("slayr - Holding (OFFICIAL MUSIC VIDEO)", "zor")).unwrap();
+        assert_eq!(
+            (song.artist.as_str(), song.title.as_str()),
+            ("slayr", "Holding")
+        );
+        let song = super::upload_query(&ask("Holding (Official Audio)", "slayr")).unwrap();
+        assert_eq!(
+            (song.artist.as_str(), song.title.as_str()),
+            ("slayr", "Holding")
+        );
+        // A version keeps its words, so the strict match can still tell it apart.
+        let remix = super::upload_query(&ask("slayr - Holding (Club Remix)", "zor")).unwrap();
+        assert_eq!(remix.title, "Holding (Club Remix)");
+        assert!(
+            super::upload_query(&ask("Holding", "slayr")).is_none(),
+            "nothing to change"
+        );
+    }
+
     async fn lrclib(answers: Vec<String>) -> (String, tokio::task::JoinHandle<()>) {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
