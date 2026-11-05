@@ -350,9 +350,19 @@ fn section(
     if ui.data(|data| data.get_temp::<String>(jump)).as_deref() == Some(title) {
         ui.scroll_to_cursor(Some(egui::Align::TOP));
         ui.data_mut(|data| data.remove_temp::<String>(jump));
+        super::kit::motion::begin(ui.ctx(), jump.with(title), 1.1);
     }
     ui.add_space(10.0);
-    theme::text(ui, title, theme::bold(18.0), palette.text);
+    let heading = theme::text(ui, title, theme::bold(18.0), palette.text);
+    // The section jumped to lights up, so the eye lands on it.
+    if let Some(t) = super::kit::motion::running(ui.ctx(), jump.with(title)) {
+        let rect = heading
+            .rect
+            .expand2(egui::vec2(10.0, 3.0))
+            .translate(egui::vec2(6.0 * (1.0 - t), 0.0));
+        ui.painter()
+            .rect_filled(rect, 6.0, palette.text.gamma_multiply(0.14 * (1.0 - t)));
+    }
     ui.add_space(8.0);
     Frame::new()
         .fill(

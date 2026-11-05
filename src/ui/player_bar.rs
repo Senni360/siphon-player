@@ -92,19 +92,29 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             let island = island_rect(ui.max_rect());
             ui.ctx()
                 .data_mut(|data| data.insert_temp(egui::Id::new(ISLAND_RECT_KEY), island));
-            super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
-            // The page scrolls on behind the island, so what passes under it
+            // As the page rushes past under it the card draws in a little,
+            // and settles out again when the page comes to rest.
+            let scrolled = super::scrolled_page(ui.ctx());
+            let was = ui.ctx().data_mut(|data| {
+                std::mem::replace(
+                    data.get_temp_mut_or_insert_with(ui.id().with("was-scrolled"), || scrolled),
+                    scrolled,
+                )
+            });
+            let squeeze = kit_motion::spring(
+                ui.ctx(),
+                ui.id().with("scroll-squeeze"),
+                ((scrolled - was).abs() / 30.0).min(1.0),
+                kit_motion::FOLLOW,
+            );
+            let card = island.shrink2(vec2(squeeze * 7.0, squeeze * 1.5));
+            super::widgets::paint_shadow(ui, &palette, card, ISLAND_RADIUS);
+            // The page scrolls on behind the card, so what passes under it
             // is frosted before the island's own glass goes on top, and the
             // words stay clear of it. Without the blur the glass is nearly solid.
-            super::kit::glass::backdrop(
-                ui.ctx(),
-                ui.painter(),
-                island,
-                ISLAND_RADIUS,
-                palette.dark,
-            );
+            super::kit::glass::backdrop(ui.ctx(), ui.painter(), card, ISLAND_RADIUS, palette.dark);
             ui.painter()
-                .rect_filled(island, ISLAND_RADIUS, island_glass(&palette, fill));
+                .rect_filled(card, ISLAND_RADIUS, island_glass(&palette, fill));
             // The island is a surface: a press on its empty space never reaches
             // the row scrolling under it.
             ui.interact(
@@ -112,9 +122,9 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
                 ui.id().with("player-bar-surface"),
                 Sense::click_and_drag(),
             );
-            super::glass_sheen(ui, island, ISLAND_RADIUS);
+            super::glass_sheen(ui, card, ISLAND_RADIUS);
             ui.painter().rect_stroke(
-                island,
+                card,
                 ISLAND_RADIUS,
                 egui::Stroke::new(1.0, palette.outline),
                 egui::StrokeKind::Inside,
@@ -125,7 +135,7 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             {
                 kit_motion::edge_light(
                     ui.painter(),
-                    island,
+                    card,
                     ISLAND_RADIUS,
                     pointer,
                     170.0,
@@ -908,6 +918,7 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     let over_expand = offer_expand && ui.rect_contains_pointer(expand_rect);
     // The cover opens Now playing, grown out of the island; the title still
     // goes to the album or playlist.
+    kit_motion::ripple(ui, &cover_response, cover_rect, palette.text);
     if cover_response.clicked() && !over_expand {
         super::now_playing::toggle(ui.ctx());
     }

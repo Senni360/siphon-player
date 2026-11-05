@@ -1163,9 +1163,16 @@ fn nav_row(
             palette.text,
             if active { 1.0 } else { hover },
         );
-        let scale = super::kit::motion::press_scale(ui.ctx(), &response);
+        let arrived = response.id.with("arrived");
+        if ui.ctx().data(|data| data.get_temp::<bool>(arrived)) == Some(false) && active {
+            super::kit::motion::begin(ui.ctx(), arrived.with("pop"), super::kit::motion::POP);
+        }
+        ui.ctx().data_mut(|data| data.insert_temp(arrived, active));
+        let popped = super::kit::motion::running(ui.ctx(), arrived.with("pop"))
+            .map_or(1.0, super::kit::motion::pop);
+        let scale = super::kit::motion::press_scale(ui.ctx(), &response) * popped;
         let icon_rect = Rect::from_center_size(
-            pos2(rect.left() + 20.0, rect.center().y),
+            pos2(rect.left() + 20.0 + hover, rect.center().y),
             Vec2::splat(18.0 * scale),
         );
         icon.image(color, 18.0).paint_at(ui, icon_rect);
@@ -1713,23 +1720,25 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     ui.add_space(6.0);
 
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-        for (value, label) in [
-            (Filter::Playlists, gettext(locale, "Playlists")),
-            (Filter::Albums, gettext(locale, "Albums")),
-            (Filter::Artists, gettext(locale, "Artists")),
-            (Filter::Podcasts, gettext(locale, "Podcasts")),
-        ] {
-            if value == Filter::Podcasts
-                && filter != Filter::Podcasts
-                && app.library.shows.items.is_empty()
-            {
-                continue;
+        theme::pill_group(ui, &palette, |ui| {
+            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+            for (value, label) in [
+                (Filter::Playlists, gettext(locale, "Playlists")),
+                (Filter::Albums, gettext(locale, "Albums")),
+                (Filter::Artists, gettext(locale, "Artists")),
+                (Filter::Podcasts, gettext(locale, "Podcasts")),
+            ] {
+                if value == Filter::Podcasts
+                    && filter != Filter::Podcasts
+                    && app.library.shows.items.is_empty()
+                {
+                    continue;
+                }
+                if theme::soft_button(ui, &palette, None, &label, filter == value).clicked() {
+                    filter = value;
+                }
             }
-            if theme::soft_button(ui, &palette, None, &label, filter == value).clicked() {
-                filter = value;
-            }
-        }
+        })
     });
     let sort = selected_sort(app, filter);
     ui.data_mut(|data| {

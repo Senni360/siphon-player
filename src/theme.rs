@@ -979,6 +979,51 @@ pub fn pill_button(ui: &mut egui::Ui, palette: &Palette, label: &str, primary: b
     response
 }
 
+/// What a [`pill_group`]'s chips ask of its pill this frame.
+#[derive(Clone, Copy, Default)]
+struct PillGroup {
+    selected: Option<egui::Rect>,
+}
+
+fn pill_group_key() -> egui::Id {
+    egui::Id::new("theme-pill-group")
+}
+
+/// Draws a row of [`soft_button`]s of which one is on, with one pill that slides
+/// from chip to chip instead of each lighting by itself.
+pub fn pill_group<R>(
+    ui: &mut egui::Ui,
+    palette: &Palette,
+    add: impl FnOnce(&mut egui::Ui) -> R,
+) -> R {
+    use crate::ui::kit::motion;
+    let id = ui.id().with("pill-group");
+    let slot = ui.painter().add(egui::Shape::Noop);
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(pill_group_key(), PillGroup::default()));
+    let result = add(ui);
+    let group = ui
+        .ctx()
+        .data_mut(|data| data.remove_temp::<PillGroup>(pill_group_key()));
+    if let Some(selected) = group.and_then(|group| group.selected) {
+        let ctx = ui.ctx();
+        let glide =
+            |name: &str, target: f32| motion::spring(ctx, id.with(name), target, motion::LIVELY);
+        let left = glide("left", selected.left());
+        let right = glide("right", selected.right());
+        let top = glide("top", selected.top());
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(left, top),
+            egui::vec2(right - left, selected.height()),
+        );
+        ui.painter().set(
+            slot,
+            egui::epaint::RectShape::filled(rect, rect.height() / 2.0, palette.text),
+        );
+    }
+    result
+}
+
 /// A muted button with an icon and label, for row and header actions.
 pub fn soft_button(
     ui: &mut egui::Ui,
@@ -1065,7 +1110,24 @@ fn soft_button_inner(
             motion::PRESS,
         );
         let rest = crate::ui::blend(palette.surface, palette.surface_hover, lit);
-        let fill = crate::ui::blend(rest, palette.text, on);
+        // In a group the one pill slides under the chip that is on.
+        let in_group = ui.ctx().data_mut(|data| {
+            let group = data.get_temp::<PillGroup>(pill_group_key());
+            if group.is_some() && active {
+                data.insert_temp(
+                    pill_group_key(),
+                    PillGroup {
+                        selected: Some(rect),
+                    },
+                );
+            }
+            group.is_some()
+        });
+        let fill = if in_group {
+            rest.gamma_multiply(1.0 - on)
+        } else {
+            crate::ui::blend(rest, palette.text, on)
+        };
         let color = crate::ui::blend(palette.text, palette.window, on);
         let was_on = response.id.with("was-on");
         if ui.ctx().data(|data| data.get_temp::<bool>(was_on)) == Some(false) && active {

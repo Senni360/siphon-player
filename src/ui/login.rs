@@ -205,7 +205,30 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
     // The raster runs a little past the mark, and the mark reaches its own
     // edges, so the logo's own square holds the gap above the title too.
     let (logo, _) = ui.allocate_exact_size(Vec2::splat(logo_size + 6.0), egui::Sense::hover());
-    theme::logo(ui, logo.center(), logo_size);
+    use super::kit::motion;
+    let arrived = motion::appear(
+        &ctx,
+        egui::Id::new("sign-in-logo"),
+        motion::ENTER * 1.6,
+        0.05,
+    );
+    let waiting = connecting || matches!(app.auth, AuthStatus::WaitingForBrowser { .. });
+    if waiting && crate::motion::seconds(&ctx, 1.0) > 0.0 {
+        let now = ui.input(|input| input.time);
+        for wave in 0..2 {
+            let t = (now * 0.6 + f64::from(wave) * 0.5).fract() as f32;
+            motion::ring(
+                ui.painter(),
+                logo.center(),
+                logo_size * 0.5,
+                logo_size,
+                t,
+                palette.text.gamma_multiply(0.5),
+            );
+        }
+        ctx.request_repaint();
+    }
+    theme::logo(ui, logo.center(), logo_size * (0.6 + 0.4 * arrived));
     theme::text(
         ui,
         "Encore",

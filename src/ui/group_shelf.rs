@@ -158,6 +158,25 @@ fn card(app: &mut App, ui: &mut Ui, rect: Rect, post: &Post, alpha: f32) {
     };
     let painter = ui.painter().clone();
     painter.rect_filled(rect, 14.0, fill.gamma_multiply(alpha));
+    if let Some((pointer, strength)) =
+        super::kit::motion::pointer_light(ui, response.id.with("light"), rect)
+    {
+        super::kit::motion::spotlight(
+            &painter,
+            rect,
+            pointer,
+            190.0,
+            palette.text.gamma_multiply(0.06 * strength * alpha),
+        );
+        super::kit::motion::edge_light(
+            &painter,
+            rect,
+            14.0,
+            pointer,
+            170.0,
+            palette.text.gamma_multiply(0.4 * strength * alpha),
+        );
+    }
 
     let cover = Rect::from_min_size(rect.min + vec2(14.0, 14.0), vec2(64.0, 64.0));
     super::widgets::paint_cover(

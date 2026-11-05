@@ -281,18 +281,21 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                         theme::bold(14.5),
                         palette.text,
                     );
-                    if hovered && let Some(uri) = uri {
+                    if lit > 0.01
+                        && let Some(uri) = uri
+                    {
                         let context_here =
                             app.playing_context_uri().as_deref() == Some(uri.as_str());
                         let playing_here = context_here && app.believed_playing();
                         let button = Rect::from_center_size(
-                            pos2(rect.right() - 28.0, rect.center().y),
+                            pos2(rect.right() - 28.0 + (1.0 - lit) * 10.0, rect.center().y),
                             Vec2::splat(40.0),
                         );
                         let mut child =
                             ui.new_child(egui::UiBuilder::new().max_rect(button).layout(
                                 egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
                             ));
+                        child.multiply_opacity(lit);
                         if theme::circle_button(
                             &mut child,
                             if playing_here {

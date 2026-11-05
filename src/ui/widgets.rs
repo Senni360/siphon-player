@@ -2413,11 +2413,20 @@ fn track_row_contents(
             pos2(x + size / 2.0 + 2.0, rect.center().y),
             Vec2::splat(size),
         );
+        // The cover steps forward under the pointer, and pops when the song starts.
+        let step = super::kit::motion::spring(
+            ui.ctx(),
+            response.id.with("cover-step"),
+            if hovered { 1.5 } else { 0.0 },
+            super::kit::motion::LIVELY,
+        );
+        let popped = super::kit::motion::running(ui.ctx(), response.id.with("played"))
+            .map_or(0.0, |t| (super::kit::motion::pop(t) - 1.0) * 14.0);
         paint_cover(
             ui,
             &palette,
             app.item_image(row.item, app.art_px(size)).as_deref(),
-            cover_rect,
+            cover_rect.expand(step + popped),
             4.0,
             if row.item.is_track() {
                 Icon::Music
@@ -3161,6 +3170,18 @@ pub fn sentence_case(text: &str) -> String {
 /// was clicked, so the table can sort by it.
 // The column switches and the language are independent inputs of one
 // drawing call; a struct would exist only to carry them here.
+/// The sort arrow's wing and tip, as offsets from its middle. Reversing the order
+/// turns it over, through flat, instead of swapping it.
+fn sort_arrow(ctx: &egui::Context, ascending: bool) -> (f32, f32) {
+    let turn = super::kit::motion::spring(
+        ctx,
+        egui::Id::new("table-sort-arrow"),
+        if ascending { 1.0 } else { -1.0 },
+        super::kit::motion::LIVELY,
+    );
+    (2.8 * turn, -3.2 * turn)
+}
+
 #[expect(clippy::fn_params_excessive_bools, clippy::too_many_arguments)]
 pub fn table_header(
     ui: &mut Ui,
@@ -3215,11 +3236,7 @@ pub fn table_header(
             // Drawn, not typed: an arrow glyph relies on the loaded fonts
             // and rendered as a hollow box on some machines.
             let center = pos2(top_left.x + size.x + 8.0, rect.center().y);
-            let (wing, tip) = if sort.ascending {
-                (2.8, -3.2)
-            } else {
-                (-2.8, 3.2)
-            };
+            let (wing, tip) = sort_arrow(ui.ctx(), sort.ascending);
             ui.painter().add(egui::Shape::convex_polygon(
                 vec![
                     center + vec2(-4.0, wing),
@@ -3270,7 +3287,7 @@ pub fn table_header(
             .or(natural.then_some(true))
         {
             let center = pos2(number.center().x + 12.0, rect.center().y);
-            let (wing, tip) = if ascending { (2.8, -3.2) } else { (-2.8, 3.2) };
+            let (wing, tip) = sort_arrow(ui.ctx(), ascending);
             ui.painter().add(egui::Shape::convex_polygon(
                 vec![
                     center + vec2(-4.0, wing),
@@ -4254,12 +4271,14 @@ pub fn chips<T: PartialEq + Copy>(
 ) -> Option<T> {
     let mut selected = None;
     ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 8.0;
-        for (value, label) in options {
-            if theme::soft_button(ui, palette, None, label, *value == current).clicked() {
-                selected = Some(*value);
+        theme::pill_group(ui, palette, |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            for (value, label) in options {
+                if theme::soft_button(ui, palette, None, label, *value == current).clicked() {
+                    selected = Some(*value);
+                }
             }
-        }
+        });
     });
     selected
 }

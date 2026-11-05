@@ -35,38 +35,42 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
-        for source in SearchSource::ALL {
-            let label = source.label(app.locale);
-            let response =
-                theme::soft_button(ui, &palette, None, &label, source == app.search.source);
-            response.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::Button,
-                    ui.is_enabled(),
-                    source == app.search.source,
-                    // Translators: {source} is All, Spotify or SoundCloud.
-                    gettext(app.locale, "Search source: {source}").replace("{source}", &label),
-                )
-            });
-            if response.clicked() {
-                app.actions.push(Action::SetSearchSource(source));
+        theme::pill_group(ui, &palette, |ui| {
+            for source in SearchSource::ALL {
+                let label = source.label(app.locale);
+                let response =
+                    theme::soft_button(ui, &palette, None, &label, source == app.search.source);
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::WidgetType::Button,
+                        ui.is_enabled(),
+                        source == app.search.source,
+                        // Translators: {source} is All, Spotify or SoundCloud.
+                        gettext(app.locale, "Search source: {source}").replace("{source}", &label),
+                    )
+                });
+                if response.clicked() {
+                    app.actions.push(Action::SetSearchSource(source));
+                }
             }
-        }
+        });
         if !recent_searches {
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(8.0);
-            for filter in SearchFilter::ALL {
-                if !app.search.source.supports(filter) {
-                    continue;
+            theme::pill_group(ui, &palette, |ui| {
+                for filter in SearchFilter::ALL {
+                    if !app.search.source.supports(filter) {
+                        continue;
+                    }
+                    let label = filter.label(app.locale);
+                    if theme::soft_button(ui, &palette, None, &label, filter == app.search.filter)
+                        .clicked()
+                    {
+                        app.actions.push(Action::SetSearchFilter(filter));
+                    }
                 }
-                let label = filter.label(app.locale);
-                if theme::soft_button(ui, &palette, None, &label, filter == app.search.filter)
-                    .clicked()
-                {
-                    app.actions.push(Action::SetSearchFilter(filter));
-                }
-            }
+            });
         }
     });
     if recent_searches {
