@@ -1,9 +1,10 @@
-// Encore on a phone. It holds no sign-in of any music service: it's another device
-// of the listener's group account, and Encore on their computer answers for the
-// library and plays the sound. Everything shown goes in as text, never as markup.
+// Encore on a phone. It's another device of the listener's group account, and Encore
+// on their computer answers for the library and plays the sound. With their own
+// Spotify app signed in here as well, Spotify carries on with the computer off; that
+// sign-in stays in this browser. Everything shown goes in as text, never as markup.
 'use strict';
 
-const STORE = { secret: 'encore.secret', name: 'encore.name', group: 'encore.group' };
+const STORE = { secret: 'encore.secret', name: 'encore.name', group: 'encore.group', client: 'encore.client', spotify: 'encore.spotify' };
 const app = document.getElementById('app');
 
 // ---------------------------------------------------------------- small helpers
@@ -93,14 +94,163 @@ async function api(path, method = 'GET', body) {
   return value;
 }
 
-/** Tells the computer to do something. */
+// ---------------------------------------------------------------- Spotify itself
+const SPOTIFY_SCOPES = 'user-read-private user-read-email playlist-read-private playlist-read-collaborative user-library-read user-library-modify user-read-playback-state user-modify-playback-state user-read-currently-playing user-top-read';
+const redirectUri = () => `${location.origin}/callback`;
+const base64url = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const hasSpotify = () => !!localStorage.getItem(STORE.spotify);
+
+async function spotifySignIn(clientId) {
+  const verifier = base64url(crypto.getRandomValues(new Uint8Array(48)));
+  const state = base64url(crypto.getRandomValues(new Uint8Array(16)));
+  const challenge = base64url(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier)));
+  localStorage.setItem(STORE.client, clientId);
+  sessionStorage.setItem('encore.verifier', verifier);
+  sessionStorage.setItem('encore.state', state);
+  location.href = `https://accounts.spotify.com/authorize?${new URLSearchParams({
+    client_id: clientId, response_type: 'code', redirect_uri: redirectUri(), scope: SPOTIFY_SCOPES,
+    code_challenge_method: 'S256', code_challenge: challenge, state,
+  })}`;
+}
+
+async function spotifyTokens(form) {
+  const answer = await fetch('https://accounts.spotify.com/api/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ client_id: localStorage.getItem(STORE.client) ?? '', ...form }),
+  });
+  if (!answer.ok) throw new Error("Spotify didn't accept that. Check your Client ID and redirect address.");
+  const tokens = await answer.json();
+  const held = JSON.parse(localStorage.getItem(STORE.spotify) ?? '{}');
+  const saved = { access: tokens.access_token, refresh: tokens.refresh_token ?? held.refresh, until: Date.now() + tokens.expires_in * 1000 };
+  localStorage.setItem(STORE.spotify, JSON.stringify(saved));
+  return saved;
+}
+
+/** Back from Spotify's sign-in: this proves who the listener is, for their same account. */
+async function spotifyReturn() {
+  const params = new URLSearchParams(location.search);
+  const state = sessionStorage.getItem('encore.state');
+  const verifier = sessionStorage.getItem('encore.verifier');
+  sessionStorage.removeItem('encore.state');
+  sessionStorage.removeItem('encore.verifier');
+  history.replaceState(null, '', '/');
+  if (params.get('error')) throw new Error('Spotify sign-in was cancelled.');
+  if (!params.get('code') || !state || params.get('state') !== state || !verifier) throw new Error("That sign-in didn't match. Try again.");
+  const tokens = await spotifyTokens({ grant_type: 'authorization_code', code: params.get('code'), redirect_uri: redirectUri(), code_verifier: verifier });
+  const joined = await api('/auth/spotify', 'POST', { token: tokens.access, device: phoneName() });
+  localStorage.setItem(STORE.secret, joined.secret);
+  localStorage.setItem(STORE.name, joined.display_name);
+}
+
+async function spotifyAccess() {
+  let saved = JSON.parse(localStorage.getItem(STORE.spotify) ?? 'null');
+  if (!saved) throw new Error('Connect Spotify first.');
+  if (Date.now() > saved.until - 60000) saved = await spotifyTokens({ grant_type: 'refresh_token', refresh_token: saved.refresh });
+  return saved.access;
+}
+
+async function web(path, method = 'GET', body) {
+  const answer = await fetch(`https://api.spotify.com/v1${path}`, {
+    method,
+    headers: { authorization: `Bearer ${await spotifyAccess()}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (answer.status === 204 || answer.status === 202) return null;
+  if (answer.status === 429) throw new Error('Spotify is busy. Try again in a moment.');
+  if (answer.status === 403 && method !== 'GET') throw new Error('Spotify only lets Premium accounts control playback from here.');
+  if (!answer.ok) throw new Error("Spotify couldn't do that.");
+  return answer.status === 200 ? answer.json().catch(() => null) : null;
+}
+
+const spotifySong = track => ({
+  uri: track.uri,
+  name: track.name,
+  artists: (track.artists ?? []).map(artist => artist.name),
+  artist_id: track.artists?.[0]?.id,
+  image: track.album?.images?.[1]?.url ?? track.album?.images?.[0]?.url,
+  duration_ms: track.duration_ms,
+});
+const playable = item => item && item.type === 'track' && item.uri?.startsWith('spotify:track:');
+
+/** The same questions the computer answers, for Spotify alone. */
+const DIRECT = {
+  home: async () => ({ picks: (await web('/me/top/tracks?limit=20&time_range=short_term')).items.filter(playable).map(spotifySong), following: [] }),
+  library: async () => ({ direct: true, playlists: (await web('/me/playlists?limit=50')).items.filter(Boolean).map(list => ({ id: list.id, uri: list.uri, name: list.name, image: list.images?.[0]?.url })) }),
+  liked: async () => ({ name: 'Liked Songs', songs: (await web('/me/tracks?limit=50')).items.map(saved => saved.track).filter(playable).map(spotifySong) }),
+  playlist: async ({ target }) => {
+    const [about, rows] = await Promise.all([web(`/playlists/${encodeURIComponent(target)}?fields=name,uri`), web(`/playlists/${encodeURIComponent(target)}/tracks?limit=100`)]);
+    return { name: about.name, uri: about.uri, songs: rows.items.map(row => row.track).filter(playable).map(spotifySong) };
+  },
+  album: async ({ target }) => {
+    const album = await web(`/albums/${encodeURIComponent(target)}`);
+    return { name: album.name, uri: album.uri, songs: album.tracks.items.map(track => spotifySong({ ...track, type: 'track', album })) };
+  },
+  artist: async ({ target }) => {
+    const id = encodeURIComponent(target);
+    const [artist, albums] = await Promise.all([web(`/artists/${id}`), web(`/artists/${id}/albums?include_groups=album,single&limit=20`)]);
+    const popular = await web(`/artists/${id}/top-tracks`).catch(() => ({ tracks: [] }));
+    return {
+      name: artist.name, uri: artist.uri, image: artist.images?.[0]?.url, followers: artist.followers?.total,
+      popular: popular.tracks.filter(playable).map(spotifySong),
+      albums: albums.items.map(album => ({ id: album.id, name: album.name, year: album.release_date?.slice(0, 4), image: album.images?.[1]?.url ?? album.images?.[0]?.url })),
+      looking: false,
+    };
+  },
+  search: async ({ query }) => {
+    const found = await web(`/search?${new URLSearchParams({ q: query, type: 'track,artist', limit: '20' })}`);
+    return {
+      artists: found.artists.items.slice(0, 4).map(artist => ({ id: artist.id, name: artist.name, image: artist.images?.[1]?.url ?? artist.images?.[0]?.url })),
+      spotify: found.tracks.items.filter(playable).map(spotifySong),
+    };
+  },
+};
+
+/** The buttons, on whichever of the listener's Spotify devices is awake. */
+const trackId = uri => uri.split(':').pop();
+const DIRECT_ACTS = {
+  // What Spotify last said, not what's already shown for this very press.
+  toggle: () => web(`/me/player/${player.state?.playing ? 'pause' : 'play'}`, 'PUT'),
+  next: () => web('/me/player/next', 'POST'),
+  previous: () => web('/me/player/previous', 'POST'),
+  seek: ({ ms }) => web(`/me/player/seek?position_ms=${Math.round(ms)}`, 'PUT'),
+  volume: ({ percent }) => web(`/me/player/volume?volume_percent=${percent}`, 'PUT'),
+  shuffle: () => web(`/me/player/shuffle?state=${!player.state?.shuffle}`, 'PUT'),
+  repeat: () => web(`/me/player/repeat?state=${player.state?.repeat === 'off' ? 'context' : 'off'}`, 'PUT'),
+  like: async ({ uri }) => {
+    const id = encodeURIComponent(trackId(uri));
+    const [saved] = await web(`/me/tracks/contains?ids=${id}`);
+    await web(`/me/tracks?ids=${id}`, saved ? 'DELETE' : 'PUT');
+  },
+  queue: ({ uri }) => web(`/me/player/queue?uri=${encodeURIComponent(uri)}`, 'POST'),
+  play: async ({ uris, index }) => {
+    const songs = uris.filter(uri => uri.startsWith('spotify:'));
+    const wanted = uris[index];
+    if (!songs.includes(wanted)) throw new Error('That song plays from Encore on your computer.');
+    const { devices } = await web('/me/player/devices');
+    const device = devices.find(item => item.is_active) ?? devices[0];
+    // Nothing awake to send it to: the Spotify app takes it from here.
+    if (!device) { location.href = `https://open.spotify.com/track/${trackId(wanted)}`; return; }
+    await web(`/me/player/play?device_id=${encodeURIComponent(device.id)}`, 'PUT', { uris: songs, offset: { uri: wanted } });
+  },
+};
+
+/** Tells the computer to do something, or Spotify when the computer's not there. */
 async function act(kind, args = {}) {
-  await api('/live/remote/send', 'POST', { id: uuid(), kind, ...args });
   player.lastAct = Date.now();
+  if (!player.online && hasSpotify() && DIRECT_ACTS[kind]) {
+    try {
+      await DIRECT_ACTS[kind](args);
+      setTimeout(pollSpotify, 500);
+    } catch (error) { toast(error.message); }
+    return;
+  }
+  await api('/live/remote/send', 'POST', { id: uuid(), kind, ...args });
 }
 
 /** Asks the computer something, and waits for it to answer. */
 async function ask(kind, args = {}, patience = 25000) {
+  if (!player.online && hasSpotify() && DIRECT[kind]) return DIRECT[kind](args);
   const id = uuid();
   await api('/live/remote/send', 'POST', { id, kind, ...args });
   const until = Date.now() + patience;
@@ -116,7 +266,7 @@ async function ask(kind, args = {}, patience = 25000) {
 }
 
 // ---------------------------------------------------------------- the player
-const player = { state: null, online: false, at: 0, held: new Map(), lastAct: 0, sheet: null, mini: null };
+const player = { state: null, online: false, direct: false, at: 0, held: new Map(), lastAct: 0, sheet: null, mini: null };
 
 /** What the listener just did shows at once and stays until the computer agrees or time's up. */
 const HOLD_MS = 4000;
@@ -148,15 +298,38 @@ async function pollState() {
       player.online = !!fresh;
       if (fresh) {
         player.state = state;
+        player.direct = false;
         player.at = Date.now() - Math.max(0, now - state.at);
+      } else if (hasSpotify()) {
+        await pollSpotify();
+      } else {
+        player.direct = false;
       }
-      if (wasOnline !== player.online) renderBanner();
+      if (wasOnline !== player.online) { renderBanner(); if (booted) render(); }
+      booted = true;
       refreshPlayer();
     } catch (error) {
       if (error instanceof SignedOut) { start(); return; }
     }
   }
-  setTimeout(pollState, 1200);
+  setTimeout(pollState, player.online || !hasSpotify() ? 1200 : 3000);
+}
+let booted = false;
+
+/** With the computer off, what's playing is whatever Spotify says, on any device. */
+async function pollSpotify() {
+  try {
+    const now = await web('/me/player');
+    player.direct = true;
+    if (!now?.item) { player.state = null; return; }
+    player.state = {
+      song: spotifySong(now.item), liked: player.state?.song?.uri === now.item.uri ? player.state.liked : false,
+      position_ms: now.progress_ms ?? 0, playing: now.is_playing, shuffle: now.shuffle_state, repeat: now.repeat_state === 'off' ? 'off' : 'all',
+      volume: now.device?.volume_percent ?? 50, device: now.device?.name ?? 'Spotify', next: [],
+    };
+    player.at = Date.now();
+    refreshPlayer();
+  } catch { /* the next look tries again */ }
 }
 
 function buildMini() {
@@ -176,7 +349,7 @@ function refreshPlayer() {
   const song = state?.song;
   const mini = player.mini;
   if (mini) {
-    mini.node.hidden = !song || !player.online;
+    mini.node.hidden = !song || !(player.online || player.direct);
     document.querySelector('main')?.classList.toggle('no-player', mini.node.hidden);
     if (song) {
       if (mini.uri !== song.uri) {
@@ -320,7 +493,7 @@ function row(song, list, index) {
     h('button', { class: 'more', 'aria-label': `More for ${song.name}`, onclick: () => songActions(song) }, icon('more')));
 }
 function playFrom(list, index) {
-  if (!player.online) { toast('Open Encore on your computer first.'); return; }
+  if (!player.online && !hasSpotify()) { toast('Open Encore on your computer first.'); return; }
   const uris = list.map(song => song.uri);
   // Shown straight away; the computer's next word confirms it.
   player.state = { ...(player.state ?? { repeat: 'off', volume: 50, next: [] }), song: list[index], position_ms: 0, playing: true };
@@ -370,8 +543,11 @@ function backButton() {
   return h('button', { class: 'back', onclick: back, 'aria-label': 'Back' }, icon('back'));
 }
 function renderBanner() {
+  const telling = hasSpotify()
+    ? 'Showing your Spotify, played on your Spotify devices. Open it for SoundCloud, YouTube and everything else.'
+    : 'Open it to browse your library and play. Your group works from here either way.';
   bannerSlot?.replaceChildren(...(player.online ? [] : [h('div', { class: 'banner' }, h('span', { class: 'dot' }),
-    h('div', {}, h('b', { text: "Encore isn't open on your computer" }), 'Open it to browse your library and play. Your group works from here either way.'))]));
+    h('div', {}, h('b', { text: "Encore isn't open on your computer" }), telling))]));
 }
 
 async function load(fill, into) {
@@ -448,13 +624,14 @@ function libraryScreen() {
     const found = await ask('library');
     return [
       place('Liked Songs', null, 'Spotify', () => go({ page: 'list', kind: 'liked' })),
-      place('SoundCloud likes', null, 'SoundCloud', () => go({ page: 'list', kind: 'soundcloud_likes' })),
-      place('YouTube likes', null, 'YouTube', () => go({ page: 'list', kind: 'youtube_likes' })),
+      !found.direct && place('SoundCloud likes', null, 'SoundCloud', () => go({ page: 'list', kind: 'soundcloud_likes' })),
+      !found.direct && place('YouTube likes', null, 'YouTube', () => go({ page: 'list', kind: 'youtube_likes' })),
       h('h2', { class: 'section', text: 'Playlists' }),
       (found.playlists ?? []).map(list => place(list.name, list.image, null, () => go({ page: 'list', kind: 'playlist', id: list.id, uri: list.uri }))),
     ];
   }, body);
-  return [h('h1', { class: 'title', text: 'Library' }), body, h('div', { class: 'settings-link' }, h('button', { class: 'quiet', text: 'Unlink this phone', onclick: unlink }))];
+  const connect = !hasSpotify() && h('button', { class: 'quiet', text: 'Keep Spotify going with the computer off', onclick: () => spotifyPanel() });
+  return [h('h1', { class: 'title', text: 'Library' }), body, h('div', { class: 'settings-link' }, connect, connect && h('br'), h('button', { class: 'quiet', text: 'Unlink this phone', onclick: unlink }))];
 }
 
 function listScreen() {
@@ -552,7 +729,8 @@ function postView(post, refresh) {
   } }, input);
   const song = { uri: `link:${post.url}`, name: post.title, artists: post.artists, image: post.artwork_url, duration_ms: post.duration_ms };
   const play = () => {
-    if (!player.online) { toast('Open Encore on your computer first.'); return; }
+    // With the computer off, the song's own app can still play its own link.
+    if (!player.online) { location.href = post.url; return; }
     act('play_link', { url: post.url }).catch(() => toast("Couldn't reach Encore."));
     toast('Starting on your computer');
   };
@@ -619,10 +797,29 @@ function shell() {
 }
 
 function unlink() {
-  localStorage.removeItem(STORE.secret);
-  localStorage.removeItem(STORE.name);
-  localStorage.removeItem(STORE.group);
+  for (const key of Object.values(STORE)) localStorage.removeItem(key);
   start();
+}
+
+const phoneName = () => (/iPhone/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'Phone');
+
+/** Signing in with the listener's own Spotify app, whose address they add once. */
+function spotifyPanel() {
+  const client = h('input', { 'aria-label': 'Spotify Client ID', placeholder: 'Client ID', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', maxlength: 64, value: localStorage.getItem(STORE.client) ?? '' });
+  const problem = h('p', { class: 'problem', role: 'alert', hidden: true });
+  const scrim = h('div', { class: 'scrim', onclick: () => { scrim.remove(); panel.remove(); } });
+  const address = h('input', { 'aria-label': 'Redirect address', readonly: true, value: redirectUri(), onfocus: event => event.target.select() });
+  const panel = h('form', { class: 'door actions sign-in', onsubmit: event => {
+    event.preventDefault();
+    const id = client.value.trim();
+    if (!/^[a-zA-Z0-9]{16,64}$/.test(id)) { problem.textContent = "That doesn't look like a Client ID."; problem.hidden = false; return; }
+    spotifySignIn(id);
+  } },
+    h('p', { text: 'This uses your own Spotify app, the same one as on your computer. In the Spotify developer dashboard, add this redirect address to it once:' }),
+    address,
+    h('label', { text: 'Your Client ID' }), client, problem,
+    h('button', { class: 'primary', type: 'submit', text: 'Continue to Spotify' }));
+  document.body.append(scrim, panel);
 }
 
 // ---------------------------------------------------------------- linking
@@ -635,10 +832,10 @@ function linkScreen() {
     button.disabled = true;
     problem.hidden = true;
     try {
-      const device = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /Android/.test(navigator.userAgent) ? 'Android phone' : 'Phone';
-      const linked = await api('/link/claim', 'POST', { code: input.value, device });
+      const linked = await api('/link/claim', 'POST', { code: input.value, device: phoneName() });
       localStorage.setItem(STORE.secret, linked.secret);
       localStorage.setItem(STORE.name, linked.display_name);
+      if (linked.client_id) localStorage.setItem(STORE.client, linked.client_id);
       start();
     } catch (error) {
       problem.textContent = error.message;
@@ -649,12 +846,21 @@ function linkScreen() {
     h('h1', { text: 'Encore' }),
     h('p', { text: 'Use your own account on this phone: your library, your groups, and playback on your computer.' }),
     h('p', { class: 'small', text: 'On your computer, open Encore, go to Group, then People, and press Link a phone. Type the code here.' }),
-    input, problem, button);
+    input, problem, button,
+    h('button', { class: 'quiet', type: 'button', text: 'Sign in with Spotify instead', onclick: spotifyPanel }));
   app.replaceChildren(h('div', { class: 'door-page' }, form));
   input.focus();
 }
 
 let polling = false;
+let arrival = null;
+async function arrive() {
+  if (location.pathname === '/callback') {
+    try { await spotifyReturn(); } catch (error) { arrival = error.message; }
+  }
+  start();
+  if (arrival) { toast(arrival); arrival = null; }
+}
 function start() {
   if (localStorage.getItem(STORE.secret)) {
     shell();
@@ -664,4 +870,4 @@ function start() {
     linkScreen();
   }
 }
-start();
+arrive();

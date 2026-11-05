@@ -14,16 +14,9 @@ use crate::theme::{self, Icon};
 use super::group::{card, field};
 
 /// A code to type on a phone, which makes it another device of this account.
-fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
+pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
     let palette = app.palette;
     let locale = app.locale;
-    theme::text(
-        ui,
-        gettext(locale, "Your phone"),
-        theme::medium(13.0),
-        palette.text,
-    );
-    ui.add_space(4.0);
     let left = match &app.phone.code {
         Some(Ok((code, made))) => crate::app::remote::CODE_LASTS
             .checked_sub(made.elapsed())
@@ -857,6 +850,13 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
             }
         }
         ui.add_space(10.0);
+        theme::text(
+            ui,
+            gettext(locale, "Your phone"),
+            theme::medium(13.0),
+            palette.text,
+        );
+        ui.add_space(4.0);
         link_a_phone(app, ui, actions);
         ui.add_space(10.0);
         if theme::soft_button(

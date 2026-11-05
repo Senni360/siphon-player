@@ -208,6 +208,9 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .send { display: flex; gap: 8px; margin-top: 6px; }
 .send input { flex: 1; height: 40px; border-radius: 20px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); padding: 0 14px; font: inherit; font-size: 16px; min-width: 0; }
 
+.actions.sign-in { max-width: none; animation: up .25s var(--ease); padding: 16px; }
+.actions.sign-in .primary { text-align: center; height: 48px; }
+.actions.sign-in .quiet { width: auto; }
 .empty { text-align: center; color: var(--secondary); padding: 40px 16px; }
 .settings-link { margin-top: 28px; }
 .quiet { color: var(--secondary); font-size: 14px; height: 44px; }

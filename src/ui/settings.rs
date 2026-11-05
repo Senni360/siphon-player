@@ -2125,6 +2125,29 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ),
         ),
     ];
+    let phone = gettext(locale, "Your phone");
+    let phone_rows = [RowText::new(
+        gettext(locale, "Link a phone"),
+        gettext(
+            locale,
+            "Use this account on your phone at encore.senni.dev, and play on this computer from it.",
+        ),
+    )];
+    if section_matches(&needle, &phone, &phone_rows) {
+        any_visible = true;
+        section(ui, &palette, &phone, |ui| {
+            theme::text(
+                ui,
+                phone_rows[0].description.as_ref(),
+                theme::regular(13.0),
+                palette.secondary,
+            );
+            ui.add_space(6.0);
+            let mut actions = Vec::new();
+            super::group_account::link_a_phone(app, ui, &mut actions);
+            app.actions.extend(actions);
+        });
+    }
     if section_matches(&needle, &storage, &storage_rows) {
         any_visible = true;
         section(ui, &palette, &storage, |ui| {
