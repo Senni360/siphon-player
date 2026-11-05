@@ -801,7 +801,7 @@ function searchScreen() {
       for (const source of ['soundcloud', 'youtube']) {
         const accounts = (found.accounts ?? []).filter(account => account.source === source);
         if (!accounts.length) continue;
-        parts.push(part(source, h('h2', { class: 'section', text: `On ${SOURCE_NAMES[source]}: people` }), h('div', { class: 'chips' }, accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
+        parts.push(part(source, h('h2', { class: 'section', text: `People on ${SOURCE_NAMES[source]}` }), h('div', { class: 'chips' }, accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
           art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] })))))));
       }
       for (const source of ['spotify', 'soundcloud', 'youtube']) {
