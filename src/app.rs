@@ -6143,11 +6143,20 @@ impl App {
         artist: String,
         ask: u64,
         side: crate::artist_sources::Side,
-        finding: crate::artist_sources::Finding,
+        mut finding: crate::artist_sources::Finding,
     ) {
         use crate::artist_sources::Side;
+        let name = self
+            .artist_pages
+            .get(&artist)
+            .and_then(|page| page.artist.get())
+            .map(|artist| artist.name.clone())
+            .unwrap_or_default();
+        finding.tidy(&name);
         self.cache_soundcloud_tracks(&finding.exclusives);
         self.cache_soundcloud_tracks(&finding.edits);
+        self.cache_soundcloud_tracks(&finding.unreleased);
+        self.cache_soundcloud_tracks(&finding.produced);
         let Some(page) = self.artist_pages.get_mut(&artist) else {
             return;
         };
@@ -13334,14 +13343,11 @@ impl App {
                 side,
                 choice,
             } => self.choose_artist_account(artist_id, side, choice),
-            Action::ToggleShowAllElsewhere { artist_id, edits } => {
-                if let Some(page) = self.artist_pages.get_mut(&artist_id) {
-                    let flag = if edits {
-                        &mut page.sources.show_all_edits
-                    } else {
-                        &mut page.sources.show_all
-                    };
-                    *flag = !*flag;
+            Action::ToggleShowAllElsewhere { artist_id, list } => {
+                if let Some(page) = self.artist_pages.get_mut(&artist_id)
+                    && !page.sources.opened.remove(&list)
+                {
+                    page.sources.opened.insert(list);
                 }
             }
             Action::LoadMore(Page::SoundCloud(uri)) => self.load_soundcloud_page(uri, true),

@@ -7,7 +7,7 @@ use crate::app::App;
 use crate::artist_sources::{Account, Confidence, Finding, Side};
 use crate::i18n::{gettext, ngettext, pgettext};
 use crate::model::{
-    Action, ArtistChoice, ArtistPage, DiscographyFilter, Loadable, Page, RowContext,
+    Action, ArtistChoice, ArtistPage, DiscographyFilter, ElsewhereList, Loadable, Page, RowContext,
 };
 use crate::theme::{self, Icon};
 use crate::ui::kit::Source;
@@ -221,7 +221,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
             }
             ui.add_space(20.0);
 
-            elsewhere_edits(app, ui, id, &page);
+            elsewhere_after(app, ui, id, artist, &page);
 
             // Related.
             if let Loadable::Loaded(related) = &page.related
@@ -852,63 +852,109 @@ fn elsewhere_songs(app: &mut App, ui: &mut egui::Ui, id: &str, page: &ArtistPage
         }
         return;
     }
-    theme::section_title(ui, &palette, &gettext(locale, "Not on Spotify"));
-    theme::subtle(ui, &palette, &from_where(locale, &sources.songs));
-    ui.add_space(4.0);
-    let limit = if sources.show_all {
-        sources.songs.len()
-    } else {
-        SHOWN_SONGS
-    };
-    elsewhere_rows(app, ui, &sources.songs, limit);
-    see_more(app, ui, id, sources.songs.len(), sources.show_all, false);
-    ui.add_space(20.0);
-}
-
-/// Other people's versions of their songs.
-fn elsewhere_edits(app: &mut App, ui: &mut egui::Ui, id: &str, page: &ArtistPage) {
-    let palette = app.palette;
-    let locale = app.locale;
-    let sources = &page.sources;
-    if sources.edits.is_empty() {
-        return;
-    }
-    theme::section_title(ui, &palette, &gettext(locale, "Edits and remixes"));
-    theme::subtle(ui, &palette, &from_where(locale, &sources.edits));
-    ui.add_space(4.0);
-    let limit = if sources.show_all_edits {
-        sources.edits.len()
-    } else {
-        SHOWN_SONGS
-    };
-    elsewhere_rows(app, ui, &sources.edits, limit);
-    see_more(
+    elsewhere_list(
         app,
         ui,
         id,
-        sources.edits.len(),
-        sources.show_all_edits,
-        true,
+        ElsewhereList::Songs,
+        &gettext(locale, "Not on Spotify"),
+        &sources.songs,
+        sources,
     );
-    ui.add_space(20.0);
 }
 
-fn see_more(app: &mut App, ui: &mut egui::Ui, id: &str, count: usize, open: bool, edits: bool) {
-    if count <= SHOWN_SONGS {
+/// What other people post of theirs, after the discography: what they've produced,
+/// what hasn't come out, and other people's versions.
+fn elsewhere_after(app: &mut App, ui: &mut egui::Ui, id: &str, artist: &Artist, page: &ArtistPage) {
+    let locale = app.locale;
+    let sources = &page.sources;
+    let produced = gettext(locale, "Produced by {artist}").replace("{artist}", &artist.name);
+    elsewhere_list(
+        app,
+        ui,
+        id,
+        ElsewhereList::Produced,
+        &produced,
+        &sources.produced,
+        sources,
+    );
+    elsewhere_list(
+        app,
+        ui,
+        id,
+        ElsewhereList::Unreleased,
+        &gettext(locale, "Snippets and unreleased"),
+        &sources.unreleased,
+        sources,
+    );
+    if !sources.unreleased.is_empty() && !sources.archives.is_empty() {
+        archives_row(app, ui, sources);
+        ui.add_space(20.0);
+    }
+    elsewhere_list(
+        app,
+        ui,
+        id,
+        ElsewhereList::Edits,
+        &gettext(locale, "Edits and remixes"),
+        &sources.edits,
+        sources,
+    );
+}
+
+/// The accounts that keep posting an artist's unreleased songs.
+fn archives_row(app: &mut App, ui: &mut egui::Ui, sources: &crate::model::ArtistSources) {
+    let palette = app.palette;
+    theme::subtle(
+        ui,
+        &palette,
+        &gettext(app.locale, "Posted by accounts like"),
+    );
+    ui.add_space(4.0);
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(8.0, 8.0);
+        for account in &sources.archives {
+            let (response, _) = account_pill(app, ui, Side::SoundCloud, account, 0.0);
+            if response.clicked() {
+                app.actions
+                    .push(Action::Open(Page::SoundCloud(account.uri.clone())));
+            }
+        }
+    });
+}
+
+fn elsewhere_list(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    id: &str,
+    list: ElsewhereList,
+    title: &str,
+    songs: &[crate::api::models::Track],
+    sources: &crate::model::ArtistSources,
+) {
+    if songs.is_empty() {
         return;
     }
     let palette = app.palette;
     let locale = app.locale;
-    ui.add_space(6.0);
-    let label = if open {
-        gettext(locale, "Show less")
-    } else {
-        gettext(locale, "See more")
-    };
-    if theme::soft_button(ui, &palette, None, &label, false).clicked() {
-        app.actions.push(Action::ToggleShowAllElsewhere {
-            artist_id: id.to_string(),
-            edits,
-        });
+    let open = sources.opened.contains(&list);
+    theme::section_title(ui, &palette, title);
+    theme::subtle(ui, &palette, &from_where(locale, songs));
+    ui.add_space(4.0);
+    elsewhere_rows(app, ui, songs, if open { songs.len() } else { SHOWN_SONGS });
+    if songs.len() > SHOWN_SONGS {
+        ui.add_space(6.0);
+        let label = if open {
+            gettext(locale, "Show less")
+        } else {
+            gettext(locale, "See more")
+        };
+        if theme::soft_button(ui, &palette, None, &label, false).clicked() {
+            app.actions.push(Action::ToggleShowAllElsewhere {
+                artist_id: id.to_string(),
+                list,
+            });
+        }
     }
+    ui.add_space(20.0);
 }

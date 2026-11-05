@@ -130,21 +130,33 @@ impl Reader {
         catalogue: &Catalogue,
         link: Option<Link>,
     ) -> Finding {
-        let finding = match side {
+        let resolver = crate::youtube::Resolver::default();
+        let mut finding = match side {
             Side::SoundCloud => {
                 sources::soundcloud(&self.client, &request.name, catalogue, link.as_ref()).await
             }
             Side::YouTube => {
-                let resolver = crate::youtube::Resolver::default();
                 sources::youtube(&resolver, &request.name, catalogue, link.as_ref()).await
             }
         };
-        self.emit(Event::ArtistSource {
-            artist: request.id.clone(),
-            ask: request.ask,
-            side,
-            finding: Box::new(finding.clone()),
-        });
+        // The artist's own first, as soon as they're known.
+        let show = |finding: &Finding| {
+            self.emit(Event::ArtistSource {
+                artist: request.id.clone(),
+                ask: request.ask,
+                side,
+                finding: Box::new(finding.clone()),
+            });
+        };
+        show(&finding);
+        let beyond = match side {
+            Side::SoundCloud => {
+                sources::soundcloud_beyond(&self.client, &request.name, catalogue).await
+            }
+            Side::YouTube => sources::youtube_beyond(&resolver, &request.name, catalogue).await,
+        };
+        finding.add(beyond);
+        show(&finding);
         finding
     }
 

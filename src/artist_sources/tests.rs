@@ -295,3 +295,198 @@ fn an_older_links_file_still_reads() {
     let empty: Links = serde_json::from_str("{}").unwrap();
     assert!(empty.artists.is_empty());
 }
+
+fn posted(name: &str, by: &str, plays: u64) -> Track {
+    Track {
+        name: name.to_owned(),
+        uri: format!("soundcloud:track:{name}"),
+        duration_ms: 120_000,
+        play_count: Some(plays),
+        artists: vec![crate::api::models::ArtistRef {
+            id: None,
+            name: by.to_owned(),
+            uri: Some(format!("soundcloud:user:{by}")),
+        }],
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_title_names_an_artist_only_when_the_name_stands_alone() {
+    assert!(names_artist("slayr - know the words (snippet)", "slayr"));
+    assert!(names_artist("SLAYR - KILL ME SLOW (2026 LEAK)", "Slayr"));
+    assert!(names_artist("slayr-my oh my (bloodluxe snippet)", "slayr"));
+    assert!(names_artist("Yeat & Slayr - Luh Star", "slayr"));
+    assert!(names_artist("(LEAK) Che - GO BACK (ft. slayr)", "slayr"));
+    assert!(names_artist("Wrap It Up (slayr unreleased)", "slayr"));
+    assert!(names_artist("Freeze Tag - slayr leak", "slayr"));
+    assert!(!names_artist("Demon Slayer - Hashira Leak", "Slayer"));
+    assert!(!names_artist("SLAYER77 - February (leak)", "Slayer"));
+    assert!(names_artist("Wa$ Era - thing", "Wa$ Era"));
+}
+
+#[test]
+fn unreleased_songs_are_kept_once_with_full_versions_first() {
+    let catalogue = Catalogue::new("slayr", ["Sloppy Joe"]);
+    let kept = sort_unreleased(
+        "slayr",
+        &catalogue,
+        vec![
+            posted(
+                "slayr - promise unreleased (Fabula Nova Snippet)",
+                "zor",
+                29_400,
+            ),
+            posted("Slayr - Promise (leak)", "other", 500),
+            posted("slayr - Promise BEST VERSION (unreleased)", "third", 2),
+            posted("slayr - know the words (snippet)", "srcfiles", 6_209),
+            posted("SLAYR - KILL ME SLOW (2026 LEAK)", "osiris", 32_129),
+            posted("slayr - Sloppy Joe (leak)", "someone", 90_000),
+            posted("nothing", "conqr", 1_993),
+            posted("Demon Slayer leak", "anime", 9_000_000),
+        ],
+        &[],
+        Side::SoundCloud,
+    );
+    let names: Vec<_> = kept.iter().map(|track| track.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            "SLAYR - KILL ME SLOW (2026 LEAK)",
+            "Slayr - Promise (leak)",
+            "slayr - know the words (snippet)",
+        ]
+    );
+}
+
+#[test]
+fn an_archive_accounts_uploads_count_with_no_label_on_them() {
+    assert!(is_archive("slayr archives", "slayr"));
+    assert!(is_archive("$layrarchives", "slayr"));
+    assert!(!is_archive("slayr", "slayr"));
+    assert!(!is_archive("savvy luvs slayr", "slayr"));
+    assert!(!is_archive("UDG Unreleased", "slayr"));
+    let kept = sort_unreleased(
+        "slayr",
+        &Catalogue::default(),
+        vec![
+            posted("Wrap It Up", "archive", 4_567),
+            posted("Other", "else", 9),
+        ],
+        &["soundcloud:user:archive".to_owned()],
+        Side::SoundCloud,
+    );
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].name, "Wrap It Up");
+}
+
+#[test]
+fn a_producer_credit_is_found_alone_or_shared_and_only_for_that_name() {
+    assert!(credits_producer("slayr - toxic (prod. waera)", "waera"));
+    assert!(credits_producer("Song [prod by waera]", "waera"));
+    assert!(credits_producer("Song (prod. someone + waera)", "waera"));
+    assert!(credits_producer("Song produced by waera", "waera"));
+    assert!(!credits_producer("waera - song (prod. someone)", "waera"));
+    assert!(!credits_producer("Prod Song", "waera"));
+}
+
+#[test]
+fn produced_songs_leave_out_their_own_and_type_beats() {
+    let kept = sort_produced(
+        "waera",
+        vec![
+            posted("slayr - toxic (prod. waera)", "slayr", 100),
+            posted("slayr - toxic (prod waera)", "fan", 900),
+            posted("my own thing (prod. waera)", "waera", 5_000),
+            posted("slayr type beat (prod. waera)", "beats", 7_000),
+            posted("yeat - song (prod. waera) (snippet)", "fan", 3),
+            posted("ken - other (prod waera)", "ken", 300),
+        ],
+        Side::SoundCloud,
+    );
+    let names: Vec<_> = kept.iter().map(|track| track.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["ken - other (prod waera)", "slayr - toxic (prod. waera)"]
+    );
+    assert!(enough_produced(kept).is_empty(), "two is a stray credit");
+}
+
+#[test]
+fn what_the_artist_posted_is_not_listed_again_as_unreleased() {
+    let kept = without_songs(
+        "slayr",
+        vec![
+            posted("slayr - Toxic (leak)", "fan", 1),
+            posted("slayr - New (leak)", "fan", 1),
+        ],
+        &[posted("Toxic", "slayr", 1)],
+    );
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].name, "slayr - New (leak)");
+}
+
+#[test]
+fn an_upload_reads_as_a_song_by_who_the_title_says() {
+    let read = |name: &str, by: &str| {
+        let track = tidied(posted(name, by, 1), "slayr");
+        (
+            track.name.clone(),
+            track.artists[0].name.clone(),
+            track.artists[0].uri.is_some(),
+        )
+    };
+    assert_eq!(
+        read("slayr - Holding (OFFICIAL MUSIC VIDEO)", "zor"),
+        ("Holding".to_owned(), "slayr".to_owned(), false)
+    );
+    assert_eq!(
+        read("Run It Back - slayr", "zor"),
+        ("Run It Back".to_owned(), "slayr".to_owned(), false)
+    );
+    assert_eq!(
+        read("slayr - toxic [prod. slayr+waera]", "x"),
+        (
+            "toxic [prod. slayr+waera]".to_owned(),
+            "slayr".to_owned(),
+            false
+        )
+    );
+    assert_eq!(
+        read("kuru - gracious prod waera", "kuru"),
+        ("gracious prod waera".to_owned(), "kuru".to_owned(), false)
+    );
+    assert_eq!(
+        read("Slayr- Promise (Fabula)", "zor"),
+        ("Promise (Fabula)".to_owned(), "Slayr".to_owned(), false)
+    );
+    assert_eq!(
+        read("(NO AI) slayr - Bird Brain", "zor"),
+        ("Bird Brain".to_owned(), "slayr".to_owned(), false)
+    );
+    assert_eq!(
+        read("Black T- Shirt", "zor"),
+        ("Black T- Shirt".to_owned(), "zor".to_owned(), true)
+    );
+    // Nothing to go on: the song stays by whoever posted it, and leads there.
+    assert_eq!(
+        read("Sloppy Joe", "slayr"),
+        ("Sloppy Joe".to_owned(), "slayr".to_owned(), true)
+    );
+    assert_eq!(
+        read("Some Long Title With Many Words In It - Part Two", "x"),
+        (
+            "Some Long Title With Many Words In It - Part Two".to_owned(),
+            "x".to_owned(),
+            true
+        )
+    );
+}
+
+#[test]
+fn an_older_saved_finding_without_the_newer_lists_still_reads() {
+    let found: Finding = serde_json::from_str(r#"{"on_spotify":3}"#).unwrap();
+    assert_eq!(found.on_spotify, 3);
+    assert!(found.unreleased.is_empty());
+    assert!(found.produced.is_empty());
+}

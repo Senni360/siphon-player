@@ -120,7 +120,10 @@ name and reads the likeliest accounts' uploads, with the same requests their own
 make: no account is needed and only the artist's name is sent. It compares those
 titles with the artist's songs, whose release listings it reads over the playback
 session. Nothing replaces a Spotify song; a song only on SoundCloud plays from there.
-What's found is kept for a day in `artist-sources` under the cache folder. Which account
+It also searches for the artist's snippets, leaks and scrapped songs, reads through the
+few accounts that keep posting them, and looks for songs crediting the artist as
+producer in their titles (Spotify has no such list). What's found is kept for a day in
+`artist-sources` under the cache folder. Which account
 is whose stays in `artist-links.json`, where a listener's choice outranks any search.
 
 Artist pages read popular tracks over the verified account's local playback

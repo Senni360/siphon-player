@@ -64,6 +64,41 @@ fn demo_artist_sources(tracks: &[Track]) -> ArtistSources {
                 41_100,
             )],
             on_spotify: 12,
+            unreleased: vec![
+                upload(
+                    7,
+                    "soundcloud:track:8".into(),
+                    "Kill Me Slow (2026 leak)",
+                    32_129,
+                ),
+                upload(
+                    8,
+                    "soundcloud:track:9".into(),
+                    "Promise (extended snippet)",
+                    29_400,
+                ),
+            ],
+            archives: vec![account("soundcloud:user:2", "tourist archives", 736)],
+            produced: vec![
+                upload(
+                    9,
+                    "soundcloud:track:10".into(),
+                    "Gracious (prod. Tourist)",
+                    60_373,
+                ),
+                upload(
+                    10,
+                    "soundcloud:track:11".into(),
+                    "Riddle (prod. Tourist)",
+                    17_458,
+                ),
+                upload(
+                    11,
+                    "soundcloud:track:12".into(),
+                    "Heart Attack (prod. Tourist)",
+                    7_598,
+                ),
+            ],
             ..Default::default()
         }),
         youtube: Loadable::Loaded(Finding {
@@ -75,7 +110,7 @@ fn demo_artist_sources(tracks: &[Track]) -> ArtistSources {
         }),
         ..Default::default()
     };
-    sources.settle("Tourist");
+    sources.settle("Bonobo");
     sources
 }
 
@@ -1384,6 +1419,16 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
         match surface {
             name if siphon::Scenario::from_flag(name).is_some() => {
                 siphon::apply(app, siphon::Scenario::from_flag(name).unwrap());
+            }
+            // The artist page with a real name, reading the real sources.
+            name if name.starts_with("artist-live:") => {
+                if let Some(page) = app.artist_pages.get_mut("art0") {
+                    page.sources = ArtistSources::default();
+                    if let Loadable::Loaded(artist) = &mut page.artist {
+                        artist.name = name["artist-live:".len()..].to_owned();
+                    }
+                }
+                app.network_reachable = true;
             }
             "downloads-ready" => app.downloads.available = true,
             "downloads" => {
@@ -7892,6 +7937,13 @@ mod tests {
         uri: &str,
         labels: &[&str],
     ) {
+        // Only what's on screen is found, so nothing above the section may push it off.
+        for page in app.artist_pages.values_mut() {
+            page.sources = ArtistSources {
+                asks: (1, 1),
+                ..Default::default()
+            };
+        }
         view_frame(ctx, app, vec![], view);
         let text = view_frame(ctx, app, vec![], view);
         let below = text

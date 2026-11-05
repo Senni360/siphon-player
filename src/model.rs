@@ -1201,11 +1201,24 @@ pub struct ArtistSources {
     pub youtube: Loadable<crate::artist_sources::Finding>,
     /// A choice was made and its songs are on their way.
     pub reading: std::collections::HashSet<crate::artist_sources::Side>,
-    /// Both sources' songs as one list, and their edits.
+    /// Both sources' songs as one list, and likewise each kind of list after it.
     pub songs: Vec<Track>,
     pub edits: Vec<Track>,
-    pub show_all: bool,
-    pub show_all_edits: bool,
+    pub unreleased: Vec<Track>,
+    pub produced: Vec<Track>,
+    /// Accounts that keep posting their unreleased songs.
+    pub archives: Vec<crate::artist_sources::Account>,
+    /// The lists opened past their first few.
+    pub opened: std::collections::HashSet<ElsewhereList>,
+}
+
+/// One of the lists of what an artist has beyond Spotify.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ElsewhereList {
+    Songs,
+    Edits,
+    Unreleased,
+    Produced,
 }
 
 impl ArtistSources {
@@ -1230,20 +1243,35 @@ impl ArtistSources {
     pub fn settle(&mut self, artist: &str) {
         let sound = self.soundcloud.get();
         let video = self.youtube.get();
-        let empty: &[Track] = &[];
-        let list = |found: Option<&crate::artist_sources::Finding>, edits: bool| {
-            found.map_or(empty.to_vec(), |found| {
-                if edits {
-                    found.edits.clone()
-                } else {
-                    found.exclusives.clone()
-                }
-            })
+        let both = |pick: fn(&crate::artist_sources::Finding) -> &Vec<Track>| {
+            let empty = Vec::new();
+            [
+                sound.map_or(empty.clone(), |found| pick(found).clone()),
+                video.map_or(empty, |found| pick(found).clone()),
+            ]
         };
-        let (sound_songs, video_songs) = (list(sound, false), list(video, false));
-        let (sound_edits, video_edits) = (list(sound, true), list(video, true));
-        self.songs = crate::artist_sources::merged(artist, [&sound_songs[..], &video_songs[..]]);
-        self.edits = crate::artist_sources::merged_edits([&sound_edits[..], &video_edits[..]]);
+        let songs = both(|found| &found.exclusives);
+        let edits = both(|found| &found.edits);
+        let unreleased = both(|found| &found.unreleased);
+        let produced = both(|found| &found.produced);
+        let archives = [sound, video]
+            .into_iter()
+            .flatten()
+            .flat_map(|found| found.archives.iter().cloned())
+            .collect();
+        let merged_songs = crate::artist_sources::merged(artist, [&songs[0][..], &songs[1][..]]);
+        self.unreleased = crate::artist_sources::without_songs(
+            artist,
+            crate::artist_sources::merged(artist, [&unreleased[0][..], &unreleased[1][..]]),
+            &merged_songs,
+        );
+        self.songs = merged_songs;
+        self.edits = crate::artist_sources::merged_edits([&edits[0][..], &edits[1][..]]);
+        self.produced = crate::artist_sources::enough_produced(crate::artist_sources::merged(
+            artist,
+            [&produced[0][..], &produced[1][..]],
+        ));
+        self.archives = archives;
     }
 }
 
@@ -1481,7 +1509,7 @@ pub enum Action {
     },
     ToggleShowAllElsewhere {
         artist_id: String,
-        edits: bool,
+        list: ElsewhereList,
     },
     Friends(crate::friends::Action),
     /// Listening together with the group. See [`crate::friends::live`].

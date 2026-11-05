@@ -28,6 +28,27 @@ fn show(side: &str, finding: &Finding, took: std::time::Duration) {
     for track in finding.edits.iter().take(6) {
         println!("  {} [{:?}]", track.name, track.play_count);
     }
+    println!("unreleased: {}", finding.unreleased.len());
+    for track in finding.unreleased.iter().take(14) {
+        println!(
+            "  {} | by {:?} [{:?}]",
+            track.name,
+            track.artists.first().map(|artist| artist.name.as_str()),
+            track.play_count
+        );
+    }
+    for archive in &finding.archives {
+        println!("  posted by: {} ({:?})", archive.name, archive.followers);
+    }
+    println!("produced: {}", finding.produced.len());
+    for track in finding.produced.iter().take(14) {
+        println!(
+            "  {} | by {:?} [{:?}]",
+            track.name,
+            track.artists.first().map(|artist| artist.name.as_str()),
+            track.play_count
+        );
+    }
     if let Some(error) = &finding.error {
         println!("error: {error}");
     }
@@ -42,10 +63,12 @@ async fn main() -> anyhow::Result<()> {
     let client = Client::new(reqwest::Client::new(), None, None);
     let resolver = Resolver::default();
     let started = std::time::Instant::now();
-    let found = sources::soundcloud(&client, &artist, &catalogue, None).await;
+    let mut found = sources::soundcloud(&client, &artist, &catalogue, None).await;
+    found.add(sources::soundcloud_beyond(&client, &artist, &catalogue).await);
     show("SoundCloud", &found, started.elapsed());
     let started = std::time::Instant::now();
-    let found = sources::youtube(&resolver, &artist, &catalogue, None).await;
+    let mut found = sources::youtube(&resolver, &artist, &catalogue, None).await;
+    found.add(sources::youtube_beyond(&resolver, &artist, &catalogue).await);
     show("YouTube", &found, started.elapsed());
     Ok(())
 }
