@@ -139,7 +139,7 @@ h2.section { font-size: 18px; font-weight: 600; margin: 24px 0 2px; }
 .sheet .heading { display: flex; align-items: center; gap: 12px; flex: none; }
 .sheet .heading > div { flex: 1; min-width: 0; }
 .sheet .big { display: block; font-size: 22px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sheet .artist { display: block; color: var(--secondary); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sheet .artist { display: block; color: var(--secondary); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; min-height: 36px; min-width: 44px; }
 .heart { width: 44px; height: 44px; display: grid; place-items: center; color: var(--secondary); margin-right: -8px; transition: transform .2s var(--ease); }
 .heart:active { transform: scale(.82); }
 .heart[aria-pressed="true"] { color: var(--text); }
