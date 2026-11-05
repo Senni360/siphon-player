@@ -7,7 +7,12 @@ use crate::artist_sources::{self as sources, Catalogue, Finding, Link, Links, Re
 const FRESH_SECONDS: i64 = 24 * 60 * 60;
 const SAVED_VERSION: u32 = 1;
 /// How many releases have their songs read, to know what Spotify has.
-const MOST_RELEASES: usize = 100;
+const MOST_RELEASES: usize = 200;
+/// How many further pages of an artist's releases are read, on top of what the page has.
+const RELEASE_PAGES: u32 = 6;
+const RELEASES_PER_PAGE: u32 = 50;
+/// Releases are read this many at a time over the session.
+const SESSION_BATCH: usize = 50;
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 struct Saved {
@@ -25,6 +30,7 @@ struct Saved {
 #[derive(Clone)]
 struct Reader {
     client: crate::soundcloud::api::Client,
+    api: Arc<ApiGateway>,
     engine: Option<Arc<Engine>>,
     links: Arc<tokio::sync::Mutex<Option<Links>>>,
     links_path: std::path::PathBuf,
@@ -104,21 +110,78 @@ impl Reader {
         .await;
     }
 
-    /// The titles Spotify has: what the page knows, and the songs of its releases
-    /// over the playback session. A release's own name stands in without a session.
+    /// Every release of the artist's that can be read, beyond the page or two the
+    /// page has loaded. The Web API has a budget, so a failure stops here quietly.
+    async fn all_releases(&self, request: &Request) -> (Vec<Album>, Vec<Album>) {
+        let mut own = request.albums.clone();
+        let mut appears = Vec::new();
+        let Ok(client) = self.api.client_for(Operation::Catalog).await else {
+            return (own, appears);
+        };
+        let _permit = client.background_permit().await;
+        let read = |groups: &'static str, list: &mut Vec<Album>, pages: u32| {
+            let client = Arc::clone(&client);
+            let id = request.id.clone();
+            let mut found = std::mem::take(list);
+            async move {
+                for page in 0..pages {
+                    let offset = page * RELEASES_PER_PAGE;
+                    let Ok(answer) = client
+                        .artist_albums(&id, groups, offset, RELEASES_PER_PAGE)
+                        .await
+                    else {
+                        break;
+                    };
+                    let done = answer.next.is_none();
+                    found.extend(answer.items);
+                    if done {
+                        break;
+                    }
+                }
+                found
+            }
+        };
+        own = read("album,single,compilation", &mut own, RELEASE_PAGES).await;
+        appears = read("appears_on", &mut appears, 2).await;
+        let mut seen = std::collections::HashSet::new();
+        own.retain(|album| seen.insert(album.id.clone()));
+        (own, appears)
+    }
+
+    /// The titles Spotify has: what the page knows, the artist's releases, and their
+    /// songs over the playback session. A release's own name stands in without one.
+    /// On other people's releases only the songs they're credited on count.
     async fn catalogue(&self, request: &Request) -> Catalogue {
         let mut titles = request.titles.clone();
-        titles.extend(request.albums.iter().map(|album| album.name.clone()));
+        let (own, appears) = self.all_releases(request).await;
+        titles.extend(own.iter().map(|album| album.name.clone()));
         if let Some(engine) = &self.engine {
-            let albums = &request.albums[..request.albums.len().min(MOST_RELEASES)];
-            let read = tokio::time::timeout(
-                Duration::from_secs(15),
-                session_reads::album_tracks(engine.session(), albums),
-            );
-            match read.await {
-                Ok(Ok(tracks)) => titles.extend(tracks.into_iter().map(|track| track.name)),
-                _ => log::debug!("an artist's release songs could not be read"),
-            }
+            let read = async |albums: &[Album]| {
+                let mut tracks = Vec::new();
+                for batch in albums[..albums.len().min(MOST_RELEASES)].chunks(SESSION_BATCH) {
+                    let answer = tokio::time::timeout(
+                        Duration::from_secs(15),
+                        session_reads::album_tracks(engine.session(), batch),
+                    )
+                    .await;
+                    match answer {
+                        Ok(Ok(found)) => tracks.extend(found),
+                        _ => {
+                            log::debug!("an artist's release songs could not be read");
+                            break;
+                        }
+                    }
+                }
+                tracks
+            };
+            titles.extend(read(&own).await.into_iter().map(|track| track.name));
+            let credited = read(&appears).await.into_iter().filter(|track| {
+                track
+                    .artists
+                    .iter()
+                    .any(|artist| artist.id.as_deref() == Some(request.id.as_str()))
+            });
+            titles.extend(credited.map(|track| track.name));
         }
         Catalogue::new(&request.name, titles)
     }
@@ -266,6 +329,7 @@ impl Worker {
     fn artist_reader(&self) -> Option<Reader> {
         Some(Reader {
             client: self.soundcloud_client()?,
+            api: Arc::clone(&self.api),
             engine: self.engine.clone(),
             links: Arc::clone(&self.hybrid.artist_links),
             links_path: self.dirs.state.join("artist-links.json"),
@@ -297,6 +361,73 @@ impl Worker {
                 .await;
             reader.write_links(links).await;
             reader.gather(request, Some(side)).await;
+        });
+    }
+
+    /// Someone opened an account's page with no artist known for it. If a Spotify
+    /// artist of that name finds this very account by the usual rules, it leads back
+    /// from now on; if not, the page stays as it is rather than guess.
+    pub(super) fn find_artist_for(&self, uri: String, name: String) {
+        let Some(reader) = self.artist_reader() else {
+            return;
+        };
+        tokio::spawn(async move {
+            let side = if uri.starts_with("youtube:") {
+                Side::YouTube
+            } else {
+                Side::SoundCloud
+            };
+            let Ok(client) = reader.api.client_for(Operation::CatalogSearch).await else {
+                return;
+            };
+            let Ok(found) = client.search(&name, &["artist"]).await else {
+                return;
+            };
+            let artists = found.artists.map(|page| page.items).unwrap_or_default();
+            let same = artists
+                .into_iter()
+                .filter(|artist| sources::name_match(&artist.name, &name) >= 1.0)
+                .take(2);
+            for artist in same {
+                let request = Request {
+                    id: artist.id.clone(),
+                    name: artist.name.clone(),
+                    ask: 0,
+                    titles: Vec::new(),
+                    albums: Vec::new(),
+                    fresh: false,
+                };
+                let catalogue = reader.catalogue(&request).await;
+                let finding = match side {
+                    Side::SoundCloud => {
+                        sources::soundcloud(&reader.client, &request.name, &catalogue, None).await
+                    }
+                    Side::YouTube => {
+                        let resolver = crate::youtube::Resolver::default();
+                        sources::youtube(&resolver, &request.name, &catalogue, None).await
+                    }
+                };
+                if finding
+                    .account
+                    .as_ref()
+                    .is_none_or(|account| account.uri != uri)
+                {
+                    continue;
+                }
+                let (_, links) = reader
+                    .with_links(|links| {
+                        let linked = links.artists.entry(artist.id.clone()).or_default();
+                        linked.name = artist.name.clone();
+                        let slot = linked.side_mut(side);
+                        if slot.is_none() {
+                            *slot = finding.account.clone().map(Link::Found);
+                        }
+                    })
+                    .await;
+                reader.write_links(links.clone()).await;
+                reader.emit(Event::ArtistLinks(links.back()));
+                return;
+            }
         });
     }
 

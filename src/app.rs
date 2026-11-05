@@ -524,6 +524,8 @@ pub struct App {
     /// Which artist each SoundCloud and YouTube account page leads back to.
     pub artist_links: HashMap<String, (String, String)>,
     artist_links_asked: bool,
+    /// Account pages already asked about, this run.
+    artist_links_sought: std::collections::HashSet<String>,
     /// Local play history. See [`crate::history`].
     pub plays: crate::history::History,
     /// Writes settings, session and history off the UI thread.
@@ -1252,6 +1254,7 @@ impl App {
             phone: remote::Remote::default(),
             artist_links: HashMap::new(),
             artist_links_asked: false,
+            artist_links_sought: Default::default(),
             plays,
             files: std::sync::Arc::new(fastframe_file::Writer::new()),
             mixed_playlists: mixed.unwrap_or_default(),
@@ -6250,6 +6253,21 @@ impl App {
             side,
             link,
         });
+    }
+
+    /// Asks once whether an account with no known artist belongs to one.
+    pub(crate) fn seek_artist_for(&mut self, uri: &str, name: &str) {
+        let person = uri.starts_with("soundcloud:user:") || uri.starts_with("youtube:channel:");
+        if person
+            && self.network_reachable
+            && !self.artist_links.contains_key(uri)
+            && self.artist_links_sought.insert(uri.to_owned())
+        {
+            self.backend.send(Command::FindArtistFor {
+                uri: uri.to_owned(),
+                name: name.to_owned(),
+            });
+        }
     }
 
     /// Learns which artists accounts lead back to, the first time it matters.

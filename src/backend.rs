@@ -887,6 +887,11 @@ pub enum Command {
         link: Option<crate::artist_sources::Link>,
     },
     ArtistLinks,
+    /// Whether the account page just opened belongs to a Spotify artist.
+    FindArtistFor {
+        uri: String,
+        name: String,
+    },
     YouTubeStream {
         tag: crate::player::PlaybackTag,
         preload: bool,
@@ -2960,6 +2965,7 @@ impl Worker {
                     link,
                 } => self.choose_artist_account(request, side, link),
                 Command::ArtistLinks => self.artist_links(),
+                Command::FindArtistFor { uri, name } => self.find_artist_for(uri, name),
                 Command::YouTubeStream {
                     tag,
                     preload,

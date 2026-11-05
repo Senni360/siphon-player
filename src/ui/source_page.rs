@@ -440,6 +440,7 @@ fn profile_header(
         play_all_button(app, ui, &content.tracks);
         follow_button(app, ui, uri, profile);
         app.ask_artist_links();
+        app.seek_artist_for(uri, &profile.name);
         if let Some((id, name)) = app.artist_links.get(uri).cloned() {
             let label = gettext(locale, "All of {name}").replace("{name}", &name);
             if theme::soft_button(ui, &palette, Some(Icon::User), &label, false).clicked() {

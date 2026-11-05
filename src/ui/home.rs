@@ -86,6 +86,10 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
     let palette = app.palette;
     let width = ui.available_width();
     const HEIGHT: f32 = 268.0;
+    // With nothing to show and nothing on its way, there's no card to hold a place for.
+    if picks.is_empty() && !app.for_you.is_loading() {
+        return;
+    }
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, HEIGHT), egui::Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
