@@ -11958,6 +11958,52 @@ impl App {
 
     /// Removes exactly `rows` from the screen now and from Spotify through
     /// the session; the answer is the usual playlist change.
+    /// The rows a removal is about to take, with their positions in the whole list.
+    fn playlist_rows_removed(
+        &self,
+        playlist_id: &str,
+        uris: &[String],
+        positions: &[u32],
+    ) -> Vec<(u32, PlayableItem)> {
+        let Some(page) = self.playlist_pages.get(playlist_id) else {
+            return Vec::new();
+        };
+        let base = page.items.base_offset;
+        page.items
+            .items
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| {
+                let item = row.playable()?;
+                let position = base + index as u32;
+                let picked = if positions.is_empty() {
+                    uris.iter().any(|uri| uri == item.uri())
+                } else {
+                    positions.contains(&position)
+                };
+                picked.then(|| (position, item.clone()))
+            })
+            .collect()
+    }
+
+    fn offer_playlist_undo(&mut self, playlist_id: &str, removed: Vec<(u32, PlayableItem)>) {
+        let message = match removed.as_slice() {
+            [] => return,
+            [(_, item)] => gettext(self.locale, "Removed {name}").replace("{name}", item.name()),
+            many => gettext(self.locale, "Removed {count} songs")
+                .replace("{count}", &many.len().to_string()),
+        };
+        let undo = gettext(self.locale, "Undo");
+        self.toast_with(
+            message,
+            undo,
+            Action::UndoPlaylistRemoval {
+                playlist_id: playlist_id.to_owned(),
+                runs: removal_runs(removed),
+            },
+        );
+    }
+
     fn remove_playlist_rows(
         &mut self,
         playlist_id: String,
@@ -12866,8 +12912,14 @@ impl App {
                 } else {
                     vec![uri]
                 };
+                let undo = uri_for_undo(saved, &targets);
                 for target in targets {
                     self.set_saved(target, !saved);
+                }
+                if let Some(uri) = undo {
+                    let removed = gettext(self.locale, "Removed from your library");
+                    let label = gettext(self.locale, "Undo");
+                    self.toast_with(removed, label, Action::ToggleSaved(uri));
                 }
             }
             Action::AddSoundCloudPlaylist {
@@ -12912,6 +12964,9 @@ impl App {
                 uris,
                 positions,
             } => {
+                // Taken before anything changes, so Undo knows what and where.
+                let removed = self.playlist_rows_removed(&playlist_id, &uris, &positions);
+                self.offer_playlist_undo(&playlist_id, removed);
                 if let Some(rows) = self.repeated_rows_to_remove(&playlist_id, &uris, &positions) {
                     self.remove_playlist_rows(playlist_id, rows);
                     return;
@@ -13363,6 +13418,22 @@ impl App {
                 }
             }
             Action::LinkPhone => self.remote_ask_code(),
+            Action::UndoPlaylistRemoval { playlist_id, runs } => {
+                let name = self
+                    .playlist_pages
+                    .get(&playlist_id)
+                    .and_then(|page| page.playlist.get())
+                    .map(|playlist| playlist.name.clone())
+                    .unwrap_or_default();
+                for (position, items) in runs {
+                    self.add_to_playlist_now(
+                        playlist_id.clone(),
+                        name.clone(),
+                        items,
+                        Some(position),
+                    );
+                }
+            }
             Action::WarmYouTube(uri) => self.backend.send(Command::WarmYouTube(uri)),
             Action::ChooseArtistAccount {
                 artist_id,
@@ -15326,6 +15397,29 @@ pub fn on_top_window_level(on_top: bool) -> egui::WindowLevel {
 /// Winamp window opens.
 fn winamp_on_top_level(winamp_window: bool, on_top: bool) -> Option<egui::WindowLevel> {
     winamp_window.then_some(on_top_window_level(on_top))
+}
+
+/// What Undo saves again after something was taken out of the library.
+fn uri_for_undo(was_saved: bool, targets: &[String]) -> Option<String> {
+    if was_saved {
+        targets.first().cloned()
+    } else {
+        None
+    }
+}
+
+/// Removed rows as runs of neighbours, first to last. Put back in this order at their
+/// old positions, each run lands exactly where it was, whatever was between them.
+fn removal_runs(mut removed: Vec<(u32, PlayableItem)>) -> Vec<(u32, Vec<PlayableItem>)> {
+    removed.sort_by_key(|(position, _)| *position);
+    let mut runs: Vec<(u32, Vec<PlayableItem>)> = Vec::new();
+    for (position, item) in removed {
+        match runs.last_mut() {
+            Some((start, items)) if *start + items.len() as u32 == position => items.push(item),
+            _ => runs.push((position, vec![item])),
+        }
+    }
+    runs
 }
 
 fn artist_request(

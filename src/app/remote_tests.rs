@@ -1,6 +1,54 @@
 // Included in app::tests so these exercise the existing offline app harness.
 use crate::remote::{Command as PhoneCommand, Incoming as PhoneIncoming};
 
+fn undo_row(uri: &str) -> PlayableItem {
+    PlayableItem::Track(Track {
+        uri: uri.into(),
+        name: uri.into(),
+        ..Default::default()
+    })
+}
+
+#[test]
+fn songs_put_back_land_exactly_where_they_were() {
+    let list = |runs: &[(u32, Vec<PlayableItem>)]| -> Vec<(u32, Vec<String>)> {
+        runs.iter()
+            .map(|(at, items)| (*at, items.iter().map(|item| item.uri().to_owned()).collect()))
+            .collect()
+    };
+    let runs = removal_runs(vec![
+        (7, undo_row("h")),
+        (1, undo_row("b")),
+        (2, undo_row("c")),
+        (5, undo_row("f")),
+    ]);
+    assert_eq!(
+        list(&runs),
+        [
+            (1, vec!["b".to_owned(), "c".to_owned()]),
+            (5, vec!["f".to_owned()]),
+            (7, vec!["h".to_owned()]),
+        ]
+    );
+    // Rebuilding a..h with those gone, in that order, gives the list back.
+    let mut left: Vec<String> = ["a", "d", "e", "g"].map(str::to_owned).to_vec();
+    for (at, items) in list(&runs) {
+        let at = at as usize;
+        left.splice(at..at, items);
+    }
+    assert_eq!(left.join(""), "abcdefgh");
+    assert!(removal_runs(Vec::new()).is_empty());
+}
+
+#[test]
+fn taking_something_out_of_the_library_offers_it_back() {
+    assert_eq!(
+        uri_for_undo(true, &["spotify:track:a".to_owned()]).as_deref(),
+        Some("spotify:track:a")
+    );
+    assert_eq!(uri_for_undo(false, &["spotify:track:a".to_owned()]), None);
+}
+
 #[test]
 fn a_phone_presses_the_same_buttons_as_this_computer() {
     use super::remote::phone_action as action;

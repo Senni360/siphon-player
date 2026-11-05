@@ -1521,6 +1521,13 @@ impl Toast {
 pub enum Action {
     /// Make a code for a phone to type.
     LinkPhone,
+    /// Puts songs just removed from a playlist back where they were.
+    UndoPlaylistRemoval {
+        playlist_id: String,
+        /// Runs of neighbouring songs by their old position, first to last, so each
+        /// goes back into the list as it stood when it was removed.
+        runs: Vec<(u32, Vec<PlayableItem>)>,
+    },
     /// Get a YouTube song ready, since the pointer has settled on it.
     WarmYouTube(String),
     ChooseArtistAccount {
