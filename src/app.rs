@@ -524,7 +524,7 @@ pub struct App {
     /// Which artist each SoundCloud and YouTube account page leads back to.
     pub artist_links: HashMap<String, (String, String)>,
     artist_links_asked: bool,
-    /// New songs beyond Spotify from artists the listener follows, and when asked.
+    /// New SoundCloud uploads from artists the listener follows, and when asked.
     pub artist_news: Vec<Track>,
     artist_news_asked: Option<Instant>,
     /// Account pages already asked about, this run.
