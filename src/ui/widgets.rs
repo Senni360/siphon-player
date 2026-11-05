@@ -4501,14 +4501,10 @@ pub fn chips<T: PartialEq + Copy>(
 
 /// A text input with the native clipboard actions and a selection-aware menu.
 pub fn text_edit(ui: &mut Ui, locale: Locale, edit: egui::TextEdit<'_>) -> egui::Response {
+    // Every field draws its own frame around this, so a ring here would be a
+    // second border inside the first.
     let mut output = edit.show(ui);
     let response = &output.response;
-    let palette = if ui.visuals().dark_mode {
-        Palette::dark()
-    } else {
-        Palette::light()
-    };
-    focus_ring_in(ui, response.id, response.rect, 6.0, &palette);
     let selection_id = response.id.with("edit-menu-selection");
     // egui moves the caret on any mouse-button press and clears a selection
     // when a popup takes focus. Keep the field's previous selection while its
@@ -4591,12 +4587,6 @@ fn focus_ring_in(ui: &Ui, id: egui::Id, rect: Rect, radius: f32, palette: &Palet
             radius + 3.0 * (1.0 - t),
             Stroke::new(1.5, palette.text.gamma_multiply(0.6 * t)),
             egui::StrokeKind::Inside,
-        );
-        ui.painter().rect_stroke(
-            rect,
-            radius,
-            Stroke::new(3.0, palette.text.gamma_multiply(0.07 * t)),
-            egui::StrokeKind::Outside,
         );
     }
     t * 2.0
