@@ -288,15 +288,13 @@ pub fn episode_row(
         return;
     }
     let hovered = super::pointer_over(ui, rect);
-    if hovered {
-        ui.painter().rect_filled(
-            rect,
-            CornerRadius::same(6),
-            palette
-                .surface_hover
-                .gamma_multiply(if palette.dark { 0.7 } else { 1.0 }),
-        );
+    let light = palette
+        .surface_hover
+        .gamma_multiply(if palette.dark { 0.7 } else { 1.0 });
+    if hovered && !super::widgets::claim_row_glide(ui.ctx(), rect, light) {
+        ui.painter().rect_filled(rect, CornerRadius::same(6), light);
     }
+    super::kit::motion::ripple(ui, &response, rect, palette.text);
     let inner = rect.shrink2(vec2(12.0, 12.0));
     let cover_rect = Rect::from_min_size(inner.min, Vec2::splat(EPISODE_ART));
     let image = pick_image(&episode.images, app.art_px(EPISODE_ART)).or(fallback_image);

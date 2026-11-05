@@ -10141,6 +10141,53 @@ mod tests {
         app.backend.shutdown();
     }
 
+    /// The island floats over the page: a press on its empty space belongs to it,
+    /// and never starts or picks the row scrolling under it.
+    #[test]
+    fn a_press_on_the_island_never_reaches_the_row_under_it() {
+        let (ctx, mut app) = accessible_app("island-over-row");
+        app.settings.player_bar_vis_click = false;
+        app.open(Page::Playlist("pl1".into()));
+        let mut frame = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| app.frame_ui(ui),
+            );
+            output.textures_delta.clear();
+        };
+        for _ in 0..3 {
+            frame(vec![]);
+        }
+        // Between the song's words and the transport, inside the island.
+        let press = egui::pos2(500.0, 800.0 - crate::theme::PLAYER_BAR_HEIGHT / 2.0 + 24.0);
+        let events = |pressed| {
+            vec![
+                egui::Event::PointerMoved(press),
+                egui::Event::PointerButton {
+                    pos: press,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ]
+        };
+        frame(events(true));
+        frame(events(false));
+        frame(vec![]);
+        let selected = app
+            .picked_rows(&Page::Playlist("pl1".into()))
+            .is_some_and(|rows| !rows.is_empty());
+        assert!(!selected, "the press picked a row under the island");
+        app.backend.shutdown();
+    }
+
     /// The cover's control follows its row: the playlist that is playing
     /// offers pause on its cover, not a restart of the context.
     #[test]

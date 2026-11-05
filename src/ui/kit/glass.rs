@@ -49,14 +49,19 @@ void main() {
 const DOWN: &str = "#version 140
 uniform sampler2D source;
 uniform vec2 texel;
+uniform vec2 area;
 in vec2 uv;
 out vec4 color;
+vec4 at(vec2 place) {
+    return texture(source, min(place, area - texel * 0.5));
+}
 void main() {
-    vec4 sum = texture(source, uv) * 4.0;
-    sum += texture(source, uv - texel);
-    sum += texture(source, uv + texel);
-    sum += texture(source, uv + vec2(texel.x, -texel.y));
-    sum += texture(source, uv + vec2(-texel.x, texel.y));
+    vec2 place = uv * area;
+    vec4 sum = at(place) * 4.0;
+    sum += at(place - texel);
+    sum += at(place + texel);
+    sum += at(place + vec2(texel.x, -texel.y));
+    sum += at(place + vec2(-texel.x, texel.y));
     color = sum / 8.0;
 }";
 
@@ -64,17 +69,22 @@ void main() {
 const UP: &str = "#version 140
 uniform sampler2D source;
 uniform vec2 texel;
+uniform vec2 area;
 in vec2 uv;
 out vec4 color;
+vec4 at(vec2 place) {
+    return texture(source, min(place, area - texel * 0.5));
+}
 void main() {
-    vec4 sum = texture(source, uv + vec2(-texel.x * 2.0, 0.0));
-    sum += texture(source, uv + vec2(-texel.x, texel.y)) * 2.0;
-    sum += texture(source, uv + vec2(0.0, texel.y * 2.0));
-    sum += texture(source, uv + vec2(texel.x, texel.y)) * 2.0;
-    sum += texture(source, uv + vec2(texel.x * 2.0, 0.0));
-    sum += texture(source, uv + vec2(texel.x, -texel.y)) * 2.0;
-    sum += texture(source, uv + vec2(0.0, -texel.y * 2.0));
-    sum += texture(source, uv + vec2(-texel.x, -texel.y)) * 2.0;
+    vec2 place = uv * area;
+    vec4 sum = at(place + vec2(-texel.x * 2.0, 0.0));
+    sum += at(place + vec2(-texel.x, texel.y)) * 2.0;
+    sum += at(place + vec2(0.0, texel.y * 2.0));
+    sum += at(place + vec2(texel.x, texel.y)) * 2.0;
+    sum += at(place + vec2(texel.x * 2.0, 0.0));
+    sum += at(place + vec2(texel.x, -texel.y)) * 2.0;
+    sum += at(place + vec2(0.0, -texel.y * 2.0));
+    sum += at(place + vec2(-texel.x, -texel.y)) * 2.0;
     color = sum / 12.0;
 }";
 
@@ -106,6 +116,7 @@ struct Program {
     program: glow::Program,
     source: Option<glow::UniformLocation>,
     texel: Option<glow::UniformLocation>,
+    area: Option<glow::UniformLocation>,
     window: Option<glow::UniformLocation>,
     size: Option<glow::UniformLocation>,
     radius: Option<glow::UniformLocation>,
@@ -114,9 +125,17 @@ struct Program {
     floor: Option<glow::UniformLocation>,
 }
 
+/// A step of the blur: a texture big enough for any card so far, of which the
+/// card in hand uses a corner. Cards change size as they animate; the textures
+/// stay, and only ever grow.
 struct Level {
     texture: glow::Texture,
-    size: [i32; 2],
+    capacity: [i32; 2],
+}
+
+/// The part of a level of `capacity` that a region of `size` uses at `step`.
+fn used(size: [i32; 2], step: usize) -> [i32; 2] {
+    [(size[0] >> step).max(1), (size[1] >> step).max(1)]
 }
 
 struct Blur {
@@ -162,6 +181,7 @@ unsafe fn compile(gl: &glow::Context, fragment: &str) -> Result<Program, String>
             program,
             source: uniform("source"),
             texel: uniform("texel"),
+            area: uniform("area"),
             window: uniform("window"),
             size: uniform("size"),
             radius: uniform("radius"),
@@ -186,15 +206,19 @@ unsafe fn build(gl: &glow::Context) -> Result<Blur, String> {
 }
 
 unsafe fn fit_levels(gl: &glow::Context, blur: &mut Blur, size: [i32; 2]) -> Result<(), String> {
-    if blur.levels.first().is_some_and(|level| level.size == size) {
+    let held = blur.levels.first().map_or([0, 0], |level| level.capacity);
+    if held[0] >= size[0] && held[1] >= size[1] {
         return Ok(());
     }
+    // A little room ahead, so a card growing by a point does not come back here.
+    let room = |side: i32, had: i32| ((side.max(had) + 255) / 256) * 256;
+    let capacity = [room(size[0], held[0]), room(size[1], held[1])];
     unsafe {
         for level in blur.levels.drain(..) {
             gl.delete_texture(level.texture);
         }
         for step in 0..=STEPS {
-            let level_size = [(size[0] >> step).max(1), (size[1] >> step).max(1)];
+            let level_size = used(capacity, step);
             let texture = gl.create_texture()?;
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             for (name, value) in [
@@ -218,7 +242,7 @@ unsafe fn fit_levels(gl: &glow::Context, blur: &mut Blur, size: [i32; 2]) -> Res
             );
             blur.levels.push(Level {
                 texture,
-                size: level_size,
+                capacity: level_size,
             });
         }
     }
@@ -226,9 +250,18 @@ unsafe fn fit_levels(gl: &glow::Context, blur: &mut Blur, size: [i32; 2]) -> Res
 }
 
 /// One pass of the blur from a level into another.
-unsafe fn pass(gl: &glow::Context, blur: &Blur, program: &Program, from: usize, to: usize) {
+unsafe fn pass(
+    gl: &glow::Context,
+    blur: &Blur,
+    program: &Program,
+    size: [i32; 2],
+    from: usize,
+    to: usize,
+) {
     let source = &blur.levels[from];
     let target = &blur.levels[to];
+    let read = used(size, from);
+    let write = used(size, to);
     unsafe {
         gl.framebuffer_texture_2d(
             glow::FRAMEBUFFER,
@@ -237,14 +270,19 @@ unsafe fn pass(gl: &glow::Context, blur: &Blur, program: &Program, from: usize, 
             Some(target.texture),
             0,
         );
-        gl.viewport(0, 0, target.size[0], target.size[1]);
+        gl.viewport(0, 0, write[0], write[1]);
         gl.use_program(Some(program.program));
         gl.bind_texture(glow::TEXTURE_2D, Some(source.texture));
         gl.uniform_1_i32(program.source.as_ref(), 0);
         gl.uniform_2_f32(
             program.texel.as_ref(),
-            1.0 / source.size[0] as f32,
-            1.0 / source.size[1] as f32,
+            1.0 / source.capacity[0] as f32,
+            1.0 / source.capacity[1] as f32,
+        );
+        gl.uniform_2_f32(
+            program.area.as_ref(),
+            read[0] as f32 / source.capacity[0] as f32,
+            read[1] as f32 / source.capacity[1] as f32,
         );
         gl.draw_arrays(glow::TRIANGLES, 0, 3);
     }
@@ -285,10 +323,10 @@ unsafe fn draw(
         gl.bind_vertex_array(Some(blur.vao));
         gl.bind_framebuffer(glow::FRAMEBUFFER, Some(blur.framebuffer));
         for step in 0..STEPS {
-            pass(gl, blur, &blur.down, step, step + 1);
+            pass(gl, blur, &blur.down, size, step, step + 1);
         }
         for step in (1..STEPS).rev() {
-            pass(gl, blur, &blur.up, step + 1, step);
+            pass(gl, blur, &blur.up, size, step + 1, step);
         }
 
         gl.bind_framebuffer(glow::FRAMEBUFFER, back);
@@ -299,12 +337,16 @@ unsafe fn draw(
         gl.use_program(Some(finish.program));
         gl.bind_texture(glow::TEXTURE_2D, Some(blur.levels[1].texture));
         gl.uniform_1_i32(finish.source.as_ref(), 0);
+        let level = &blur.levels[1];
+        let part = used(size, 1);
+        let across = part[0] as f32 / level.capacity[0] as f32 / size[0] as f32;
+        let down = part[1] as f32 / level.capacity[1] as f32 / size[1] as f32;
         gl.uniform_4_f32(
             finish.window.as_ref(),
-            (left - x0) as f32 / size[0] as f32,
-            (bottom - y0) as f32 / size[1] as f32,
-            width as f32 / size[0] as f32,
-            height as f32 / size[1] as f32,
+            (left - x0) as f32 * across,
+            (bottom - y0) as f32 * down,
+            width as f32 * across,
+            height as f32 * down,
         );
         gl.uniform_2_f32(finish.size.as_ref(), width as f32, height as f32);
         gl.uniform_1_f32(finish.radius.as_ref(), radius);

@@ -702,6 +702,20 @@ fn up_next(app: &mut App, ui: &mut Ui) {
         cell.multiply_opacity(alpha);
         let ui = &mut cell;
         let cover = Rect::from_min_size(pos2(row.left(), row.center().y - 20.0), vec2(40.0, 40.0));
+        let pointed = motion::toward(
+            &ctx,
+            Id::new(("up-next-light", index)),
+            ui.rect_contains_pointer(row),
+            motion::FEEDBACK,
+        );
+        if pointed > 0.0 {
+            ui.painter().rect_filled(
+                row.expand2(vec2(6.0, 0.0)),
+                8.0,
+                Color32::from_white_alpha((14.0 * pointed) as u8),
+            );
+        }
+        let cover = cover.expand(pointed * 1.5);
         super::widgets::paint_cover(
             ui,
             &app.palette,

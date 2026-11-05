@@ -694,75 +694,78 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
             let offset = vec2((1.0 - enter) * 24.0 * from_side, (1.0 - enter) * 10.0);
             let whole = ui.clip_rect();
-            let scroll = crate::autoscroll::show(
-                ui,
-                egui::ScrollArea::vertical()
-                    .id_salt(("page", page.encode()))
-                    .auto_shrink([false, false]),
-                egui::Vec2b::new(false, true),
-                |ui| {
-                    if ui
-                        .ctx()
-                        .data_mut(|data| data.remove_temp::<bool>(back_to_top_id()))
-                        .is_some()
-                    {
-                        let top = Rect::from_min_size(ui.max_rect().min, vec2(1.0, 1.0));
-                        ui.scroll_to_rect(top, Some(egui::Align::Min));
-                    }
-                    if enter < 1.0 {
-                        ui.multiply_opacity(0.2 + 0.8 * enter);
-                    }
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(Id::new("rows-enter"), true));
-                    ui.with_visual_transform(
-                        egui::emath::TSTransform::from_translation(offset),
-                        |ui| {
-                            Frame::new()
-                                .inner_margin(Margin {
-                                    left: widgets::PAGE_PADDING as i8,
-                                    right: widgets::PAGE_PADDING as i8,
-                                    top: 4,
-                                    // The last row scrolls clear of the player.
-                                    bottom: theme::PLAYER_BAR_HEIGHT as i8,
-                                })
-                                .show(ui, |ui| {
-                                    ui.set_min_width(ui.available_width());
-                                    match page {
-                                        Page::Home => home::show(app, ui),
-                                        Page::TopSongs => collection::top_songs(app, ui),
-                                        Page::NewReleases => new_releases::page(app, ui),
-                                        Page::Search => search::show(app, ui),
-                                        Page::LikedSongs => collection::liked(app, ui),
-                                        Page::SoundCloudLikes => soundcloud::show(app, ui, page),
-                                        Page::Albums
-                                        | Page::Artists
-                                        | Page::Podcasts
-                                        | Page::Episodes => library::show(app, ui, page),
-                                        Page::Playlist(id) => collection::playlist(app, ui, &id),
-                                        Page::MixedPlaylist(id) => {
-                                            collection::mixed_playlist(app, ui, &id)
-                                        }
-                                        Page::SoundCloud(uri) => {
-                                            collection::soundcloud(app, ui, &uri)
-                                        }
-                                        Page::Album(id) => collection::album(app, ui, &id),
-                                        Page::Artist(id) => artist::show(app, ui, &id),
-                                        Page::Show(id) => show::show(app, ui, &id),
-                                        Page::Radio(seed) => radio::radio(app, ui, &seed),
-                                        Page::Queue => queue::page(app, ui),
-                                        Page::Settings => settings::show(app, ui),
-                                        Page::Group => group::show(app, ui),
+            let area = egui::ScrollArea::vertical()
+                .id_salt(("page", page.encode()))
+                .auto_shrink([false, false]);
+            // Captures of a scrolled page, which a shot cannot scroll to itself.
+            #[cfg(feature = "demo")]
+            let area = match std::env::var("SIPHON_DEMO_SCROLL")
+                .ok()
+                .and_then(|offset| offset.parse().ok())
+            {
+                Some(offset) => area.vertical_scroll_offset(offset),
+                None => area,
+            };
+            let scroll = crate::autoscroll::show(ui, area, egui::Vec2b::new(false, true), |ui| {
+                if ui
+                    .ctx()
+                    .data_mut(|data| data.remove_temp::<bool>(back_to_top_id()))
+                    .is_some()
+                {
+                    let top = Rect::from_min_size(ui.max_rect().min, vec2(1.0, 1.0));
+                    ui.scroll_to_rect(top, Some(egui::Align::Min));
+                }
+                if enter < 1.0 {
+                    ui.multiply_opacity(0.2 + 0.8 * enter);
+                }
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::new("rows-enter"), true));
+                ui.with_visual_transform(
+                    egui::emath::TSTransform::from_translation(offset),
+                    |ui| {
+                        Frame::new()
+                            .inner_margin(Margin {
+                                left: widgets::PAGE_PADDING as i8,
+                                right: widgets::PAGE_PADDING as i8,
+                                top: 4,
+                                // The last row scrolls clear of the player.
+                                bottom: theme::PLAYER_BAR_HEIGHT as i8,
+                            })
+                            .show(ui, |ui| {
+                                ui.set_min_width(ui.available_width());
+                                match page {
+                                    Page::Home => home::show(app, ui),
+                                    Page::TopSongs => collection::top_songs(app, ui),
+                                    Page::NewReleases => new_releases::page(app, ui),
+                                    Page::Search => search::show(app, ui),
+                                    Page::LikedSongs => collection::liked(app, ui),
+                                    Page::SoundCloudLikes => soundcloud::show(app, ui, page),
+                                    Page::Albums
+                                    | Page::Artists
+                                    | Page::Podcasts
+                                    | Page::Episodes => library::show(app, ui, page),
+                                    Page::Playlist(id) => collection::playlist(app, ui, &id),
+                                    Page::MixedPlaylist(id) => {
+                                        collection::mixed_playlist(app, ui, &id)
                                     }
-                                });
-                        },
-                    );
-                    ui.ctx()
-                        .data_mut(|data| data.insert_temp(Id::new("rows-enter"), false));
-                    if app.dialog.is_none() && !app.show_devices {
-                        keys::scroll_page(ui);
-                    }
-                },
-            );
+                                    Page::SoundCloud(uri) => collection::soundcloud(app, ui, &uri),
+                                    Page::Album(id) => collection::album(app, ui, &id),
+                                    Page::Artist(id) => artist::show(app, ui, &id),
+                                    Page::Show(id) => show::show(app, ui, &id),
+                                    Page::Radio(seed) => radio::radio(app, ui, &seed),
+                                    Page::Queue => queue::page(app, ui),
+                                    Page::Settings => settings::show(app, ui),
+                                    Page::Group => group::show(app, ui),
+                                }
+                            });
+                    },
+                );
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(Id::new("rows-enter"), false));
+                if app.dialog.is_none() && !app.show_devices {
+                    keys::scroll_page(ui);
+                }
+            });
             ui.set_clip_rect(whole);
             ui.ctx().data_mut(|data| {
                 data.insert_temp(scrolled_id, scroll.state.offset.y);

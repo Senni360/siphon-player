@@ -127,6 +127,8 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                 .on_hover_cursor(egui::CursorIcon::PointingHand)
                 .clicked()
             {
+                let radius = if hero.round { cover_size / 2.0 } else { 6.0 };
+                super::kit::shared::launch(ui.ctx(), hero.images.image, rect, radius);
                 app.actions.push(Action::ShowDialog(Dialog::CoverArt {
                     url: url.to_string(),
                     shown: hero.images.image.map(str::to_string),

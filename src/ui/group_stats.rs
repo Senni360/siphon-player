@@ -60,9 +60,13 @@ fn tiles(ui: &mut Ui, palette: &Palette, items: &[(String, String)]) {
     let width = ((ui.available_width() - gap * (count - 1.0)) / count).max(70.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = gap;
-        for (value, label) in items {
+        for (index, (value, label)) in items.iter().enumerate() {
             let (rect, _) = ui.allocate_exact_size(vec2(width, 68.0), Sense::hover());
-            let painter = ui.painter();
+            let rose = super::entering(ui.ctx(), super::kit::motion::stagger(index));
+            let rect = rect.translate(vec2(0.0, (1.0 - rose) * 10.0));
+            let mut faded = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            faded.multiply_opacity(rose.max(0.02));
+            let painter = faded.painter();
             painter.rect_filled(rect, 12.0, palette.surface);
             painter.text(
                 rect.left_top() + vec2(12.0, 12.0),

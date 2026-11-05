@@ -950,6 +950,10 @@ fn cover_art(app: &mut App, ctx: &egui::Context, url: &str, shown: Option<&str>,
             let (rect, cover) =
                 ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::click());
             cover.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, title));
+            // It grows out of the cover that was pressed.
+            if super::kit::shared::land(ui, &palette, rect, 8.0) {
+                return cover.clicked();
+            }
             super::widgets::paint_cover_with_thumbnail(
                 ui,
                 &palette,

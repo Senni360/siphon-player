@@ -1314,6 +1314,29 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         }
     }
 
+    // However it was asked for (a key, another device, the disc), starting and
+    // stopping sends a ring out of the disc.
+    let was_playing = egui::Id::new("island-was-playing");
+    if ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(was_playing))
+        .is_some_and(|was| was != playing)
+    {
+        kit_motion::begin(ui.ctx(), was_playing.with("ring"), kit_motion::RIPPLE);
+    }
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(was_playing, playing));
+    if let Some(t) = kit_motion::running(ui.ctx(), was_playing.with("ring")) {
+        kit_motion::ring(
+            ui.painter(),
+            disc.center(),
+            18.0,
+            34.0,
+            t,
+            palette.text.gamma_multiply(0.7),
+        );
+    }
+
     let forward = slot(widths[3]).translate(vec2(lean(ui, "next-lean", 1.0), 0.0));
     let mut cell = centered(ui, forward);
     if theme::icon_button(
@@ -1601,9 +1624,24 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
             .ctx()
             .data(|data| data.get_temp::<Rect>(volume_id.with("rect")))
         {
+            let changed_id = volume_id.with("changed");
+            if ui
+                .ctx()
+                .data(|data| data.get_temp::<u8>(volume_id.with("last")))
+                .is_some_and(|last| last != shown)
+            {
+                kit_motion::begin(ui.ctx(), changed_id, 1.1);
+            }
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(volume_id.with("last"), shown));
+            let knob = pos2(
+                bar.left() + bar.width() * f32::from(shown) / 100.0,
+                bar.center().y,
+            );
             let pointing = ui
                 .input(|input| input.pointer.hover_pos())
-                .filter(|pos| bar.expand2(vec2(0.0, 4.0)).contains(*pos));
+                .filter(|pos| bar.expand2(vec2(0.0, 4.0)).contains(*pos))
+                .or_else(|| kit_motion::running(ui.ctx(), changed_id).map(|_| knob));
             floating_value(
                 ui,
                 volume_id.with("bubble"),
