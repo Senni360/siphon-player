@@ -791,18 +791,35 @@ function searchScreen() {
     rememberSearch(query);
     load(async () => {
       const found = await ask('search', { query });
+      // Each part says which source it's from, so the chips can show one at a time.
+      const part = (source, ...nodes) => h('div', { 'data-source': source }, nodes);
       const parts = [];
       if (found.artists?.length) {
-        parts.push(h('h2', { class: 'section', text: 'Artists' }), h('div', { class: 'cards' },
-          found.artists.slice(0, 4).map(artist => card(artist.name, 'Artist', artist.image, () => go({ page: 'artist', id: artist.id })))));
+        parts.push(part('spotify', h('h2', { class: 'section', text: 'Artists' }), h('div', { class: 'cards' },
+          found.artists.slice(0, 4).map(artist => card(artist.name, 'Artist', artist.image, () => go({ page: 'artist', id: artist.id }))))));
       }
-      if (found.accounts?.length) {
-        parts.push(h('h2', { class: 'section', text: 'Accounts' }), h('div', { class: 'chips' }, found.accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
-          art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] }))))));
+      for (const source of ['soundcloud', 'youtube']) {
+        const accounts = (found.accounts ?? []).filter(account => account.source === source);
+        if (!accounts.length) continue;
+        parts.push(part(source, h('h2', { class: 'section', text: `On ${SOURCE_NAMES[source]}: people` }), h('div', { class: 'chips' }, accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
+          art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] })))))));
       }
-      parts.push(section('On Spotify', found.spotify, ''), section('On SoundCloud', found.soundcloud, ''), section('On YouTube', found.youtube, ''));
-      const any = parts.some(Boolean);
-      return any ? parts : h('p', { class: 'empty', text: `Nothing found for "${query}".` });
+      for (const source of ['spotify', 'soundcloud', 'youtube']) {
+        const songs = section(`On ${SOURCE_NAMES[source]}`, found[source], '');
+        if (songs) parts.push(part(source, songs));
+      }
+      if (!parts.length) return h('p', { class: 'empty', text: `Nothing found for "${query}".` });
+      const shown = new Set(parts.map(node => node.dataset.source));
+      const scope = h('div', { class: 'chips scope' });
+      const pick = wanted => {
+        current.scope = wanted;
+        scope.querySelectorAll('button').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.scope === wanted)));
+        parts.forEach(node => { node.hidden = wanted !== 'all' && node.dataset.source !== wanted; });
+      };
+      scope.append(...['all', 'spotify', 'soundcloud', 'youtube'].filter(source => source === 'all' || shown.has(source))
+        .map(source => h('button', { class: 'chip plain', 'data-scope': source, text: source === 'all' ? 'All' : SOURCE_NAMES[source], onclick: () => pick(source) })));
+      pick(shown.has(current.scope) ? current.scope : 'all');
+      return [shown.size > 1 ? scope : null, ...parts];
     }, results);
   };
   const showRecent = () => {
