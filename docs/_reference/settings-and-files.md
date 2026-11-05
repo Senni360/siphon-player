@@ -67,6 +67,8 @@ Siphon follows each platform's conventions. On Linux:
 | Proxy password | System credential store | Clear the password and apply the manual proxy settings |
 | Legacy proxy password | `~/.local/state/siphonplayer/proxy_password` | Removed after protected migration |
 | Last session | `~/.local/state/siphonplayer/session.json` | Yes |
+| Whose accounts are whose | `~/.local/state/siphonplayer/artist-links.json` | Yes, you lose your choices of an artist's accounts |
+| What artists have elsewhere | `~/.cache/siphonplayer/artist-sources/` | Yes, it's read again |
 | SoundCloud connection | `~/.local/state/siphonplayer/soundcloud-account.json` | Yes, forgets the selected profile; disconnect to remove its protected token too |
 | SoundCloud public client ID | `~/.local/state/siphonplayer/soundcloud-client.json` | Yes, discovered again on the next request |
 | SoundCloud session token | System credential store | Use SoundCloud disconnect when the connection interface is integrated |
@@ -532,6 +534,7 @@ main fields are:
 | `mac_show_in_dock` | `true` | macOS only: show Siphon in the Dock and Cmd+Tab. `false` keeps it in the menu bar only; the menu-bar icon always stays |
 | `check_for_updates` | `true` | Ask GitHub once a day for a newer release |
 | `web_client_id` | none | Client ID of your own Spotify app, which Siphon signs in with |
+| `phone_linked` | `false` | A phone has been linked, so this computer listens for it |
 | `personal_app_nudge_at` | none | Legacy daily-reminder timestamp, retained for older releases |
 | `personal_app_intro_seen` | `false` | Whether the Premium personal-app introduction was dismissed or followed (available since 0.8.0) |
 | `slow_app_banner` | none | When the "Spotify is being slow" banner last appeared (`shown_at`) and how many times it was closed (`dismissals`; at 3 it stops). Kept by the app, not a preference |

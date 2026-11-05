@@ -17,7 +17,7 @@ function h(tag, props = {}, ...children) {
     else if (key === 'text') node.textContent = value;
     else node.setAttribute(key, value === true ? '' : value);
   }
-  node.append(...children.flat().filter(child => child !== null && child !== undefined && child !== false));
+  node.append(...children.flat(Infinity).filter(child => child !== null && child !== undefined && child !== false));
   return node;
 }
 const ICONS = {
@@ -305,7 +305,11 @@ async function pollState() {
       } else {
         player.direct = false;
       }
-      if (wasOnline !== player.online) { renderBanner(); if (booted) render(); }
+      if (wasOnline !== player.online) {
+        renderBanner();
+        // Only Spotify's own answers differ from the computer's, so nothing else reloads.
+        if (booted && hasSpotify()) render();
+      }
       booted = true;
       refreshPlayer();
     } catch (error) {
@@ -429,6 +433,23 @@ function openSheet() {
       repeat),
     h('div', { class: 'volume' }, icon('volume'), volume.input),
     next);
+  // Pulled down from the top, it follows the finger and closes.
+  let pull = null;
+  sheet.addEventListener('touchstart', event => { pull = sheet.scrollTop <= 0 && event.target.type !== 'range' ? event.touches[0].clientY : null; }, { passive: true });
+  sheet.addEventListener('touchmove', event => {
+    if (pull === null) return;
+    const moved = event.touches[0].clientY - pull;
+    if (moved > 0) sheet.style.transform = `translateY(${moved}px)`;
+  }, { passive: true });
+  const release = event => {
+    if (pull === null) return;
+    const moved = event.changedTouches[0].clientY - pull;
+    pull = null;
+    if (moved > 120) close();
+    else sheet.style.transform = '';
+  };
+  sheet.addEventListener('touchend', release);
+  sheet.addEventListener('touchcancel', () => { pull = null; sheet.style.transform = ''; });
   document.body.append(sheet);
   let wasPlaying = null;
   player.sheet = { update(state) {
@@ -542,7 +563,15 @@ addEventListener('popstate', () => { if (player.sheet) { document.querySelector(
 function backButton() {
   return h('button', { class: 'back', onclick: back, 'aria-label': 'Back' }, icon('back'));
 }
+/** The computer looks in every so often while nobody's watching, so give it that long. */
+const WAKE_MS = 18000;
+const openedAt = Date.now();
 function renderBanner() {
+  if (!player.online && Date.now() - openedAt < WAKE_MS) {
+    bannerSlot?.replaceChildren(h('div', { class: 'banner' }, h('div', {}, h('b', { text: 'Connecting to your computer…' }), 'This can take a few seconds.')));
+    setTimeout(renderBanner, WAKE_MS);
+    return;
+  }
   const telling = hasSpotify()
     ? 'Showing your Spotify, played on your Spotify devices. Open it for SoundCloud, YouTube and everything else.'
     : 'Open it to browse your library and play. Your group works from here either way.';
@@ -557,7 +586,7 @@ async function load(fill, into) {
     into.replaceChildren(bones(6));
     try {
       const content = await fill();
-      if (mine === drawn) into.replaceChildren(...[content].flat(2).filter(Boolean));
+      if (mine === drawn) into.replaceChildren(...[content].flat(Infinity).filter(Boolean));
     } catch (error) {
       if (error instanceof SignedOut) start();
       else if (mine === drawn) into.replaceChildren(failed(error, run));
@@ -672,7 +701,7 @@ function artistScreen() {
       section('Snippets and unreleased', found.unreleased),
       section('Edits and remixes', found.edits),
       found.looking ? h('p', { class: 'note', text: 'Still looking on SoundCloud and YouTube…' }) : null,
-    ].flat(2).filter(Boolean));
+    ].flat(Infinity).filter(Boolean));
   };
   const read = async () => {
     try {
@@ -697,6 +726,13 @@ function sourceScreen() {
     return [h('h1', { class: 'title', text: found.name ?? 'Songs' }), rows(songs, 50)];
   }, body);
   return [backButton(), body];
+}
+
+function playShared(url) {
+  // With the computer off, the song's own app can still play its own link.
+  if (!player.online) { location.href = url; return; }
+  act('play_link', { url }).catch(() => toast("Couldn't reach Encore."));
+  toast('Starting on your computer');
 }
 
 function postView(post, refresh) {
@@ -728,12 +764,7 @@ function postView(post, refresh) {
     try { await api(`/posts/${post.id}/replies`, 'POST', { text }); } catch { toast("That reply didn't go through."); refresh(); }
   } }, input);
   const song = { uri: `link:${post.url}`, name: post.title, artists: post.artists, image: post.artwork_url, duration_ms: post.duration_ms };
-  const play = () => {
-    // With the computer off, the song's own app can still play its own link.
-    if (!player.online) { location.href = post.url; return; }
-    act('play_link', { url: post.url }).catch(() => toast("Couldn't reach Encore."));
-    toast('Starting on your computer');
-  };
+  const play = () => playShared(post.url);
   return h('article', { class: 'post' },
     h('p', { class: 'who' }, h('b', { text: post.author_name }), ' shared'),
     post.note ? h('p', { class: 'said', text: post.note }) : null,
@@ -748,7 +779,7 @@ function groupScreen() {
   const title = h('h1', { class: 'title', text: 'Group' });
   const chooser = h('div');
   const refresh = () => load(async () => {
-    const [account, feed] = await Promise.all([api('/account'), api('/posts?limit=30')]);
+    const [account, feed, live, people] = await Promise.all([api('/account'), api('/posts?limit=30'), api('/live').catch(() => null), api('/members').catch(() => null)]);
     const groups = account.groups ?? [];
     const chosen = localStorage.getItem(STORE.group);
     const here = groups.find(group => group.id === chosen) ?? groups[0];
@@ -758,7 +789,15 @@ function groupScreen() {
       refresh();
     } })))] : []));
     const posts = feed.posts ?? [];
-    return posts.length ? posts.map(post => postView(post, refresh)) : h('p', { class: 'empty', text: 'Nothing shared yet.' });
+    const names = new Map((people?.members ?? []).map(person => [person.user_id, person.display_name]));
+    const listening = (live?.presence ?? []).filter(someone => someone.item && someone.playing && someone.user_id !== account.user_id);
+    return [
+      listening.length ? [h('h2', { class: 'section', text: 'Listening now' }), listening.map(someone => h('div', { class: 'row' }, art(someone.item.artwork_url),
+        h('button', { class: 'words', onclick: () => playShared(someone.item.url) },
+          h('span', { class: `name ${someone.item.source}`, text: someone.item.title }),
+          h('span', { class: 'by', text: `${names.get(someone.user_id) ?? 'Someone'} · ${(someone.item.artists ?? []).join(', ')}` }))))] : null,
+      posts.length ? [listening.length ? h('h2', { class: 'section', text: 'Shared' }) : null, posts.map(post => postView(post, refresh))] : h('p', { class: 'empty', text: 'Nothing shared yet.' }),
+    ];
   }, body);
   refresh();
   return [title, chooser, body];
@@ -771,7 +810,7 @@ function render() {
   drawn++;
   const tab = TABS.find(([page]) => page === current.page);
   const content = (tab ? tab[2] : current.kind === 'source' ? sourceScreen : SCREENS[current.page])();
-  screen.replaceChildren(h('div', { class: 'page' }, h('div', { class: 'banner-slot' }), ...[content].flat(2).filter(Boolean)));
+  screen.replaceChildren(h('div', { class: 'page' }, h('div', { class: 'banner-slot' }), ...[content].flat(Infinity).filter(Boolean)));
   bannerSlot = screen.querySelector('.banner-slot');
   renderBanner();
   screen.scrollTop = 0;
