@@ -38,6 +38,7 @@ img { display: block; }
 body.center, .door-page { min-height: 100dvh; display: grid; place-items: center; padding: calc(24px + var(--top)) 24px calc(24px + var(--bottom)); }
 .door { width: 100%; max-width: 340px; display: grid; gap: 12px; animation: rise .4s var(--ease); }
 .door h1 { font-size: 34px; font-weight: 600; letter-spacing: -.02em; margin-bottom: 12px; }
+.door .logo { width: 64px; height: 64px; margin-bottom: 4px; }
 .door label { color: var(--secondary); font-size: 13px; }
 .door p { color: var(--secondary); }
 .door input { width: 100%; height: 52px; padding: 0 16px; border-radius: 12px; border: 1px solid var(--line-strong);
@@ -130,9 +131,10 @@ h2.section { font-size: 18px; font-weight: 600; margin: 24px 0 2px; }
 @keyframes up { from { transform: translateY(100%); } }
 .sheet .glow { position: fixed; inset: -30% -30% 40%; z-index: -1; object-fit: cover; width: 160%; height: 90%; filter: blur(70px) saturate(1.4); opacity: .45; }
 .sheet header { display: flex; align-items: center; justify-content: space-between; height: 44px; flex: none; }
-.sheet header button { width: 44px; height: 44px; display: grid; place-items: center; margin-left: -10px; }
+.sheet header button:first-child { width: 44px; height: 44px; display: grid; place-items: center; margin-left: -10px; }
 .sheet header svg { width: 26px; height: 26px; }
-.where { font-size: 12px; color: var(--secondary); text-align: center; }
+.where { font-size: 12px; color: var(--secondary); text-align: center; min-height: 32px; padding: 0 8px; }
+.sheet header .spacer { width: 34px; }
 .sheet .cover { width: min(100%, 44dvh); aspect-ratio: 1; object-fit: cover; border-radius: 14px; margin: 10px auto 18px; background: var(--raised); box-shadow: 0 18px 50px rgb(0 0 0 / 50%); flex: none; }
 .sheet .heading { display: flex; align-items: center; gap: 12px; flex: none; }
 .sheet .heading > div { flex: 1; min-width: 0; }
@@ -192,6 +194,8 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .hero .back { position: absolute; z-index: 1; top: calc(6px + var(--top)); left: 12px; margin: 0; color: var(--text); }
 .play-all { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 22px; background: var(--inverse); color: var(--on-inverse); font-weight: 600; margin-top: 12px; }
 .play-all svg { width: 18px; height: 18px; }
+.play-all.second { background: var(--raised); color: var(--text); border: 1px solid var(--line-strong); }
+.list-actions { display: flex; gap: 8px; }
 
 /* Group */
 .post { padding: 12px 0; border-bottom: 1px solid var(--line); }
@@ -211,6 +215,22 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .actions.sign-in { max-width: none; animation: up .25s var(--ease); padding: 16px; }
 .actions.sign-in .primary { text-align: center; height: 48px; }
 .actions.sign-in .quiet { width: auto; }
+.actions.share input { width: 100%; height: 44px; margin: 6px 0; padding: 0 12px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); font: inherit; font-size: 16px; }
+.actions .send-share { text-align: center; background: var(--inverse); color: var(--on-inverse); border-radius: 24px; font-weight: 600; }
+.actions .send-share:active { background: var(--secondary); }
+
+/* Lyrics in Now Playing */
+.sheet .tools { display: flex; justify-content: center; gap: 8px; margin-top: 10px; flex: none; }
+.sheet .tools button { height: 36px; padding: 0 14px; border-radius: 18px; background: var(--hover); color: var(--secondary); font-size: 13px; font-weight: 500; }
+.sheet .tools [aria-pressed="true"] { background: var(--inverse); color: var(--on-inverse); }
+.lyrics { flex: 1 1 0; min-height: 44dvh; overflow-y: auto; margin: 10px 0 14px; scroll-behavior: smooth; mask-image: linear-gradient(transparent, #000 12%, #000 88%, transparent); }
+.lyrics button { display: block; width: 100%; text-align: left; padding: 8px 0; font-size: 22px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; color: rgb(255 255 255 / 38%); transition: color .25s; }
+.lyrics button.now { color: var(--text); }
+.lyrics p { padding: 8px 0; font-size: 20px; font-weight: 600; line-height: 1.3; }
+.lyrics .quiet-note { color: var(--secondary); font-size: 15px; font-weight: 400; padding-top: 40px; text-align: center; }
+
+.source-picture { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; background: var(--raised); margin-bottom: 10px; }
+.play-all[aria-pressed="true"] { color: var(--secondary); }
 .empty { text-align: center; color: var(--secondary); padding: 40px 16px; }
 .settings-link { margin-top: 28px; }
 .quiet { color: var(--secondary); font-size: 14px; height: 44px; }

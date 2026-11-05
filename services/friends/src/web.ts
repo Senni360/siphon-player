@@ -42,6 +42,9 @@ const CONTENT: Record<string, string> = {
   '/app.css': 'text/css; charset=utf-8',
   '/manifest.webmanifest': 'application/manifest+json',
   '/icon.svg': 'image/svg+xml',
+  '/icon-180.png': 'image/png',
+  '/icon-192.png': 'image/png',
+  '/icon-512.png': 'image/png',
 };
 
 const files = new Map<string, Buffer>();
@@ -93,7 +96,7 @@ export async function webAnswer(
   if (method !== 'GET' && method !== 'HEAD') return plain(405, { error: 'Not allowed' });
   // The gate needs its own look and its one script to work before the code is in.
   if (path === '/gate.js') return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT['/app.js'], 'Cache-Control': 'no-store' }, body: file('gate.js') };
-  if (path === '/app.css' || path === '/icon.svg') return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT[path], 'Cache-Control': 'no-cache' }, body: file(path.slice(1)) };
+  if (path === '/app.css' || path === '/icon.svg' || path === '/manifest.webmanifest' || /^\/icon-\d+\.png$/.test(path) && CONTENT[path]) return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT[path], 'Cache-Control': 'no-cache' }, body: file(path.slice(1)) };
   if (!code || !passedGate(cookies, code, now)) return page(path === '/' ? 200 : 401, 'gate.html');
   if (CONTENT[path]) return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT[path], 'Cache-Control': 'no-cache' }, body: file(path.slice(1)) };
   // The app routes its own screens, and Spotify returns to /callback.

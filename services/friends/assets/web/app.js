@@ -308,7 +308,7 @@ async function pollState() {
       if (wasOnline !== player.online) {
         renderBanner();
         // Only Spotify's own answers differ from the computer's, so nothing else reloads.
-        if (booted && hasSpotify()) render();
+        if (booted && hasSpotify()) { tabViews.clear(); render(true); }
       }
       booted = true;
       refreshPlayer();
@@ -358,6 +358,7 @@ function refreshPlayer() {
     if (song) {
       if (mini.uri !== song.uri) {
         mini.uri = song.uri;
+        markPlaying();
         const image = art(song.image);
         mini.image.replaceWith(image);
         mini.image = image;
@@ -374,7 +375,15 @@ function refreshPlayer() {
   }
   player.sheet?.update(state);
 }
+/** Marks the song playing, wherever it's listed on the page. */
+function markPlaying() {
+  const uri = player.state?.song?.uri;
+  document.querySelectorAll('.row[data-uri]').forEach(row => row.classList.toggle('playing', row.dataset.uri === uri));
+}
+/** A small knock under the thumb, where the phone can. */
+const knock = () => navigator.vibrate?.(8);
 function togglePlay() {
+  knock();
   const state = shown();
   hold('playing', !state?.playing);
   act('toggle').catch(() => toast("Couldn't reach Encore."));
@@ -392,11 +401,12 @@ function range(value, max, onchange, label) {
 
 function openSheet() {
   if (player.sheet) return;
+  history.pushState(null, '');
   const glow = h('div');
   const cover = h('div', { class: 'cover' });
   const name = h('span', { class: 'big' });
   const artist = h('button', { class: 'artist' });
-  const where = h('div', { class: 'where' });
+  const where = h('button', { class: 'where', onclick: () => { if (player.direct) devicePicker(); } });
   const heart = h('button', { class: 'heart', 'aria-label': 'Like', onclick: () => {
     const state = shown();
     if (!state?.song) return;
@@ -417,6 +427,55 @@ function openSheet() {
   const repeat = h('button', { class: 'side', 'aria-label': 'Repeat', onclick: () => act('repeat') }, icon('repeat'));
   const volume = range(50, 100, percent => { hold('volume', percent); act('volume', { percent }); }, 'Volume');
   const next = h('div', { class: 'upnext' });
+  const lyricsBox = h('div', { class: 'lyrics', hidden: true });
+  const lyricsButton = h('button', { 'aria-pressed': 'false', text: 'Lyrics', onclick: () => {
+    const open = lyricsBox.hidden;
+    lyricsBox.hidden = !open;
+    lyricsButton.setAttribute('aria-pressed', String(open));
+    sheet.querySelector('.cover').hidden = open;
+    if (open) readLyrics(shown()?.song?.uri);
+  } });
+  const shareButton = h('button', { text: 'Share', onclick: () => { const song = shown()?.song; if (song?.link) shareSong(song); else toast("This song can't be shared from here."); } });
+  let lyrics = { uri: null, lines: [], at: -1 };
+  async function readLyrics(forUri) {
+    if (!forUri || lyrics.uri === forUri) return;
+    lyrics = { uri: forUri, lines: [], at: -1 };
+    lyricsBox.replaceChildren(bones(5));
+    try {
+      if (!player.online) throw new Error('Lyrics come from Encore on your computer.');
+      const found = await ask('lyrics');
+      if (lyrics.uri !== forUri) return;
+      lyrics.lines = found.lines ?? [];
+      if (!lyrics.lines.length) {
+        lyricsBox.replaceChildren(h('p', { class: 'quiet-note', text: found.instrumental ? 'This one has no words.' : 'No lyrics for this song.' }));
+        return;
+      }
+      lyricsBox.replaceChildren(...lyrics.lines.map(line => (found.synced
+        ? h('button', { text: line.text || '♪', onclick: () => {
+          player.state.position_ms = line.at_ms;
+          player.at = Date.now();
+          act('seek', { ms: line.at_ms });
+        } })
+        : h('p', { text: line.text || ' ' }))));
+      lyrics.synced = found.synced;
+      lyrics.at = -1;
+    } catch (error) {
+      if (lyrics.uri === forUri) lyricsBox.replaceChildren(h('p', { class: 'quiet-note', text: error.message }));
+    }
+  }
+  function followLyrics(at) {
+    if (!lyrics.synced || lyricsBox.hidden) return;
+    let line = -1;
+    lyrics.lines.forEach((item, index) => { if (item.at_ms != null && item.at_ms <= at) line = index; });
+    if (line === lyrics.at) return;
+    lyricsBox.children[lyrics.at]?.classList.remove('now');
+    lyrics.at = line;
+    const shownLine = lyricsBox.children[line];
+    if (shownLine) {
+      shownLine.classList.add('now');
+      lyricsBox.scrollTop = shownLine.offsetTop - lyricsBox.offsetTop - lyricsBox.clientHeight * 0.35;
+    }
+  }
   let nextKey = '';
   let uri = null;
   const close = () => { player.sheet = null; sheet.remove(); };
@@ -424,14 +483,16 @@ function openSheet() {
     glow,
     h('header', {}, h('button', { 'aria-label': 'Close', onclick: close }, icon('down')), where, h('span', { class: 'spacer' })),
     cover,
+    lyricsBox,
     h('div', { class: 'heading' }, h('div', {}, name, artist), heart),
     h('div', { class: 'seek' }, seek.input, h('div', { class: 'times' }, elapsed, total)),
     h('div', { class: 'transport' }, shuffle,
-      h('button', { 'aria-label': 'Previous', onclick: () => act('previous') }, icon('previous')),
+      h('button', { 'aria-label': 'Previous', onclick: () => { knock(); act('previous'); } }, icon('previous')),
       main,
-      h('button', { 'aria-label': 'Next', onclick: () => act('next') }, icon('next')),
+      h('button', { 'aria-label': 'Next', onclick: () => { knock(); act('next'); } }, icon('next')),
       repeat),
     h('div', { class: 'volume' }, icon('volume'), volume.input),
+    h('div', { class: 'tools' }, lyricsButton, shareButton),
     next);
   // Pulled down from the top, it follows the finger and closes.
   let pull = null;
@@ -452,13 +513,15 @@ function openSheet() {
   sheet.addEventListener('touchcancel', () => { pull = null; sheet.style.transform = ''; });
   document.body.append(sheet);
   let wasPlaying = null;
-  player.sheet = { update(state) {
+  player.sheet = { close, update(state) {
     const song = state?.song;
     if (!song) return;
     if (song.uri !== uri) {
       uri = song.uri;
       const image = art(song.image, 'cover');
+      image.hidden = !lyricsBox.hidden;
       sheet.querySelector('.cover').replaceWith(image);
+      if (!lyricsBox.hidden) readLyrics(song.uri);
       sheet.querySelector('.glow')?.remove();
       if (safeImage(song.image)) sheet.prepend(h('img', { class: 'glow', src: song.image, alt: '' }));
       name.textContent = song.name;
@@ -476,6 +539,7 @@ function openSheet() {
     }
     seek.input.max = song.duration_ms || 1;
     const at = position(state);
+    followLyrics(at);
     if (!seek.input.dataset.dragging) { seek.input.value = at; seek.fill(); }
     elapsed.textContent = clock(seek.input.dataset.dragging ? Number(seek.input.value) : at);
     total.textContent = clock(song.duration_ms);
@@ -489,6 +553,27 @@ function openSheet() {
   refreshPlayer();
 }
 
+/** Which of the listener's Spotify devices the sound comes from, with the computer off. */
+async function devicePicker() {
+  let devices;
+  try {
+    ({ devices } = await web('/me/player/devices'));
+  } catch (error) { toast(error.message); return; }
+  const scrim = h('div', { class: 'scrim', onclick: () => close() });
+  const close = () => { scrim.remove(); panel.remove(); };
+  const panel = h('div', { class: 'actions', role: 'menu' },
+    h('div', { class: 'about' }, h('b', { text: 'Play on' }), h('span', { text: devices.length ? 'Your Spotify devices' : 'Open Spotify on a device, then look again.' })),
+    devices.map(device => h('button', { text: `${device.is_active ? '♪ ' : ''}${device.name}`, onclick: async () => {
+      close();
+      try {
+        await web('/me/player', 'PUT', { device_ids: [device.id], play: true });
+        setTimeout(pollSpotify, 700);
+      } catch (error) { toast(error.message); }
+    } })),
+    h('button', { text: 'Cancel', onclick: () => close() }));
+  document.body.append(scrim, panel);
+}
+
 // ---------------------------------------------------------------- rows and actions
 function songActions(song) {
   const scrim = h('div', { class: 'scrim', onclick: () => close() });
@@ -498,15 +583,37 @@ function songActions(song) {
     h('div', { class: 'about' }, h('b', { text: song.name, class: sourceOf(song.uri) }), h('span', { text: song.artists.join(', ') })),
     choose('Play next', () => act('queue', { uri: song.uri }).then(() => toast('Added to the queue'))),
     choose('Like', () => act('like', { uri: song.uri }).then(() => toast('Done'))),
+    song.link && choose('Share with the group', () => shareSong(song)),
     song.artist_id && choose('Go to artist', () => go({ page: 'artist', id: song.artist_id })),
     choose('Cancel', () => {}));
   document.body.append(scrim, panel);
 }
+/** Shares a song with the group, with a note if there's something to say. */
+function shareSong(song) {
+  const note = h('input', { type: 'text', placeholder: 'Say something (optional)', 'aria-label': 'Note', maxlength: 280, enterkeyhint: 'send' });
+  const scrim = h('div', { class: 'scrim', onclick: () => close() });
+  const close = () => { scrim.remove(); panel.remove(); };
+  const panel = h('form', { class: 'actions share', onsubmit: async event => {
+    event.preventDefault();
+    close();
+    try {
+      await api('/posts', 'POST', { url: song.link, source: sourceOf(song.uri), title: song.name, artists: song.artists.slice(0, 20), artwork_url: safeImage(song.image), duration_ms: song.duration_ms ?? 0, note: note.value.trim() });
+      tabViews.delete('group');
+      toast('Shared with the group');
+    } catch (error) { toast(error.message); }
+  } },
+    h('div', { class: 'about' }, h('b', { text: song.name, class: sourceOf(song.uri) }), h('span', { text: song.artists.join(', ') })),
+    note,
+    h('button', { class: 'send-share', type: 'submit', text: 'Share with the group' }));
+  document.body.append(scrim, panel);
+  note.focus();
+}
+
 function row(song, list, index) {
   const playing = player.state?.song?.uri === song.uri;
   const by = song.artists.join(', ');
   const plays = song.plays ? ` · ${count(song.plays)} plays` : '';
-  return h('div', { class: `row${playing ? ' playing' : ''}` },
+  return h('div', { class: `row${playing ? ' playing' : ''}`, 'data-uri': song.uri },
     art(song.image),
     h('button', { class: 'words', onclick: () => playFrom(list, index) },
       h('span', { class: `name ${sourceOf(song.uri)}`, text: song.name }),
@@ -549,16 +656,22 @@ let bannerSlot = null;
 let drawn = 0;
 
 function go(next, remember = true) {
+  keepPlace();
   if (remember) trail.push(current);
   current = next;
   history.pushState(null, '');
   render();
 }
 function back() {
+  keepPlace();
   current = trail.pop() ?? { page: 'home' };
   render();
 }
-addEventListener('popstate', () => { if (player.sheet) { document.querySelector('.sheet')?.remove(); player.sheet = null; } else if (trail.length) back(); });
+addEventListener('popstate', () => {
+  if (document.querySelector('.actions')) { document.querySelector('.scrim')?.click(); return; }
+  if (player.sheet) player.sheet.close();
+  else if (trail.length) back();
+});
 
 function backButton() {
   return h('button', { class: 'back', onclick: back, 'aria-label': 'Back' }, icon('back'));
@@ -579,17 +692,18 @@ function renderBanner() {
     h('div', {}, h('b', { text: "Encore isn't open on your computer" }), telling))]));
 }
 
+/** Fills `into`, even if the page has been left meanwhile: going back finds it done. */
 async function load(fill, into) {
-  const mine = drawn;
-  into.replaceChildren(bones(6));
+  const mine = {};
+  into.loading = mine;
   const run = async () => {
     into.replaceChildren(bones(6));
     try {
       const content = await fill();
-      if (mine === drawn) into.replaceChildren(...[content].flat(Infinity).filter(Boolean));
+      if (into.loading === mine) into.replaceChildren(...[content].flat(Infinity).filter(Boolean));
     } catch (error) {
       if (error instanceof SignedOut) start();
-      else if (mine === drawn) into.replaceChildren(failed(error, run));
+      else if (into.loading === mine) into.replaceChildren(failed(error, run));
     }
   };
   await run();
@@ -611,6 +725,8 @@ function homeScreen() {
         h('span', { class: `name ${sourceOf(first.uri)}`, text: first.name }), h('span', { class: 'by', text: first.artists.join(', ') }))),
       h('h2', { class: 'section', text: 'For you' }),
       h('div', { class: 'cards' }, rest.slice(0, 8).map((song, index) => card(song.name, song.artists.join(', '), song.image, () => playFrom(picks, index + 1), song.uri))),
+      found.recent?.length ? [h('h2', { class: 'section', text: 'Jump back in' }), rows(found.recent, 5)] : null,
+      found.made_for_you?.length ? [h('h2', { class: 'section', text: 'Made for you' }), h('div', { class: 'cards' }, found.made_for_you.slice(0, 6).map(list => card(list.name, null, list.image, () => go({ page: 'list', kind: 'playlist', id: list.id }))))] : null,
       section('New from who you follow', found.following),
     ];
   }, body);
@@ -621,14 +737,20 @@ function greeting() {
   return hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
 }
 
+const RECENT_KEY = 'encore.searches';
+const recentSearches = () => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]'); } catch { return []; } };
+function rememberSearch(query) {
+  localStorage.setItem(RECENT_KEY, JSON.stringify([query, ...recentSearches().filter(old => old !== query)].slice(0, 8)));
+}
+
 function searchScreen() {
   const results = h('div');
   const input = h('input', { type: 'search', placeholder: 'Spotify, SoundCloud and YouTube', 'aria-label': 'Search', enterkeyhint: 'search', autocapitalize: 'off', autocorrect: 'off', value: current.query ?? '' });
   const run = () => {
     const query = input.value.trim();
     current.query = query;
-    if (!query) { results.replaceChildren(); return; }
-    drawn++;
+    if (!query) { showRecent(); return; }
+    rememberSearch(query);
     load(async () => {
       const found = await ask('search', { query }, 30000);
       const parts = [];
@@ -636,13 +758,24 @@ function searchScreen() {
         parts.push(h('h2', { class: 'section', text: 'Artists' }), h('div', { class: 'cards' },
           found.artists.slice(0, 4).map(artist => card(artist.name, 'Artist', artist.image, () => go({ page: 'artist', id: artist.id })))));
       }
+      if (found.accounts?.length) {
+        parts.push(h('h2', { class: 'section', text: 'Accounts' }), h('div', { class: 'chips' }, found.accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
+          art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] }))))));
+      }
       parts.push(section('On Spotify', found.spotify, ''), section('On SoundCloud', found.soundcloud, ''), section('On YouTube', found.youtube, ''));
       const any = parts.some(Boolean);
       return any ? parts : h('p', { class: 'empty', text: `Nothing found for "${query}".` });
     }, results);
   };
+  const showRecent = () => {
+    const recent = recentSearches();
+    results.loading = null;
+    results.replaceChildren(...(recent.length ? [h('h2', { class: 'section', text: 'Recent' }), h('div', { class: 'chips' }, recent.map(query => h('button', { class: 'chip plain', text: query, onclick: () => { input.value = query; run(); } })))] : []));
+  };
+  input.addEventListener('input', () => { if (!input.value.trim()) showRecent(); });
   const form = h('form', { class: 'search', role: 'search', onsubmit: event => { event.preventDefault(); input.blur(); run(); } }, icon('search'), input);
   if (current.query) setTimeout(run);
+  else showRecent();
   return [h('h1', { class: 'title', text: 'Search' }), form, results];
 }
 
@@ -663,6 +796,15 @@ function libraryScreen() {
   return [h('h1', { class: 'title', text: 'Library' }), body, h('div', { class: 'settings-link' }, connect, connect && h('br'), h('button', { class: 'quiet', text: 'Unlink this phone', onclick: unlink }))];
 }
 
+function shuffled(list) {
+  const out = [...list];
+  for (let at = out.length - 1; at > 0; at--) {
+    const other = Math.floor(Math.random() * (at + 1));
+    [out[at], out[other]] = [out[other], out[at]];
+  }
+  return out;
+}
+
 function listScreen() {
   const body = h('div');
   const { kind, id } = current;
@@ -671,26 +813,46 @@ function listScreen() {
     const songs = found.songs ?? [];
     return [
       h('h1', { class: 'title', text: found.name ?? 'Songs' }),
-      songs.length ? h('button', { class: 'play-all', onclick: () => playFrom(songs, 0) }, icon('play'), 'Play') : h('p', { class: 'empty', text: 'Nothing here yet.' }),
+      songs.length ? h('div', { class: 'list-actions' },
+        h('button', { class: 'play-all', onclick: () => playFrom(songs, 0) }, icon('play'), 'Play'),
+        h('button', { class: 'play-all second', onclick: () => playFrom(shuffled(songs), 0) }, icon('shuffle'), 'Shuffle')) : h('p', { class: 'empty', text: 'Nothing here yet.' }),
       h('div', { class: 'upnext' }, rows(songs, 50)),
     ];
   }, body);
   return [backButton(), body];
 }
 
+/** Follow or unfollow, shown at once and put back if it doesn't go through. */
+function followButton(found) {
+  const button = h('button', { class: 'play-all second', 'aria-pressed': String(found.following), text: found.following ? 'Following' : 'Follow', onclick: async () => {
+    found.following = !found.following;
+    button.textContent = found.following ? 'Following' : 'Follow';
+    button.setAttribute('aria-pressed', String(found.following));
+    try {
+      await act('like', { uri: found.uri });
+    } catch {
+      found.following = !found.following;
+      button.textContent = found.following ? 'Following' : 'Follow';
+      button.setAttribute('aria-pressed', String(found.following));
+      toast("That didn't go through.");
+    }
+  } });
+  return button;
+}
+
 function artistScreen() {
   const id = current.id;
   const body = h('div');
-  const mine = ++drawn;
   body.append(bones(8));
   let tries = 0;
   const draw = found => {
-    if (mine !== drawn) return;
     const everything = [...(found.popular ?? []), ...(found.not_on_spotify ?? [])];
     body.replaceChildren(...[
       h('div', { class: 'hero' }, safeImage(found.image) && h('img', { src: found.image, alt: '' }), backButton(),
         h('div', {}, h('h1', { text: found.name }), found.followers != null && h('p', { text: `${count(found.followers)} followers` }),
-          everything.length > 0 && h('button', { class: 'play-all', onclick: () => playFrom(everything, 0) }, icon('play'), 'Play everything'))),
+          h('div', { class: 'list-actions' },
+            everything.length > 0 && h('button', { class: 'play-all', onclick: () => playFrom(everything, 0) }, icon('play'), 'Play everything'),
+            found.following != null && followButton(found)))),
       found.accounts?.length ? h('div', { class: 'chips' }, found.accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
         art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] }))))) : null,
       section('Popular', found.popular, ''),
@@ -708,10 +870,10 @@ function artistScreen() {
       const found = await ask('artist', { target: id });
       draw(found);
       // What's on the other sources arrives while the page is open.
-      if (found.looking && mine === drawn && tries++ < 12) setTimeout(read, 3000);
+      if (found.looking && tries++ < 12) setTimeout(read, 3000);
     } catch (error) {
       if (error instanceof SignedOut) start();
-      else if (mine === drawn && !body.querySelector('.hero')) body.replaceChildren(backButton(), failed(error, () => { body.replaceChildren(bones(8)); read(); }));
+      else if (!body.querySelector('.hero')) body.replaceChildren(backButton(), failed(error, () => { body.replaceChildren(bones(8)); read(); }));
     }
   };
   read();
@@ -720,10 +882,19 @@ function artistScreen() {
 
 function sourceScreen() {
   const body = h('div');
+  const { uri } = current;
   load(async () => {
-    const found = await ask('source', { uri: current.uri });
+    const found = await ask('source', { uri });
     const songs = found.songs ?? [];
-    return [h('h1', { class: 'title', text: found.name ?? 'Songs' }), rows(songs, 50)];
+    return [
+      found.image ? h('div', { class: 'source-head' }, art(found.image, 'source-picture')) : null,
+      h('h1', { class: 'title', text: found.name ?? 'Songs' }),
+      h('p', { class: 'note', text: SOURCE_NAMES[sourceOf(uri)] }),
+      songs.length ? h('div', { class: 'list-actions' },
+        h('button', { class: 'play-all', onclick: () => playFrom(songs, 0) }, icon('play'), 'Play'),
+        h('button', { class: 'play-all second', onclick: () => playFrom(shuffled(songs), 0) }, icon('shuffle'), 'Shuffle')) : h('p', { class: 'empty', text: 'Nothing here yet.' }),
+      h('div', { class: 'upnext' }, rows(songs, 50)),
+    ];
   }, body);
   return [backButton(), body];
 }
@@ -806,14 +977,31 @@ function groupScreen() {
 const TABS = [['home', 'Home', homeScreen], ['search', 'Search', searchScreen], ['library', 'Library', libraryScreen], ['group', 'Group', groupScreen]];
 const SCREENS = { list: listScreen, artist: artistScreen, source: sourceScreen };
 
-function render() {
+/** A tab's page shows as it was left for this long, then reads again. */
+const TAB_KEEPS_MS = 3 * 60 * 1000;
+const tabViews = new Map();
+let shownView = null;
+function keepPlace() {
+  if (shownView) shownView.scroll = screen.scrollTop;
+}
+
+function render(fresh = false) {
   drawn++;
   const tab = TABS.find(([page]) => page === current.page);
-  const content = (tab ? tab[2] : current.kind === 'source' ? sourceScreen : SCREENS[current.page])();
-  screen.replaceChildren(h('div', { class: 'page' }, h('div', { class: 'banner-slot' }), ...[content].flat(Infinity).filter(Boolean)));
-  bannerSlot = screen.querySelector('.banner-slot');
+  const holder = tab ? tabViews.get(current.page) : current.view;
+  let view = !fresh && holder && (!tab || Date.now() - holder.at < TAB_KEEPS_MS) ? holder : null;
+  if (!view) {
+    const content = (tab ? tab[2] : current.kind === 'source' ? sourceScreen : SCREENS[current.page])();
+    view = { node: h('div', { class: 'page' }, h('div', { class: 'banner-slot' }), ...[content].flat(Infinity).filter(Boolean)), scroll: 0, at: Date.now() };
+    if (tab) tabViews.set(current.page, view);
+    else current.view = view;
+  }
+  shownView = view;
+  screen.replaceChildren(view.node);
+  bannerSlot = view.node.querySelector('.banner-slot');
   renderBanner();
-  screen.scrollTop = 0;
+  screen.scrollTop = view.scroll;
+  markPlaying();
   document.querySelectorAll('nav.tabs button').forEach(button => {
     if (button.dataset.page === (tab ? current.page : tabOf)) button.setAttribute('aria-current', 'page');
     else button.removeAttribute('aria-current');
@@ -826,7 +1014,12 @@ function shell() {
   screen = h('main');
   player.mini = buildMini();
   const tabs = h('nav', { class: 'tabs', 'aria-label': 'Sections' }, TABS.map(([page, label]) => h('button', { 'data-page': page, onclick: () => {
-    if (current.page === page) { screen.scrollTo({ top: 0, behavior: 'smooth' }); return; }
+    // Pressed again it goes to the top, and pressed at the top it reads again.
+    if (current.page === page) {
+      if (screen.scrollTop > 0) screen.scrollTo({ top: 0, behavior: 'smooth' });
+      else render(true);
+      return;
+    }
     trail.length = 0;
     go({ page }, false);
   } }, icon(page), label)));
@@ -882,6 +1075,7 @@ function linkScreen() {
       button.disabled = false;
     }
   } },
+    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
     h('h1', { text: 'Encore' }),
     h('p', { text: 'Use your own account on this phone: your library, your groups, and playback on your computer.' }),
     h('p', { class: 'small', text: 'On your computer, open Encore, go to Group, then People, and press Link a phone. Type the code here.' }),
