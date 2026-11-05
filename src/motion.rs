@@ -16,6 +16,8 @@ pub const ANIMATION_TIME: f32 = 0.12;
 #[derive(Default)]
 pub struct Motion {
     reduced: bool,
+    /// The app's own setting, on top of what the system says.
+    always: bool,
     checked: Option<Instant>,
     /// What the Linux desktop portal said at the last check.
     desktop: Option<bool>,
@@ -42,7 +44,15 @@ impl Motion {
         }
         self.checked = Some(now);
         self.desktop = desktop_animations;
-        self.set(system_reduced(desktop_animations))
+        self.set(self.always || system_reduced(desktop_animations))
+    }
+
+    /// The app's own setting. A change is looked at on the next refresh.
+    pub fn set_always(&mut self, always: bool) {
+        if self.always != always {
+            self.always = always;
+            self.checked = None;
+        }
     }
 
     /// Takes `reduced` as the preference, and answers whether it changed.

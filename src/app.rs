@@ -14625,6 +14625,7 @@ impl App {
             .and_then(crate::appearance::SystemAppearance::animations);
         #[cfg(not(target_os = "linux"))]
         let desktop = None;
+        self.motion.set_always(self.settings.reduce_motion);
         if self.motion.refresh(Instant::now(), desktop) {
             log::debug!("reduce motion: {}", self.motion.reduced());
             crate::motion::apply(ctx, self.motion.reduced());

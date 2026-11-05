@@ -535,6 +535,7 @@ main fields are:
 | `check_for_updates` | `true` | Ask GitHub once a day for a newer release |
 | `web_client_id` | none | Client ID of your own Spotify app, which Siphon signs in with |
 | `phone_linked` | `false` | A phone has been linked, so this computer listens for it |
+| `reduce_motion` | `false` | Keep animations to a minimum, whatever the system says |
 | `personal_app_nudge_at` | none | Legacy daily-reminder timestamp, retained for older releases |
 | `personal_app_intro_seen` | `false` | Whether the Premium personal-app introduction was dismissed or followed (available since 0.8.0) |
 | `slow_app_banner` | none | When the "Spotify is being slow" banner last appeared (`shown_at`) and how many times it was closed (`dismissals`; at 3 it stops). Kept by the app, not a preference |

@@ -487,7 +487,7 @@ fn header(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
         theme::text(
             ui,
             gettext(locale, "Group"),
-            theme::medium(28.0),
+            theme::bold(28.0),
             palette.text,
         );
         if let Some(account) = &app.friends_feed.account {

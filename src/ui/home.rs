@@ -41,7 +41,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
     ui.add_space(6.0);
     let greeting = crate::util::greeting(app.locale);
-    widgets::title_in_words(ui, greeting.as_ref(), theme::medium(28.0), palette.text);
+    widgets::title_in_words(ui, greeting.as_ref(), theme::bold(28.0), palette.text);
     ui.add_space(12.0);
     // Home never scrolls sideways: its rows hold what fits.
     widgets::fit_shelves(ui.ctx(), true);

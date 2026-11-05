@@ -359,6 +359,8 @@ pub struct Settings {
     pub web_client_id: Option<String>,
     /// A phone has been linked, so this computer listens for it.
     pub phone_linked: bool,
+    /// Keep animations to a minimum, whatever the system says.
+    pub reduce_motion: bool,
     /// Legacy reminder time, retained for older Siphon versions.
     pub personal_app_nudge_at: Option<String>,
     /// The listener has dismissed or followed the personal-app introduction.
@@ -527,6 +529,7 @@ impl Default for Settings {
             show_shortcut_hints: true,
             web_client_id: None,
             phone_linked: false,
+            reduce_motion: false,
             personal_app_nudge_at: None,
             personal_app_intro_seen: false,
             slow_app_banner: SlowAppBanner::default(),

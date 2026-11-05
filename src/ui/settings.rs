@@ -324,8 +324,8 @@ fn jump_chips(ui: &mut egui::Ui, palette: &Palette, locale: crate::i18n::Locale,
         };
         for (label, title) in [
             ("Account", "Account"),
-            ("Soloist", "Spotify Soloist"),
             ("Playback", playback),
+            ("Soloist", "Spotify Soloist"),
             ("Streamer mode", "Streamer mode"),
             ("Appearance", "Appearance"),
             ("Equalizer", "Equalizer"),
@@ -1356,6 +1356,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ),
         pair_row(fastframe_theme::Base::Light),
         pair_row(fastframe_theme::Base::Dark),
+        RowText::new(
+            gettext(locale, "Reduce motion"),
+            gettext(locale, "Keep animations to a minimum, even if Windows allows them."),
+        ),
     ];
     for index in [8, 9, 10] {
         appearance_rows[index].available &= built_in;
@@ -1693,6 +1697,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     },
                 );
             }
+            let reduce_row = appearance_rows.len() - 1;
+            filtered_row(
+                ui,
+                &palette,
+                &needle,
+                &appearance,
+                &appearance_rows[reduce_row],
+                |ui| {
+                    let label = gettext(locale, "Reduce motion");
+                    if widgets::switch(ui, &palette, &label, &mut app.settings.reduce_motion)
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                },
+            );
         });
     }
 

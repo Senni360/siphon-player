@@ -113,14 +113,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         && ui.available_width() >= 800.0
     {
         ui.columns(2, |columns| {
-            theme::section_title(&mut columns[0], &palette, &gettext(app.locale, "Spotify"));
+            source_label(&mut columns[0], &palette, "Spotify");
             columns[0].add_space(8.0);
             spotify(app, &mut columns[0]);
-            theme::section_title(
-                &mut columns[1],
-                &palette,
-                &gettext(app.locale, "SoundCloud"),
-            );
+            source_label(&mut columns[1], &palette, "SoundCloud");
             columns[1].add_space(8.0);
             soundcloud(app, &mut columns[1]);
         });
