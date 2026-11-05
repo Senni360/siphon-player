@@ -4,7 +4,9 @@
 
 ## Platform
 
-web
+desktop
+
+A native Windows app drawn with egui, not a web page. The phone companion at `encore.senni.dev` is the only web part.
 
 ## Users
 
