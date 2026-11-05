@@ -457,6 +457,7 @@ impl App {
                 "name": account.name,
                 "uri": account.uri,
                 "image": account.image,
+                "followers": account.followers,
             }))
         })
         .collect();

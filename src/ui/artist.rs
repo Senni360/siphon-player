@@ -29,7 +29,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
     let locale = app.locale;
     match &page.artist {
         Loadable::Loaded(artist) => {
-            artist_hero(app, ui, artist, preview.as_deref());
+            artist_hero(app, ui, artist, preview.as_deref(), Some(&page.sources));
             artist_actions(app, ui, artist, Some(&page));
             accounts_row(app, ui, id, artist, &page);
 
@@ -278,7 +278,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
         }
         Loadable::Loading | Loadable::NotLoaded => {
             if let Some(artist) = &preview {
-                artist_hero(app, ui, artist, None);
+                artist_hero(app, ui, artist, None, None);
             } else {
                 ui.add_space(40.0);
             }
@@ -303,7 +303,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
         Loadable::Failed(error) => {
             let error = error.clone();
             if let Some(artist) = &preview {
-                artist_hero(app, ui, artist, None);
+                artist_hero(app, ui, artist, None, None);
             } else {
                 ui.add_space(40.0);
             }
@@ -333,19 +333,45 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
     app.ask_artist_sources(id);
 }
 
-fn artist_hero(app: &mut App, ui: &mut egui::Ui, artist: &Artist, preview: Option<&Artist>) {
+fn artist_hero(
+    app: &mut App,
+    ui: &mut egui::Ui,
+    artist: &Artist,
+    preview: Option<&Artist>,
+    sources: Option<&crate::model::ArtistSources>,
+) {
     let locale = app.locale;
     let mut byline = Vec::new();
+    let elsewhere: Vec<(Side, u64)> = sources
+        .into_iter()
+        .flat_map(|sources| SIDES.map(|side| (side, sources.finding(side))))
+        .filter_map(|(side, found)| Some((side, found.get()?.account.as_ref()?.followers?)))
+        .collect();
     if let Some(followers) = &artist.followers {
         byline.push((
-            ngettext(
-                locale,
-                // Translators: {count} is the number of people who follow an artist.
-                "{count} follower",
-                "{count} followers",
-                u32::try_from(followers.total).unwrap_or(u32::MAX),
-            )
-            .replace("{count}", &util::format_count(followers.total)),
+            if elsewhere.is_empty() {
+                ngettext(
+                    locale,
+                    // Translators: {count} is the number of people who follow an artist.
+                    "{count} follower",
+                    "{count} followers",
+                    u32::try_from(followers.total).unwrap_or(u32::MAX),
+                )
+                .replace("{count}", &util::format_count(followers.total))
+            } else {
+                // Translators: {count} followers on {source}, a music service.
+                gettext(locale, "{count} on {source}")
+                    .replace("{count}", &util::format_count(followers.total))
+                    .replace("{source}", "Spotify")
+            },
+            None,
+        ));
+    }
+    for (side, followers) in elsewhere {
+        byline.push((
+            gettext(locale, "{count} on {source}")
+                .replace("{count}", &util::format_count(followers))
+                .replace("{source}", source_of(side).name()),
             None,
         ));
     }

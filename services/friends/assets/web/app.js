@@ -886,7 +886,10 @@ function artistScreen() {
     const everything = [...(found.popular ?? []), ...(found.not_on_spotify ?? [])];
     body.replaceChildren(...[
       h('div', { class: 'hero' }, safeImage(found.image) && h('img', { src: found.image, alt: '' }), backButton(),
-        h('div', {}, h('h1', { text: found.name }), found.followers != null && h('p', { text: `${count(found.followers)} followers` }),
+        h('div', {}, h('h1', { text: found.name }), found.followers != null && h('p', { text: [
+          `${count(found.followers)} ${found.accounts?.some(account => account.followers) ? 'on Spotify' : 'followers'}`,
+          ...(found.accounts ?? []).filter(account => account.followers).map(account => `${count(account.followers)} on ${SOURCE_NAMES[account.source]}`),
+        ].join(' · ') }),
           h('div', { class: 'list-actions' },
             everything.length > 0 && h('button', { class: 'play-all', onclick: () => playFrom(everything, 0) }, icon('play'), 'Play everything'),
             found.following != null && followButton(found)))),
