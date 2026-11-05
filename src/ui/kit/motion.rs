@@ -28,6 +28,12 @@ pub fn stagger(index: usize) -> f32 {
     index.min(MAX_STAGGERED - 1) as f32 * STAGGER
 }
 
+/// The progress that [`ease`] turned into `eased`, for what must travel evenly,
+/// or in a shape of its own, on a transition's clock.
+pub fn unease(eased: f32) -> f32 {
+    1.0 - (1.0 - eased.clamp(0.0, 1.0)).powf(0.2)
+}
+
 /// A transition with a start time, an optional delay and a length, in
 /// egui's clock (`InputState::time`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -118,6 +124,26 @@ pub fn appear(ctx: &Context, id: Id, duration: f32, delay: f32) -> f32 {
         .progress(ctx)
 }
 
+/// Marks this window as one that comes in when the app starts. Views drawn alone,
+/// as in tests, are simply there.
+pub fn welcome(ctx: &Context) {
+    ctx.data_mut(|data| data.insert_temp(Id::new("kit-welcome"), true));
+}
+
+/// Eased progress of something coming in when the app starts, over `duration`
+/// after waiting `delay`. It waits for a frame or two to be drawn first, as the
+/// first frame is a slow one and would eat the motion.
+pub fn arrival(ctx: &Context, id: Id, duration: f32, delay: f32) -> f32 {
+    if !ctx.data(|data| data.get_temp::<bool>(Id::new("kit-welcome")).unwrap_or(false)) {
+        return 1.0;
+    }
+    if ctx.cumulative_frame_nr() < 2 {
+        ctx.request_repaint();
+        return 0.0;
+    }
+    appear(ctx, id, duration, delay)
+}
+
 /// Eased progress, from 0 to 1, of something drawn again after not being
 /// drawn (a panel opened, a section shown): it enters over `duration`
 /// every time it comes back.
@@ -173,6 +199,51 @@ pub fn toward(ctx: &Context, id: Id, on: bool, duration: f32) -> f32 {
 /// An eased number that glides to `target` over `duration` seconds.
 pub fn glide(ctx: &Context, id: Id, target: f32, duration: f32) -> f32 {
     ctx.animate_value_with_time(id, target, crate::motion::seconds(ctx, duration))
+}
+
+/// How far long text has slid to show its end, while `active`: it waits a moment,
+/// reads along at an even pace, rests at the end, and comes back. When `overflow`
+/// is nothing, nothing moves. Asks for frames only while it moves.
+pub fn glide_along(ctx: &Context, id: Id, overflow: f32, active: bool) -> f32 {
+    const WAIT: f64 = 0.5;
+    const PACE: f64 = 40.0;
+    if overflow <= 1.0 || crate::motion::seconds(ctx, 1.0) <= 0.0 {
+        return 0.0;
+    }
+    let now = ctx.input(|input| input.time);
+    let started_id = id.with("started");
+    let target = if active {
+        let started = ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(started_id, || now));
+        let travel = f64::from(overflow) / PACE;
+        let elapsed = (now - started) - WAIT;
+        let cycle = (travel + WAIT) * 2.0;
+        let place = elapsed.rem_euclid(cycle);
+        if elapsed < 0.0 {
+            0.0
+        } else if place < travel {
+            ctx.request_repaint();
+            (place * PACE) as f32
+        } else if place < travel + WAIT {
+            ctx.request_repaint();
+            overflow
+        } else if place < travel * 2.0 + WAIT {
+            ctx.request_repaint();
+            overflow - ((place - travel - WAIT) * PACE) as f32
+        } else {
+            ctx.request_repaint();
+            0.0
+        }
+    } else {
+        ctx.data_mut(|data| data.remove::<f64>(started_id));
+        0.0
+    };
+    if active {
+        ctx.request_repaint();
+        spring_jump(ctx, id, target);
+        target
+    } else {
+        spring(ctx, id, target, FOLLOW)
+    }
 }
 
 /// How a [`spring`] moves: how long one swing takes, in seconds, and how much
@@ -494,6 +565,38 @@ pub fn glint_on_hover(ctx: &Context, id: Id, hovered: bool) -> Option<f32> {
     running(ctx, id.with("glint"))
 }
 
+/// How an icon answers being pointed at and pressed. Each says what its control
+/// does: a gear turns, a chevron leans the way it goes, a download dips.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gesture {
+    /// A turn while pointed at, in degrees, and a whole gesture on a press.
+    pub hover_turn: f32,
+    pub press_turn: f32,
+    /// A lean while pointed at, in points.
+    pub hover_move: (f32, f32),
+    /// A shake from side to side on a press.
+    pub press_shake: f32,
+    /// A dip downward and back on a press, in points.
+    pub press_dip: f32,
+}
+
+/// How long a pressed icon's gesture takes.
+pub const GESTURE: f32 = 0.5;
+
+/// Where an icon sits at `hover` (0 to 1, and past 1 on a bounce) and the
+/// `press` gesture's raw progress: its offset and its turn in radians.
+pub fn gesture_pose(gesture: Gesture, hover: f32, press: Option<f32>) -> (egui::Vec2, f32) {
+    let mut offset = egui::vec2(gesture.hover_move.0, gesture.hover_move.1) * hover;
+    let mut turn = gesture.hover_turn * hover;
+    if let Some(t) = press {
+        let t = t.clamp(0.0, 1.0);
+        turn += gesture.press_turn * ease(t);
+        offset.x += gesture.press_shake * (1.0 - t) * (t * std::f32::consts::PI * 5.0).sin();
+        offset.y += gesture.press_dip * (t * std::f32::consts::PI).sin();
+    }
+    (offset, turn.to_radians())
+}
+
 /// How long a changed count takes to roll to its new value.
 pub const ROLL: f32 = 0.32;
 
@@ -770,6 +873,14 @@ mod tests {
         }
         assert_eq!(ease(-1.0), 0.0);
         assert_eq!(ease(2.0), 1.0);
+    }
+
+    #[test]
+    fn unease_undoes_the_curve() {
+        for step in 0..=10 {
+            let t = step as f32 / 10.0;
+            assert!((unease(ease(t)) - t).abs() < 1e-3, "{t}");
+        }
     }
 
     #[test]

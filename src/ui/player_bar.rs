@@ -77,6 +77,15 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
 pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
     let palette = app.palette;
     let fill = eased_fill(ui.ctx(), palette.panel, app.now_playing_tint());
+    // The island rises into place when the app starts.
+    let rising = kit_motion::arrival(
+        ui.ctx(),
+        egui::Id::new("island-rises"),
+        kit_motion::ENTER * 1.5,
+        0.1,
+    );
+    let layer = ui.layer_id();
+    let before = kit_motion::mark(ui.ctx(), layer);
     ui.scope_builder(
         UiBuilder::new().id_salt("player-bar").max_rect(strip),
         |ui| {
@@ -125,6 +134,25 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             }
             let rect = island.shrink2(vec2(14.0, 0.0));
             let now = app.now_playing();
+            // A new song's colour runs around the island's edge.
+            let run_id = ui.id().with("island-edge-run");
+            let uri = now.as_ref().map(|now| now.uri.clone());
+            let last = ui
+                .ctx()
+                .data(|data| data.get_temp::<Option<String>>(run_id.with("uri")));
+            if last.is_some_and(|last| last != uri && uri.is_some()) {
+                kit_motion::begin(ui.ctx(), run_id, kit_motion::EDGE_RUN);
+            }
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(run_id.with("uri"), uri));
+            if let Some(t) = kit_motion::running(ui.ctx(), run_id) {
+                // The curve eases; the light travels evenly.
+                let raw = kit_motion::unease(t);
+                let color = app
+                    .now_playing_tint()
+                    .map_or(palette.text, super::glow_color);
+                kit_motion::edge_run(ui.painter(), island, ISLAND_RADIUS, raw, color);
+            }
             // The whole island, behind everything else.
             let behind = island;
             if visualizer(app, ui, behind, now.as_ref()) {
@@ -181,6 +209,7 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
             extras(app, &mut right_ui, now.as_ref(), transport_right);
         },
     );
+    kit_motion::shift_since(ui.ctx(), layer, before, vec2(0.0, (1.0 - rising) * 64.0));
 }
 
 /// Draws the chosen spectrum or waveform of the song playing on this
@@ -746,16 +775,35 @@ fn queue_tiles(
         crate::motion::seconds(ui.ctx(), kit_motion::FEEDBACK * 2.0),
     );
     let step = TILE_STEP + (TILE_STEP_SPREAD - TILE_STEP) * spread;
+    // Turning Shuffle on or off deals the tiles again: they hop and cross.
+    let deal = kit_motion::running(ui.ctx(), egui::Id::new("island-tiles-deal"));
     for (index, item) in upcoming.iter().enumerate().rev() {
-        let lift = if index == 0 {
+        let settling = if index == 0 {
             (1.0 - settled) * 4.0
         } else {
             0.0
         };
+        let left = area.left() + index as f32 * step;
+        // The tile the pointer is on rises out of the stack.
+        let pointed = response
+            .hover_pos()
+            .is_some_and(|pos| pos.x >= left && pos.x < left + step.max(TILE_SIZE * 0.6));
+        let rise = kit_motion::spring(
+            ui.ctx(),
+            egui::Id::new(("island-tile-rise", index)),
+            if pointed { 5.0 } else { 0.0 },
+            kit_motion::LIVELY,
+        );
+        let (deal_x, deal_y) = deal.map_or((0.0, 0.0), |t| {
+            let raw = kit_motion::unease(t);
+            let swing = (raw * std::f32::consts::PI).sin();
+            let side = 1.0 - index as f32;
+            (side * step * swing, -8.0 * swing)
+        });
         let rect = Rect::from_min_size(
             pos2(
-                area.left() + index as f32 * step,
-                area.center().y - TILE_SIZE / 2.0 + lift,
+                left + deal_x,
+                area.center().y - TILE_SIZE / 2.0 + settling - rise + deal_y,
             ),
             Vec2::splat(TILE_SIZE),
         );
@@ -814,13 +862,24 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         return;
     };
 
+    // The cover sits back when the song is paused, and steps up when it plays.
+    let presence = kit_motion::spring(
+        ui.ctx(),
+        egui::Id::new("island-cover-presence"),
+        if now.playing || now.loading {
+            1.0
+        } else {
+            0.86
+        },
+        kit_motion::LIVELY,
+    );
     super::widgets::playing_cover(
         ui,
         &palette,
         app.backend.art(),
         "player-bar",
         app.small_art(now, cover_rect.width()),
-        cover_rect,
+        Rect::from_center_size(cover_rect.center(), cover_rect.size() * presence),
         6.0,
     );
     let song = app.now_playing_item();
@@ -895,7 +954,25 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
     text_ui.set_clip_rect(info_rect.intersect(ui.clip_rect()));
     text_ui.spacing_mut().item_spacing.y = 2.0;
     let title_color = super::kit::Source::of(&now.uri).color(&palette);
-    let title_response = theme::link(&mut text_ui, &now.title, theme::medium(14.0), title_color)
+    // A title too long for its place slides along while it is pointed at, and
+    // comes back when the pointer leaves.
+    let title_width = ui
+        .painter()
+        .layout_no_wrap(now.title.clone(), theme::medium(14.0), title_color)
+        .size()
+        .x;
+    let slide = kit_motion::glide_along(
+        ui.ctx(),
+        egui::Id::new("island-title-slide"),
+        title_width - text_width,
+        ui.rect_contains_pointer(info_rect),
+    );
+    let title_response = text_ui
+        .with_visual_transform(
+            egui::emath::TSTransform::from_translation(vec2(-slide, 0.0)),
+            |ui| theme::link(ui, &now.title, theme::medium(14.0), title_color),
+        )
+        .inner
         .interact(drag_sense);
     if title_response.clicked()
         && let Some(page) = app.now_playing_collection_page(now)
@@ -1150,6 +1227,11 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         )
     });
     if shuffle_button.clicked() {
+        kit_motion::begin(
+            ui.ctx(),
+            egui::Id::new("island-tiles-deal"),
+            kit_motion::GESTURE,
+        );
         app.actions.push(Action::ToggleShuffle);
     }
 
@@ -1286,6 +1368,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         Some(fraction) => (fraction * duration as f32) as u32,
         None => position,
     };
+    let shown_position = ticking_time(ui.ctx(), shown_position, app.seek_preview.is_some());
     let time_color = if now.is_some() {
         palette.secondary
     } else {
@@ -1324,6 +1407,20 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         slider_width,
         None,
     );
+    seek_bubble(ui, slider_rect, duration, &palette, controls_locked(app));
+    // While the song is being fetched, a light goes along the bar.
+    if loading {
+        let t = (ui.input(|input| input.time) * 0.9).fract() as f32;
+        if crate::motion::seconds(ui.ctx(), 1.0) > 0.0 {
+            kit_motion::glint(
+                ui.painter(),
+                Rect::from_center_size(slider_rect.center(), vec2(slider_width, 6.0)),
+                t,
+                palette.text.gamma_multiply(0.7),
+            );
+            ui.ctx().request_repaint();
+        }
+    }
     let event_is_commit = matches!(slider_event, SliderEvent::Committed(_));
     match slider_event {
         // In someone else's party the knob stays where the party is.
@@ -1349,6 +1446,82 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         util::format_duration_ms(duration),
         theme::regular(11.5),
         time_color,
+    );
+}
+
+/// The elapsed time, counting quickly through a jump (a seek, a new place from
+/// another device) so the eye sees how far it went. Ordinary seconds just tick.
+fn ticking_time(ctx: &egui::Context, position: u32, dragging: bool) -> u32 {
+    const JUMP_MS: i64 = 3000;
+    let id = egui::Id::new("island-time-ticker");
+    let last = ctx
+        .data(|data| data.get_temp::<u32>(id))
+        .unwrap_or(position);
+    ctx.data_mut(|data| data.insert_temp(id, position));
+    if !dragging && (i64::from(position) - i64::from(last)).abs() > JUMP_MS {
+        ctx.data_mut(|data| data.insert_temp(id.with("from"), last));
+        kit_motion::begin(ctx, id.with("jump"), kit_motion::POPOVER * 2.0);
+    }
+    let Some(t) = kit_motion::running(ctx, id.with("jump")) else {
+        return position;
+    };
+    let from = ctx
+        .data(|data| data.get_temp::<u32>(id.with("from")))
+        .unwrap_or(position);
+    (f64::from(from) + (f64::from(position) - f64::from(from)) * f64::from(t)) as u32
+}
+
+/// While the pointer is on the seek bar, the time it points at floats above the
+/// island, following along it.
+fn seek_bubble(ui: &egui::Ui, bar: Rect, duration: u32, palette: &theme::Palette, locked: bool) {
+    let ctx = ui.ctx();
+    let id = egui::Id::new("seek-bubble");
+    let pointer = ui
+        .input(|input| input.pointer.hover_pos())
+        .filter(|pos| bar.expand2(vec2(0.0, 4.0)).contains(*pos) && duration > 0 && !locked);
+    let shown = kit_motion::toward(ctx, id, pointer.is_some(), kit_motion::FEEDBACK);
+    if let Some(pos) = pointer {
+        if shown < 0.02 {
+            kit_motion::spring_jump(ctx, id.with("x"), pos.x);
+        }
+        ctx.data_mut(|data| data.insert_temp(id.with("aim"), pos.x));
+    }
+    if shown <= 0.0 {
+        return;
+    }
+    let Some(aim) = ctx.data(|data| data.get_temp::<f32>(id.with("aim"))) else {
+        return;
+    };
+    let x = kit_motion::spring(ctx, id.with("x"), aim, kit_motion::FOLLOW);
+    let fraction = ((aim - bar.left()) / bar.width()).clamp(0.0, 1.0);
+    let text = util::format_duration_ms((fraction * duration as f32) as u32);
+    let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, id));
+    let galley = painter.layout_no_wrap(
+        text,
+        theme::medium(11.5),
+        palette.text.gamma_multiply(shown),
+    );
+    let top = ctx
+        .data(|data| data.get_temp::<Rect>(egui::Id::new(ISLAND_RECT_KEY)))
+        .map_or(bar.top() - 40.0, |island| island.top());
+    let size = galley.size() + vec2(14.0, 8.0);
+    let pill = Rect::from_center_size(
+        pos2(x, top - 8.0 - size.y / 2.0 + (1.0 - shown) * 6.0),
+        size,
+    );
+    painter.rect(
+        pill,
+        size.y / 2.0,
+        palette.overlay.gamma_multiply(shown),
+        egui::Stroke::new(1.0, palette.outline.gamma_multiply(shown)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(pill.min + vec2(7.0, 4.0), galley, palette.text);
+    // A fine mark on the bar shows the exact place.
+    ui.painter().rect_filled(
+        Rect::from_center_size(pos2(x, bar.center().y), vec2(2.0, 10.0)),
+        1.0,
+        palette.text.gamma_multiply(0.7 * shown),
     );
 }
 

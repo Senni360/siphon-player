@@ -124,12 +124,37 @@ pub(super) fn paint_cover_with_thumbnail(
         || sources
             .thumbnail
             .is_some_and(|url| paint_cover_url(ui, at(url), art, sources.align_thumbnail));
-    if !loaded {
+    // A cover that had to be waited for comes up out of its placeholder.
+    let waited = sources
+        .requested
+        .map(|url| egui::Id::new(("cover-waited", url, rect.width() as u32)));
+    if let Some(waited) = waited {
+        if !loaded {
+            ui.ctx().data_mut(|data| data.insert_temp(waited, true));
+        } else if ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<bool>(waited))
+            .is_some()
+        {
+            super::kit::motion::begin(ui.ctx(), waited.with("fade"), super::kit::motion::ENTER);
+        }
+    }
+    let revealing =
+        waited.and_then(|waited| super::kit::motion::running(ui.ctx(), waited.with("fade")));
+    if !loaded || revealing.is_some() {
+        let cover = revealing.map_or(1.0, |t| 1.0 - t);
         let painter = ui.painter();
         let fill = if palette.dark {
             palette.surface_hover
         } else {
             palette.surface_active
+        };
+        // Over a cover that is fading in the placeholder is solid, or the
+        // cover would show through before its turn.
+        let fill = if revealing.is_some() {
+            fill.to_opaque().gamma_multiply(cover)
+        } else {
+            fill
         };
         if radius >= rect.width() / 2.0 - 0.5 {
             painter.circle_filled(rect.center(), rect.width() / 2.0, fill);
@@ -137,7 +162,13 @@ pub(super) fn paint_cover_with_thumbnail(
             painter.rect_filled(rect, corner, fill);
         }
         let icon_size = (rect.width() * 0.42).clamp(12.0, 64.0);
-        theme::paint_icon(ui, fallback, rect, icon_size, palette.dim);
+        theme::paint_icon(
+            ui,
+            fallback,
+            rect,
+            icon_size,
+            palette.dim.gamma_multiply(cover),
+        );
     }
 }
 
@@ -372,7 +403,7 @@ pub fn virtual_rows(
     if count == 0 {
         return;
     }
-    let glide_id = ui.next_auto_id().with("row-glide");
+    let glide_id = list_id(ui);
     let previous_spacing = ui.spacing().item_spacing;
     ui.spacing_mut().item_spacing.y = 0.0;
     let clip = ui.clip_rect();
@@ -398,18 +429,25 @@ pub fn virtual_rows(
     // goes by where a row sits in the window, not by how many there are, so it
     // reaches the last visible row on any screen and at any zoom.
     let entering = super::rows_enter(ui.ctx());
+    let late = if entering {
+        list_arrived_late(ui.ctx(), glide_id)
+    } else {
+        0.0
+    };
     for index in first..last {
         let t = if entering {
             let top = start_y + index as f32 * row_height;
-            super::entering(ui.ctx(), entrance_delay(top, clip))
+            super::entering(ui.ctx(), late + entrance_delay(top, clip))
         } else {
             1.0
         };
+        let opacity = ui.opacity();
         if t >= 1.0 {
             row(ui, index);
+            // A row may have dimmed itself as it arrived.
+            ui.set_opacity(opacity);
             continue;
         }
-        let opacity = ui.opacity();
         ui.multiply_opacity(t);
         let layer = ui.layer_id();
         let start = super::kit::motion::mark(ui.ctx(), layer);
@@ -431,6 +469,40 @@ pub fn virtual_rows(
         ui.allocate_space(vec2(width, (count - last) as f32 * row_height));
     }
     ui.spacing_mut().item_spacing = previous_spacing;
+}
+
+/// A name for this list that stays the same from frame to frame, by its order
+/// among the lists its parent draws.
+fn list_id(ui: &Ui) -> egui::Id {
+    let frame = ui.ctx().cumulative_frame_nr();
+    let key = ui.id().with("lists-this-frame");
+    let nth = ui.ctx().data_mut(|data| {
+        let entry = data.get_temp_mut_or_insert_with(key, || (frame, 0_u32));
+        if entry.0 != frame {
+            *entry = (frame, 0);
+        }
+        entry.1 += 1;
+        entry.1
+    });
+    ui.id().with(("row-list", nth))
+}
+
+/// How long after its page opened this list first drew rows, so that a list that
+/// had to load gets the same entrance when it comes.
+fn list_arrived_late(ctx: &egui::Context, list: egui::Id) -> f32 {
+    let Some(opened) = super::page_opened(ctx) else {
+        return 0.0;
+    };
+    let now = ctx.input(|input| input.time);
+    let key = list.with("arrived");
+    let first = ctx.data_mut(|data| {
+        let entry = data.get_temp_mut_or_insert_with(key, || (opened, now));
+        if entry.0 != opened {
+            *entry = (opened, now);
+        }
+        entry.1
+    });
+    (first - opened) as f32
 }
 
 /// What a list's rows ask of its gliding light this frame.
@@ -3425,6 +3497,11 @@ pub fn card(
             .clicked();
         }
     }
+    if response.clicked() && !play {
+        let image_rect = Rect::from_min_size(rect.min + vec2(PAD, PAD), Vec2::splat(image_size));
+        let radius = if circular { image_size / 2.0 } else { 6.0 };
+        super::kit::shared::launch(ui.ctx(), image, image_rect, radius);
+    }
     super::kit::motion::ripple(ui, &response, rect, palette.text);
     crate::autoscroll::row(ui, &response);
     theme::focus_ring(ui, &response);
@@ -3505,6 +3582,58 @@ fn skeleton_share(index: usize, line: usize) -> f32 {
 /// Placeholder rows shaped like the songs a page is loading, in place of a
 /// spinner (#674): a cover and two lines each. They are drawn once and do
 /// not move, so loading asks for no frames. Screen readers hear Loading….
+/// A page's title, its words rising into place one after another as the page
+/// opens, each out of a mask at its own foot. Afterwards it is ordinary text.
+pub fn title_in_words(ui: &mut Ui, title: &str, font: egui::FontId, color: Color32) {
+    const BEHIND: f32 = 0.05;
+    let words: Vec<&str> = title.split_whitespace().collect();
+    let last = super::entering(
+        ui.ctx(),
+        0.04 + BEHIND * words.len().saturating_sub(1) as f32,
+    );
+    if last >= 1.0 || crate::bidi::is_rtl(title) {
+        theme::text(ui, title, font, color);
+        return;
+    }
+    let whole = crate::bidi::layout_line(ui.painter(), title, font.clone(), color);
+    let (rect, response) = ui.allocate_exact_size(whole.size(), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, title));
+    let space = ui
+        .painter()
+        .layout_no_wrap(" ".to_string(), font.clone(), color)
+        .size()
+        .x;
+    let painter = ui
+        .painter()
+        .with_clip_rect(rect.expand2(vec2(4.0, 0.0)).intersect(ui.clip_rect()));
+    let mut x = rect.left();
+    for (index, word) in words.iter().enumerate() {
+        let t = super::entering(ui.ctx(), 0.04 + BEHIND * index as f32);
+        let galley = painter.layout_no_wrap((*word).to_string(), font.clone(), color);
+        let width = galley.size().x;
+        painter.galley(
+            pos2(x, rect.top() + (1.0 - t) * rect.height()),
+            galley,
+            color.gamma_multiply(t),
+        );
+        x += width + space;
+    }
+}
+
+/// A soft light travelling across a skeleton, while there is something to wait
+/// for. Nothing moves when less motion is asked for.
+fn skeleton_wave(ui: &Ui, rect: Rect, palette: &Palette) {
+    if crate::motion::seconds(ui.ctx(), 1.0) <= 0.0 {
+        return;
+    }
+    let t = (ui.input(|input| input.time) * 0.55).fract() as f32;
+    let shine = palette
+        .text
+        .gamma_multiply(if palette.dark { 0.05 } else { 0.08 });
+    super::kit::motion::glint(ui.painter(), rect, t, shine);
+    ui.ctx().request_repaint();
+}
+
 pub fn skeleton_rows(ui: &mut Ui, palette: &Palette, locale: Locale, count: usize) {
     let fill = skeleton_fill(palette);
     let (rect, response) = ui.allocate_exact_size(
@@ -3517,6 +3646,7 @@ pub fn skeleton_rows(ui: &mut Ui, palette: &Palette, locale: Locale, count: usiz
     if !ui.is_rect_visible(rect) {
         return;
     }
+    skeleton_wave(ui, rect, palette);
     let painter = ui.painter_at(rect);
     for index in 0..count {
         let top = rect.top() + theme::ROW_HEIGHT * index as f32;
@@ -3547,6 +3677,9 @@ pub fn skeleton_cards(ui: &mut Ui, palette: &Palette, locale: Locale, count: usi
     let height = PAD + CARD_ART + 10.0 + 14.0 + 6.0 + 10.0 + PAD;
     for index in 0..count {
         let (rect, response) = ui.allocate_exact_size(vec2(CARD_WIDTH, height), Sense::hover());
+        if ui.is_rect_visible(rect) {
+            skeleton_wave(ui, rect, palette);
+        }
         if index == 0 {
             response.widget_info(|| {
                 egui::WidgetInfo::labeled(

@@ -230,13 +230,30 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                     ui.allocate_exact_size(vec2(tile_width, TILE_HEIGHT), Sense::click());
                 if ui.is_rect_visible(rect) {
                     let hovered = super::pointer_over(ui, rect);
-                    let fill = if hovered {
-                        palette.surface_hover
-                    } else {
-                        palette.surface
-                    };
+                    let lit = super::kit::motion::toward(
+                        ui.ctx(),
+                        response.id.with("lit"),
+                        hovered,
+                        super::kit::motion::FEEDBACK,
+                    );
+                    let fill = super::blend(palette.surface, palette.surface_hover, lit);
                     ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+                    if let Some((pointer, strength)) =
+                        super::kit::motion::pointer_light(ui, response.id.with("light"), rect)
+                    {
+                        super::kit::motion::spotlight(
+                            ui.painter(),
+                            rect,
+                            pointer,
+                            130.0,
+                            palette.text.gamma_multiply(0.07 * strength),
+                        );
+                    }
+                    super::kit::motion::ripple(ui, &response, rect, palette.text);
                     let cover = Rect::from_min_size(rect.min, Vec2::splat(TILE_HEIGHT));
+                    if response.clicked() {
+                        super::kit::shared::launch(ui.ctx(), image.as_deref(), cover, 6.0);
+                    }
                     if *liked {
                         super::sidebar::liked_cover(ui, cover, 6.0);
                     } else {

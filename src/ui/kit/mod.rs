@@ -5,6 +5,7 @@
 pub mod flight;
 pub mod glass;
 pub mod motion;
+pub mod shared;
 pub mod source;
 pub mod tools;
 

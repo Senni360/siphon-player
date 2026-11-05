@@ -669,6 +669,25 @@ pub fn floating(app: &mut App, ui: &mut egui::Ui, area: Rect) {
 }
 
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
+    // The docked sidebar comes in from its edge when the app starts.
+    let arriving = super::kit::motion::arrival(
+        ui.ctx(),
+        egui::Id::new("sidebar-arrives"),
+        super::kit::motion::ENTER * 1.3,
+        0.0,
+    );
+    let layer = ui.layer_id();
+    let before = super::kit::motion::mark(ui.ctx(), layer);
+    docked(app, ui);
+    super::kit::motion::shift_since(
+        ui.ctx(),
+        layer,
+        before,
+        egui::vec2((arriving - 1.0) * 28.0, 0.0),
+    );
+}
+
+fn docked(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let expanded_art = has_expanded_art(app);
     let floating_art = app.settings.sidebar_grid && expanded_art;

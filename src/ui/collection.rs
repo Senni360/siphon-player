@@ -134,8 +134,19 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
             }
         }
         let radius = if hero.round { cover_size / 2.0 } else { 6.0 };
+        // As the page scrolls, the cover sits back and is left behind a little.
+        let scrolled = super::scrolled_page(ui.ctx());
+        let away = (scrolled / (cover_size + 60.0)).clamp(0.0, 1.0);
+        let rect = Rect::from_center_size(
+            rect.center() + vec2(0.0, scrolled.min(cover_size) * 0.22),
+            rect.size() * (1.0 - 0.14 * away),
+        );
+        ui.multiply_opacity(1.0 - 0.8 * away * away);
+        let handed_over = super::kit::shared::land(ui, &palette, rect, radius);
         widgets::paint_shadow(ui, &palette, rect, radius);
-        if hero.liked {
+        if handed_over {
+            // The cover pressed to come here is growing into this place.
+        } else if hero.liked {
             super::sidebar::liked_cover(ui, rect, radius);
         } else {
             widgets::paint_cover_with_thumbnail(
@@ -173,7 +184,7 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                 }
                 size -= 6.0;
             }
-            theme::text(ui, hero.title, theme::semibold(size), palette.text);
+            widgets::title_in_words(ui, hero.title, theme::semibold(size), palette.text);
             if let Some(description) = &hero.description
                 && !description.is_empty()
             {
@@ -932,11 +943,26 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
             } else {
                 gettext(locale, "Loading…")
             };
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(ui.id().with(("row-loading", row)), true));
             if placeholder_row(ui, &palette, locale, row_height, &label, retry) {
                 app.actions.push(Action::RetryWindow(table.page.clone()));
             }
             return;
         };
+        // A song that was still loading comes up where its placeholder stood.
+        // The list puts the opacity back after each row.
+        let loaded = ui.id().with(("row-loading", row));
+        if ui
+            .ctx()
+            .data_mut(|data| data.remove_temp::<bool>(loaded))
+            .is_some()
+        {
+            super::kit::motion::begin(ui.ctx(), loaded.with("in"), super::kit::motion::ENTER);
+        }
+        if let Some(t) = super::kit::motion::running(ui.ctx(), loaded.with("in")) {
+            ui.multiply_opacity(t);
+        }
         let local_index = table
             .pagination
             .and_then(|page| page.positions)
@@ -964,6 +990,17 @@ fn table_contents(app: &mut App, ui: &mut egui::Ui, table: Table<'_>) {
             },
             crate::motion::seconds(ui.ctx(), 0.12),
         );
+        // When the order changes, a row glides from its old place to its new
+        // one, wherever on screen that is; one from far off comes from the edge.
+        let place = row as f32 * row_height;
+        let shown = super::kit::motion::spring(
+            ui.ctx(),
+            ui.id().with(("table-place", actual_index)),
+            place,
+            super::kit::motion::FOLLOW,
+        );
+        let reach = ui.clip_rect().height();
+        let shift = shift + (shown - place).clamp(-reach, reach);
         let (response, asked) = widgets::track_row_response(
             ui,
             app,

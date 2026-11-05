@@ -663,6 +663,14 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                     .auto_shrink([false, false]),
                 egui::Vec2b::new(false, true),
                 |ui| {
+                    if ui
+                        .ctx()
+                        .data_mut(|data| data.remove_temp::<bool>(back_to_top_id()))
+                        .is_some()
+                    {
+                        let top = Rect::from_min_size(ui.max_rect().min, vec2(1.0, 1.0));
+                        ui.scroll_to_rect(top, Some(egui::Align::Min));
+                    }
                     if enter < 1.0 {
                         ui.multiply_opacity(0.2 + 0.8 * enter);
                     }
@@ -718,8 +726,17 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                 },
             );
             ui.set_clip_rect(whole);
-            ui.ctx()
-                .data_mut(|data| data.insert_temp(scrolled_id, scroll.state.offset.y));
+            ui.ctx().data_mut(|data| {
+                data.insert_temp(scrolled_id, scroll.state.offset.y);
+                data.insert_temp(Id::new("open-page-scrolled"), scroll.state.offset.y);
+            });
+            back_to_top(
+                ui,
+                scroll.inner_rect,
+                scroll.state.offset.y,
+                &palette,
+                app.locale,
+            );
             header_shadow(ui, scroll.inner_rect, scroll.state.offset.y, palette.dark);
             ui.painter().rect_stroke(
                 rect,
@@ -730,8 +747,70 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
         });
 }
 
+/// How far the open page is scrolled, as of the last frame.
+pub(crate) fn scrolled_page(ctx: &Context) -> f32 {
+    ctx.data(|data| data.get_temp::<f32>(Id::new("open-page-scrolled")))
+        .unwrap_or(0.0)
+}
+
+fn back_to_top_id() -> Id {
+    Id::new("page-back-to-top")
+}
+
+/// A long way down a page, a small round button drops in at its top to go back.
+fn back_to_top(
+    ui: &mut egui::Ui,
+    view: Rect,
+    scrolled: f32,
+    palette: &theme::Palette,
+    locale: crate::i18n::Locale,
+) {
+    let id = back_to_top_id().with("button");
+    let shown = kit::motion::spring(
+        ui.ctx(),
+        id.with("shown"),
+        if scrolled > 700.0 { 1.0 } else { 0.0 },
+        kit::motion::LIVELY,
+    );
+    if shown < 0.01 {
+        return;
+    }
+    let center = egui::pos2(view.center().x, view.top() + 24.0 - (1.0 - shown) * 44.0);
+    let rect = Rect::from_center_size(center, egui::Vec2::splat(36.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect).layout(
+        egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+    ));
+    child.set_opacity(shown.clamp(0.0, 1.0));
+    widgets::paint_shadow(&child, palette, rect, 18.0);
+    child.painter().circle(
+        center,
+        18.0,
+        palette.overlay,
+        Stroke::new(1.0, palette.outline),
+    );
+    let label = crate::i18n::gettext(locale, "Back to top");
+    if theme::icon_button(
+        &mut child,
+        Icon::ChevronUp,
+        18.0,
+        palette.text,
+        palette.text,
+        &label,
+    )
+    .clicked()
+    {
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(back_to_top_id(), true));
+    }
+}
+
 fn page_opened_id() -> Id {
     Id::new("page-opened-at")
+}
+
+/// When the open page was opened by navigating, on egui's clock.
+pub(crate) fn page_opened(ctx: &Context) -> Option<f64> {
+    ctx.data(|data| data.get_temp::<f64>(page_opened_id()))
 }
 
 /// Eased progress of something on the page entering `delay` seconds after
@@ -803,6 +882,12 @@ fn page_entrance(ctx: &Context, page: &Page, history_index: usize) -> (f32, f32)
         }
         None => 0.0,
     };
+    // The first page, once there are frames to see it by.
+    if ctx.cumulative_frame_nr() <= 2 && kit::motion::arrival(ctx, id.with("welcome"), 0.0, 0.0) < 1.0 {
+        kit::motion::begin(ctx, id.with("transition"), PAGE_ENTER * 1.3);
+        let now = ctx.input(|input| input.time);
+        ctx.data_mut(|data| data.insert_temp(page_opened_id(), now));
+    }
     ctx.data_mut(|data| data.insert_temp(id, (key, history_index, side)));
     let t = kit::motion::running(ctx, id.with("transition")).unwrap_or(1.0);
     (t, side)

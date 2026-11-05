@@ -585,6 +585,57 @@ pub fn focus_ring(ui: &egui::Ui, response: &Response) {
 /// centered layout to the box's top edge and the glyph lands off-center.
 pub const ICON_BUTTON_PAD: f32 = 12.0;
 
+/// What `icon` does when it is pointed at and pressed.
+fn icon_gesture(icon: Icon) -> crate::ui::kit::motion::Gesture {
+    use crate::ui::kit::motion::Gesture;
+    let turn = |hover_turn, press_turn| Gesture {
+        hover_turn,
+        press_turn,
+        ..Default::default()
+    };
+    let lean = |x, y| Gesture {
+        hover_move: (x, y),
+        ..Default::default()
+    };
+    match icon {
+        Icon::Settings => turn(40.0, 90.0),
+        Icon::Refresh | Icon::Repeat | Icon::Repeat1 => turn(16.0, 360.0),
+        Icon::Plus | Icon::CirclePlus | Icon::X | Icon::CircleX => turn(90.0, 0.0),
+        Icon::Sun | Icon::Moon => turn(24.0, 180.0),
+        Icon::Compass | Icon::Disc | Icon::Globe => turn(30.0, 0.0),
+        Icon::Search | Icon::Pencil | Icon::SquarePen => turn(-12.0, 0.0),
+        Icon::Pin | Icon::PinOff => turn(18.0, 0.0),
+        Icon::ChevronLeft | Icon::ArrowLeft => lean(-2.0, 0.0),
+        Icon::ChevronRight | Icon::ArrowRight | Icon::LogOut | Icon::ListEnd => lean(2.0, 0.0),
+        Icon::ChevronUp => lean(0.0, -2.0),
+        Icon::ChevronDown => lean(0.0, 2.0),
+        Icon::ExternalLink | Icon::Send => Gesture {
+            hover_move: (1.5, -1.5),
+            ..Default::default()
+        },
+        Icon::Mic => lean(0.0, -1.5),
+        Icon::Download => Gesture {
+            hover_move: (0.0, 1.5),
+            press_dip: 4.0,
+            ..Default::default()
+        },
+        Icon::Copy | Icon::ListPlus => Gesture {
+            press_dip: 3.0,
+            ..Default::default()
+        },
+        Icon::Shuffle => Gesture {
+            press_shake: 3.5,
+            ..Default::default()
+        },
+        Icon::Trash => Gesture {
+            hover_turn: -8.0,
+            press_shake: 2.5,
+            ..Default::default()
+        },
+        _ => Gesture::default(),
+    }
+}
+
 /// A frameless icon control whose colour lifts on hover.
 pub fn icon_button(
     ui: &mut egui::Ui,
@@ -624,7 +675,41 @@ pub fn icon_button(
             },
             crate::ui::kit::motion::LIVELY,
         );
-        paint_icon(ui, icon, rect, size * scale, tint);
+        use crate::ui::kit::motion;
+        let gesture = icon_gesture(icon);
+        if gesture == motion::Gesture::default() {
+            paint_icon(ui, icon, rect, size * scale, tint);
+        } else {
+            let hover = motion::spring(
+                ui.ctx(),
+                response.id.with("gesture-hover"),
+                if response.hovered() { 1.0 } else { 0.0 },
+                motion::LIVELY,
+            );
+            let press_id = response.id.with("gesture-press");
+            if response.clicked() {
+                let started = motion::Transition::at(
+                    ui.input(|input| input.time),
+                    crate::motion::seconds(ui.ctx(), motion::GESTURE),
+                );
+                ui.ctx()
+                    .data_mut(|data| data.insert_temp(press_id, started));
+            }
+            // The raw progress: the shake and dip have their own shapes.
+            let press = motion::running(ui.ctx(), press_id).map(motion::unease);
+            let (offset, angle) = motion::gesture_pose(gesture, hover, press);
+            let shown = size * scale;
+            let at = egui::Rect::from_center_size(
+                rect.center() + offset + play_glyph_offset(icon, shown),
+                Vec2::splat(shown),
+            );
+            let image = icon.image(tint, shown);
+            if angle == 0.0 {
+                image.paint_at(ui, at);
+            } else {
+                image.rotate(angle, Vec2::splat(0.5)).paint_at(ui, at);
+            }
+        }
     }
     focus_ring(ui, &response);
     if tooltip.is_empty() {
