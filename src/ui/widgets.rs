@@ -3930,7 +3930,7 @@ fn paged_cards(ui: &mut Ui, id: &str, add_contents: impl FnOnce(&mut Ui)) {
                 .max_rect(rect)
                 .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
         );
-        child.multiply_opacity((0.55 + 0.45 * lit).max(0.02));
+        child.multiply_opacity(0.85 + 0.15 * lit);
         paint_shadow(&child, &palette, rect, 22.0);
         if theme::circle_button(
             &mut child,
