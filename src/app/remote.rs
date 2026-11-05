@@ -295,7 +295,10 @@ impl App {
             Phone::SoundcloudLikes => self.ensure_loaded(Page::SoundCloudLikes),
             Phone::Artist { id } => self.ensure_loaded(Page::Artist(id.clone())),
             Phone::Source { uri } => self.ensure_loaded(Page::SoundCloud(uri.clone())),
-            Phone::Home => self.ask_for_you(),
+            Phone::Home => {
+                self.ask_for_you();
+                self.ask_artist_news();
+            }
             Phone::Lyrics => self.request_lyrics(),
             _ => {}
         }
@@ -328,6 +331,7 @@ impl App {
                     "picks": songs(shown.picks.iter().map(|pick| &pick.track)),
                     "following": songs(&shown.following),
                     "recent": songs(self.recents_view.iter().take(12).map(|play| &play.track)),
+                    "news": songs(&self.artist_news),
                     "made_for_you": made,
                 })
             }

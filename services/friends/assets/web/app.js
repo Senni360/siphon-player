@@ -764,6 +764,7 @@ function homeScreen() {
       h('div', { class: 'cards' }, rest.slice(0, 8).map((song, index) => card(song.name, song.artists.join(', '), song.image, () => playFrom(picks, index + 1), song.uri))),
       found.recent?.length ? [h('h2', { class: 'section', text: 'Jump back in' }), rows(found.recent, 5)] : null,
       found.made_for_you?.length ? [h('h2', { class: 'section', text: 'Made for you' }), h('div', { class: 'cards' }, found.made_for_you.slice(0, 6).map(list => card(list.name, null, list.image, () => go({ page: 'list', kind: 'playlist', id: list.id }))))] : null,
+      section('New on SoundCloud from artists you follow', found.news, ''),
       section('New from who you follow', found.following),
     ];
   }, body);
