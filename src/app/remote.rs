@@ -22,12 +22,66 @@ pub struct Remote {
     last_state: Option<(Snapshot, Instant)>,
     last_try: Option<Instant>,
     /// Questions whose answers are still loading.
-    waiting: Vec<(String, Phone, Instant)>,
+    pub(super) waiting: Vec<(String, Phone, Instant)>,
     /// A code to show until it runs out, or why there isn't one.
     pub code: Option<Result<(String, Instant), String>>,
     pub asking_code: bool,
     /// Commands that have arrived, carried out on the next frame.
     incoming: Vec<Incoming>,
+}
+
+fn is_question(command: &Phone) -> bool {
+    matches!(
+        command,
+        Phone::Home
+            | Phone::Library
+            | Phone::Playlist { .. }
+            | Phone::Album { .. }
+            | Phone::Liked
+            | Phone::SoundcloudLikes
+            | Phone::YoutubeLikes
+            | Phone::Artist { .. }
+            | Phone::Source { .. }
+    )
+}
+
+/// What pressing something on the phone comes to here. Anything it can't ask for,
+/// such as a link that isn't a song, comes to nothing.
+pub(super) fn phone_action(command: &Phone) -> Option<Action> {
+    match command {
+        Phone::Toggle => Some(Action::TogglePlay),
+        Phone::Next => Some(Action::Next),
+        Phone::Previous => Some(Action::Previous),
+        Phone::Seek { ms } => Some(Action::Seek(*ms)),
+        Phone::Volume { percent } => Some(Action::SetVolume((*percent).min(100))),
+        Phone::Shuffle => Some(Action::ToggleShuffle),
+        Phone::Repeat => Some(Action::CycleRepeat),
+        Phone::Like { uri } if allowed_uri(uri) => Some(Action::ToggleSaved(uri.clone())),
+        Phone::Play { uris, index } => {
+            // The index is into what the phone sent, so it has to survive the filter.
+            let wanted = uris.get(*index as usize)?;
+            let uris: Vec<String> = uris
+                .iter()
+                .filter(|uri| allowed_uri(uri))
+                .cloned()
+                .collect();
+            let index = uris.iter().position(|uri| uri == wanted)? as u32;
+            Some(Action::PlayUris { uris, index })
+        }
+        Phone::PlayContext { uri } if allowed_uri(uri) => Some(Action::PlayContext {
+            uri: uri.clone(),
+            offset_uri: None,
+            offset_index: None,
+        }),
+        Phone::Queue { uri } if allowed_uri(uri) => Some(Action::AddToQueue {
+            uri: uri.clone(),
+            label: String::new(),
+        }),
+        // Only a link the app can play: nothing here opens a browser over there.
+        Phone::PlayLink { url } => (url.len() <= 2_000 && crate::link::parse(url).is_some())
+            .then(|| crate::ui::group::play_action(url)),
+        _ => None,
+    }
 }
 
 impl App {
@@ -169,48 +223,16 @@ impl App {
             .send(Command::Remote(RemoteRequest::Reply { id, value }));
     }
 
-    fn remote_command(&mut self, incoming: Incoming, ctx: &egui::Context) {
+    pub(super) fn remote_command(&mut self, incoming: Incoming, ctx: &egui::Context) {
         let Incoming { id, command } = incoming;
         let action = match &command {
-            Phone::Toggle => Some(Action::TogglePlay),
-            Phone::Next => Some(Action::Next),
-            Phone::Previous => Some(Action::Previous),
-            Phone::Seek { ms } => Some(Action::Seek(*ms)),
-            Phone::Volume { percent } => Some(Action::SetVolume((*percent).min(100))),
-            Phone::Shuffle => Some(Action::ToggleShuffle),
-            Phone::Repeat => Some(Action::CycleRepeat),
-            Phone::Like { uri } if allowed_uri(uri) => Some(Action::ToggleSaved(uri.clone())),
-            Phone::Play { uris, index } => {
-                let uris: Vec<String> = uris
-                    .iter()
-                    .filter(|uri| allowed_uri(uri))
-                    .cloned()
-                    .collect();
-                (!uris.is_empty()).then_some(Action::PlayUris {
-                    uris,
-                    index: *index,
-                })
-            }
-            Phone::PlayContext { uri } if allowed_uri(uri) => Some(Action::PlayContext {
-                uri: uri.clone(),
-                offset_uri: None,
-                offset_index: None,
-            }),
-            Phone::Queue { uri } if allowed_uri(uri) => Some(Action::AddToQueue {
-                uri: uri.clone(),
-                label: String::new(),
-            }),
-            // Only a link the app can play: nothing here opens a browser over there.
-            Phone::PlayLink { url } => (url.len() <= 2_000 && crate::link::parse(url).is_some())
-                .then(|| crate::ui::group::play_action(url)),
-            Phone::Like { .. } | Phone::PlayContext { .. } | Phone::Queue { .. } => None,
             Phone::Search { query } => {
                 let query = query.trim().chars().take(200).collect();
                 self.backend
                     .send(Command::Remote(RemoteRequest::Search { id, query }));
                 return;
             }
-            question => {
+            question if is_question(question) => {
                 self.remote_prepare(question);
                 match self.remote_answer(question) {
                     Some(value) => self.remote_reply(id, value),
@@ -221,6 +243,7 @@ impl App {
                 }
                 return;
             }
+            pressed => phone_action(pressed),
         };
         if let Some(action) = action {
             // Applied here and now: the phone's next look shows the result.

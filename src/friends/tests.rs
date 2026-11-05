@@ -450,6 +450,79 @@ async fn joining_stops_before_network_when_previous_identity_cannot_be_revoked()
 
 /// Explicitly opt in against the disposable local Node runner, never the
 /// production group. Does not load or write any real app credentials.
+/// What a phone does to a computer, over the real service: link, send, answer.
+#[tokio::test]
+#[ignore = "requires the local friends service on 127.0.0.1:8787"]
+async fn local_service_phone_round_trip() {
+    let raw = reqwest::Client::builder().no_proxy().build().unwrap();
+    let client = Client::new(Http::new(raw.clone()), "http://127.0.0.1:8787/api").unwrap();
+    let computer = client
+        .join("siphon-local-test-invite", "Rust phone test")
+        .await
+        .unwrap();
+    let code = client.link_start(&computer, Some("abc")).await.unwrap();
+    let base = "http://127.0.0.1:8787/api";
+    let claimed: serde_json::Value = raw
+        .post(format!("{base}/link/claim"))
+        .json(&json!({ "code": code, "device": "Phone" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(claimed["user_id"], computer.user_id.as_str());
+    let phone = claimed["secret"].as_str().unwrap();
+    let id = "11111111-1111-4111-8111-111111111111";
+
+    assert!(!client.remote_poll(&computer).await.unwrap().wanted);
+    raw.post(format!("{base}/live/remote/send"))
+        .bearer_auth(phone)
+        .json(&json!({ "id": id, "kind": "artist", "target": "art0" }))
+        .send()
+        .await
+        .unwrap();
+    let polled = client.remote_poll(&computer).await.unwrap();
+    assert!(polled.wanted);
+    let incoming: crate::remote::Incoming =
+        serde_json::from_value(polled.commands[0].clone()).unwrap();
+    assert_eq!(incoming.id, id);
+    assert_eq!(
+        incoming.command,
+        crate::remote::Command::Artist { id: "art0".into() }
+    );
+
+    client
+        .remote_state(&computer, &json!({ "playing": true }))
+        .await
+        .unwrap();
+    let shown: serde_json::Value = raw
+        .get(format!("{base}/live/remote/state"))
+        .bearer_auth(phone)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(shown["state"]["playing"], true);
+
+    client
+        .remote_reply(&computer, id, &json!({ "name": "Artist" }))
+        .await
+        .unwrap();
+    let reply: serde_json::Value = raw
+        .get(format!("{base}/live/remote/reply/{id}"))
+        .bearer_auth(phone)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(reply["reply"]["name"], "Artist");
+}
+
 #[tokio::test]
 #[ignore = "requires the local friends service on 127.0.0.1:8787"]
 async fn local_service_round_trip() {

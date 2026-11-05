@@ -36249,5 +36249,6 @@ mod tests {
     }
     include!("app/youtube_tests.rs");
     include!("app/artist_sources_tests.rs");
+    include!("app/remote_tests.rs");
     include!("app/hybrid_reliability_tests.rs");
 }
