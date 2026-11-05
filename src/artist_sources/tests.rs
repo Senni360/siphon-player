@@ -489,6 +489,36 @@ fn an_upload_reads_as_a_song_by_who_the_title_says() {
 }
 
 #[test]
+fn only_sets_spotify_lacks_are_listed_with_albums_first() {
+    let set = |id: u64, title: &str, is_album: bool, songs: u32, public: bool| models::Playlist {
+        id,
+        title: title.to_owned(),
+        description: None,
+        artwork_url: None,
+        permalink_url: None,
+        user: None,
+        public: Some(public),
+        is_album: Some(is_album),
+        track_count: Some(songs),
+        tracks: Vec::new(),
+    };
+    let catalogue = Catalogue::new("slayr", ["FABULA NOVA"]);
+    let kept = sort_sets(
+        &catalogue,
+        vec![
+            set(1, "old loosies", false, 8, true),
+            set(2, "FABULA NOVA", true, 14, true),
+            set(3, "lost tape", true, 6, true),
+            set(6, "Lost Tape", true, 6, true),
+            set(4, "one song", false, 1, true),
+            set(5, "private", true, 9, false),
+        ],
+    );
+    let names: Vec<_> = kept.iter().map(|set| set.name.as_str()).collect();
+    assert_eq!(names, ["lost tape", "old loosies"]);
+}
+
+#[test]
 fn an_older_saved_finding_without_the_newer_lists_still_reads() {
     let found: Finding = serde_json::from_str(r#"{"on_spotify":3}"#).unwrap();
     assert_eq!(found.on_spotify, 3);

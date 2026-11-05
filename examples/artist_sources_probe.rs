@@ -35,6 +35,9 @@ fn show(side: &str, finding: &Finding, took: std::time::Duration) {
         );
     }
     println!("alternate songs: {}", finding.alternate_songs.len());
+    for set in &finding.sets {
+        println!("  set: {} ({:?} songs)", set.name, set.songs);
+    }
     println!("unreleased: {}", finding.unreleased.len());
     for track in finding.unreleased.iter().take(14) {
         println!(

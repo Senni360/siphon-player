@@ -24,6 +24,7 @@ const YOUTUBE_LOOKS: usize = 2;
 const SOUNDCLOUD_UPLOADS: u32 = 100;
 const EDIT_SEARCH: u32 = 30;
 const BEYOND_SEARCH: u32 = 30;
+const SETS_READ: u32 = 50;
 const MOST_CANDIDATES: usize = 4;
 const MOST_EDITS: usize = 30;
 const MOST_UNRELEASED: usize = 60;
@@ -104,6 +105,9 @@ pub struct Finding {
     /// Songs by others that credit this artist as producer.
     #[serde(default)]
     pub produced: Vec<Track>,
+    /// Their SoundCloud sets and mixtapes that Spotify doesn't have.
+    #[serde(default)]
+    pub sets: Vec<Set>,
     /// Other accounts the artist posts on, and what's there that Spotify lacks.
     #[serde(default)]
     pub alternates: Vec<Account>,
@@ -111,6 +115,17 @@ pub struct Finding {
     pub alternate_songs: Vec<Track>,
     #[serde(default)]
     pub error: Option<String>,
+}
+
+/// A set or mixtape on an artist's account.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Set {
+    pub uri: String,
+    pub name: String,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default)]
+    pub songs: Option<u32>,
 }
 
 /// What the listener or a search settled for one source.
@@ -1100,6 +1115,33 @@ fn sounds_like_a_song(track: &Track, artist: &str) -> bool {
     tagged || named || (SONG_MS.contains(&track.duration_ms) && !track.name.contains(':'))
 }
 
+/// An artist's sets that aren't a release Spotify has under that name, albums first.
+pub fn sort_sets(catalogue: &Catalogue, sets: Vec<models::Playlist>) -> Vec<Set> {
+    let mut seen = HashSet::new();
+    let mut kept: Vec<models::Playlist> = sets
+        .into_iter()
+        .filter(|set| {
+            set.public != Some(false)
+                && set.track_count.unwrap_or(1) > 1
+                && !set.title.trim().is_empty()
+                && !catalogue.has(&set.title)
+                && seen.insert(tokens(&set.title).concat())
+        })
+        .collect();
+    kept.sort_by_key(|set| std::cmp::Reverse(set.is_album.unwrap_or(false)));
+    kept.into_iter()
+        .map(|set| {
+            let converted = set.to_playlist();
+            Set {
+                uri: converted.uri.clone(),
+                name: converted.name.clone(),
+                image: crate::api::models::pick_image(&converted.images, 300).map(str::to_owned),
+                songs: set.track_count,
+            }
+        })
+        .collect()
+}
+
 /// Sorts an artist's own uploads: what Spotify lacks, their edits, and how many
 /// Spotify has. The most played come first, and a song uploaded twice appears once.
 pub fn sort_uploads(
@@ -1302,6 +1344,14 @@ pub async fn soundcloud(
             ..Default::default()
         };
     };
+    let sets = match account.id.parse() {
+        Ok(id) => client
+            .user_playlists(id, SETS_READ, 0)
+            .await
+            .map(|page| sort_sets(catalogue, page.collection))
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
     let known = catalogue.with_uploads(&uploads);
     let (exclusives, mut edits, on_spotify) =
         sort_uploads(artist, catalogue, uploads, Side::SoundCloud);
@@ -1328,6 +1378,7 @@ pub async fn soundcloud(
         exclusives,
         edits,
         on_spotify,
+        sets,
         ..Default::default()
     }
 }

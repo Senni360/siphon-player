@@ -129,7 +129,7 @@ name and reads the likeliest accounts' uploads, with the same requests their own
 make: no account is needed and only the artist's name is sent. It compares those
 titles with the artist's songs, whose release listings it reads over the playback
 session. Nothing replaces a Spotify song; a song only on SoundCloud plays from there.
-It also searches for the artist's snippets, leaks and scrapped songs, reads through the
+It lists their SoundCloud sets that aren't a Spotify release. It also searches for the artist's snippets, leaks and scrapped songs, reads through the
 few accounts that keep posting them, and looks for songs crediting the artist as
 producer in their titles (Spotify has no such list). From the artist's SoundCloud account
 it reads their bio, reposts and followings to find another account they post on, which

@@ -2166,6 +2166,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             ui.add_space(6.0);
             let mut actions = Vec::new();
             super::group_account::link_a_phone(app, ui, &mut actions);
+            super::group_account::linked_devices(app, ui, &mut actions);
             app.actions.extend(actions);
         });
     }

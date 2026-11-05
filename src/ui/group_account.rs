@@ -17,6 +17,15 @@ use super::group::{card, field};
 pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
     let palette = app.palette;
     let locale = app.locale;
+    if app.phone.watched {
+        theme::text(
+            ui,
+            gettext(locale, "Your phone is connected."),
+            theme::medium(13.0),
+            palette.text,
+        );
+        return;
+    }
     let left = match &app.phone.code {
         Some(Ok((code, made))) => crate::app::remote::CODE_LASTS
             .checked_sub(made.elapsed())
@@ -66,6 +75,30 @@ pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
         && !asking
     {
         actions.push(Action::LinkPhone);
+    }
+}
+
+/// The other devices on this account, to sign out one at a time.
+pub(super) fn linked_devices(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let Some(account) = &app.friends_feed.account else {
+        return;
+    };
+    for device in account.devices.iter().filter(|device| !device.current) {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            theme::text(
+                ui,
+                app.private_text(&device.name),
+                theme::regular(13.0),
+                palette.secondary,
+            );
+            if theme::soft_button(ui, &palette, None, &gettext(locale, "Sign out"), false).clicked()
+            {
+                actions.push(account_op(Op::RemoveDevice(device.id.clone())));
+            }
+        });
     }
 }
 

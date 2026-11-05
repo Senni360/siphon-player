@@ -715,6 +715,16 @@ function card(title, by, image, onclick, uri) {
   return h('button', { class: 'card', onclick }, art(image, ''), h('span', { class: `name${uri ? ` ${sourceOf(uri)}` : ''}`, text: title }), by && h('span', { class: 'by', text: by }));
 }
 
+/** Once, a tip for keeping Encore on the home screen, where it opens like an app. */
+function installTip() {
+  const installed = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (installed || localStorage.getItem('encore.tip')) return null;
+  const how = /iPhone|iPad/.test(navigator.userAgent) ? 'Press Share, then Add to Home Screen.' : "Open your browser's menu, then Add to Home screen.";
+  const tip = h('div', { class: 'banner' }, h('div', {}, h('b', { text: 'Keep Encore on your home screen' }), how),
+    h('button', { class: 'tip-close', 'aria-label': 'Dismiss', onclick: () => { localStorage.setItem('encore.tip', '1'); tip.remove(); } }, '×'));
+  return tip;
+}
+
 function homeScreen() {
   const body = h('div');
   load(async () => {
@@ -732,7 +742,7 @@ function homeScreen() {
       section('New from who you follow', found.following),
     ];
   }, body);
-  return [h('h1', { class: 'title', text: greeting() }), body];
+  return [installTip(), h('h1', { class: 'title', text: greeting() }), body];
 }
 function greeting() {
   const hour = new Date().getHours();
@@ -859,6 +869,7 @@ function artistScreen() {
         art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] }))))) : null,
       section('Popular', found.popular, ''),
       section('Not on Spotify', found.not_on_spotify),
+      found.sets?.length ? [h('h2', { class: 'section', text: 'Sets and mixtapes' }), h('p', { class: 'note', text: 'On SoundCloud' }), h('div', { class: 'cards' }, found.sets.slice(0, 8).map(set => card(set.name, set.songs ? `${set.songs} songs` : null, set.image, () => go({ page: 'list', kind: 'source', uri: set.uri }))))] : null,
       found.also_as?.length ? section(`Also posts as ${found.also_as.join(', ')}`, found.alternate) : null,
       found.albums?.length ? [h('h2', { class: 'section', text: 'Discography' }), h('div', { class: 'cards' }, found.albums.slice(0, 8).map(album => card(album.name, album.year, album.image, () => go({ page: 'list', kind: 'album', id: album.id }))))] : null,
       section(`Produced by ${found.name}`, found.produced),

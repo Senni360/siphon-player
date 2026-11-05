@@ -1208,6 +1208,8 @@ pub struct ArtistSources {
     pub produced: Vec<Track>,
     /// Accounts that keep posting their unreleased songs.
     pub archives: Vec<crate::artist_sources::Account>,
+    /// Their sets and mixtapes that Spotify lacks.
+    pub sets: Vec<crate::artist_sources::Set>,
     /// Other accounts they post on themselves, and what's on them.
     pub alternates: Vec<crate::artist_sources::Account>,
     pub alternate_songs: Vec<Track>,
@@ -1276,6 +1278,7 @@ impl ArtistSources {
             [&produced[0][..], &produced[1][..]],
         ));
         self.archives = archives;
+        self.sets = sound.map(|found| found.sets.clone()).unwrap_or_default();
         // Songs on their other accounts are theirs, so they aren't also listed as
         // something someone else posted or that they produced for someone.
         let alternate = sound

@@ -484,6 +484,7 @@ impl App {
             "not_on_spotify": songs(&sources.songs),
             "also_as": sources.alternates.iter().map(|account| &account.name).collect::<Vec<_>>(),
             "alternate": songs(&sources.alternate_songs),
+            "sets": sources.sets,
             "produced": songs(&sources.produced),
             "unreleased": songs(&sources.unreleased),
             "edits": songs(&sources.edits),

@@ -117,6 +117,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
             ui.add_space(20.0);
 
             elsewhere_songs(app, ui, id, &page);
+            elsewhere_sets(app, ui, &page.sources);
 
             // Discography.
             theme::section_title(ui, &palette, &gettext(locale, "Discography"));
@@ -945,6 +946,40 @@ fn archives_row(app: &mut App, ui: &mut egui::Ui, sources: &crate::model::Artist
             }
         }
     });
+}
+
+/// Their sets and mixtapes that aren't on Spotify.
+fn elsewhere_sets(app: &mut App, ui: &mut egui::Ui, sources: &crate::model::ArtistSources) {
+    if sources.sets.is_empty() {
+        return;
+    }
+    let palette = app.palette;
+    let locale = app.locale;
+    theme::section_title(ui, &palette, &gettext(locale, "Sets and mixtapes"));
+    theme::subtle(ui, &palette, &gettext(locale, "On SoundCloud"));
+    ui.add_space(6.0);
+    widgets::grid(ui, |ui| {
+        for set in &sources.sets {
+            let playing_here = app.playing_context_uri().as_deref() == Some(set.uri.as_str());
+            let songs = set.songs.map(|count| {
+                ngettext(locale, "{count} song", "{count} songs", count)
+                    .replace("{count}", &count.to_string())
+            });
+            let card = widgets::card(
+                ui,
+                app,
+                set.image.as_deref(),
+                &set.name,
+                songs.as_deref().unwrap_or_default(),
+                widgets::CardCover::square(playing_here && app.believed_playing()),
+            );
+            if card.clicked || card.play {
+                app.actions
+                    .push(Action::Open(Page::SoundCloud(set.uri.clone())));
+            }
+        }
+    });
+    ui.add_space(20.0);
 }
 
 fn elsewhere_list(
