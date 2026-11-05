@@ -147,16 +147,23 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     }
 }
 
-/// YouTube under the other sources, where its filter applies.
+/// YouTube under the other sources, where its filter applies, and then Spotify's
+/// podcasts, at the very foot of the page.
 fn youtube_brief(app: &mut App, ui: &mut egui::Ui) {
-    if !SearchSource::YouTube.supports(app.search.filter) {
-        return;
-    }
     let palette = app.palette;
-    ui.add_space(16.0);
-    theme::section_title(ui, &palette, &gettext(app.locale, "YouTube"));
-    ui.add_space(8.0);
-    super::source_page::youtube_results(app, ui, true);
+    if SearchSource::YouTube.supports(app.search.filter) {
+        ui.add_space(16.0);
+        theme::section_title(ui, &palette, &gettext(app.locale, "YouTube"));
+        ui.add_space(8.0);
+        super::source_page::youtube_results(app, ui, true);
+    }
+    if app.search.filter == SearchFilter::All
+        && let Loadable::Loaded(results) = &app.search.results
+    {
+        let results = results.clone();
+        ui.add_space(16.0);
+        podcasts_tail(app, ui, &results);
+    }
 }
 
 fn spotify(app: &mut App, ui: &mut egui::Ui) {
@@ -668,6 +675,15 @@ fn all(app: &mut App, ui: &mut egui::Ui, results: &SearchResults) {
     shelf_artists(app, ui, results);
     shelf_albums(app, ui, results);
     shelf_playlists(app, ui, results);
+    // With every source showing, podcasts wait below all of them.
+    if app.search.source != SearchSource::All {
+        podcasts_tail(app, ui, results);
+    }
+}
+
+fn podcasts_tail(app: &mut App, ui: &mut egui::Ui, results: &SearchResults) {
+    let palette = app.palette;
+    let locale = app.locale;
     shelf_shows(app, ui, results);
     if results
         .episodes

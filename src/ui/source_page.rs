@@ -650,8 +650,11 @@ fn video_skeleton(app: &App, ui: &mut Ui) {
 
 /// How many videos fit across, and how wide each is.
 fn video_columns(width: f32) -> (usize, f32) {
-    let columns =
-        (((width + VIDEO_GAP) / (VIDEO_MIN_WIDTH + VIDEO_GAP)).floor() as usize).clamp(1, 8);
+    columns_of(width, VIDEO_MIN_WIDTH)
+}
+
+fn columns_of(width: f32, least: f32) -> (usize, f32) {
+    let columns = (((width + VIDEO_GAP) / (least + VIDEO_GAP)).floor() as usize).clamp(1, 8);
     let each = (width - VIDEO_GAP * (columns as f32 - 1.0)) / columns as f32;
     (columns, each)
 }
@@ -667,11 +670,36 @@ fn video_grid(app: &mut App, ui: &mut Ui, tracks: &[Track], page: &Page, can_loa
             ui.spacing_mut().item_spacing.x = VIDEO_GAP;
             let first = row * columns;
             for (offset, track) in tracks.iter().skip(first).take(columns).enumerate() {
-                video_card(app, ui, track, &uris, first + offset, each);
+                video_card(app, ui, track, &uris, first + offset, each, 9.0 / 16.0);
             }
         });
     });
     widgets::load_more_when_near_end(ui, app, page.clone(), can_load);
+}
+
+/// Songs of any source as square cards that fit the page, in at most `rows` rows.
+/// What doesn't fit stays out; there is nothing to scroll sideways.
+pub(super) fn song_cards(app: &mut App, ui: &mut Ui, tracks: &[Track], rows: usize) {
+    let (columns, each) = columns_of(ui.available_width(), 168.0);
+    let shown = &tracks[..tracks.len().min(columns * rows)];
+    let uris = tracks_uris(shown);
+    let height = each + VIDEO_TEXT + VIDEO_GAP;
+    widgets::virtual_rows(ui, shown.len().div_ceil(columns), height, |ui, row| {
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = VIDEO_GAP;
+            let first = row * columns;
+            for (offset, track) in shown.iter().skip(first).take(columns).enumerate() {
+                video_card(app, ui, track, &uris, first + offset, each, 1.0);
+            }
+        });
+    });
+}
+
+/// Videos as wide cards that fit the page, in at most `rows` rows.
+pub(super) fn video_cards(app: &mut App, ui: &mut Ui, tracks: &[Track], rows: usize) {
+    let (columns, _) = video_columns(ui.available_width());
+    let shown = &tracks[..tracks.len().min(columns * rows)];
+    video_grid(app, ui, shown, &Page::Home, false);
 }
 
 /// A compact count, as YouTube shows views.
@@ -686,10 +714,11 @@ fn video_card(
     uris: &[String],
     index: usize,
     width: f32,
+    aspect: f32,
 ) {
     let palette = app.palette;
     let locale = app.locale;
-    let thumb_height = width * 9.0 / 16.0;
+    let thumb_height = width * aspect;
     let (rect, response) =
         ui.allocate_exact_size(vec2(width, thumb_height + VIDEO_TEXT), Sense::click());
     response.widget_info(|| {
@@ -821,9 +850,9 @@ fn video_card(
             Color32::WHITE,
             Color32::WHITE,
             &if saved {
-                gettext(locale, "Remove from YouTube Likes")
+                gettext(locale, "Remove from your likes")
             } else {
-                gettext(locale, "Add to YouTube Likes")
+                gettext(locale, "Add to your likes")
             },
         )
         .clicked()

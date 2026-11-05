@@ -11,7 +11,9 @@
 //! and uploader names are all that leave this computer.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{OnceLock, RwLock};
+#[cfg(not(test))]
+use std::sync::OnceLock;
+use std::sync::RwLock;
 
 use serde::{Deserialize, Serialize};
 
@@ -55,9 +57,19 @@ struct Readings {
     dirty: bool,
 }
 
+#[cfg(not(test))]
 fn readings() -> &'static RwLock<Readings> {
     static READINGS: OnceLock<RwLock<Readings>> = OnceLock::new();
     READINGS.get_or_init(Default::default)
+}
+
+/// Each test thread has its own, or another test's frames would empty its queue.
+#[cfg(test)]
+fn readings() -> &'static RwLock<Readings> {
+    thread_local! {
+        static READINGS: &'static RwLock<Readings> = Box::leak(Box::default());
+    }
+    READINGS.with(|readings| *readings)
 }
 
 const SEPARATORS: [&str; 6] = [" - ", " – ", " — ", " | ", " // ", " ~ "];

@@ -21,23 +21,6 @@ const GAP: f32 = 12.0;
 pub fn show(app: &mut App, ui: &mut Ui) {
     let palette = app.palette;
     let locale = app.locale;
-    ui.horizontal(|ui| {
-        theme::section_title(ui, &palette, &gettext(locale, "From the group"));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if theme::link(
-                ui,
-                gettext(locale, "Open group"),
-                theme::regular(13.0),
-                palette.secondary,
-            )
-            .clicked()
-            {
-                app.actions.push(Action::Open(crate::model::Page::Group));
-            }
-        });
-    });
-    ui.add_space(4.0);
-
     let feed = &app.friends_feed;
     if feed.profile.is_none() {
         let join = message(
@@ -83,7 +66,44 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         return;
     }
 
-    let posts: Vec<Post> = feed.picks(SHOWN).into_iter().cloned().collect();
+    // The first time, what's already there isn't new; what comes next is.
+    if super::seen::first_visit(ui.ctx()) {
+        for post in &feed.posts {
+            super::seen::mark(ui.ctx(), &post.id, post.replies.len() as u32);
+        }
+        for song in &feed.shared_songs {
+            super::seen::mark(ui.ctx(), song.uri().as_str(), 0);
+        }
+        return;
+    }
+    // Home holds what hasn't been looked at. A share comes back when a reply does.
+    let posts: Vec<Post> = feed
+        .picks(usize::MAX)
+        .into_iter()
+        .filter(|post| super::seen::is_new(ui.ctx(), &post.id, post.replies.len() as u32))
+        .take(SHOWN)
+        .cloned()
+        .collect();
+    if posts.is_empty() {
+        return;
+    }
+    ui.horizontal(|ui| {
+        theme::section_title(ui, &palette, &gettext(locale, "From the group"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if theme::link(
+                ui,
+                gettext(locale, "Open group"),
+                theme::regular(13.0),
+                palette.secondary,
+            )
+            .clicked()
+            {
+                app.actions.push(Action::Open(crate::model::Page::Group));
+            }
+        });
+    });
+    ui.add_space(4.0);
+
     let width = ui.available_width();
     let columns = if width > 900.0 { SHOWN } else { 2 }.min(posts.len());
     let card_width = (width - GAP * (columns as f32 - 1.0)) / columns as f32;
@@ -102,6 +122,19 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         );
         let rect = rect.translate(vec2(0.0, (1.0 - super::kit::motion::ease(arrive)) * 10.0));
         card(app, ui, rect, post, arrive);
+        // Played from here, it has been looked at.
+        if app
+            .now_playing()
+            .is_some_and(|now| post.item.uri.as_deref() == Some(now.uri.as_str()))
+        {
+            super::seen::mark(ui.ctx(), &post.id, post.replies.len() as u32);
+        }
+        super::seen::badge(
+            ui.painter(),
+            rect.right_top() + vec2(-14.0, 14.0),
+            app.palette.text,
+            app.palette.window,
+        );
     }
     ui.add_space(20.0);
 }

@@ -142,6 +142,19 @@ pub fn search_section(app: &mut App, ui: &mut Ui) {
 }
 
 /// Files friends put up lately, so a new one doesn't wait to be found in a tab.
+/// Whether friends shared a file here that hasn't been looked at.
+pub(super) fn any_new(app: &App, ctx: &egui::Context) -> bool {
+    let me = app
+        .friends_feed
+        .profile
+        .as_ref()
+        .map_or("", |me| me.user_id.as_str());
+    app.friends_feed
+        .shared_songs
+        .iter()
+        .any(|song| song.by != me && super::seen::is_new(ctx, song.uri().as_str(), 0))
+}
+
 pub fn home_section(app: &mut App, ui: &mut Ui) {
     let Some(me) = app
         .friends_feed
@@ -151,6 +164,16 @@ pub fn home_section(app: &mut App, ui: &mut Ui) {
     else {
         return;
     };
+    // Played from Home, a file has been looked at.
+    if let Some(now) = app.now_playing()
+        && app
+            .friends_feed
+            .shared_songs
+            .iter()
+            .any(|song| song.uri() == now.uri)
+    {
+        super::seen::mark(ui.ctx(), &now.uri, 0);
+    }
     let now = jiff::Timestamp::now().as_millisecond().max(0) as u64;
     let locale = app.locale;
     let found: Vec<Hit> = app
@@ -158,7 +181,11 @@ pub fn home_section(app: &mut App, ui: &mut Ui) {
         .shared_songs
         .iter()
         .enumerate()
-        .filter(|(_, song)| song.by != me && now.saturating_sub(song.created_at) < RECENT_MS)
+        .filter(|(_, song)| {
+            song.by != me
+                && super::seen::is_new(ui.ctx(), song.uri().as_str(), 0)
+                && now.saturating_sub(song.created_at) < RECENT_MS
+        })
         .take(RECENT_SHOWN)
         .map(|(index, song)| Hit {
             title: song.title.clone(),
@@ -409,6 +436,24 @@ fn row(
     let uri = song.uri();
     let playing = app.now_playing().is_some_and(|now| now.uri == uri);
     let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::click());
+    // Until it has been on screen a moment, it wears a mark saying it's new.
+    if song.by
+        != app
+            .friends_feed
+            .profile
+            .as_ref()
+            .map_or("", |me| me.user_id.as_str())
+        && super::seen::is_new(ui.ctx(), song.uri().as_str(), 0)
+        && ui.is_rect_visible(rect)
+    {
+        super::seen::looking_at(ui.ctx(), song.uri().as_str(), 0);
+        super::seen::badge(
+            ui.painter(),
+            rect.right_top() + vec2(-14.0, 14.0),
+            palette.text,
+            palette.window,
+        );
+    }
     let inside = super::pointer_over(ui, rect);
     if inside || playing {
         ui.painter().rect(

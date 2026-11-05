@@ -515,6 +515,9 @@ pub struct App {
     liked_songs: crate::liked::LikedSongs,
     liked_recheck_at: Option<Instant>,
     pub home: HomeData,
+    /// Home's recommendations, and when they were asked for.
+    pub for_you: Loadable<crate::for_you::ForYou>,
+    pub for_you_asked: Option<Instant>,
     /// Local play history. See [`crate::history`].
     pub plays: crate::history::History,
     /// Writes settings, session and history off the UI thread.
@@ -1238,6 +1241,8 @@ impl App {
             liked_songs: crate::liked::LikedSongs::default(),
             liked_recheck_at: None,
             home: HomeData::default(),
+            for_you: Loadable::NotLoaded,
+            for_you_asked: None,
             plays,
             files: std::sync::Arc::new(fastframe_file::Writer::new()),
             mixed_playlists: mixed.unwrap_or_default(),
@@ -2885,6 +2890,7 @@ impl App {
                 Event::SoundCloudCollection { .. }
                     | Event::SoundCloudSearch { .. }
                     | Event::YouTubeSearch { .. }
+                    | Event::ForYou(..)
             );
             #[cfg(not(all(feature = "demo", not(test))))]
             let browsing = false;
@@ -3069,6 +3075,16 @@ impl App {
                     self.handle_hybrid_context(generation, result)
                 }
                 Event::YouTubeAccount(response) => self.handle_youtube_account(response),
+                Event::ForYou(shown) => {
+                    let tracks: Vec<Track> = shown
+                        .picks
+                        .iter()
+                        .map(|pick| pick.track.clone())
+                        .chain(shown.following.iter().cloned())
+                        .collect();
+                    self.cache_soundcloud_tracks(&tracks);
+                    self.for_you = Loadable::Loaded(*shown);
+                }
                 Event::SoundCloudLibrary(response) => self.handle_soundcloud_library(response),
                 Event::SoundCloudSaveFailed => self.toast_error(gettext(self.locale, "Could not save the SoundCloud connection or library on this computer. Try again.")),
                 Event::SoundCloudConnectFailed { error, request } => {
@@ -6078,7 +6094,48 @@ impl App {
     }
 
     /// Starts a new Home refresh while preserving cards already on screen.
+    /// Asks for Home's recommendations, unless they're fresh.
+    pub(crate) fn ask_for_you(&mut self) {
+        const FRESH: Duration = Duration::from_secs(30 * 60);
+        if self.for_you_asked.is_some_and(|at| at.elapsed() < FRESH) {
+            return;
+        }
+        self.for_you_asked = Some(Instant::now());
+        if self.for_you.get().is_none() {
+            self.for_you = Loadable::Loading;
+        }
+        let mut likes = self.soundcloud_library.snapshot.likes.clone();
+        likes.extend(self.youtube_likes().unwrap_or_default().iter().cloned());
+        let soundcloud_feed = self
+            .soundcloud_library
+            .snapshot
+            .following
+            .items
+            .iter()
+            .filter_map(|item| match &item.content {
+                crate::soundcloud::following::Content::Track(track) => Some((**track).clone()),
+                crate::soundcloud::following::Content::Playlist(_) => None,
+            })
+            .collect();
+        self.backend.send(Command::ForYou(crate::for_you::Request {
+            likes,
+            // The setting that hid Spotify's shelf keeps its suggestions out of Home.
+            spotify: if self.settings.home.recommendations.visible {
+                self.home.recommendations.get().cloned().unwrap_or_default()
+            } else {
+                Vec::new()
+            },
+            soundcloud_feed,
+            channels: self
+                .youtube_channels()
+                .iter()
+                .map(|channel| channel.id.clone())
+                .collect(),
+        }));
+    }
+
     fn load_home(&mut self, force: bool) {
+        self.ask_for_you();
         if self.home.requested
             && !force
             && self

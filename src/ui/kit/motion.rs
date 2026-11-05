@@ -594,6 +594,29 @@ pub fn edge_light(
     });
 }
 
+/// A glow from `center` that fills a rounded card exactly to its corners.
+pub fn glow_in_card(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    radius: f32,
+    center: egui::Pos2,
+    reach: f32,
+    color: egui::Color32,
+) {
+    let points = rounded_outline(rect, radius);
+    let count = points.len() as u32;
+    let mut mesh = egui::Mesh::default();
+    mesh.colored_vertex(center, color);
+    for point in &points {
+        let left = (1.0 - (*point - center).length() / reach).clamp(0.0, 1.0);
+        mesh.colored_vertex(*point, color.gamma_multiply(left));
+    }
+    for index in 0..count {
+        mesh.add_triangle(0, 1 + index, 1 + (index + 1) % count);
+    }
+    painter.add(egui::Shape::mesh(mesh));
+}
+
 /// A card's whole edge lit, brightest where the pointer is.
 pub fn edge_ring(
     painter: &egui::Painter,

@@ -893,6 +893,7 @@ pub enum Command {
     Hybrid(HybridCommand),
     SoundCloudLibrary(soundcloud_library::Request),
     YouTubeAccount(youtube_account::Request),
+    ForYou(crate::for_you::Request),
     SoundCloudAccount(crate::soundcloud::account::Account),
     AcceptSoundCloudAccount {
         account: crate::soundcloud::account::Account,
@@ -1308,6 +1309,7 @@ pub enum Event {
     },
     SoundCloudLibrary(soundcloud_library::Response),
     YouTubeAccount(youtube_account::Response),
+    ForYou(Box<crate::for_you::ForYou>),
     SoundCloudSaveFailed,
     Soloist(crate::soloist::Update),
     /// The folder picked in the local files dialog; `None` when cancelled.
@@ -1737,6 +1739,7 @@ impl Backend {
                 | Command::SoundCloudSearch(..)
                 | Command::YouTubeFeed { .. }
                 | Command::YouTubeSearch { .. }
+                | Command::ForYou(..)
         );
         #[cfg(not(all(feature = "demo", not(test))))]
         let browsing = false;
@@ -2852,6 +2855,23 @@ impl Worker {
                 Command::Hybrid(command) => self.hybrid_command(command).await,
                 Command::SoundCloudLibrary(request) => self.soundcloud_library(request),
                 Command::YouTubeAccount(request) => self.youtube_account(request),
+                Command::ForYou(request) => {
+                    let client = self.soundcloud_client().expect("SoundCloud initialized");
+                    let http = self.http.client().ok();
+                    let dir = self.dirs.listening_dir();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let plays =
+                            tokio::task::spawn_blocking(move || crate::stats::read_all(&dir))
+                                .await
+                                .unwrap_or_default();
+                        let now = jiff::Timestamp::now().as_second();
+                        let shown = crate::for_you::gather(client, http, plays, request, now).await;
+                        let _ = events.send(Event::ForYou(Box::new(shown)));
+                        waker.wake();
+                    });
+                }
                 Command::SoundCloudAccount(account) => {
                     self.credentials.invalidate(CredentialSlot::SoundCloud);
                     self.set_soundcloud_account(account, 0);

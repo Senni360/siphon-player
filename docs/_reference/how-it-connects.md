@@ -832,6 +832,15 @@ A listener can also connect their YouTube account, through their own Google proj
 between this computer and `www.googleapis.com`, with tokens from
 `oauth2.googleapis.com`. No grant ever leaves this computer otherwise.
 
+## Home's recommendations
+
+Opening Home at most every half hour reads the listening log on this computer, and
+asks SoundCloud for tracks related to up to 4 of your most played or liked songs, and
+yt-dlp for YouTube mixes of up to 3. The log itself is never sent; those requests
+reveal only the songs asked about. Neither service gets plays from Encore, so its own
+recommendations on its own site aren't changed by listening here, only by likes and
+follows on a connected account.
+
 ## Web links
 
 When Encore is the Windows handler for web links, a clicked normal YouTube video

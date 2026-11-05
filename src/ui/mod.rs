@@ -30,6 +30,7 @@ pub mod queue;
 pub mod radio;
 pub(crate) mod row_tools;
 pub mod search;
+mod seen;
 pub mod settings;
 pub mod show;
 pub mod sidebar;

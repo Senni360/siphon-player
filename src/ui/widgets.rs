@@ -3828,20 +3828,145 @@ pub fn linked_shelf(
     clicked
 }
 
+/// Whether shelves drawn now sit in rows that fit the page, as on Home, instead of
+/// paging sideways.
+pub(crate) fn fit_shelves(ctx: &egui::Context, fit: bool) {
+    ctx.data_mut(|data| data.insert_temp(egui::Id::new("shelves-fit"), fit));
+}
+
+/// How many rows of cards a shelf that fits shows.
+const FIT_ROWS: f32 = 1.0;
+
 fn shelf_cards(ui: &mut Ui, id: &str, add_contents: impl FnOnce(&mut Ui)) {
     ui.add_space(4.0);
-    crate::autoscroll::show(
-        ui,
-        egui::ScrollArea::horizontal().id_salt(id),
-        egui::Vec2b::new(true, false),
-        |ui| {
+    let fit = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(egui::Id::new("shelves-fit")))
+        .unwrap_or(false);
+    if fit {
+        // As many as fit across, and nothing to scroll: the rest stay out of the
+        // row, and out of reach of the pointer.
+        let height = card_row_height(ui) * FIT_ROWS;
+        let step = CARD_WIDTH + CARD_GAP / 2.0;
+        let fits = ((ui.available_width() + CARD_GAP / 2.0) / step)
+            .floor()
+            .max(1.0);
+        let area = Rect::from_min_size(
+            ui.next_widget_position(),
+            vec2(fits * step - CARD_GAP / 2.0, height),
+        );
+        let mut row = ui.new_child(
+            UiBuilder::new()
+                .max_rect(area)
+                .layout(Layout::left_to_right(Align::Min)),
+        );
+        row.set_clip_rect(area.intersect(ui.clip_rect()));
+        row.spacing_mut().item_spacing.x = CARD_GAP / 2.0;
+        add_contents(&mut row);
+        ui.allocate_rect(area, Sense::hover());
+    } else {
+        paged_cards(ui, id, add_contents);
+    }
+    ui.add_space(12.0);
+}
+
+/// Cards in a row that pages sideways with arrows at its ends. There is no
+/// scrollbar, and the wheel keeps scrolling the page.
+fn paged_cards(ui: &mut Ui, id: &str, add_contents: impl FnOnce(&mut Ui)) {
+    use super::kit::motion;
+    let shelf = egui::Id::new(("shelf-page", id));
+    let aim = ui
+        .ctx()
+        .data(|data| data.get_temp::<f32>(shelf))
+        .unwrap_or(0.0);
+    let shown = motion::spring(
+        ui.ctx(),
+        shelf.with("shown"),
+        aim,
+        motion::Spring {
+            period: 0.45,
+            bounce: 0.0,
+        },
+    );
+    let output = egui::ScrollArea::horizontal()
+        .id_salt(id)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .scroll_source(egui::scroll_area::ScrollSource::NONE)
+        .horizontal_scroll_offset(shown)
+        .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = CARD_GAP / 2.0;
                 add_contents(ui);
             });
-        },
+        });
+    let view = output.inner_rect;
+    let most = (output.content_size.x - view.width()).max(0.0);
+    // A page is what fits, in whole cards, so a card is never left cut in half.
+    let step = CARD_WIDTH + CARD_GAP / 2.0;
+    let page = ((view.width() / step).floor().max(1.0) * step).min(most.max(step));
+    let mut next = aim.min(most);
+    // Shift and the wheel still move it, for whoever is used to that.
+    let sideways = ui.input(|input| input.smooth_scroll_delta.x);
+    if sideways != 0.0 && super::pointer_over(ui, view) {
+        next = (next - sideways).clamp(0.0, most);
+        motion::spring_jump(ui.ctx(), shelf.with("shown"), next);
+    }
+    let lit = motion::toward(
+        ui.ctx(),
+        shelf.with("lit"),
+        super::pointer_over(ui, view),
+        motion::POPOVER,
     );
-    ui.add_space(12.0);
+    let palette = if ui.visuals().dark_mode {
+        Palette::dark()
+    } else {
+        Palette::light()
+    };
+    let mut arrow = |ui: &mut Ui, x: f32, icon: Icon, label: &str, target: f32| {
+        let center = pos2(x, view.top() + CARD_ART / 2.0 + 12.0);
+        let rect = Rect::from_center_size(center, Vec2::splat(44.0));
+        let mut child = ui.new_child(
+            UiBuilder::new()
+                .max_rect(rect)
+                .layout(Layout::centered_and_justified(egui::Direction::LeftToRight)),
+        );
+        child.multiply_opacity((0.55 + 0.45 * lit).max(0.02));
+        paint_shadow(&child, &palette, rect, 22.0);
+        if theme::circle_button(
+            &mut child,
+            icon,
+            40.0,
+            palette.overlay,
+            palette.surface_hover.to_opaque(),
+            palette.text,
+            label,
+        )
+        .clicked()
+        {
+            next = target;
+        }
+    };
+    let locale_back = "Back";
+    let locale_more = "More";
+    if aim > 1.0 {
+        arrow(
+            ui,
+            view.left() + 24.0,
+            Icon::ChevronLeft,
+            locale_back,
+            (aim - page).max(0.0),
+        );
+    }
+    if aim < most - 1.0 {
+        arrow(
+            ui,
+            view.right() - 24.0,
+            Icon::ChevronRight,
+            locale_more,
+            (aim + page).min(most),
+        );
+    }
+    ui.ctx().data_mut(|data| data.insert_temp(shelf, next));
 }
 
 /// A wrapping grid of cards.

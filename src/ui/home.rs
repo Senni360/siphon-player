@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use egui::{CornerRadius, Rect, Sense, Vec2, pos2, vec2};
 
-use crate::api::models::{Album, Episode, PlayableItem, Playlist, Show, pick_image};
+use crate::api::models::{Album, PlayableItem, Playlist, pick_image};
 use crate::app::App;
 use crate::i18n::gettext;
 use crate::model::{Action, Loadable, Page, RowContext, TopPeriod};
@@ -43,29 +43,291 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let greeting = crate::util::greeting(app.locale);
     widgets::title_in_words(ui, greeting.as_ref(), theme::medium(28.0), palette.text);
     ui.add_space(12.0);
-    // Each shelf rises in a beat behind the one above it, on every visit.
+    // Home never scrolls sideways: its rows hold what fits.
+    widgets::fit_shelves(ui.ctx(), true);
     use super::rise;
-    // The group's own shares come before anything a service suggests.
-    rise(ui, 0, |ui| {
+    let picks = app
+        .for_you
+        .get()
+        .map_or_else(Vec::new, |shown| shown.picks.clone());
+    let following = app
+        .for_you
+        .get()
+        .map_or_else(Vec::new, |shown| shown.following.clone());
+    rise(ui, 0, |ui| featured(app, ui, &picks));
+    ui.add_space(20.0);
+    // What's new from the group comes before anything a service suggests.
+    rise(ui, 1, |ui| {
         super::group_shelf::show(app, ui);
         super::group_songs::home_section(app, ui);
     });
-    rise(ui, 1, |ui| quick_access(app, ui));
+    rise(ui, 2, |ui| quick_access(app, ui));
     ui.add_space(16.0);
-
+    rise(ui, 3, |ui| more_for_you(app, ui, &picks));
     if app.settings.home.made_for_you.visible {
-        rise(ui, 2, |ui| {
+        rise(ui, 4, |ui| {
             made_for_you(app, ui);
             top_mixes(app, ui);
         });
     }
-    rise(ui, 3, |ui| new_releases(app, ui));
-    rise(ui, 4, |ui| recently_played(app, ui));
-    rise(ui, 5, |ui| podcasts(app, ui));
-    rise(ui, 6, |ui| top_artists(app, ui));
+    rise(ui, 5, |ui| new_from_followed(app, ui, &following));
+    rise(ui, 5, |ui| source_picks(app, ui, &picks));
+    rise(ui, 6, |ui| new_releases(app, ui));
+    rise(ui, 6, |ui| recently_played(app, ui));
+    rise(ui, 7, |ui| top_artists(app, ui));
     rise(ui, 7, |ui| top_tracks(app, ui));
-    if app.settings.home.recommendations.visible {
-        rise(ui, 8, |ui| recommendations(app, ui));
+    widgets::fit_shelves(ui.ctx(), false);
+}
+
+/// The first thing on Home: the best pick, large, in its own colour, with the next
+/// few beside it. It says why it's here.
+fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
+    use super::kit::motion;
+    let palette = app.palette;
+    let width = ui.available_width();
+    const HEIGHT: f32 = 268.0;
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(width, HEIGHT), egui::Sense::hover());
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let Some(first) = picks.first() else {
+        ui.painter().rect_filled(rect, 18.0, palette.surface);
+        if app.for_you.is_loading() {
+            motion::glint(
+                ui.painter(),
+                rect,
+                (ui.input(|input| input.time) * 0.55).fract() as f32,
+                palette.text.gamma_multiply(0.05),
+            );
+            ui.ctx().request_repaint();
+        }
+        return;
+    };
+    let uris: Vec<String> = picks.iter().map(|pick| pick.track.uri.clone()).collect();
+    let art = first.track.image(500);
+    let tint = app
+        .tint_for(art)
+        .map(super::glow_color)
+        .unwrap_or(palette.surface_active);
+    let glow = super::entering(ui.ctx(), 0.05);
+    ui.painter().rect_filled(rect, 18.0, palette.surface);
+    motion::glow_in_card(
+        ui.painter(),
+        rect,
+        18.0,
+        rect.left_center() + egui::vec2(150.0, 0.0),
+        width * 0.75,
+        tint.gamma_multiply(0.75 * glow),
+    );
+    let cover = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 28.0 + 106.0, rect.center().y),
+        egui::Vec2::splat(212.0),
+    );
+    widgets::paint_shadow(ui, &palette, cover, 12.0);
+    widgets::paint_cover(
+        ui,
+        &palette,
+        art,
+        cover,
+        12.0,
+        Icon::Music,
+        Some(app.backend.art()),
+    );
+    let side = if width > 1000.0 { 320.0 } else { 0.0 };
+    let words = egui::Rect::from_min_max(
+        egui::pos2(cover.right() + 28.0, rect.top() + 34.0),
+        egui::pos2(rect.right() - side - 24.0, rect.bottom() - 24.0),
+    );
+    let mut block = ui.new_child(egui::UiBuilder::new().max_rect(words));
+    block.spacing_mut().item_spacing.y = 8.0;
+    theme::text(
+        &mut block,
+        gettext(app.locale, "Picked for you"),
+        theme::medium(13.0),
+        palette.secondary,
+    );
+    let title_color = super::kit::Source::of(&first.track.uri).color(&palette);
+    let title = widgets::ellipsized(
+        &block,
+        &first.track.name,
+        theme::semibold(30.0),
+        title_color,
+        words.width(),
+        2,
+    );
+    block.add(egui::Label::new(title).selectable(false));
+    widgets::artist_links(
+        &mut block,
+        app,
+        &first.track.artists,
+        theme::regular(14.0),
+        palette.text,
+    );
+    theme::text(
+        &mut block,
+        first.reason.as_str(),
+        theme::regular(13.0),
+        palette.secondary,
+    );
+    block.add_space(4.0);
+    block.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 10.0;
+        let current = app
+            .current_track_uri()
+            .is_some_and(|uri| uri == first.track.uri);
+        let playing = current && app.believed_playing();
+        if theme::circle_button(
+            ui,
+            if playing {
+                Icon::PauseFilled
+            } else {
+                Icon::PlayFilled
+            },
+            48.0,
+            palette.accent,
+            palette.accent_hover,
+            palette.on_accent,
+            &gettext(app.locale, if playing { "Pause" } else { "Play" }),
+        )
+        .clicked()
+        {
+            app.actions.push(if current {
+                Action::TogglePlay
+            } else {
+                Action::PlayUris {
+                    uris: uris.clone(),
+                    index: 0,
+                }
+            });
+        }
+    });
+    if side > 0.0 {
+        let list = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - side, rect.top() + 18.0),
+            egui::pos2(rect.right() - 16.0, rect.bottom() - 18.0),
+        );
+        let row_height = list.height() / 4.0;
+        for (index, pick) in picks.iter().skip(1).take(4).enumerate() {
+            let row = egui::Rect::from_min_size(
+                list.min + egui::vec2(0.0, index as f32 * row_height),
+                egui::vec2(list.width(), row_height),
+            );
+            // They follow it in, one after another.
+            let rose = super::entering(ui.ctx(), 0.1 + motion::stagger(index));
+            let row = row.translate(egui::vec2((1.0 - rose) * 14.0, 0.0));
+            let response = ui.interact(
+                row,
+                ui.id().with(("featured-next", index)),
+                egui::Sense::click(),
+            );
+            let lit = motion::toward(
+                ui.ctx(),
+                response.id.with("lit"),
+                response.hovered(),
+                motion::FEEDBACK,
+            );
+            if lit > 0.0 {
+                ui.painter().rect_filled(
+                    row.shrink2(egui::vec2(0.0, 2.0)),
+                    8.0,
+                    palette.surface_hover.gamma_multiply(lit),
+                );
+            }
+            let art_rect = egui::Rect::from_min_size(
+                row.min + egui::vec2(6.0, 6.0),
+                egui::Vec2::splat(row_height - 12.0),
+            );
+            widgets::paint_cover(
+                ui,
+                &palette,
+                pick.track.image(120),
+                art_rect,
+                6.0,
+                Icon::Music,
+                Some(app.backend.art()),
+            );
+            let left = art_rect.right() + 10.0;
+            let room = (row.right() - left - 6.0).max(10.0);
+            let color = super::kit::Source::of(&pick.track.uri).color(&palette);
+            let name =
+                widgets::ellipsized(ui, &pick.track.name, theme::medium(13.5), color, room, 1);
+            ui.painter()
+                .galley(egui::pos2(left, row.center().y - 18.0), name, color);
+            let artist = pick
+                .track
+                .artists
+                .first()
+                .map_or("", |artist| artist.name.as_str());
+            let by =
+                widgets::ellipsized(ui, artist, theme::regular(12.0), palette.secondary, room, 1);
+            ui.painter().galley(
+                egui::pos2(left, row.center().y + 2.0),
+                by,
+                palette.secondary,
+            );
+            if response.clicked() {
+                app.actions.push(Action::PlayUris {
+                    uris: uris.clone(),
+                    index: index as u32 + 1,
+                });
+            }
+        }
+    }
+}
+
+/// More of what's on the featured card, across the sources.
+fn more_for_you(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
+    let tracks: Vec<_> = picks
+        .iter()
+        .skip(5)
+        .map(|pick| pick.track.clone())
+        .collect();
+    if tracks.is_empty() {
+        return;
+    }
+    theme::section_title(ui, &app.palette, &gettext(app.locale, "More for you"));
+    ui.add_space(6.0);
+    super::source_page::song_cards(app, ui, &tracks, 2);
+    ui.add_space(12.0);
+}
+
+/// New from the people and channels followed on SoundCloud and YouTube.
+fn new_from_followed(app: &mut App, ui: &mut egui::Ui, tracks: &[crate::api::models::Track]) {
+    if tracks.is_empty() {
+        return;
+    }
+    theme::section_title(
+        ui,
+        &app.palette,
+        &gettext(app.locale, "New from who you follow"),
+    );
+    ui.add_space(6.0);
+    super::source_page::song_cards(app, ui, tracks, 1);
+    ui.add_space(12.0);
+}
+
+/// Each source's own picks: SoundCloud's as cards, YouTube's as thumbnails.
+fn source_picks(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
+    let of = |wanted: fn(&str) -> bool| -> Vec<crate::api::models::Track> {
+        picks
+            .iter()
+            .filter(|pick| wanted(&pick.track.uri))
+            .map(|pick| pick.track.clone())
+            .collect()
+    };
+    let soundcloud = of(crate::soundcloud::is_track_uri);
+    if !soundcloud.is_empty() {
+        theme::section_title(ui, &app.palette, &gettext(app.locale, "SoundCloud for you"));
+        ui.add_space(6.0);
+        super::source_page::song_cards(app, ui, &soundcloud, 1);
+        ui.add_space(12.0);
+    }
+    let youtube = of(crate::youtube::is_track_uri);
+    if !youtube.is_empty() {
+        theme::section_title(ui, &app.palette, &gettext(app.locale, "YouTube for you"));
+        ui.add_space(6.0);
+        super::source_page::video_cards(app, ui, &youtube, 1);
+        ui.add_space(12.0);
     }
 }
 
@@ -123,6 +385,15 @@ fn quick_access_tiles(app: &App) -> Vec<Tile> {
     for play in app.home.recently_played.get().into_iter().flatten() {
         if tiles.len() == TILES {
             break;
+        }
+        // Home is for music.
+        if play
+            .context
+            .as_ref()
+            .is_some_and(|context| context.uri.starts_with("spotify:show:"))
+            || play.track.uri.starts_with("spotify:episode:")
+        {
+            continue;
         }
         let track = &play.track;
         let context = play.context.as_ref().map(|context| context.uri.as_str());
@@ -573,6 +844,7 @@ fn recently_played(app: &mut App, ui: &mut egui::Ui) {
     let mut seen = std::collections::HashSet::new();
     let tracks: Vec<_> = history
         .into_iter()
+        .filter(|entry| !entry.track.uri.starts_with("spotify:episode:"))
         .filter(|entry| {
             entry
                 .track
@@ -623,154 +895,6 @@ fn recently_played(app: &mut App, ui: &mut egui::Ui) {
                             ui,
                             app,
                             &PlayableItem::Track(track.clone()),
-                            None,
-                            None,
-                        );
-                    });
-            }
-        },
-    );
-}
-
-/// Why an episode is on the podcast shelf.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum EpisodeReason {
-    /// Started and not finished, with this much left.
-    Continue { left_ms: u32 },
-    /// The show's newest episode, recently released and not yet started.
-    New,
-}
-
-/// How many days after its release an unplayed episode still counts as new.
-const NEW_EPISODE_DAYS: i64 = 30;
-/// The podcast shelf's card limit, as for Recently played.
-const PODCAST_CARDS: usize = 16;
-
-/// The episodes on the podcast shelf: those to continue first, then each
-/// show's newest unstarted episode from the last month, each group newest
-/// first. `skip` leaves out shows that are audiobooks or no longer saved.
-pub(crate) fn podcast_episodes(
-    podcasts: &[(Show, Vec<Episode>)],
-    skip: impl Fn(&Show) -> bool,
-    today: jiff::civil::Date,
-) -> Vec<(Show, Episode, EpisodeReason)> {
-    let oldest_new = today
-        .checked_sub(jiff::Span::new().days(NEW_EPISODE_DAYS))
-        .unwrap_or(today);
-    let released = |episode: &Episode| {
-        episode
-            .release_date
-            .as_deref()
-            .and_then(|date| date.get(..10))
-            .and_then(|date| date.parse::<jiff::civil::Date>().ok())
-    };
-    let mut continuing = Vec::new();
-    let mut new = Vec::new();
-    for (show, episodes) in podcasts {
-        if skip(show) {
-            continue;
-        }
-        for episode in episodes {
-            if let Some(resume) = &episode.resume_point
-                && !resume.fully_played
-                && resume.resume_position_ms > 0
-            {
-                let left_ms = episode
-                    .duration_ms
-                    .saturating_sub(resume.resume_position_ms);
-                continuing.push((show, episode, EpisodeReason::Continue { left_ms }));
-            }
-        }
-        // Spotify lists a show's episodes newest first.
-        if let Some(newest) = episodes.first()
-            && newest
-                .resume_point
-                .as_ref()
-                .is_none_or(|resume| !resume.fully_played && resume.resume_position_ms == 0)
-            && released(newest).is_some_and(|date| date >= oldest_new)
-        {
-            new.push((show, newest, EpisodeReason::New));
-        }
-    }
-    for group in [&mut continuing, &mut new] {
-        group.sort_by_key(|(_, episode, _)| std::cmp::Reverse(released(episode)));
-    }
-    let mut seen = std::collections::HashSet::new();
-    continuing
-        .into_iter()
-        .chain(new)
-        .filter(|(_, episode, _)| !episode.uri.is_empty() && seen.insert(&episode.uri))
-        .take(PODCAST_CARDS)
-        .map(|(show, episode, reason)| {
-            let mut episode = episode.clone();
-            // A show's episode list leaves out the show; menus need it.
-            if episode.show.is_none() {
-                episode.show = Some(show.clone());
-            }
-            (show.clone(), episode, reason)
-        })
-        .collect()
-}
-
-fn podcasts(app: &mut App, ui: &mut egui::Ui) {
-    let palette = app.palette;
-    let episodes = podcast_episodes(
-        &app.home.podcasts,
-        |show| app.audiobook_shows.contains(&show.uri) || app.is_saved(&show.uri) == Some(false),
-        jiff::Zoned::now().date(),
-    );
-    if episodes.is_empty() {
-        return;
-    }
-    widgets::shelf(
-        ui,
-        &palette,
-        "podcasts",
-        &gettext(app.locale, "Your podcasts"),
-        |ui| {
-            for (show, episode, reason) in &episodes {
-                let subtitle = match reason {
-                    EpisodeReason::Continue { left_ms } => {
-                        // Translators: {time} is the time left in an episode, such as 12 min; {show} is the podcast's name.
-                        gettext(app.locale, "{time} left • {show}")
-                            .replace(
-                                "{time}",
-                                &crate::util::format_episode_ms(app.locale, *left_ms),
-                            )
-                            .replace("{show}", &show.name)
-                    }
-                    EpisodeReason::New => {
-                        // Translators: {show} is the podcast's name.
-                        gettext(app.locale, "New • {show}").replace("{show}", &show.name)
-                    }
-                };
-                let card_art = app.art_px(widgets::CARD_ART);
-                let card = widgets::card(
-                    ui,
-                    app,
-                    pick_image(&episode.images, card_art)
-                        .or_else(|| pick_image(&show.images, card_art)),
-                    &episode.name,
-                    &subtitle,
-                    widgets::CardCover::square(false),
-                );
-                if card.play {
-                    app.actions.push(Action::PlayEpisode {
-                        uri: episode.uri.clone(),
-                        resume_ms: episode.resume_ms(),
-                    });
-                }
-                if card.clicked && !show.id.is_empty() {
-                    app.actions.push(Action::Open(Page::Show(show.id.clone())));
-                }
-                egui::Popup::context_menu(&card.response)
-                    .id(ui.make_persistent_id(("home-podcasts-menu", &episode.uri)))
-                    .frame(widgets::menu_frame(&palette))
-                    .show(|ui| {
-                        widgets::item_menu(
-                            ui,
-                            app,
-                            &PlayableItem::Episode(episode.clone()),
                             None,
                             None,
                         );
@@ -856,89 +980,6 @@ fn top_artists(app: &mut App, ui: &mut egui::Ui) {
     );
 }
 
-fn track_list(
-    app: &mut App,
-    ui: &mut egui::Ui,
-    title: &str,
-    tracks: Loadable<Vec<crate::api::models::Track>>,
-    limit: usize,
-    title_page: Option<Page>,
-    more_label: Option<&str>,
-) {
-    let palette = app.palette;
-    let tracks = match tracks {
-        Loadable::Loaded(tracks) => tracks,
-        Loadable::Loading | Loadable::NotLoaded => {
-            if let Some(page) = title_page {
-                if theme::link(ui, title, theme::bold(17.0), palette.text).clicked() {
-                    app.actions.push(Action::Open(page));
-                }
-            } else {
-                theme::section_title(ui, &palette, title);
-            }
-            widgets::skeleton_rows(ui, &palette, app.locale, 4);
-            ui.add_space(12.0);
-            return;
-        }
-        Loadable::Failed(message) => {
-            theme::section_title(ui, &palette, title);
-            widgets::error_row(ui, app, &message, Some(title_page.unwrap_or(Page::Home)));
-            ui.add_space(12.0);
-            return;
-        }
-    };
-    if tracks.is_empty() {
-        return;
-    }
-    if let Some(page) = title_page {
-        if theme::link(ui, title, theme::bold(17.0), palette.text).clicked() {
-            app.actions.push(Action::Open(page));
-        }
-    } else {
-        theme::section_title(ui, &palette, title);
-    }
-    ui.add_space(4.0);
-    let uris: Arc<[String]> = tracks
-        .iter()
-        .map(|track| track.uri.clone())
-        .collect::<Vec<_>>()
-        .into();
-    let context = RowContext::Uris(Arc::clone(&uris));
-    for (index, track) in tracks.iter().take(limit).enumerate() {
-        let item = PlayableItem::Track(track.clone());
-        widgets::track_row(
-            ui,
-            app,
-            TrackRow {
-                index,
-                number: None,
-                item: &item,
-                context: &context,
-                show_cover: !app.settings.tracklist_compact,
-                show_album: true,
-                added_at: None,
-                added_by: None,
-                show_added_by: false,
-                show_plays: false,
-                compact: false,
-                thin: app.settings.tracklist_compact,
-                shift: 0.0,
-                picked: false,
-                picked_songs: &[],
-                picked_positions: &[],
-                position: None,
-            },
-        );
-    }
-    if let Some(label) = more_label
-        && tracks.len() > limit
-        && theme::link(ui, label, theme::semibold(14.0), palette.secondary).clicked()
-    {
-        app.actions.push(Action::Open(Page::TopSongs));
-    }
-    ui.add_space(16.0);
-}
-
 fn top_tracks(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let title = gettext(app.locale, "Your top songs");
@@ -1017,46 +1058,9 @@ fn top_tracks(app: &mut App, ui: &mut egui::Ui) {
     ui.add_space(16.0);
 }
 
-fn recommendations(app: &mut App, ui: &mut egui::Ui) {
-    let tracks = app.home.recommendations.clone();
-    let title = gettext(app.locale, "Recommended for you");
-    track_list(app, ui, &title, tracks, 20, None, None);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::models::ResumePoint;
-
-    fn show(id: &str) -> Show {
-        Show {
-            id: id.into(),
-            uri: format!("spotify:show:{id}"),
-            name: id.to_uppercase(),
-            ..Show::default()
-        }
-    }
-
-    fn episode(id: &str, date: &str, played: Option<u32>, finished: bool) -> Episode {
-        Episode {
-            id: id.into(),
-            uri: format!("spotify:episode:{id}"),
-            duration_ms: 3_600_000,
-            release_date: Some(date.into()),
-            resume_point: Some(ResumePoint {
-                fully_played: finished,
-                resume_position_ms: played.unwrap_or(0),
-            }),
-            ..Episode::default()
-        }
-    }
-
-    fn ids(shelf: &[(Show, Episode, EpisodeReason)]) -> Vec<&str> {
-        shelf
-            .iter()
-            .map(|(_, episode, _)| episode.id.as_str())
-            .collect()
-    }
 
     /// A tile's cover is 60 points. Spotify's 64 pixel rendition would be
     /// blurry even at 100%, so the tile takes the 300 pixel one and scales
@@ -1167,77 +1171,5 @@ mod tests {
         assert_eq!(tiles.len(), TILES);
         app.backend.shutdown();
         let _ = std::fs::remove_dir_all(root);
-    }
-
-    fn today() -> jiff::civil::Date {
-        "2026-09-23".parse().unwrap()
-    }
-
-    #[test]
-    fn episodes_to_continue_come_before_new_ones() {
-        let podcasts = vec![
-            (
-                show("a"),
-                vec![
-                    episode("a-new", "2026-09-20", None, false),
-                    episode("a-started", "2026-09-01", Some(600_000), false),
-                    episode("a-done", "2026-08-25", Some(0), true),
-                ],
-            ),
-            (
-                show("b"),
-                vec![
-                    episode("b-started", "2026-09-10", Some(60_000), false),
-                    episode("b-old", "2026-09-03", None, false),
-                ],
-            ),
-            (show("c"), vec![episode("c-new", "2026-09-22", None, false)]),
-        ];
-        let shelf = podcast_episodes(&podcasts, |_| false, today());
-        assert_eq!(ids(&shelf), ["b-started", "a-started", "c-new", "a-new"]);
-        assert_eq!(shelf[1].2, EpisodeReason::Continue { left_ms: 3_000_000 });
-        assert_eq!(shelf[2].2, EpisodeReason::New);
-        assert_eq!(
-            shelf[0].1.show.as_ref().map(|show| show.id.as_str()),
-            Some("b"),
-            "the episode menu can go to its podcast"
-        );
-    }
-
-    #[test]
-    fn only_a_recent_unstarted_newest_episode_is_new() {
-        let podcasts = vec![
-            (show("old"), vec![episode("old", "2026-07-01", None, false)]),
-            (
-                show("finished"),
-                vec![episode("finished", "2026-09-20", Some(0), true)],
-            ),
-            (
-                show("undated"),
-                vec![episode("undated", "2026", None, false)],
-            ),
-            (
-                show("second"),
-                vec![
-                    episode("second-done", "2026-09-21", Some(0), true),
-                    episode("second-new", "2026-09-20", None, false),
-                ],
-            ),
-        ];
-        assert!(podcast_episodes(&podcasts, |_| false, today()).is_empty());
-    }
-
-    #[test]
-    fn skipped_shows_leave_the_shelf_and_it_stays_bounded() {
-        let podcasts: Vec<_> = (0..20)
-            .map(|index| {
-                let id = format!("s{index}");
-                let started = episode(&format!("{id}-e"), "2026-09-01", Some(1), false);
-                (show(&id), vec![started])
-            })
-            .collect();
-        let shelf = podcast_episodes(&podcasts, |show| show.id == "s0", today());
-        assert_eq!(shelf.len(), PODCAST_CARDS);
-        assert!(!ids(&shelf).contains(&"s0-e"));
     }
 }

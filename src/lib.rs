@@ -22,6 +22,7 @@ pub mod drag_out;
 pub mod emoji;
 pub mod eq;
 pub mod extension_bridge;
+pub mod for_you;
 pub mod friends;
 pub mod history;
 pub mod http;

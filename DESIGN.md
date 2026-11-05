@@ -216,6 +216,26 @@ pasted links and the playing song, sends to everyone or picked friends,
 and per-share download whose file drags into a DAW on Windows
 (`src/drag_out.rs`).
 
+## Home and sideways scrolling (5 November)
+
+Home opens on one large pick in its own colour, with why it's there and the next
+few beside it. Then what's new from the group, recent places, more picks across the
+sources, new uploads from who you follow, and each source's picks. Podcasts and
+audiobooks are not on Home, and in Search they wait below everything in All.
+
+Nothing has a sideways scrollbar. Home's rows hold what fits the page. Elsewhere a
+shelf pages with arrows at its ends, in whole cards, and the wheel keeps scrolling
+the page.
+
+`src/for_you.rs` works the picks out: plays and likes make a taste (recent plays
+count most, skips count against, an artist you skip sinks), then SoundCloud's related
+tracks and YouTube mixes of the top songs are ordered by it. What was just played
+gives way, no artist fills the page, and each source gets about its share of the
+listening. With no history it starts from what's popular.
+
+What friends share wears a mark until looked at: a share or file leaves Home once
+played or seen in the group, and returns if a reply arrives.
+
 ## The sources' own pages (5 November)
 
 Spotify keeps its pages. SoundCloud and YouTube share one structure in

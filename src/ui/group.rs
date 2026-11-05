@@ -154,6 +154,10 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 .unwrap_or(0);
             let divider =
                 ctx.data_mut(|data| *data.get_temp_mut_or_insert_with(divider_id(), || seen));
+            // Having the group open is looking at what it shares.
+            for post in &feed.posts {
+                super::seen::mark(&ctx, &post.id, post.replies.len() as u32);
+            }
             if newest > seen {
                 ctx.data_mut(|data| data.insert_persisted(seen_id(&me.user_id), newest));
             }
@@ -259,6 +263,14 @@ fn tabs(app: &App, ui: &mut Ui, accounts: bool, actions: &mut Vec<Action>) -> Ta
             theme::focus_ring(ui, &response);
             if on {
                 underline = Some((rect.left(), rect.width(), rect.bottom()));
+            }
+            if each == Tab::Shared && !on && super::group_songs::any_new(app, ui.ctx()) {
+                super::seen::badge(
+                    ui.painter(),
+                    pos2(rect.right() + 10.0, rect.top() + 8.0),
+                    palette.text,
+                    palette.window,
+                );
             }
             if response.clicked() && !on {
                 if each == Tab::Stats {
