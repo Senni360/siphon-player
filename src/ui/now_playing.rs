@@ -50,7 +50,8 @@ impl Tab {
 }
 
 /// Draws the view over `content`, grown out of `island`.
-pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
+/// Draws the view if any of it shows, and says so.
+pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) -> bool {
     let ctx = ui.ctx().clone();
     if is_open(&ctx) && ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
         toggle(&ctx);
@@ -62,7 +63,7 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
         crate::motion::seconds(&ctx, GROW),
     );
     if grown <= 0.0 {
-        return;
+        return false;
     }
     let t = motion::ease(grown);
     // The top bar stays: search and back keep working over Now playing.
@@ -74,6 +75,9 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
         content.max,
     );
     let lerp = |a: f32, b: f32| a + (b - a) * t;
+    // The card runs to the window's foot, behind the island. Its contents stop
+    // above the island, inside `content`.
+    let foot = ctx.content_rect().bottom();
     let frame = Rect::from_min_max(
         pos2(
             lerp(island.left(), content.left() + 8.0),
@@ -81,7 +85,7 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
         ),
         pos2(
             lerp(island.right(), content.right() - 8.0),
-            lerp(island.bottom(), content.bottom()),
+            lerp(island.bottom(), foot - 8.0),
         ),
     );
     let radius = lerp(22.0, 16.0);
@@ -102,8 +106,9 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
         .show(&ctx, |ui| {
             // The page behind fades to the window as the view grows over it,
             // so none of it shows around the rounded corners.
+            let behind = Rect::from_min_max(content.min, pos2(content.right(), foot));
             ui.painter()
-                .rect_filled(content, 0.0, palette.window.gamma_multiply(t));
+                .rect_filled(behind, 0.0, palette.window.gamma_multiply(t));
             ui.set_clip_rect(frame.expand(1.0));
             ui.painter().rect(
                 frame,
@@ -120,6 +125,7 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
                 Rect::from_min_max(content.min + vec2(8.0, 8.0), content.max - vec2(8.0, 0.0));
             body(app, ui, inner, t);
         });
+    true
 }
 
 /// How loud the playing song is at this moment, from 0 to about 1, while it plays

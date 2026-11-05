@@ -111,8 +111,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         let mut page = ui.available_rect_before_wrap();
         page.max.y = strip.top();
         central(app, ui);
-        player_bar::show_in(app, ui, strip);
-        now_playing::show(app, ui, page, player_bar::island_rect(strip));
+        // Now playing grows behind the island, which floats over it as it floats
+        // over the page: while the view shows, the island needs a layer above it.
+        if now_playing::show(app, ui, page, player_bar::island_rect(strip)) {
+            let layer = egui::Area::new(Id::new("player-over-now-playing"))
+                .order(egui::Order::Middle)
+                .constrain(false)
+                .fixed_pos(strip.min)
+                .show(ui.ctx(), |ui| {
+                    player_bar::show_in(app, ui, strip);
+                    ui.layer_id()
+                })
+                .inner;
+            ui.ctx().move_to_top(layer);
+        } else {
+            player_bar::show_in(app, ui, strip);
+        }
         if !app.settings.sidebar_visible {
             sidebar::floating(app, ui, content);
         }
@@ -680,16 +694,6 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
             let offset = vec2((1.0 - enter) * 24.0 * from_side, (1.0 - enter) * 10.0);
             let whole = ui.clip_rect();
-            // Now playing stops higher than the page does, and covers it: nothing
-            // of the page shows in the gap under its rounded edge.
-            if now_playing::is_open(ui.ctx()) {
-                let mut covered = ui.clip_rect();
-                covered.max.y = covered
-                    .max
-                    .y
-                    .min(ui.ctx().content_rect().bottom() - theme::PLAYER_BAR_HEIGHT - CARD_RADIUS);
-                ui.set_clip_rect(covered);
-            }
             let scroll = crate::autoscroll::show(
                 ui,
                 egui::ScrollArea::vertical()
