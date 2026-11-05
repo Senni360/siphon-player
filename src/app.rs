@@ -6,6 +6,7 @@ mod group;
 mod hybrid;
 mod live;
 pub(crate) mod playlist_sources;
+pub(crate) mod remote;
 mod soundcloud_library;
 pub mod stats;
 mod youtube;
@@ -518,6 +519,8 @@ pub struct App {
     /// Home's recommendations, and when they were asked for.
     pub for_you: Loadable<crate::for_you::ForYou>,
     pub for_you_asked: Option<Instant>,
+    /// A linked phone's connection.
+    pub phone: remote::Remote,
     /// Which artist each SoundCloud and YouTube account page leads back to.
     pub artist_links: HashMap<String, (String, String)>,
     artist_links_asked: bool,
@@ -1246,6 +1249,7 @@ impl App {
             home: HomeData::default(),
             for_you: Loadable::NotLoaded,
             for_you_asked: None,
+            phone: remote::Remote::default(),
             artist_links: HashMap::new(),
             artist_links_asked: false,
             plays,
@@ -3089,6 +3093,7 @@ impl App {
                     finding,
                 } => self.artist_source_found(artist, ask, side, *finding),
                 Event::ArtistLinks(links) => self.artist_links = links,
+                Event::Remote(event) => self.remote_event(event),
                 Event::ForYou(shown) => {
                     let tracks: Vec<Track> = shown
                         .picks
@@ -4632,6 +4637,7 @@ impl App {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
+        self.remote_tick(ctx);
         // The group is read while something shows it: its page, Home's
         // shelf, the friends panel, or the sidebar's unread count.
         let feed_visible = (self.show_friends_panel
@@ -13338,6 +13344,7 @@ impl App {
                     self.open(Page::Search);
                 }
             }
+            Action::LinkPhone => self.remote_ask_code(),
             Action::WarmYouTube(uri) => self.backend.send(Command::WarmYouTube(uri)),
             Action::ChooseArtistAccount {
                 artist_id,

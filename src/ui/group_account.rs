@@ -13,6 +13,69 @@ use crate::theme::{self, Icon};
 
 use super::group::{card, field};
 
+/// A code to type on a phone, which makes it another device of this account.
+fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
+    let palette = app.palette;
+    let locale = app.locale;
+    theme::text(
+        ui,
+        gettext(locale, "Your phone"),
+        theme::medium(13.0),
+        palette.text,
+    );
+    ui.add_space(4.0);
+    let left = match &app.phone.code {
+        Some(Ok((code, made))) => crate::app::remote::CODE_LASTS
+            .checked_sub(made.elapsed())
+            .map(|left| (code.clone(), left)),
+        _ => None,
+    };
+    if let Some((code, left)) = left {
+        paragraph(
+            ui,
+            gettext(
+                locale,
+                "On your phone, open encore.senni.dev and type this code. Your phone then has this account, its groups and its library, and it can play on this computer.",
+            ),
+            &palette,
+        );
+        ui.add_space(6.0);
+        let spaced = format!(
+            "{} {}",
+            &code[..4.min(code.len())],
+            &code[4.min(code.len())..]
+        );
+        theme::text(ui, spaced, theme::semibold(26.0), palette.text);
+        theme::text(
+            ui,
+            gettext(locale, "Good for {minutes} more minutes")
+                .replace("{minutes}", &(left.as_secs() / 60 + 1).to_string()),
+            theme::regular(12.0),
+            palette.dim,
+        );
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(1));
+        return;
+    }
+    if let Some(Err(problem)) = &app.phone.code {
+        theme::text(ui, problem, theme::regular(13.0), palette.warning);
+        ui.add_space(4.0);
+    }
+    let asking = app.phone.asking_code;
+    if theme::soft_button(
+        ui,
+        &palette,
+        Some(Icon::Plus),
+        &gettext(locale, "Link a phone"),
+        asking,
+    )
+    .clicked()
+        && !asking
+    {
+        actions.push(Action::LinkPhone);
+    }
+}
+
 fn account_op(op: Op) -> Action {
     Action::Friends(Group::Account(op))
 }
@@ -793,6 +856,8 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
                 });
             }
         }
+        ui.add_space(10.0);
+        link_a_phone(app, ui, actions);
         ui.add_space(10.0);
         if theme::soft_button(
             ui,

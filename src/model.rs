@@ -1519,6 +1519,8 @@ impl Toast {
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
+    /// Make a code for a phone to type.
+    LinkPhone,
     /// Get a YouTube song ready, since the pointer has settled on it.
     WarmYouTube(String),
     ChooseArtistAccount {

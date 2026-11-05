@@ -61,6 +61,7 @@ pub mod playlist_cover;
 pub mod playlist_overlay;
 pub mod power;
 pub mod prerelease;
+pub mod remote;
 pub mod resample;
 pub mod retitle;
 pub mod session_reads;

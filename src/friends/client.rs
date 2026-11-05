@@ -387,6 +387,72 @@ impl Client {
             base_url: self.base_url().into(),
         })
     }
+    /// A code a phone can type to become a device of this account.
+    pub async fn link_start(
+        &self,
+        id: &Identity,
+        client_id: Option<&str>,
+    ) -> Result<String, String> {
+        #[derive(Deserialize)]
+        struct Started {
+            code: String,
+        }
+        let started: Started = self
+            .request(
+                Method::POST,
+                "/link/start",
+                Some(id),
+                Some(serde_json::json!({ "client_id": client_id.unwrap_or_default() })),
+                None,
+            )
+            .await?;
+        Ok(started.code)
+    }
+
+    /// What a linked phone has left, and whether it's there to hurry for.
+    pub async fn remote_poll(&self, id: &Identity) -> Result<RemotePoll, String> {
+        self.request(Method::GET, "/live/remote/poll", Some(id), None, None)
+            .await
+    }
+
+    pub async fn remote_state(
+        &self,
+        id: &Identity,
+        state: &serde_json::Value,
+    ) -> Result<(), String> {
+        let _: serde_json::Value = self
+            .request(
+                Method::PUT,
+                "/live/remote/state",
+                Some(id),
+                Some(state.clone()),
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub async fn remote_reply(
+        &self,
+        id: &Identity,
+        reply: &str,
+        value: &serde_json::Value,
+    ) -> Result<(), String> {
+        if valid_id(reply).is_err() {
+            return Err("Invalid reply".into());
+        }
+        let _: serde_json::Value = self
+            .request(
+                Method::PUT,
+                &format!("/live/remote/reply/{reply}"),
+                Some(id),
+                Some(value.clone()),
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
     pub async fn profile(&self, id: &Identity) -> Result<Profile, String> {
         self.request(Method::GET, "/me", Some(id), None, None).await
     }
@@ -541,4 +607,13 @@ pub(super) fn valid_id(id: &str) -> Result<(), String> {
         return Err("Invalid post id.".into());
     }
     Ok(())
+}
+
+/// What the service holds for this computer from a linked phone.
+#[derive(Debug, Deserialize)]
+pub struct RemotePoll {
+    #[serde(default)]
+    pub wanted: bool,
+    #[serde(default)]
+    pub commands: Vec<serde_json::Value>,
 }

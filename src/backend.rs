@@ -815,6 +815,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 mod artist_sources;
 mod download_jobs;
 mod hybrid;
+pub(crate) mod remote;
 pub(crate) mod soundcloud_library;
 mod track_details;
 mod youtube;
@@ -876,6 +877,8 @@ pub enum Command {
     },
     /// A row has been hovered: its song may well be pressed next.
     WarmYouTube(String),
+    /// A linked phone's connection.
+    Remote(remote::RemoteRequest),
     /// What an artist has on SoundCloud and YouTube.
     ArtistSources(crate::artist_sources::Request),
     ChooseArtistAccount {
@@ -1321,6 +1324,7 @@ pub enum Event {
     SoundCloudLibrary(soundcloud_library::Response),
     YouTubeAccount(youtube_account::Response),
     ForYou(Box<crate::for_you::ForYou>),
+    Remote(remote::RemoteEvent),
     ArtistSource {
         artist: String,
         ask: u64,
@@ -2948,6 +2952,7 @@ impl Worker {
                     });
                 }
                 Command::WarmYouTube(uri) => self.warm_youtube(uri),
+                Command::Remote(request) => self.remote(request),
                 Command::ArtistSources(request) => self.artist_sources(request),
                 Command::ChooseArtistAccount {
                     request,

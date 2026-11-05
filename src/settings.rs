@@ -357,6 +357,8 @@ pub struct Settings {
     /// An optional personal Spotify Web API application id. The shared
     /// application remains active for coverage when this is present.
     pub web_client_id: Option<String>,
+    /// A phone has been linked, so this computer listens for it.
+    pub phone_linked: bool,
     /// Legacy reminder time, retained for older Siphon versions.
     pub personal_app_nudge_at: Option<String>,
     /// The listener has dismissed or followed the personal-app introduction.
@@ -524,6 +526,7 @@ impl Default for Settings {
             search_history: Vec::new(),
             show_shortcut_hints: true,
             web_client_id: None,
+            phone_linked: false,
             personal_app_nudge_at: None,
             personal_app_intro_seen: false,
             slow_app_banner: SlowAppBanner::default(),
