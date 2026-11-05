@@ -74,6 +74,7 @@ pub(super) struct HybridRuntime {
     /// Audio links found this session, shared by everything that plays.
     pub(super) youtube_links: Arc<crate::youtube::Links>,
     pub(super) remote_running: bool,
+    pub(super) remote_signin: super::remote::Signin,
     pub(super) artist_links: Arc<tokio::sync::Mutex<Option<crate::artist_sources::Links>>>,
     pub(super) youtube_warming: Arc<std::sync::atomic::AtomicUsize>,
     soundcloud_load: Option<tokio::task::AbortHandle>,

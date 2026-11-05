@@ -30,6 +30,36 @@ pub enum RemoteEvent {
     Code(Result<String, String>),
 }
 
+/// The group sign-in, read from the system's credential store at most once a minute
+/// while a phone keeps this busy. Any failure forgets it, so a new sign-in is read.
+#[derive(Clone, Default)]
+pub(super) struct Signin(
+    Arc<std::sync::Mutex<Option<(crate::friends::Identity, std::time::Instant)>>>,
+);
+
+impl Signin {
+    const KEEP: std::time::Duration = std::time::Duration::from_secs(60);
+
+    async fn get(&self, credentials: &CredentialStore) -> Option<crate::friends::Identity> {
+        if let Some((identity, at)) = self.0.lock().ok()?.clone()
+            && at.elapsed() < Self::KEEP
+        {
+            return Some(identity);
+        }
+        let identity = crate::friends::saved_identity(credentials).await?;
+        if let Ok(mut held) = self.0.lock() {
+            *held = Some((identity.clone(), std::time::Instant::now()));
+        }
+        Some(identity)
+    }
+
+    fn forget(&self) {
+        if let Ok(mut held) = self.0.lock() {
+            *held = None;
+        }
+    }
+}
+
 fn songs_json(tracks: &[Track]) -> serde_json::Value {
     serde_json::to_value(crate::remote::songs(tracks)).unwrap_or_default()
 }
@@ -47,6 +77,7 @@ impl Worker {
             return;
         };
         let credentials = self.credentials.clone();
+        let signin = self.hybrid.remote_signin.clone();
         let events = self.events.clone();
         let waker = self.waker.clone();
         let emit = move |event: RemoteEvent| {
@@ -62,7 +93,7 @@ impl Worker {
                 tokio::spawn(async move {
                     let mut watched = false;
                     loop {
-                        let wait = match crate::friends::saved_identity(&credentials).await {
+                        let wait = match signin.get(&credentials).await {
                             None => IDLE_POLL,
                             Some(identity) => match client.remote_poll(&identity).await {
                                 Ok(polled) => {
@@ -81,6 +112,7 @@ impl Worker {
                                     if watched { WATCHED_POLL } else { IDLE_POLL }
                                 }
                                 Err(_) => {
+                                    signin.forget();
                                     if watched {
                                         watched = false;
                                         emit(RemoteEvent::Watched(false));
@@ -95,14 +127,14 @@ impl Worker {
             }
             RemoteRequest::State(state) => {
                 tokio::spawn(async move {
-                    if let Some(identity) = crate::friends::saved_identity(&credentials).await {
+                    if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_state(&identity, &state).await;
                     }
                 });
             }
             RemoteRequest::Reply { id, value } => {
                 tokio::spawn(async move {
-                    if let Some(identity) = crate::friends::saved_identity(&credentials).await {
+                    if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_reply(&identity, &id, &value).await;
                     }
                 });
@@ -111,14 +143,14 @@ impl Worker {
                 let search = self.remote_search(query);
                 tokio::spawn(async move {
                     let value = search.await;
-                    if let Some(identity) = crate::friends::saved_identity(&credentials).await {
+                    if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_reply(&identity, &id, &value).await;
                     }
                 });
             }
             RemoteRequest::LinkCode { client_id } => {
                 tokio::spawn(async move {
-                    let answer = match crate::friends::saved_identity(&credentials).await {
+                    let answer = match signin.get(&credentials).await {
                         None => Err("Connect to your group first.".to_owned()),
                         Some(identity) => client.link_start(&identity, client_id.as_deref()).await,
                     };
