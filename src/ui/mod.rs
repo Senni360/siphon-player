@@ -463,26 +463,6 @@ pub(crate) fn glass_fill(palette: &theme::Palette, fill: Color32) -> Color32 {
     Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), alpha)
 }
 
-/// Stops a panel's scrolling contents just above the player, when the player
-/// lies over that panel, so nothing shows in slivers around it. Returns the
-/// clip to put back once the contents are drawn.
-pub(crate) fn clip_above_player(ui: &mut egui::Ui) -> Rect {
-    let clip = ui.clip_rect();
-    let window = ui.ctx().content_rect();
-    let strip = Rect::from_min_max(
-        egui::pos2(window.left(), window.bottom() - theme::PLAYER_BAR_HEIGHT),
-        window.max,
-    );
-    let island = player_bar::island_rect(strip);
-    let panel = ui.max_rect();
-    if panel.right() > island.left() && panel.left() < island.right() {
-        let mut above = clip;
-        above.max.y = above.max.y.min(island.top() - 6.0);
-        ui.set_clip_rect(above);
-    }
-    clip
-}
-
 /// The light catching a glass card's top edge: a bright hairline and a
 /// faint sheen just under it.
 pub(crate) fn glass_sheen(ui: &egui::Ui, rect: Rect, radius: f32) {
@@ -660,7 +640,7 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             // in from the side travelled toward.
             let (enter, from_side) = page_entrance(ui.ctx(), &page, app.history_index);
             let offset = vec2((1.0 - enter) * 24.0 * from_side, (1.0 - enter) * 10.0);
-            let whole = clip_above_player(ui);
+            let whole = ui.clip_rect();
             // Now playing stops higher than the page does, and covers it: nothing
             // of the page shows in the gap under its rounded edge.
             if now_playing::is_open(ui.ctx()) {

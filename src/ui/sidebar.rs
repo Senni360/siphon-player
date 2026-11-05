@@ -1899,7 +1899,6 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
     let current_page = app.page().clone();
 
     begin_step(ui, reveal, 0.55);
-    super::clip_above_player(ui);
     crate::autoscroll::show(
         ui,
         egui::ScrollArea::vertical()

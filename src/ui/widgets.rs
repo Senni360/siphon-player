@@ -385,12 +385,14 @@ pub fn virtual_rows(
     if first > 0 {
         ui.allocate_space(vec2(width, first as f32 * row_height));
     }
-    // The first rows of the page's lists come in one after another when
-    // the page opens; rows scrolled to later are simply there.
+    // Every row on screen when a page opens comes in, top to bottom. The wave
+    // goes by where a row sits in the window, not by how many there are, so it
+    // reaches the last visible row on any screen and at any zoom.
     let entering = super::rows_enter(ui.ctx());
     for index in first..last {
-        let t = if entering && index < ENTERING_ROWS {
-            super::entering(ui.ctx(), index as f32 * 0.03)
+        let t = if entering {
+            let top = start_y + index as f32 * row_height;
+            super::entering(ui.ctx(), entrance_delay(top, clip))
         } else {
             1.0
         };
@@ -412,8 +414,14 @@ pub fn virtual_rows(
     ui.spacing_mut().item_spacing = previous_spacing;
 }
 
-/// How many of a list's first rows enter one after another.
-const ENTERING_ROWS: usize = 10;
+/// How long the entrance takes to travel from the top of the window to its foot.
+const ENTRANCE_WAVE: f32 = 0.34;
+
+/// How long a row whose top is at `top` waits to enter, by where it sits in the
+/// visible area `clip`. Anything above or below takes the nearest edge's time.
+pub(crate) fn entrance_delay(top: f32, clip: Rect) -> f32 {
+    ((top - clip.top()) / clip.height().max(1.0)).clamp(0.0, 1.0) * ENTRANCE_WAVE
+}
 
 /// A wrapping grid of cards, laid out row by row so only visible cards are
 /// measured and painted.
@@ -4235,6 +4243,26 @@ mod playing_cover_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The entrance runs top to bottom over the same time on any screen: the
+    /// last row of a tall window waits as long as the last row of a short one,
+    /// and however many rows that takes, each waits longer than the one above.
+    #[test]
+    fn the_row_entrance_reaches_the_foot_of_any_window() {
+        for height in [600.0, 1000.0, 1440.0, 2400.0] {
+            let clip = Rect::from_min_size(pos2(0.0, 40.0), vec2(1000.0, height));
+            assert_eq!(entrance_delay(clip.top(), clip), 0.0);
+            assert_eq!(entrance_delay(clip.bottom(), clip), ENTRANCE_WAVE);
+            let mut last = -1.0;
+            let mut y = clip.top();
+            while y < clip.bottom() {
+                let delay = entrance_delay(y, clip);
+                assert!(delay > last, "row at {y} of {height}");
+                last = delay;
+                y += theme::ROW_HEIGHT;
+            }
+        }
+    }
     use crate::app::{App, AppOptions};
     use crate::model::{Action, Page};
     use crate::paths::AppDirs;

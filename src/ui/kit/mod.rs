@@ -3,6 +3,7 @@
 //! user did; applying it stays with `crate::app`.
 
 pub mod flight;
+pub mod glass;
 pub mod motion;
 pub mod source;
 pub mod tools;

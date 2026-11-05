@@ -122,7 +122,6 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
         {
             app.actions.push(Action::LoadMoreRecents);
         }
-        super::clip_above_player(ui);
         crate::autoscroll::show(
             ui,
             egui::ScrollArea::vertical()

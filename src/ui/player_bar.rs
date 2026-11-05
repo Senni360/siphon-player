@@ -82,10 +82,25 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
         |ui| {
             let island = island_rect(ui.max_rect());
             super::widgets::paint_shadow(ui, &palette, island, ISLAND_RADIUS);
-            // Solid, because the page scrolls behind it and text showing through
-            // would fight with the controls.
+            // The page scrolls on behind the island, so what passes under it
+            // is frosted before the island's own glass goes on top, and the
+            // words stay clear of it. Without the blur the glass is nearly solid.
+            super::kit::glass::backdrop(
+                ui.ctx(),
+                ui.painter(),
+                island,
+                ISLAND_RADIUS,
+                palette.dark,
+            );
             ui.painter()
-                .rect_filled(island, ISLAND_RADIUS, fill.to_opaque());
+                .rect_filled(island, ISLAND_RADIUS, island_glass(&palette, fill));
+            // The island is a surface: a press on its empty space never reaches
+            // the row scrolling under it.
+            ui.interact(
+                island,
+                ui.id().with("player-bar-surface"),
+                Sense::click_and_drag(),
+            );
             super::glass_sheen(ui, island, ISLAND_RADIUS);
             ui.painter().rect_stroke(
                 island,
@@ -442,6 +457,17 @@ fn eased_fill(ctx: &egui::Context, panel: Color32, tint: Option<Color32>) -> Col
         target
     } else {
         Color32::from_rgba_unmultiplied(eased[0], eased[1], eased[2], target.a())
+    }
+}
+
+/// The island's fill: glass like the other cards over the frosted backdrop, and
+/// nearly solid when there is no blur to keep passing words from showing through.
+fn island_glass(palette: &theme::Palette, fill: Color32) -> Color32 {
+    let fill = fill.to_opaque();
+    if super::kit::glass::available() {
+        super::glass_fill(palette, fill)
+    } else {
+        Color32::from_rgba_unmultiplied(fill.r(), fill.g(), fill.b(), 235)
     }
 }
 

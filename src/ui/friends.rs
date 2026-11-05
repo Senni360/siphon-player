@@ -74,7 +74,6 @@ pub fn side_panel(app: &mut App, ui: &mut egui::Ui) {
             app.actions.push(Action::ToggleFriendsPanel);
         }
         ui.add_space(12.0);
-        super::clip_above_player(ui);
         egui::ScrollArea::vertical()
             .id_salt("friends-panel-scroll")
             .auto_shrink([false, false])

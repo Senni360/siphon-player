@@ -216,11 +216,22 @@ pasted links and the playing song, sends to everyone or picked friends,
 and per-share download whose file drags into a DAW on Windows
 (`src/drag_out.rs`).
 
+## What changed (5 November)
+
+- **The player floats over everything.** The page and the panels scroll on
+  behind the island instead of stopping above it. What passes under it is
+  frosted (`ui/kit/glass.rs`): the frame is copied, blurred, and its brightness
+  held in a band, so the island's words stay readable over any cover, and the
+  island's fill is the same glass as the other cards. This replaces "no live
+  blur" for the island alone. If the shaders do not build, the fill is nearly
+  solid. The island takes its own clicks and hovers, not the row beneath it.
+- **The entrance fits the window.** Every row on screen enters when a page
+  opens, in a wave timed by where the row sits in the window and not by its
+  number, so it reaches the last visible row at any size and zoom.
+
 ## What changed (4 November)
 
-- **Panels run to the window's bottom** and the island floats over them. A
-  panel under the island stops its scrolling contents just above it, so nothing
-  shows in slivers around it. A wider window's side panels keep the full height.
+- **Panels run to the window's bottom** and the island floats over them.
 - **Tabs and chips differ.** A page's tabs are quiet words with a sliding line
   (Group). Chips are filters, and an unselected chip has no room kept for its
   check.
