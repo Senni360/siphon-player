@@ -6,7 +6,7 @@
 mod client;
 mod discovery;
 mod framing;
-mod matching;
+pub(crate) mod matching;
 
 use std::collections::BTreeMap;
 

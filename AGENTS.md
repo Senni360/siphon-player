@@ -10,7 +10,10 @@ wrong without it.
 - Never log or publish credentials, authorization responses, the signing key,
   the group invite code, or private SoundCloud and unlisted YouTube links.
 - Do not circumvent DRM. Spotify songs play from Spotify, through librespot or
-  the optional Soloist player, never from a substitute source.
+  the optional Soloist player, never from a substitute source. The one exception,
+  the owner's call on 2026-11-05: the phone web app, which can't play Spotify,
+  plays a Spotify song as the same song matched on YouTube or SoundCloud (the
+  download matcher's strict rules), and the Spotify app only when there's no match.
 - Each listener uses their own Spotify developer app. Never use someone else's
   Client ID.
 - Windows x64 is the only target. Other platforms' code is unverified, so never

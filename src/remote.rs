@@ -73,6 +73,11 @@ pub enum Command {
         #[serde(rename = "target")]
         id: String,
     },
+    /// A mixed playlist, which lives only on this computer.
+    Mixed {
+        #[serde(rename = "target")]
+        id: String,
+    },
     Liked,
     SoundcloudLikes,
     YoutubeLikes,
@@ -85,6 +90,17 @@ pub enum Command {
     },
     Search {
         query: String,
+    },
+    /// Where a song's audio is, for the phone to play. A Spotify song comes with
+    /// what it's called, so the same song can be found on YouTube or SoundCloud.
+    Stream {
+        uri: String,
+        #[serde(default)]
+        name: Option<String>,
+        #[serde(default)]
+        artists: Vec<String>,
+        #[serde(default)]
+        duration_ms: Option<u32>,
     },
 }
 
@@ -230,6 +246,17 @@ mod tests {
             serde_json::from_str(r#"{"id":"1","kind":"artist","target":"art0"}"#).unwrap();
         assert_eq!(artist.id, "1");
         assert_eq!(artist.command, Command::Artist { id: "art0".into() });
+        assert_eq!(
+            read(&format!(
+                r#"{{{id},"kind":"stream","uri":"soundcloud:track:7"}}"#
+            )),
+            Command::Stream {
+                uri: "soundcloud:track:7".into(),
+                name: None,
+                artists: Vec::new(),
+                duration_ms: None,
+            }
+        );
         assert!(serde_json::from_str::<Incoming>(r#"{"id":"1","kind":"format_disk"}"#).is_err());
         assert!(serde_json::from_str::<Incoming>(r#"{"id":"1","kind":"seek"}"#).is_err());
     }

@@ -7,7 +7,7 @@ use serde_json::Value;
 use crate::api::models::Track;
 
 #[derive(Clone, Debug)]
-pub(super) struct Candidate {
+pub(crate) struct Candidate {
     pub url: String,
     pub title: String,
     pub uploader: String,
@@ -78,7 +78,7 @@ fn coverage(wanted: &BTreeSet<String>, actual: &BTreeSet<String>) -> f64 {
     wanted.intersection(actual).count() as f64 / wanted.len() as f64
 }
 
-pub(super) fn score(track: &Track, candidate: &Candidate) -> Option<f64> {
+pub(crate) fn score(track: &Track, candidate: &Candidate) -> Option<f64> {
     let duration = candidate.duration.filter(|d| d.is_finite() && *d > 0.0)?;
     let difference = (duration - f64::from(track.duration_ms) / 1000.0).abs();
     if track.duration_ms == 0 || difference > 3.0 || candidate.live {
@@ -142,7 +142,7 @@ pub(super) fn score(track: &Track, candidate: &Candidate) -> Option<f64> {
     Some(0.5 * precision + 0.35 * coverage(&artists, &actual) + 0.15 * (1.0 - difference / 3.0))
 }
 
-pub(super) fn best_match<'a>(track: &Track, candidates: &'a [Candidate]) -> Option<&'a Candidate> {
+pub(crate) fn best_match<'a>(track: &Track, candidates: &'a [Candidate]) -> Option<&'a Candidate> {
     candidates
         .iter()
         .filter_map(|candidate| score(track, candidate).map(|score| (candidate, score)))
@@ -242,6 +242,55 @@ mod tests {
             "ytsearch5:test",
         ] {
             assert!(youtube_url(url).is_none());
+        }
+    }
+
+    /// The phone's Spotify songs are found this way on real YouTube:
+    /// `cargo test --lib same_song_is_found_on_youtube_for_real -- --ignored --nocapture`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the helper and the network"]
+    async fn same_song_is_found_on_youtube_for_real() {
+        let resolver = crate::youtube::Resolver::default();
+        for (artist, name, duration_ms) in [
+            ("The Weeknd", "Blinding Lights", 200_040),
+            ("Queen", "Bohemian Rhapsody", 354_320),
+        ] {
+            let wanted = Track {
+                uri: "spotify:track:x".into(),
+                name: name.into(),
+                artists: vec![ArtistRef {
+                    name: artist.into(),
+                    ..Default::default()
+                }],
+                duration_ms,
+                ..Default::default()
+            };
+            let query = format!("{artist} - {name}");
+            let videos = crate::youtube::browse::videos_for(&resolver, &query)
+                .await
+                .unwrap();
+            let best = videos
+                .iter()
+                .filter_map(|video| {
+                    let found = Candidate {
+                        url: video.uri.clone(),
+                        title: video.name.clone(),
+                        uploader: video
+                            .artists
+                            .first()
+                            .map(|artist| artist.name.clone())
+                            .unwrap_or_default(),
+                        duration: Some(f64::from(video.duration_ms) / 1000.0),
+                        live: false,
+                    };
+                    score(&wanted, &found).map(|score| (video, score))
+                })
+                .max_by(|left, right| left.1.total_cmp(&right.1));
+            println!(
+                "{query}: {:?}",
+                best.map(|(video, score)| (&video.name, &video.uri, score))
+            );
+            assert!(best.is_some(), "{query} is on YouTube");
         }
     }
 }

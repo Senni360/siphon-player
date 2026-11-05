@@ -17,6 +17,14 @@ pub enum RemoteRequest {
         id: String,
         query: String,
     },
+    /// The audio of a song from SoundCloud, YouTube or the group, for the phone itself.
+    Stream {
+        id: String,
+        uri: String,
+        share_url: Option<String>,
+        /// For a Spotify song: what to look for on YouTube and SoundCloud.
+        wanted: Option<Box<Track>>,
+    },
     /// A code for a phone to type, and this listener's own Spotify app for it to use.
     LinkCode {
         client_id: Option<String>,
@@ -139,6 +147,23 @@ impl Worker {
                     }
                 });
             }
+            RemoteRequest::Stream {
+                id,
+                uri,
+                share_url,
+                wanted,
+            } => {
+                let find = self.remote_stream(uri, share_url, wanted);
+                tokio::spawn(async move {
+                    let value = match find.await {
+                        Ok(value) => value,
+                        Err(error) => serde_json::json!({ "error": error }),
+                    };
+                    if let Some(identity) = signin.get(&credentials).await {
+                        let _ = client.remote_reply(&identity, &id, &value).await;
+                    }
+                });
+            }
             RemoteRequest::Search { id, query } => {
                 let search = self.remote_search(query);
                 tokio::spawn(async move {
@@ -157,6 +182,87 @@ impl Worker {
                     emit(RemoteEvent::Code(answer));
                 });
             }
+        }
+    }
+
+    /// The address of a song's audio for the phone. A Spotify song can't play in a
+    /// phone's browser, so by the owner's choice (2026-11-05) the phone plays the same
+    /// song from YouTube or SoundCloud, found with the download matcher's strict rules
+    /// and remembered for the session. The computer itself still plays Spotify.
+    fn remote_stream(
+        &self,
+        uri: String,
+        share_url: Option<String>,
+        wanted: Option<Box<Track>>,
+    ) -> impl std::future::Future<Output = Result<serde_json::Value, String>> + Send + 'static {
+        let catalogue = self.youtube_catalogue();
+        let soundcloud = self.soundcloud_client();
+        let matches = Arc::clone(&self.hybrid.phone_matches);
+        let credentials = self.credentials.clone();
+        let http = crate::http::build_collection_client(&self.engine_config.proxy)
+            .map(Http::new)
+            .unwrap_or_else(Http::unavailable);
+        async move {
+            let mut uri = uri;
+            let mut share_url = share_url;
+            if let Some(wanted) = wanted.filter(|_| uri.starts_with("spotify:track:")) {
+                let known = matches.lock().ok().and_then(|held| held.get(&uri).cloned());
+                let found = match known {
+                    Some(found) => found,
+                    None => {
+                        let found = same_song(&wanted, &catalogue, soundcloud.as_ref())
+                            .await
+                            .ok_or("This song isn't on YouTube or SoundCloud.")?;
+                        if let Ok(mut held) = matches.lock() {
+                            held.insert(uri.clone(), found.clone());
+                        }
+                        found
+                    }
+                };
+                uri = found;
+                share_url = None;
+            }
+            if crate::youtube::is_track_uri(&uri) {
+                let (track, url) = catalogue
+                    .playable(&uri, false)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                return Ok(serde_json::json!({
+                    "url": url,
+                    "mime": "audio/mp4",
+                    "duration_ms": track.duration_ms,
+                }));
+            }
+            if crate::shared_songs::is_song(&uri) {
+                let id = crate::shared_songs::song_id(&uri).ok_or("That song is gone.")?;
+                let identity = crate::friends::saved_identity(&credentials)
+                    .await
+                    .ok_or("Connect to your group to play this song.")?;
+                let client = crate::friends::Client::configured(http)?;
+                let (url, mime) = client.song_stream(&identity, id).await?;
+                return Ok(serde_json::json!({ "url": url, "mime": mime }));
+            }
+            if crate::soundcloud::track_id(&uri).is_some() {
+                let client = soundcloud.ok_or("SoundCloud isn't ready yet.")?;
+                let track = client
+                    .track_for_playback(&uri, share_url.as_deref(), None)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let info = client
+                    .resolve_stream(&track)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if info.is_preview {
+                    return Err("SoundCloud only plays a preview of this song.".into());
+                }
+                return Ok(serde_json::json!({
+                    "url": info.url,
+                    "mime": info.mime,
+                    "hls": matches!(info.protocol, crate::soundcloud::models::Protocol::Hls),
+                    "duration_ms": info.duration_ms,
+                }));
+            }
+            Err("This song plays from Spotify.".into())
         }
     }
 
@@ -252,4 +358,53 @@ impl Worker {
             })
         }
     }
+}
+
+/// The same song as a Spotify one, on YouTube or SoundCloud: the best that passes the
+/// download matcher, which wants the title, the artist and the length within seconds,
+/// and turns down remixes, live takes and covers. None rather than a near miss.
+async fn same_song(
+    wanted: &Track,
+    catalogue: &crate::youtube::Catalogue,
+    soundcloud: Option<&crate::soundcloud::api::Client>,
+) -> Option<String> {
+    use crate::downloads::matching::{Candidate, score};
+    let query = format!("{} - {}", wanted.artist_names(), wanted.name);
+    let video = crate::youtube::browse::videos_for(&catalogue.resolver, &query);
+    let sound = async {
+        match soundcloud {
+            Some(client) => client
+                .search_tracks(&query, 15, 0)
+                .await
+                .map(|page| {
+                    page.collection
+                        .iter()
+                        .filter(|track| !track.to_track(None).preview_only)
+                        .map(|track| track.to_track(None))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default(),
+            None => Vec::new(),
+        }
+    };
+    let (videos, sounds) = tokio::join!(video, sound);
+    let candidate = |track: &Track| Candidate {
+        url: track.uri.clone(),
+        title: track.name.clone(),
+        uploader: track
+            .artists
+            .first()
+            .map(|artist| artist.name.clone())
+            .unwrap_or_default(),
+        duration: (track.duration_ms > 0).then(|| f64::from(track.duration_ms) / 1000.0),
+        live: false,
+    };
+    videos
+        .unwrap_or_default()
+        .iter()
+        .chain(sounds.iter())
+        .map(candidate)
+        .filter_map(|found| score(wanted, &found).map(|score| (found.url, score)))
+        .max_by(|(_, left), (_, right)| left.total_cmp(right))
+        .map(|(uri, _)| uri)
 }

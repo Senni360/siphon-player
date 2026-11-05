@@ -38,6 +38,7 @@ fn is_question(command: &Phone) -> bool {
             | Phone::Library
             | Phone::Playlist { .. }
             | Phone::Album { .. }
+            | Phone::Mixed { .. }
             | Phone::Liked
             | Phone::SoundcloudLikes
             | Phone::YoutubeLikes
@@ -53,7 +54,10 @@ pub(super) fn fair_question(command: &Phone) -> bool {
         !id.is_empty() && id.len() <= 64 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
     };
     match command {
-        Phone::Playlist { id } | Phone::Album { id } | Phone::Artist { id } => plain(id),
+        Phone::Playlist { id }
+        | Phone::Album { id }
+        | Phone::Artist { id }
+        | Phone::Mixed { id } => plain(id),
         Phone::Source { uri } => {
             crate::soundcloud::is_page(uri) || crate::youtube::browse::is_page(uri)
         }
@@ -255,6 +259,54 @@ impl App {
     pub(super) fn remote_command(&mut self, incoming: Incoming, ctx: &egui::Context) {
         let Incoming { id, command } = incoming;
         let action = match &command {
+            Phone::Stream {
+                uri,
+                name,
+                artists,
+                duration_ms,
+            } => {
+                if !allowed_uri(uri) || uri.starts_with("spotify:episode:") {
+                    self.remote_reply(id, json!({ "error": "This can't play on a phone." }));
+                    return;
+                }
+                let share_url = self
+                    .track_cache
+                    .get(uri)
+                    .and_then(|track| track.external_urls.spotify.clone());
+                // A Spotify song is looked for elsewhere by what it's called: as this
+                // computer knows it, or else as the phone describes it.
+                let known = self
+                    .track_cache
+                    .get(uri)
+                    .filter(|track| track.duration_ms > 0);
+                let wanted = uri
+                    .starts_with("spotify:track:")
+                    .then(|| known.cloned())
+                    .flatten()
+                    .or_else(|| {
+                        uri.starts_with("spotify:track:").then(|| Track {
+                            uri: uri.clone(),
+                            name: name.clone().unwrap_or_default().chars().take(300).collect(),
+                            artists: artists
+                                .iter()
+                                .take(5)
+                                .map(|artist| crate::api::models::ArtistRef {
+                                    name: artist.chars().take(200).collect(),
+                                    ..Default::default()
+                                })
+                                .collect(),
+                            duration_ms: duration_ms.unwrap_or_default(),
+                            ..Default::default()
+                        })
+                    });
+                self.backend.send(Command::Remote(RemoteRequest::Stream {
+                    id,
+                    uri: uri.clone(),
+                    share_url,
+                    wanted: wanted.map(Box::new),
+                }));
+                return;
+            }
             Phone::Search { query } => {
                 let query = query.trim().chars().take(200).collect();
                 self.backend
@@ -367,8 +419,26 @@ impl App {
                             .collect()
                     })
                     .unwrap_or_default();
+                let mixed: Vec<Value> = self
+                    .mixed_playlists
+                    .playlists
+                    .iter()
+                    .map(|list| {
+                        let image = list.entries.iter().find_map(|entry| {
+                            let album = entry.track.album.as_ref()?;
+                            pick_image(&album.images, 300).map(str::to_owned)
+                        });
+                        json!({
+                            "id": list.id,
+                            "name": list.name,
+                            "image": image,
+                            "count": list.entries.len(),
+                        })
+                    })
+                    .collect();
                 json!({
                     "playlists": playlists,
+                    "mixed": mixed,
                     "soundcloud": self.soundcloud_library.snapshot.likes_loaded,
                     "youtube": self.youtube_likes().is_some(),
                 })
@@ -405,6 +475,13 @@ impl App {
                     row.image.clone_from(&image);
                 }
                 json!({ "name": album.name, "uri": album.uri, "image": image, "songs": rows })
+            }
+            Phone::Mixed { id } => {
+                let list = self.mixed_playlists.get(id)?;
+                let (name, uri, tracks) = (list.name.clone(), list.uri(), list.to_tracks());
+                // Played from the phone, its SoundCloud and YouTube songs must be known here.
+                self.cache_soundcloud_tracks(&tracks);
+                json!({ "name": name, "uri": uri, "songs": songs(&tracks) })
             }
             Phone::Liked => {
                 if !self.library.liked.loaded_once {

@@ -238,6 +238,8 @@ const DIRECT_ACTS = {
 /** Tells the computer to do something, or Spotify when the computer's not there. */
 async function act(kind, args = {}) {
   player.lastAct = Date.now();
+  // Playing on this phone, the buttons work the phone's own player.
+  if (here.active && HERE_ACTS[kind]) return HERE_ACTS[kind](args);
   if (!player.online && hasSpotify() && DIRECT_ACTS[kind]) {
     try {
       await DIRECT_ACTS[kind](args);
@@ -267,6 +269,220 @@ async function ask(kind, args = {}, patience = 45000) {
   throw new Error(player.online ? 'Encore took too long to answer.' : "Encore isn't open on your computer.");
 }
 
+// ---------------------------------------------------------------- playing on this phone
+// Every song plays in this page; the computer only says where its audio is. A Spotify
+// song plays as the same song from YouTube or SoundCloud, which the computer finds, so
+// a mixed playlist runs straight through. Only when there's no such match does it go
+// to the Spotify app, and the list carries on when it ends there.
+const TARGET_KEY = 'encore.target';
+const here = { audio: null, list: [], index: -1, spotify: null, active: false };
+const playsHere = () => localStorage.getItem(TARGET_KEY) === 'phone';
+
+function hereAudio() {
+  if (here.audio) return here.audio;
+  const audio = new Audio();
+  audio.preload = 'auto';
+  audio.addEventListener('ended', () => playIndex(here.index + 1));
+  audio.addEventListener('error', () => {
+    if (!here.active || here.spotify || !audio.src) return;
+    const song = here.list[here.index];
+    toast(`${song?.name ?? 'That song'} can't play on this phone.`);
+    playIndex(here.index + 1);
+  });
+  for (const event of ['play', 'pause', 'loadedmetadata']) audio.addEventListener(event, refreshPlayer);
+  here.audio = audio;
+  return audio;
+}
+
+async function playHere(list, index) {
+  here.list = list;
+  here.active = true;
+  await playIndex(index);
+}
+
+function stopHere() {
+  here.audio?.pause();
+  here.active = false;
+  here.spotify = null;
+  refreshPlayer();
+}
+
+async function playIndex(index) {
+  if (index < 0 || index >= here.list.length) {
+    here.audio?.pause();
+    here.spotify = null;
+    refreshPlayer();
+    return;
+  }
+  here.index = index;
+  here.spotify = null;
+  const song = here.list[index];
+  mediaSession(song);
+  refreshPlayer();
+  markPlaying();
+  try {
+    const found = await streamOf(song);
+    if (here.index !== index) return;
+    // The next song is looked up while this one plays, so there's no gap between them.
+    const next = here.list[index + 1];
+    if (next) streamOf(next).catch(() => {});
+    const audio = hereAudio();
+    if (found.hls && !audio.canPlayType('application/vnd.apple.mpegurl')) throw new Error("this browser can't play it");
+    audio.src = found.url;
+    await audio.play();
+  } catch (error) {
+    if (here.index !== index) return;
+    if (song.uri.startsWith('spotify:track:')) return handOff(song, index);
+    toast(`${song.name}: ${error.message}`);
+    playIndex(index + 1);
+  }
+}
+
+/** Where a song's audio is, asked once per song for a while. */
+const STREAM_KEEP_MS = 20 * 60 * 1000;
+const streams = new Map();
+function streamOf(song) {
+  const held = streams.get(song.uri);
+  if (held && Date.now() - held.at < STREAM_KEEP_MS) return held.found;
+  const question = song.uri.startsWith('spotify:')
+    ? { uri: song.uri, name: song.name, artists: song.artists, duration_ms: song.duration_ms }
+    : { uri: song.uri };
+  const found = ask('stream', question);
+  streams.set(song.uri, { at: Date.now(), found });
+  found.catch(() => streams.delete(song.uri));
+  return found;
+}
+
+/** A Spotify song plays in the Spotify app on this phone, and the list waits for it. */
+async function handOff(song, index) {
+  here.audio?.pause();
+  const app = `https://open.spotify.com/track/${trackId(song.uri)}`;
+  if (!hasSpotify()) {
+    toast('Spotify songs play in the Spotify app.');
+    location.href = app;
+    stopHere();
+    return;
+  }
+  try {
+    const { devices } = await web('/me/player/devices');
+    const device = devices.find(item => item.type === 'Smartphone') ?? devices.find(item => item.is_active) ?? devices[0];
+    if (!device) { location.href = app; stopHere(); return; }
+    await web(`/me/player/play?device_id=${encodeURIComponent(device.id)}`, 'PUT', { uris: [song.uri] });
+    here.spotify = { uri: song.uri, position: 0, playing: true, at: Date.now(), started: Date.now(), seen: false };
+    followSpotify(index, song);
+  } catch (error) {
+    toast(error.message);
+    playIndex(index + 1);
+  }
+}
+
+/** Watches the Spotify app until its song ends, then carries on with the list here. */
+function followSpotify(index, song) {
+  const look = async () => {
+    if (here.index !== index || !here.spotify) return;
+    try {
+      const now = await web('/me/player');
+      const same = now?.item?.uri === here.spotify.uri;
+      if (same) {
+        Object.assign(here.spotify, { position: now.progress_ms ?? 0, playing: now.is_playing, at: Date.now(), seen: true });
+        refreshPlayer();
+        const length = now.item.duration_ms ?? song.duration_ms ?? 0;
+        const finished = !now.is_playing && ((now.progress_ms ?? 0) >= length - 3000
+          || ((now.progress_ms ?? 0) === 0 && Date.now() - here.spotify.started > length - 5000));
+        if (finished) return playIndex(index + 1);
+      } else if (here.spotify.seen) {
+        // Spotify moved on by itself: take the list back.
+        await web('/me/player/pause', 'PUT').catch(() => {});
+        return playIndex(index + 1);
+      }
+    } catch { /* the next look tries again */ }
+    setTimeout(look, 2000);
+  };
+  setTimeout(look, 2500);
+}
+
+/** The phone's own playback, in the shape the player shows. */
+function hereState() {
+  const song = here.list[here.index];
+  if (!song) return null;
+  const audio = here.audio;
+  const spotify = here.spotify;
+  const playing = spotify ? spotify.playing : !!audio && !audio.paused;
+  const position = spotify ? spotify.position + (spotify.playing ? Date.now() - spotify.at : 0) : (audio?.currentTime ?? 0) * 1000;
+  return {
+    song: { ...song, duration_ms: song.duration_ms || (audio?.duration ? audio.duration * 1000 : 0) },
+    position_ms: position, playing, liked: false, shuffle: false, repeat: 'off',
+    volume: Math.round((audio?.volume ?? 1) * 100), device: spotify ? 'Spotify on this phone' : 'This phone',
+    next: here.list.slice(here.index + 1, here.index + 6), here: true,
+  };
+}
+
+const HERE_ACTS = {
+  toggle: () => {
+    if (here.spotify) return web(`/me/player/${here.spotify.playing ? 'pause' : 'play'}`, 'PUT').then(() => { here.spotify.playing = !here.spotify.playing; here.spotify.at = Date.now(); refreshPlayer(); });
+    const audio = hereAudio();
+    return audio.paused ? audio.play() : audio.pause();
+  },
+  next: () => playIndex(here.index + 1),
+  previous: () => {
+    const at = hereState()?.position_ms ?? 0;
+    if (at > 3000) return HERE_ACTS.seek({ ms: 0 });
+    return playIndex(Math.max(0, here.index - 1));
+  },
+  seek: ({ ms }) => {
+    if (here.spotify) return web(`/me/player/seek?position_ms=${Math.round(ms)}`, 'PUT').then(() => { here.spotify.position = ms; here.spotify.at = Date.now(); });
+    hereAudio().currentTime = ms / 1000;
+  },
+  volume: ({ percent }) => { hereAudio().volume = Math.min(1, Math.max(0, percent / 100)); },
+  shuffle: () => toast("Shuffle isn't on this phone yet."),
+  repeat: () => toast("Repeat isn't on this phone yet."),
+};
+
+/** The lock screen and headphones show the song and work the buttons. */
+function mediaSession(song) {
+  if (!('mediaSession' in navigator)) return;
+  const image = safeImage(song.image);
+  navigator.mediaSession.metadata = new MediaMetadata({ title: song.name, artist: song.artists.join(', '), artwork: image ? [{ src: image, sizes: '300x300' }] : [] });
+  const handlers = {
+    play: () => HERE_ACTS.toggle(), pause: () => HERE_ACTS.toggle(),
+    nexttrack: () => HERE_ACTS.next(), previoustrack: () => HERE_ACTS.previous(),
+    seekto: details => HERE_ACTS.seek({ ms: details.seekTime * 1000 }),
+  };
+  for (const [action, handler] of Object.entries(handlers)) {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* not every phone has every one */ }
+  }
+}
+
+/** Where the sound comes from: the computer or this phone. */
+function targetPicker() {
+  const scrim = h('div', { class: 'scrim', onclick: () => close() });
+  const close = () => { scrim.remove(); panel.remove(); };
+  const choose = (label, chosen, run) => h('button', { text: `${chosen ? '♪ ' : ''}${label}`, onclick: () => { close(); run(); } });
+  const onPhone = playsHere();
+  const panel = h('div', { class: 'actions', role: 'menu' },
+    h('div', { class: 'about' }, h('b', { text: 'Play on' }), h('span', { text: 'Everything plays on the phone itself, Spotify songs included.' })),
+    choose('Your computer', !onPhone, () => {
+      localStorage.setItem(TARGET_KEY, 'computer');
+      stopHere();
+    }),
+    choose('This phone', onPhone, () => {
+      localStorage.setItem(TARGET_KEY, 'phone');
+      // Whatever the computer was playing carries on here, from the same place.
+      const state = player.state;
+      if (state?.song && player.online) {
+        const list = [state.song, ...(state.next ?? [])];
+        if (state.playing) api('/live/remote/send', 'POST', { id: uuid(), kind: 'toggle' }).catch(() => {});
+        playHere(list, 0).then(() => {
+          if (!here.spotify) HERE_ACTS.seek({ ms: position(state) });
+        });
+      }
+      refreshPlayer();
+    }),
+    player.direct || hasSpotify() ? choose('A Spotify device…', false, () => devicePicker()) : null,
+    h('button', { text: 'Cancel', onclick: () => close() }));
+  document.body.append(scrim, panel);
+}
+
 // ---------------------------------------------------------------- the player
 const player = { state: null, online: false, direct: false, at: 0, held: new Map(), lastAct: 0, sheet: null, mini: null };
 
@@ -277,6 +493,7 @@ function hold(field, value) {
   refreshPlayer();
 }
 function shown() {
+  if (here.active) return hereState();
   if (!player.state) return null;
   const merged = { ...player.state };
   for (const [field, { value, until }] of player.held) {
@@ -364,7 +581,7 @@ function refreshPlayer() {
   const song = state?.song;
   const mini = player.mini;
   if (mini) {
-    mini.node.hidden = !song || !(player.online || player.direct);
+    mini.node.hidden = !song || !(player.online || player.direct || here.active);
     document.querySelector('main')?.classList.toggle('no-player', mini.node.hidden);
     if (song) {
       if (mini.uri !== song.uri) {
@@ -381,7 +598,8 @@ function refreshPlayer() {
         mini.playing = state.playing;
         mini.play.replaceChildren(icon(state.playing ? 'pause' : 'play'));
       }
-      mini.line.style.width = `${song.duration_ms ? position(state) / song.duration_ms * 100 : 0}%`;
+      const at = state.here ? state.position_ms : position(state);
+      mini.line.style.width = `${song.duration_ms ? at / song.duration_ms * 100 : 0}%`;
     }
   }
   player.sheet?.update(state);
@@ -395,6 +613,7 @@ function markPlaying() {
 const knock = () => navigator.vibrate?.(8);
 /** Moves to `ms` now, and holds it there until the computer agrees. */
 function seekTo(ms) {
+  if (here.active) { act('seek', { ms }); return; }
   if (!player.state) return;
   player.state.position_ms = ms;
   player.at = Date.now();
@@ -425,7 +644,7 @@ function openSheet() {
   const cover = h('div', { class: 'cover' });
   const name = h('span', { class: 'big' });
   const artist = h('button', { class: 'artist' });
-  const where = h('button', { class: 'where', onclick: () => { if (player.direct) devicePicker(); } });
+  const where = h('button', { class: 'where', onclick: targetPicker });
   const heart = h('button', { class: 'heart', 'aria-label': 'Like', onclick: () => {
     const state = shown();
     if (!state?.song) return;
@@ -546,7 +765,7 @@ function openSheet() {
       artist.textContent = song.artists.join(', ');
       artist.onclick = song.artist_id ? () => { close(); go({ page: 'artist', id: song.artist_id }); } : null;
     }
-    where.textContent = state.device ? `Playing on ${state.device}` : 'Playing on your computer';
+    where.textContent = `${state.device ? `Playing on ${state.device}` : 'Playing on your computer'} ▾`;
     heart.setAttribute('aria-pressed', String(!!state.liked));
     shuffle.setAttribute('aria-pressed', String(!!state.shuffle));
     repeat.setAttribute('aria-pressed', String(state.repeat !== 'off'));
@@ -557,7 +776,7 @@ function openSheet() {
       main.replaceChildren(icon(state.playing ? 'pause' : 'play'));
     }
     seek.input.max = song.duration_ms || 1;
-    const at = position(state);
+    const at = state.here ? state.position_ms : position(state);
     followLyrics(at);
     if (!seek.input.dataset.dragging) { seek.input.value = at; seek.fill(); }
     elapsed.textContent = clock(seek.input.dataset.dragging ? Number(seek.input.value) : at);
@@ -640,6 +859,7 @@ function row(song, list, index) {
     h('button', { class: 'more', 'aria-label': `More for ${song.name}`, onclick: () => songActions(song) }, icon('more')));
 }
 function playFrom(list, index) {
+  if (playsHere()) { playHere(list, index); return; }
   if (!player.online && !hasSpotify()) { toast('Open Encore on your computer first.'); return; }
   // The computer plays 500 at most, so a very long list starts around the song.
   const start = Math.max(0, index - 100);
@@ -843,6 +1063,8 @@ function libraryScreen() {
       place('Liked Songs', null, 'Spotify', () => go({ page: 'list', kind: 'liked' })),
       !found.direct && place('SoundCloud likes', null, 'SoundCloud', () => go({ page: 'list', kind: 'soundcloud_likes' })),
       !found.direct && place('YouTube likes', null, 'YouTube', () => go({ page: 'list', kind: 'youtube_likes' })),
+      found.mixed?.length ? [h('h2', { class: 'section', text: 'Mixed playlists' }),
+        found.mixed.map(list => place(list.name, list.image, `${list.count} songs · Spotify, SoundCloud and YouTube`, () => go({ page: 'list', kind: 'mixed', id: list.id })))] : null,
       h('h2', { class: 'section', text: 'Playlists' }),
       (found.playlists ?? []).map(list => place(list.name, list.image, null, () => go({ page: 'list', kind: 'playlist', id: list.id, uri: list.uri }))),
     ];
@@ -1009,7 +1231,7 @@ function groupScreen() {
   const title = h('h1', { class: 'title', text: 'Group' });
   const chooser = h('div');
   const refresh = () => load(async () => {
-    const [account, feed, live, people] = await Promise.all([api('/account'), api('/posts?limit=30'), api('/live').catch(() => null), api('/members').catch(() => null)]);
+    const [account, feed, live, people, lists] = await Promise.all([api('/account'), api('/posts?limit=30'), api('/live').catch(() => null), api('/members').catch(() => null), api('/playlists').catch(() => null)]);
     const groups = account.groups ?? [];
     const chosen = localStorage.getItem(STORE.group);
     const here = groups.find(group => group.id === chosen) ?? groups[0];
@@ -1026,7 +1248,8 @@ function groupScreen() {
         h('button', { class: 'words', onclick: () => playShared(someone.item.url) },
           h('span', { class: `name ${someone.item.source}`, text: someone.item.title }),
           h('span', { class: 'by', text: `${names.get(someone.user_id) ?? 'Someone'} · ${(someone.item.artists ?? []).join(', ')}` }))))] : null,
-      posts.length ? [listening.length ? h('h2', { class: 'section', text: 'Shared' }) : null, posts.map(post => postView(post, refresh))] : h('p', { class: 'empty', text: 'Nothing shared yet.' }),
+      lists?.playlists?.length ? [h('h2', { class: 'section', text: 'Shared playlists' }), h('div', { class: 'cards' }, lists.playlists.slice(0, 6).map(list => card(list.name, `${list.by_name} · ${list.count} songs`, list.artwork_url, () => go({ page: 'shared', id: list.id, name: list.name }))))] : null,
+      posts.length ? [listening.length || lists?.playlists?.length ? h('h2', { class: 'section', text: 'Shared songs' }) : null, posts.map(post => postView(post, refresh))] : h('p', { class: 'empty', text: 'Nothing shared yet.' }),
     ];
   }, body);
   refresh();
@@ -1034,7 +1257,24 @@ function groupScreen() {
 }
 
 const TABS = [['home', 'Home', homeScreen], ['search', 'Search', searchScreen], ['library', 'Library', libraryScreen], ['group', 'Group', groupScreen]];
-const SCREENS = { list: listScreen, artist: artistScreen, source: sourceScreen };
+/** A playlist someone shared with the group. Each song plays by its own link. */
+function sharedScreen() {
+  const body = h('div');
+  const { id } = current;
+  load(async () => {
+    const found = await api(`/playlists/${encodeURIComponent(id)}`);
+    const items = found.items ?? [];
+    return [
+      h('h1', { class: 'title', text: found.name }),
+      h('p', { class: 'note', text: `${items.length} songs` }),
+      items.map(item => h('div', { class: 'row' }, art(item.artwork_url), h('button', { class: 'words', onclick: () => playShared(item.url) },
+        h('span', { class: `name ${item.source}`, text: item.title }), h('span', { class: 'by', text: (item.artists ?? []).join(', ') })))),
+    ];
+  }, body);
+  return [backButton(), body];
+}
+
+const SCREENS = { list: listScreen, artist: artistScreen, source: sourceScreen, shared: sharedScreen };
 
 /** A tab's page shows as it was left for this long, then reads again. */
 const TAB_KEEPS_MS = 3 * 60 * 1000;

@@ -120,9 +120,39 @@ fn a_phone_can_only_ask_about_things_with_plain_names() {
     assert!(!fair(&PhoneCommand::Artist { id: "../me/player".into() }));
     assert!(!fair(&PhoneCommand::Playlist { id: "a?b=c".into() }));
     assert!(!fair(&PhoneCommand::Album { id: String::new() }));
+    assert!(fair(&PhoneCommand::Mixed { id: "0123456789abcdef".into() }));
+    assert!(!fair(&PhoneCommand::Mixed { id: "../x".into() }));
     assert!(fair(&PhoneCommand::Source { uri: "soundcloud:user:12".into() }));
     assert!(fair(&PhoneCommand::Source { uri: "youtube:channel:UC1234567890123456789012".into() }));
     assert!(!fair(&PhoneCommand::Source { uri: "https://evil.example".into() }));
+}
+
+#[test]
+fn a_phone_sees_this_computers_mixed_playlists() {
+    let mut app = artist_page_app("remote-mixed");
+    let ctx = egui::Context::default();
+    let id = app.mixed_playlists.create("Across the streams".into(), String::new());
+    let song = Track {
+        uri: "soundcloud:track:7".into(),
+        name: "Song".into(),
+        ..Default::default()
+    };
+    app.mixed_playlists
+        .get_mut(&id)
+        .unwrap()
+        .add_tracks(std::slice::from_ref(&song), None);
+    app.remote_command(
+        PhoneIncoming {
+            id: "1".into(),
+            command: PhoneCommand::Mixed { id: id.clone() },
+        },
+        &ctx,
+    );
+    assert!(app.phone.waiting.is_empty(), "answered at once");
+    assert!(
+        app.track_cache.contains_key("soundcloud:track:7"),
+        "its songs can be played from the phone"
+    );
 }
 
 #[test]

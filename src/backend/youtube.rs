@@ -5,7 +5,7 @@ use crate::soundcloud::engine as pcm;
 use std::sync::atomic::Ordering;
 
 impl Worker {
-    fn youtube_catalogue(&self) -> crate::youtube::Catalogue {
+    pub(super) fn youtube_catalogue(&self) -> crate::youtube::Catalogue {
         crate::youtube::Catalogue {
             resolver: Default::default(),
             cache: self.dirs.cache.join("youtube-metadata").join(
