@@ -251,6 +251,8 @@ async function act(kind, args = {}) {
 /** Asks the computer something, and waits for it to answer. */
 async function ask(kind, args = {}, patience = 45000) {
   if (!player.online && hasSpotify() && DIRECT[kind]) return DIRECT[kind](args);
+  // Past the time the computer takes to notice, it isn't coming: say so straight away.
+  if (!player.online && Date.now() - openedAt > WAKE_MS) throw new Error("Encore isn't open on your computer.");
   const id = uuid();
   await api('/live/remote/send', 'POST', { id, kind, ...args });
   const until = Date.now() + patience;

@@ -5,7 +5,8 @@ use crate::artist_sources::{self as sources, Catalogue, Finding, Link, Links, Re
 
 /// How long what's saved is shown without reading it again.
 const FRESH_SECONDS: i64 = 24 * 60 * 60;
-const SAVED_VERSION: u32 = 1;
+/// Raised when what's found grows a list, so a page saved before shows it at once.
+const SAVED_VERSION: u32 = 2;
 /// How many releases have their songs read, to know what Spotify has.
 const MOST_RELEASES: usize = 200;
 /// How many further pages of an artist's releases are read, on top of what the page has.
