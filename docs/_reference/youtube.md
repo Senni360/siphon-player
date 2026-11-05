@@ -18,7 +18,8 @@ uploaded, read from YouTube's public feed of each channel
 Connecting is optional, and takes the listener's own Google Cloud project: the
 dialog walks through creating it, turning on the YouTube Data API v3, publishing
 its consent screen (unpublished, Google ends sign-ins after 7 days) and creating a
-Desktop client. Each listener uses their own keys. No key is built into the app and
+Desktop client. Google won't publish without a home page and a privacy policy, so
+the dialog gives `https://siphon-friends.vercel.app` and its `/privacy` page. Each listener uses their own keys. No key is built into the app and
 nothing goes through a server. Google warns that the app is unverified, as it is.
 
 Sign-in is the authorization code flow with PKCE, on a loopback port chosen for the
@@ -65,7 +66,11 @@ shipping helper discovery.
 
 The command starts directly without a shell, ignores yt-dlp configuration,
 accepts only a validated video ID, and requests format 140 (progressive AAC in
-MP4). It never selects a video format or requests Google cookies. It inherits
+MP4). Starting a song asks once for its details and link together, since a yt-dlp
+run takes about two seconds. Links are remembered in memory for the session, a row
+the pointer rests on for a quarter of a second is looked up ahead of a press (two at
+a time at most), and a press during that lookup waits for it instead of starting
+another. It never selects a video format or requests Google cookies. It inherits
 the process environment for yt-dlp proxy handling; the app's custom proxy
 preferences are not yet passed to this separate executable. Signed HTTPS
 URLs must belong to `*.googlevideo.com`, contain no embedded credentials, and

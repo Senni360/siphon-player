@@ -1408,6 +1408,8 @@ impl Toast {
 /// Actions emitted while drawing and applied afterward to avoid borrow conflicts.
 #[derive(Clone, Debug)]
 pub enum Action {
+    /// Get a YouTube song ready, since the pointer has settled on it.
+    WarmYouTube(String),
     Friends(crate::friends::Action),
     /// Listening together with the group. See [`crate::friends::live`].
     Live(crate::friends::live::Action),

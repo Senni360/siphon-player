@@ -2217,11 +2217,44 @@ pub fn track_row(ui: &mut Ui, app: &mut App, row: TrackRow<'_>) -> Option<RowPic
 }
 
 /// Also exposes the row body so a collection can navigate between whole songs.
+/// How long the pointer rests on a YouTube song before its link is looked up.
+/// Long enough that passing over a list asks for nothing.
+const WARM_AFTER: f64 = 0.25;
+
+/// Looks up a YouTube song's link once the pointer has settled on it, which takes
+/// about two seconds off a press that follows. Only one song is ever waiting.
+pub(crate) fn warm_on_hover(app: &mut App, ctx: &egui::Context, hovered: bool, uri: &str) {
+    if !hovered || !crate::youtube::is_track_uri(uri) {
+        return;
+    }
+    let now = ctx.input(|input| input.time);
+    let key = egui::Id::new("warm-youtube-row");
+    let song = egui::Id::new(uri);
+    let (settled_on, since, asked) = ctx.data_mut(|data| {
+        let state = data.get_temp_mut_or_insert_with(key, || (song, now, false));
+        if state.0 != song {
+            *state = (song, now, false);
+        }
+        *state
+    });
+    debug_assert_eq!(settled_on, song);
+    if asked {
+        return;
+    }
+    if now - since < WARM_AFTER {
+        ctx.request_repaint_after(std::time::Duration::from_secs_f64(WARM_AFTER));
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(key, (song, since, true)));
+    app.actions.push(Action::WarmYouTube(uri.to_owned()));
+}
+
 pub(crate) fn track_row_response(
     ui: &mut Ui,
     app: &mut App,
     row: TrackRow<'_>,
 ) -> (egui::Response, Option<RowPick>) {
+    let uri = row.item.uri().to_owned();
     // Virtual lists reuse the visible slots as they scroll. Keep focus and
     // accessibility actions attached to the song and its occurrence instead.
     // Now playing and Next up can both contain the same song at index zero.
@@ -2257,6 +2290,7 @@ pub(crate) fn track_row_response(
     if t < 1.0 {
         super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 8.0));
     }
+    warm_on_hover(app, ui.ctx(), shown.inner.0.hovered(), &uri);
     shown.inner
 }
 

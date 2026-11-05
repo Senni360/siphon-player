@@ -13178,6 +13178,7 @@ impl App {
                     self.open(Page::Search);
                 }
             }
+            Action::WarmYouTube(uri) => self.backend.send(Command::WarmYouTube(uri)),
             Action::LoadMore(Page::SoundCloud(uri)) => self.load_soundcloud_page(uri, true),
             Action::LoadMore(page) => self.load_more(page),
             Action::LoadWindow { page, position } => self.load_window(page, position),

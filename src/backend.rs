@@ -873,6 +873,8 @@ pub enum Command {
         generation: u64,
         revision: u64,
     },
+    /// A row has been hovered: its song may well be pressed next.
+    WarmYouTube(String),
     YouTubeStream {
         tag: crate::player::PlaybackTag,
         preload: bool,
@@ -2925,6 +2927,7 @@ impl Worker {
                         revision,
                     });
                 }
+                Command::WarmYouTube(uri) => self.warm_youtube(uri),
                 Command::YouTubeStream {
                     tag,
                     preload,

@@ -2,6 +2,7 @@
 use super::*;
 use crate::player::PlaybackTag;
 use crate::soundcloud::engine as pcm;
+use std::sync::atomic::Ordering;
 
 impl Worker {
     fn youtube_catalogue(&self) -> crate::youtube::Catalogue {
@@ -15,6 +16,7 @@ impl Worker {
                         .map_or("signed-out", |account| account.as_str()),
                 ),
             ),
+            links: Arc::clone(&self.hybrid.youtube_links),
         }
     }
 
@@ -39,10 +41,11 @@ impl Worker {
         let waker = self.waker.clone();
         self.hybrid.youtube_context = Some(
             tokio::spawn(async move {
+                // The song is about to be played, so this finds its link as well.
                 let result = catalogue
-                    .track(&uri)
+                    .playable(&uri, false)
                     .await
-                    .map(|track| crate::hybrid_queue::Context {
+                    .map(|(track, _)| crate::hybrid_queue::Context {
                         uri,
                         name: track.name.clone(),
                         tracks: vec![track],
@@ -66,10 +69,12 @@ impl Worker {
         let commands = self.commands.clone();
         let task = tokio::spawn(async move {
             let result = async {
-                let id =
-                    crate::youtube::video_id(&uri).ok_or(crate::youtube::Error::Unavailable)?;
-                let track = catalogue.track(&uri).await?;
-                let url = catalogue.resolver.audio_url(id).await?;
+                let asked = std::time::Instant::now();
+                let (track, url) = catalogue.playable(&uri, refresh.is_some()).await?;
+                log::debug!(
+                    "YouTube stream ready in {} ms preload={preload}",
+                    asked.elapsed().as_millis()
+                );
                 Ok::<_, crate::youtube::Error>(pcm::Stream {
                     uri,
                     url,
@@ -97,6 +102,22 @@ impl Worker {
         if let Some(old) = slot.replace(task) {
             old.abort();
         }
+    }
+
+    /// Finds a song's link before it's asked for, so a click can start at once.
+    /// A guess, so it gives way: a few at a time, and failures say nothing.
+    pub(super) fn warm_youtube(&self, uri: String) {
+        const MOST_WARMING: usize = 2;
+        let warming = Arc::clone(&self.hybrid.youtube_warming);
+        if warming.fetch_add(1, Ordering::SeqCst) >= MOST_WARMING {
+            warming.fetch_sub(1, Ordering::SeqCst);
+            return;
+        }
+        let catalogue = self.youtube_catalogue();
+        tokio::spawn(async move {
+            let _ = catalogue.playable(&uri, false).await;
+            warming.fetch_sub(1, Ordering::SeqCst);
+        });
     }
 
     pub(super) fn cancel_youtube_metadata(&mut self) {

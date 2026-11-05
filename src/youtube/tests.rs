@@ -107,6 +107,7 @@ async fn cached_metadata_works_without_a_helper_and_never_contains_audio_urls() 
     let path = scratch.0.join(format!("{}.json", video.id));
     std::fs::write(path, serde_json::to_vec(&video).unwrap()).unwrap();
     let catalogue = Catalogue {
+        links: Default::default(),
         resolver: Resolver::default(),
         cache: scratch.0.clone(),
     };
@@ -418,4 +419,49 @@ fn youtube_downloads_keep_the_selected_video_instead_of_matching_spotify() {
     assert!(
         matches!(source, crate::downloads::Source::YouTube { url, .. } if url == "https://www.youtube.com/watch?v=aB9_-012xyz")
     );
+}
+
+const LASTING: &str = "https://r1.googlevideo.com/a?expire=99999999999";
+const EXPIRED: &str = "https://r1.googlevideo.com/a?expire=1";
+
+fn found(url: &str) -> Playable {
+    (Track::default(), url.to_owned())
+}
+
+#[tokio::test]
+async fn a_hover_and_the_press_after_it_share_one_lookup() {
+    let links = Links::default();
+    let runs = std::sync::atomic::AtomicU32::new(0);
+    let find = || async {
+        runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        tokio::task::yield_now().await;
+        Ok(found(LASTING))
+    };
+    let (hover, press) = tokio::join!(links.get("a", false, find), links.get("a", false, find));
+    assert_eq!(hover.unwrap().1, LASTING);
+    assert_eq!(press.unwrap().1, LASTING);
+    links.get("a", false, find).await.unwrap();
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_refused_or_expired_link_is_looked_up_again_and_failures_are_not_kept() {
+    let links = Links::default();
+    let runs = std::sync::atomic::AtomicU32::new(0);
+    let find = || async {
+        let run = runs.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        match run {
+            0 => Err(Error::Network),
+            1 => Ok(found(EXPIRED)),
+            _ => Ok(found(LASTING)),
+        }
+    };
+    assert_eq!(
+        links.get("a", false, find).await.unwrap_err(),
+        Error::Network
+    );
+    assert_eq!(links.get("a", false, find).await.unwrap().1, LASTING);
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 3);
+    links.get("a", true, find).await.unwrap();
+    assert_eq!(runs.load(std::sync::atomic::Ordering::SeqCst), 4);
 }

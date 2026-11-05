@@ -727,6 +727,7 @@ fn video_card(
     let context = RowContext::Uris(uris.to_vec().into());
     let current = app.current_track_uri().is_some_and(|uri| uri == track.uri);
     let playing = current && app.believed_playing();
+    widgets::warm_on_hover(app, ui.ctx(), response.hovered(), &track.uri);
     if response.clicked() {
         if current {
             app.actions.push(Action::TogglePlay);

@@ -87,6 +87,15 @@ impl Resolver {
         audio_url(text)
     }
 
+    /// A video's details and audio link from one yt-dlp run. Asking for them
+    /// apart costs two runs, about two seconds each, before a new song sounds.
+    pub async fn playable(&self, id: &str) -> Result<(Video, String), Error> {
+        let bytes = self
+            .run(id, &["-f", "140", "-J", "--skip-download"])
+            .await?;
+        playable(&bytes, id)
+    }
+
     /// One page of a channel, playlist or search, as yt-dlp's flat JSON. The
     /// callers build `url` from validated ids or an encoded query, and it follows
     /// `--`, so it can never be taken for an option.
@@ -165,6 +174,23 @@ impl Resolver {
             result
         }).await.map_err(|_| Error::Network)?
     }
+}
+
+/// The chosen format's link sits beside the details, kept apart from them
+/// because the details are cached on disk and a signed link never is.
+fn playable(bytes: &[u8], id: &str) -> Result<(Video, String), Error> {
+    #[derive(serde::Deserialize)]
+    struct Playable {
+        #[serde(flatten)]
+        video: Video,
+        url: Option<String>,
+    }
+    let found: Playable = serde_json::from_slice(bytes).map_err(|_| Error::Metadata)?;
+    if found.video.id != id {
+        return Err(Error::Metadata);
+    }
+    let url = audio_url(found.url.as_deref().ok_or(Error::Metadata)?)?;
+    Ok((found.video, url))
 }
 
 fn audio_url(text: &str) -> Result<String, Error> {
@@ -283,6 +309,30 @@ fn classify(stderr: &str) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_answer_gives_the_details_and_the_link_without_the_link_in_the_details() {
+        let link = "https://r1---sn-test.googlevideo.com/videoplayback?expire=99999999999";
+        let json = format!(
+            r#"{{"id":"aB9_-012xyz","title":"Song","duration":213.0,"format_id":"140","url":"{link}"}}"#
+        );
+        let (video, url) = playable(json.as_bytes(), "aB9_-012xyz").unwrap();
+        assert_eq!(url, link);
+        assert_eq!(video.title, "Song");
+        assert!(
+            !serde_json::to_string(&video)
+                .unwrap()
+                .contains("googlevideo")
+        );
+        assert_eq!(
+            playable(json.as_bytes(), "someoneelse").unwrap_err(),
+            Error::Metadata
+        );
+        assert_eq!(
+            playable(br#"{"id":"aB9_-012xyz","title":"Song"}"#, "aB9_-012xyz").unwrap_err(),
+            Error::Metadata
+        );
+    }
 
     #[test]
     fn audio_resolution_rejects_multiple_urls_credentials_and_expired_links() {

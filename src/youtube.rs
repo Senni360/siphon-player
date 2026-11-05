@@ -11,10 +11,13 @@ mod resolver;
 #[cfg(test)]
 mod tests;
 
+use std::future::Future;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::OnceCell;
 
 use crate::api::models::{Album, ArtistRef, ExternalUrls, Image, Track};
 pub use resolver::{Error, Resolver};
@@ -205,12 +208,60 @@ impl Video {
     }
 }
 
+/// What playing a video takes.
+pub type Playable = (Track, String);
+
+/// The most links kept. A link is short, so this is about not growing forever.
+const MOST_LINKS: usize = 256;
+
+/// Audio links found this session, in memory only. Whoever asks while another is
+/// finding the same one waits for that answer, so a hover and the click that
+/// follows it share one yt-dlp run.
+#[derive(Default)]
+pub struct Links(std::sync::Mutex<std::collections::HashMap<String, Arc<OnceCell<Playable>>>>);
+
+impl Links {
+    fn cell(&self, id: &str) -> Arc<OnceCell<Playable>> {
+        let mut links = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if links.len() >= MOST_LINKS && !links.contains_key(id) {
+            links.retain(|_, cell| cell.get().is_none_or(|found| !url_expired(&found.1)));
+            if links.len() >= MOST_LINKS {
+                links.clear();
+            }
+        }
+        Arc::clone(links.entry(id.to_owned()).or_default())
+    }
+
+    fn forget(&self, id: &str) {
+        self.0.lock().unwrap_or_else(|p| p.into_inner()).remove(id);
+    }
+
+    /// The link for `id`, found with `find` if none is known. `refresh` means the
+    /// one known was refused, and a link past its expiry is never handed out.
+    async fn get<F, Fut>(&self, id: &str, refresh: bool, find: F) -> Result<Playable, Error>
+    where
+        F: Fn() -> Fut,
+        Fut: Future<Output = Result<Playable, Error>>,
+    {
+        if refresh {
+            self.forget(id);
+        }
+        let found = self.cell(id).get_or_try_init(&find).await?.clone();
+        if !url_expired(&found.1) {
+            return Ok(found);
+        }
+        self.forget(id);
+        self.cell(id).get_or_try_init(&find).await.cloned()
+    }
+}
+
 /// One file per video avoids concurrent metadata requests losing each other's
 /// cache writes. This type is used only on the backend, never during drawing.
 #[derive(Clone)]
 pub struct Catalogue {
     pub resolver: Resolver,
     pub cache: PathBuf,
+    pub links: Arc<Links>,
 }
 
 const MAX_METADATA_BYTES: u64 = 4 * 1024 * 1024;
@@ -230,6 +281,31 @@ fn read_cached_video(reader: impl Read) -> Option<Video> {
 }
 
 impl Catalogue {
+    /// Everything playing `uri` needs, from one yt-dlp run at most.
+    pub async fn playable(&self, uri: &str, refresh: bool) -> Result<Playable, Error> {
+        let id = video_id(uri).ok_or(Error::Unavailable)?.to_owned();
+        self.links
+            .get(&id, refresh, || async {
+                let (video, url) = self.resolver.playable(&id).await?;
+                let track = video.to_track()?;
+                self.remember(&id, &video).await?;
+                Ok((track, url))
+            })
+            .await
+    }
+
+    async fn remember(&self, id: &str, video: &Video) -> Result<(), Error> {
+        let path = self.cache.join(format!("{id}.json"));
+        let bytes = serde_json::to_vec(video).map_err(|_| Error::Metadata)?;
+        tokio::task::spawn_blocking(move || {
+            if fastframe_file::write_private(&path, &bytes).is_err() {
+                log::warn!("Could not cache YouTube metadata");
+            }
+        })
+        .await
+        .map_err(|_| Error::Metadata)
+    }
+
     pub async fn track(&self, uri: &str) -> Result<Track, Error> {
         let id = video_id(uri).ok_or(Error::Unavailable)?.to_owned();
         let path = self.cache.join(format!("{id}.json"));
@@ -248,14 +324,7 @@ impl Catalogue {
         }
         let video = self.resolver.metadata(&id).await?;
         let track = video.to_track()?;
-        let bytes = serde_json::to_vec(&video).map_err(|_| Error::Metadata)?;
-        tokio::task::spawn_blocking(move || {
-            if fastframe_file::write_private(&path, &bytes).is_err() {
-                log::warn!("Could not cache YouTube metadata");
-            }
-        })
-        .await
-        .map_err(|_| Error::Metadata)?;
+        self.remember(&id, &video).await?;
         Ok(track)
     }
 }

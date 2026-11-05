@@ -71,6 +71,9 @@ pub(super) struct HybridRuntime {
     pub(super) youtube_preload: Option<tokio::task::AbortHandle>,
     pub(super) youtube_context: Option<tokio::task::AbortHandle>,
     pub(super) youtube_tracks: HashMap<String, tokio::task::AbortHandle>,
+    /// Audio links found this session, shared by everything that plays.
+    pub(super) youtube_links: Arc<crate::youtube::Links>,
+    pub(super) youtube_warming: Arc<std::sync::atomic::AtomicUsize>,
     soundcloud_load: Option<tokio::task::AbortHandle>,
     soundcloud_preload: Option<tokio::task::AbortHandle>,
     catalogue_context: Option<tokio::task::AbortHandle>,
