@@ -18,7 +18,7 @@ pub const STATE_EVERY: Duration = Duration::from_millis(1000);
 /// How often it's told regardless, which is how it knows this computer is there.
 pub const STATE_AT_LEAST: Duration = Duration::from_secs(8);
 /// How long an answer that has to load first is worked on.
-pub const ANSWER_WITHIN: Duration = Duration::from_secs(20);
+pub const ANSWER_WITHIN: Duration = Duration::from_secs(40);
 const ART_PIXELS: u32 = 300;
 /// The most songs in one answer: they all pass through the service.
 pub const MOST_SONGS: usize = 200;

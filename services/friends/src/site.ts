@@ -34,7 +34,7 @@ function page(title: string, head: string, body: string): string {
 const home = () => page('Encore', '', `<h1>Encore</h1>
 <p>A private music app for friends. One library and one queue for Spotify, SoundCloud and YouTube, shared inside your group. Windows only.</p>
 <a class="primary" href="/download">Download for Windows</a>
-<small><a href="/privacy">Privacy</a><br>Extract the zip and open <b>siphon.exe</b>. If Windows warns you, choose More info, then Run anyway. Encore then shows you how to sign in with your own free Spotify app.</small>`);
+<small>Already have it? <a href="https://encore.senni.dev">Use it on your phone</a>.<br><a href="/privacy">Privacy</a><br>Extract the zip and open <b>siphon.exe</b>. If Windows warns you, choose More info, then Run anyway. Encore then shows you how to sign in with your own free Spotify app.</small>`);
 
 const privacy = () => page('Encore privacy', '', `<h1>Privacy</h1>
 <p>Encore is a desktop music app that runs on your computer. It has no ads, analytics or telemetry, and nothing here is sold.</p>

@@ -112,7 +112,7 @@ impl Reader {
 
     /// Every release of the artist's that can be read, beyond the page or two the
     /// page has loaded. The Web API has a budget, so a failure stops here quietly.
-    async fn all_releases(&self, request: &Request) -> (Vec<Album>, Vec<Album>) {
+    async fn all_releases(&self, request: &Request, pages: u32) -> (Vec<Album>, Vec<Album>) {
         let mut own = request.albums.clone();
         let mut appears = Vec::new();
         let Ok(client) = self.api.client_for(Operation::Catalog).await else {
@@ -141,8 +141,10 @@ impl Reader {
                 found
             }
         };
-        own = read("album,single,compilation", &mut own, RELEASE_PAGES).await;
-        appears = read("appears_on", &mut appears, 2).await;
+        own = read("album,single,compilation", &mut own, pages).await;
+        if pages > 1 {
+            appears = read("appears_on", &mut appears, 2).await;
+        }
         let mut seen = std::collections::HashSet::new();
         own.retain(|album| seen.insert(album.id.clone()));
         (own, appears)
@@ -151,9 +153,9 @@ impl Reader {
     /// The titles Spotify has: what the page knows, the artist's releases, and their
     /// songs over the playback session. A release's own name stands in without one.
     /// On other people's releases only the songs they're credited on count.
-    async fn catalogue(&self, request: &Request) -> Catalogue {
+    async fn catalogue(&self, request: &Request, pages: u32) -> Catalogue {
         let mut titles = request.titles.clone();
-        let (own, appears) = self.all_releases(request).await;
+        let (own, appears) = self.all_releases(request, pages).await;
         titles.extend(own.iter().map(|album| album.name.clone()));
         if let Some(engine) = &self.engine {
             let read = async |albums: &[Album]| {
@@ -254,7 +256,7 @@ impl Reader {
                 return;
             }
         }
-        let catalogue = self.catalogue(&request).await;
+        let catalogue = self.catalogue(&request, RELEASE_PAGES).await;
         let ((sc_link, yt_link), _) = self
             .with_links(|links| {
                 let linked = links.artists.entry(request.id.clone()).or_default();
@@ -397,7 +399,9 @@ impl Worker {
                     albums: Vec::new(),
                     fresh: false,
                 };
-                let catalogue = reader.catalogue(&request).await;
+                // Enough to recognise an account: opening profiles shouldn't spend
+                // the listener's Spotify budget reading whole catalogues.
+                let catalogue = reader.catalogue(&request, 1).await;
                 let finding = match side {
                     Side::SoundCloud => {
                         sources::soundcloud(&reader.client, &request.name, &catalogue, None).await

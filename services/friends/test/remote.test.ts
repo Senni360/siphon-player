@@ -89,6 +89,15 @@ test('commands reach the computer once and its answers reach the phone', async (
   assert.deepEqual((await call(`/live/remote/reply/${ID}`, 'GET', undefined, phone)).body, { ready: true, reply: { songs: [1] } });
 });
 
+test('playing a long list fits in one command', async () => {
+  const { call, join } = fixture();
+  const { secret } = await join('Senni');
+  const uris = Array.from({ length: 500 }, (_, index) => `soundcloud:track:${1000000000 + index}`);
+  assert.equal((await call('/live/remote/send', 'POST', { id: ID, kind: 'play', uris, index: 0 }, secret)).status, 202);
+  const polled = await call('/live/remote/poll', 'GET', undefined, secret);
+  assert.equal(polled.body.commands[0].uris.length, 500);
+});
+
 test('one account can never reach another through the relay', async () => {
   const { call, join } = fixture();
   const mine = await join('Senni');

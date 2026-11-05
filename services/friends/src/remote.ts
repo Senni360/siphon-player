@@ -12,7 +12,8 @@ const REPLY_SECONDS = 60;
 /** How long a phone counts as watching, which has the computer check every second. */
 export const WANTED_SECONDS = 30;
 const MAX_INBOX = 50;
-const MAX_COMMAND_BYTES = 8 * 1024;
+// Enough for playing a whole list: the phone sends at most 500 songs at a time.
+const MAX_COMMAND_BYTES = 64 * 1024;
 const MAX_STATE_BYTES = 16 * 1024;
 const MAX_REPLY_BYTES = 900 * 1024;
 const ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;

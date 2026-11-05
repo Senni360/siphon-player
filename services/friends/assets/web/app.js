@@ -249,7 +249,7 @@ async function act(kind, args = {}) {
 }
 
 /** Asks the computer something, and waits for it to answer. */
-async function ask(kind, args = {}, patience = 25000) {
+async function ask(kind, args = {}, patience = 45000) {
   if (!player.online && hasSpotify() && DIRECT[kind]) return DIRECT[kind](args);
   const id = uuid();
   await api('/live/remote/send', 'POST', { id, kind, ...args });
@@ -622,12 +622,14 @@ function row(song, list, index) {
 }
 function playFrom(list, index) {
   if (!player.online && !hasSpotify()) { toast('Open Encore on your computer first.'); return; }
-  const uris = list.map(song => song.uri);
+  // The computer plays 500 at most, so a very long list starts around the song.
+  const start = Math.max(0, index - 100);
+  const uris = list.slice(start, start + 500).map(song => song.uri);
   // Shown straight away; the computer's next word confirms it.
   player.state = { ...(player.state ?? { repeat: 'off', volume: 50, next: [] }), song: list[index], position_ms: 0, playing: true };
   player.at = Date.now();
   refreshPlayer();
-  act('play', { uris, index }).catch(() => toast("Couldn't reach Encore."));
+  act('play', { uris, index: index - start }).catch(() => toast("Couldn't reach Encore."));
 }
 function rows(list, limit) {
   const box = h('div');
@@ -752,7 +754,7 @@ function searchScreen() {
     if (!query) { showRecent(); return; }
     rememberSearch(query);
     load(async () => {
-      const found = await ask('search', { query }, 30000);
+      const found = await ask('search', { query });
       const parts = [];
       if (found.artists?.length) {
         parts.push(h('h2', { class: 'section', text: 'Artists' }), h('div', { class: 'cards' },
