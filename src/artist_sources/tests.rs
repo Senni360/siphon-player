@@ -536,6 +536,29 @@ fn the_newest_songs_come_first_and_undated_ones_last() {
 }
 
 #[test]
+fn home_news_is_recent_songs_once_and_newest_first() {
+    let dated = |uri: &str, name: &str, date: Option<&str>| Track {
+        uri: uri.to_owned(),
+        name: name.to_owned(),
+        release_date: date.map(str::to_owned),
+        ..Default::default()
+    };
+    let news = sort_news(
+        vec![
+            dated("a", "old", Some("2026-01-01")),
+            dated("b", "fresh", Some("2026-11-01T10:00:00Z")),
+            dated("c", "fresher", Some("2026-11-04")),
+            dated("c", "fresher", Some("2026-11-04")),
+            dated("d", "tour trailer", Some("2026-11-03")),
+            dated("e", "undated", None),
+        ],
+        "2026-11-05",
+    );
+    let names: Vec<_> = news.iter().map(|track| track.name.as_str()).collect();
+    assert_eq!(names, ["fresher", "fresh"]);
+}
+
+#[test]
 fn an_older_saved_finding_without_the_newer_lists_still_reads() {
     let found: Finding = serde_json::from_str(r#"{"on_spotify":3}"#).unwrap();
     assert_eq!(found.on_spotify, 3);

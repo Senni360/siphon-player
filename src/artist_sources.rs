@@ -1235,6 +1235,57 @@ pub fn without_songs(artist: &str, unreleased: Vec<Track>, songs: &[Track]) -> V
         .collect()
 }
 
+/// How recent an upload has to be to count as new.
+const NEW_DAYS: i64 = 45;
+/// How many accounts are looked at, and new songs kept, for Home.
+pub const NEWS_ACCOUNTS: usize = 12;
+const NEWS_SONGS: usize = 24;
+
+/// New uploads on the accounts of artists the listener follows on Spotify, newest
+/// first and a song once: only songs, from the last few weeks.
+pub fn sort_news(uploads: Vec<Track>, today: &str) -> Vec<Track> {
+    let cutoff = jiff::civil::Date::strptime("%Y-%m-%d", today.get(..10).unwrap_or(today))
+        .ok()
+        .and_then(|day| day.checked_sub(jiff::Span::new().days(NEW_DAYS)).ok())
+        .map(|day| day.to_string());
+    let mut seen = HashSet::new();
+    let mut kept: Vec<Track> = uploads
+        .into_iter()
+        .filter(|track| {
+            let recent = match (&track.release_date, &cutoff) {
+                (Some(date), Some(cutoff)) => date.get(..10).unwrap_or(date) >= cutoff.as_str(),
+                _ => false,
+            };
+            recent && kind_of(&track.name) != Kind::NotMusic && seen.insert(track.uri.clone())
+        })
+        .collect();
+    kept = newest_first(&kept);
+    kept.truncate(NEWS_SONGS);
+    kept
+}
+
+/// Reads what the accounts uploaded lately.
+pub async fn news(client: &Client, accounts: Vec<String>, today: String) -> Vec<Track> {
+    let reads = accounts
+        .iter()
+        .filter_map(|uri| crate::soundcloud::user_id(uri))
+        .take(NEWS_ACCOUNTS)
+        .map(|id| async move {
+            client
+                .user_tracks(id, 10, 0)
+                .await
+                .map(|page| {
+                    page.collection
+                        .iter()
+                        .map(|track| track.to_track(None))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default()
+        });
+    let found = futures_util::future::join_all(reads).await.concat();
+    sort_news(found, &today)
+}
+
 /// The same songs, the latest first. Songs with no date keep their order, after the rest.
 pub fn newest_first(songs: &[Track]) -> Vec<Track> {
     let mut sorted = songs.to_vec();

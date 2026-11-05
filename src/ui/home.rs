@@ -71,6 +71,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         });
     }
     rise(ui, 5, |ui| new_from_followed(app, ui, &following));
+    app.ask_artist_news();
+    let news = app.artist_news.clone();
+    rise(ui, 5, |ui| beyond_spotify(app, ui, &news));
     rise(ui, 5, |ui| source_picks(app, ui, &picks));
     rise(ui, 6, |ui| new_releases(app, ui));
     rise(ui, 6, |ui| recently_played(app, ui));
@@ -304,6 +307,22 @@ fn new_from_followed(app: &mut App, ui: &mut egui::Ui, tracks: &[crate::api::mod
         ui,
         &app.palette,
         &gettext(app.locale, "New from who you follow"),
+    );
+    ui.add_space(6.0);
+    super::source_page::song_cards(app, ui, tracks, 1);
+    ui.add_space(12.0);
+}
+
+/// New SoundCloud uploads from artists followed on Spotify. Some will also be on
+/// Spotify, so it says where they're from rather than that Spotify lacks them.
+fn beyond_spotify(app: &mut App, ui: &mut egui::Ui, tracks: &[crate::api::models::Track]) {
+    if tracks.is_empty() {
+        return;
+    }
+    theme::section_title(
+        ui,
+        &app.palette,
+        &gettext(app.locale, "New on SoundCloud from artists you follow"),
     );
     ui.add_space(6.0);
     super::source_page::song_cards(app, ui, tracks, 1);

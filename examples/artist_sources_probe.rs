@@ -77,6 +77,14 @@ async fn main() -> anyhow::Result<()> {
     let main = found.account.clone();
     found.add(sources::soundcloud_beyond(&client, &artist, &catalogue, main.as_ref()).await);
     show("SoundCloud", &found, started.elapsed());
+    if let Some(account) = &found.account {
+        let today = jiff::Zoned::now().date().to_string();
+        let news = sources::news(&client, vec![account.uri.clone()], today).await;
+        println!("--- new lately: {}", news.len());
+        for track in news.iter().take(5) {
+            println!("  {} {:?}", track.name, track.release_date);
+        }
+    }
     let started = std::time::Instant::now();
     let mut found = sources::youtube(&resolver, &artist, &catalogue, None).await;
     found.add(sources::youtube_beyond(&resolver, &artist, &catalogue).await);

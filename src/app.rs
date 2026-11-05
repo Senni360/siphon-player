@@ -524,6 +524,9 @@ pub struct App {
     /// Which artist each SoundCloud and YouTube account page leads back to.
     pub artist_links: HashMap<String, (String, String)>,
     artist_links_asked: bool,
+    /// New songs beyond Spotify from artists the listener follows, and when asked.
+    pub artist_news: Vec<Track>,
+    artist_news_asked: Option<Instant>,
     /// Account pages already asked about, this run.
     artist_links_sought: std::collections::HashSet<String>,
     /// Local play history. See [`crate::history`].
@@ -1254,6 +1257,8 @@ impl App {
             phone: remote::Remote::default(),
             artist_links: HashMap::new(),
             artist_links_asked: false,
+            artist_news: Vec::new(),
+            artist_news_asked: None,
             artist_links_sought: Default::default(),
             plays,
             files: std::sync::Arc::new(fastframe_file::Writer::new()),
@@ -2905,6 +2910,7 @@ impl App {
                     | Event::ForYou(..)
                     | Event::ArtistSource { .. }
                     | Event::ArtistLinks(..)
+                    | Event::ArtistNews(..)
             );
             #[cfg(not(all(feature = "demo", not(test))))]
             let browsing = false;
@@ -3096,6 +3102,10 @@ impl App {
                     finding,
                 } => self.artist_source_found(artist, ask, side, *finding),
                 Event::ArtistLinks(links) => self.artist_links = links,
+                Event::ArtistNews(news) => {
+                    self.cache_soundcloud_tracks(&news);
+                    self.artist_news = news;
+                }
                 Event::Remote(event) => self.remote_event(event),
                 Event::ForYou(shown) => {
                     let tracks: Vec<Track> = shown
@@ -6268,6 +6278,35 @@ impl App {
                 name: name.to_owned(),
             });
         }
+    }
+
+    /// Asks now and then what the followed artists' other accounts have posted.
+    pub(crate) fn ask_artist_news(&mut self) {
+        const FRESH: Duration = Duration::from_secs(30 * 60);
+        self.ask_artist_links();
+        if self
+            .artist_news_asked
+            .is_some_and(|at| at.elapsed() < FRESH)
+            || !self.network_reachable
+        {
+            return;
+        }
+        let accounts: Vec<String> = self
+            .artist_links
+            .iter()
+            .filter(|(uri, (id, _))| {
+                crate::soundcloud::user_id(uri).is_some()
+                    && self.is_saved(&format!("spotify:artist:{id}")) == Some(true)
+            })
+            .map(|(uri, _)| uri.clone())
+            .take(crate::artist_sources::NEWS_ACCOUNTS)
+            .collect();
+        // Until the links are known there's nothing to ask about; ask again later.
+        if accounts.is_empty() {
+            return;
+        }
+        self.artist_news_asked = Some(Instant::now());
+        self.backend.send(Command::ArtistNews(accounts));
     }
 
     /// Learns which artists accounts lead back to, the first time it matters.

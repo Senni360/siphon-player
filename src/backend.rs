@@ -887,6 +887,8 @@ pub enum Command {
         link: Option<crate::artist_sources::Link>,
     },
     ArtistLinks,
+    /// New uploads on the SoundCloud accounts of artists followed on Spotify.
+    ArtistNews(Vec<String>),
     /// Whether the account page just opened belongs to a Spotify artist.
     FindArtistFor {
         uri: String,
@@ -1336,6 +1338,7 @@ pub enum Event {
         side: crate::artist_sources::Side,
         finding: Box<crate::artist_sources::Finding>,
     },
+    ArtistNews(Vec<crate::api::models::Track>),
     /// Account page to the artist it belongs to, by Spotify id and name.
     ArtistLinks(std::collections::HashMap<String, (String, String)>),
     SoundCloudSaveFailed,
@@ -1771,6 +1774,7 @@ impl Backend {
                 | Command::ArtistSources(..)
                 | Command::ChooseArtistAccount { .. }
                 | Command::ArtistLinks
+                | Command::ArtistNews(..)
         );
         #[cfg(not(all(feature = "demo", not(test))))]
         let browsing = false;
@@ -2966,6 +2970,18 @@ impl Worker {
                 } => self.choose_artist_account(request, side, link),
                 Command::ArtistLinks => self.artist_links(),
                 Command::FindArtistFor { uri, name } => self.find_artist_for(uri, name),
+                Command::ArtistNews(accounts) => {
+                    if let Some(client) = self.soundcloud_client() {
+                        let events = self.events.clone();
+                        let waker = self.waker.clone();
+                        let today = jiff::Zoned::now().date().to_string();
+                        tokio::spawn(async move {
+                            let news = crate::artist_sources::news(&client, accounts, today).await;
+                            let _ = events.send(Event::ArtistNews(news));
+                            waker.wake();
+                        });
+                    }
+                }
                 Command::YouTubeStream {
                     tag,
                     preload,
