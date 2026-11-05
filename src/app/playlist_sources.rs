@@ -869,7 +869,7 @@ mod tests {
                 content: Loadable::Loaded(SoundCloudCollection {
                     title: "A set".into(),
                     tracks: tracks.clone(),
-                    next: None,
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

@@ -2878,7 +2878,18 @@ impl App {
         for event in events {
             // Offline, as in demo mode, only colours read from cover art and
             // local update checks come through.
+            // The demo reads SoundCloud and YouTube for real, like its backend.
+            #[cfg(all(feature = "demo", not(test)))]
+            let browsing = matches!(
+                &event,
+                Event::SoundCloudCollection { .. }
+                    | Event::SoundCloudSearch { .. }
+                    | Event::YouTubeSearch { .. }
+            );
+            #[cfg(not(all(feature = "demo", not(test))))]
+            let browsing = false;
             if self.offline
+                && !browsing
                 && !matches!(&event, Event::Accent { .. })
                 && (self.update_source.is_github()
                     || !matches!(
@@ -2945,6 +2956,11 @@ impl App {
                 } => {
                     self.soundcloud_playlist_add_finished(request, complete, result);
                 }
+                Event::YouTubeSearch {
+                    serial,
+                    more,
+                    results,
+                } => self.youtube_search_finished(serial, more, *results),
                 Event::SoundCloudSearch { request, results } => {
                     self.soundcloud_search_finished(request, *results)
                 }
@@ -2966,6 +2982,7 @@ impl App {
                             Ok(mut value) => {
                                 if more && let Some(content) = page.content.get_mut() {
                                     content.tracks.append(&mut value.tracks);
+                                    content.cards.append(&mut value.cards);
                                     content.next = value.next;
                                 } else {
                                     page.content = Loadable::Loaded(value);
@@ -7248,6 +7265,11 @@ impl App {
     }
 
     fn run_search(&mut self, query: String) {
+        // A channel or playlist link is a place to go, not words to look for.
+        if let Some(uri) = crate::youtube::browse::page_for_link(&query) {
+            self.open(Page::SoundCloud(uri));
+            return;
+        }
         if crate::soundcloud::browse::is_url(&query) {
             if self.search.source == SearchSource::Spotify {
                 self.search.source = SearchSource::SoundCloud;
@@ -7273,8 +7295,11 @@ impl App {
         self.search.committed_run = None;
         self.search.playlists = None;
         self.search.error = None;
-        self.search.catalogue_pending =
-            !query.is_empty() && self.search.source != SearchSource::SoundCloud;
+        self.search.catalogue_pending = !query.is_empty()
+            && !matches!(
+                self.search.source,
+                SearchSource::SoundCloud | SearchSource::YouTube
+            );
         self.search.playlists_pending = false;
         // Results and their query change together. In particular, a failed
         // new query must never inherit the previous query's songs.
@@ -7283,6 +7308,16 @@ impl App {
         } else {
             Loadable::Loading
         };
+        self.search.youtube = Loadable::NotLoaded;
+        self.search.youtube_pending = false;
+        if !query.is_empty()
+            && matches!(
+                self.search.source,
+                SearchSource::All | SearchSource::YouTube
+            )
+        {
+            self.start_youtube_search(false);
+        }
         self.search.soundcloud = Loadable::NotLoaded;
         self.search.soundcloud_request += 1;
         self.search.soundcloud_pending = false;
@@ -7294,7 +7329,12 @@ impl App {
                 more: None,
             },
         ));
-        if !query.is_empty() && self.search.source != SearchSource::Spotify {
+        if !query.is_empty()
+            && !matches!(
+                self.search.source,
+                SearchSource::Spotify | SearchSource::YouTube
+            )
+        {
             self.actions.push(Action::SearchSoundCloud {
                 query: query.clone(),
                 serial: self.search.serial,
@@ -7302,7 +7342,10 @@ impl App {
         }
         // An empty query also cancels requests waiting on Spotify's quota.
         self.backend.api(ApiRequest::Search {
-            query: if self.search.source == SearchSource::SoundCloud {
+            query: if matches!(
+                self.search.source,
+                SearchSource::SoundCloud | SearchSource::YouTube
+            ) {
                 String::new()
             } else {
                 query
@@ -7398,6 +7441,10 @@ impl App {
     fn load_soundcloud_page(&mut self, uri: String, more: bool) {
         if uri == "youtube:likes" {
             self.load_youtube_likes_page();
+            return;
+        }
+        if uri == crate::youtube::browse::HOME {
+            self.load_youtube_home();
             return;
         }
         let page = self.soundcloud_pages.entry(uri.clone()).or_default();
@@ -9155,6 +9202,7 @@ impl App {
                 if serial != self.search.serial
                     || query != self.search.committed
                     || self.search.source == SearchSource::SoundCloud
+                    || self.search.source == SearchSource::YouTube
                 {
                     return;
                 }
@@ -9176,6 +9224,7 @@ impl App {
                 if serial != self.search.serial
                     || query != self.search.committed
                     || self.search.source == SearchSource::SoundCloud
+                    || self.search.source == SearchSource::YouTube
                 {
                     return;
                 }
@@ -12542,6 +12591,11 @@ impl App {
             Action::ToggleSaved(uri) if crate::youtube::is_track_uri(&uri) => {
                 self.toggle_youtube_like(&uri)
             }
+            Action::ToggleYouTubeFollow(channel) => self.toggle_youtube_follow(channel),
+            Action::ToggleSoundCloudFollow { id, name, image } => {
+                self.toggle_soundcloud_follow(id, name, image)
+            }
+            Action::SearchYouTube { more } => self.start_youtube_search(more),
             Action::ToggleSoundCloudLike(uri) => self.toggle_soundcloud_like(&uri),
             Action::ToggleSoundCloudRepost(uri) => self.toggle_soundcloud_repost(&uri),
             Action::LoadSoundCloudFollowing { more } => self.load_soundcloud_following(more),
@@ -12982,7 +13036,13 @@ impl App {
                 }
                 let previous = self.search.source;
                 self.search.source = source;
-                if source == SearchSource::Spotify {
+                if matches!(source, SearchSource::All | SearchSource::YouTube)
+                    && !self.search.committed.is_empty()
+                    && self.search.youtube.needs_load()
+                {
+                    self.start_youtube_search(false);
+                }
+                if matches!(source, SearchSource::Spotify | SearchSource::YouTube) {
                     self.search.soundcloud_request += 1;
                     self.search.soundcloud_pending = false;
                     if matches!(self.search.soundcloud, Loadable::Loading) {
@@ -12997,7 +13057,8 @@ impl App {
                         },
                     ));
                 }
-                if previous == SearchSource::SoundCloud
+                if matches!(previous, SearchSource::SoundCloud | SearchSource::YouTube)
+                    && matches!(source, SearchSource::All | SearchSource::Spotify)
                     && !self.search.committed.is_empty()
                     && self.search.results.get().is_none()
                 {
@@ -13007,7 +13068,7 @@ impl App {
                         serial: self.search.serial,
                     });
                 }
-                if source == SearchSource::SoundCloud {
+                if matches!(source, SearchSource::SoundCloud | SearchSource::YouTube) {
                     self.search.catalogue_pending = false;
                     self.search.playlists_pending = false;
                     self.backend.api(ApiRequest::Search {
@@ -13018,7 +13079,7 @@ impl App {
                 if !source.supports(self.search.filter) {
                     self.search.filter = SearchFilter::All;
                 }
-                if source != SearchSource::Spotify
+                if matches!(source, SearchSource::All | SearchSource::SoundCloud)
                     && !self.search.committed.is_empty()
                     && self.search.soundcloud.needs_load()
                 {
@@ -22177,6 +22238,7 @@ mod tests {
                 ..Default::default()
             }],
             next: Some("users/9/tracks?cursor=one".into()),
+            ..Default::default()
         };
         app.handle_backend_events(vec![Event::SoundCloudCollection {
             uri: uri.clone(),

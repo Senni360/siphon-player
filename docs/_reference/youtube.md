@@ -2,8 +2,25 @@
 title: YouTube audio
 ---
 
-Siphon opens public and unlisted YouTube videos as audio in its local mixed
-queue. Paste a watch, youtu.be, mobile/music watch, or Shorts link into Search,
+Encore browses YouTube without a Google account, and plays public and unlisted
+videos as audio in its local mixed queue. Search finds videos, channels and
+playlists. A channel's page has its banner, picture and subscribers, its videos
+as a grid of thumbnails, and its playlists; a video's channel name links to it.
+Pasting a channel or playlist link opens its page. Any video can start a mix.
+
+Following a channel stays on this computer, beside the likes, with no account
+behind it. **New uploads** in the sidebar lists what the channels followed last
+uploaded, read from YouTube's public feed of each channel
+(`youtube.com/feeds/videos.xml`). There is no page of recommendations.
+
+Browsing runs yt-dlp's flat listing (`--flat-playlist -J --playlist-items`), at
+most 30 videos a page, with the same deadline, output limit and running lock as
+below. Only validated channel ids, handles and playlist ids and an encoded query
+reach the command line, always after `--`. Images are accepted only from
+YouTube's image hosts.
+
+Search can also take these links: paste a watch, youtu.be, mobile/music watch, or
+Shorts link into Search, Paste a watch, youtu.be, mobile/music watch, or Shorts link into Search,
 or open it through the existing command-line/single-instance link command.
 The internal identity is `youtube:video:<11-character-id>`; URL tracking and
 playlist parameters do not become queue identities. Spotify tracks continue
@@ -28,7 +45,7 @@ remain in memory. The shared external PCM engine owns bounded range reads,
 seek, URL refresh after expiry/refusal, cancellation, EQ/limiter and output
 handoff. The shared loudness work applies at that same PCM seam.
 
-At most two yt-dlp processes run concurrently. A 30-second deadline covers
+At most five yt-dlp processes run concurrently, because a search takes three. A 30-second deadline covers
 process-slot waiting, update-lock waiting, execution and draining pipes.
 Metadata output is limited to 4 MiB and diagnostics to 64 KiB. Timeout,
 oversized output or cancelled work kills and reaps the directly launched
@@ -39,8 +56,8 @@ fixed user-facing categories; neither helper stderr nor signed/unlisted URLs
 are written to the player log.
 
 Missing helper, unavailable/deleted/live/upcoming content, sign-in-required
-content and unsupported AAC are explicit errors. No Google authentication or
-YouTube search is implemented. Next-track preparation uses the same queue
+content and unsupported AAC are explicit errors. No Google authentication is
+implemented. Next-track preparation uses the same queue
 preload path; completed loads are accepted only for the current playback tag.
 Replacing or stopping playback cancels older resolver work. URL expiry is
 checked before reusing a prepared stream; metadata is reused from a bounded,

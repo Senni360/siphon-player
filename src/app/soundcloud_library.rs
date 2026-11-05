@@ -259,12 +259,29 @@ impl App {
             | Response::Reposted { generation, .. }
             | Response::Following { generation, .. }
             | Response::Refreshed { generation }
+            | Response::Followed { generation, .. }
             | Response::Liked { generation, .. } => *generation,
         };
         if generation != self.soundcloud_library.generation {
             return;
         }
         match response {
+            Response::Followed {
+                id,
+                following,
+                result: Err(error),
+                ..
+            } => {
+                // It did not happen: stop showing that it did.
+                let uri = crate::soundcloud::user_uri(id);
+                let library = &mut self.soundcloud_library;
+                if following {
+                    library.snapshot.artists.retain(|artist| artist.uri != uri);
+                }
+                library.revision = library.revision.wrapping_add(1);
+                self.toast_error(error);
+            }
+            Response::Followed { .. } => {}
             Response::Cached {
                 snapshot: Some(mut snapshot),
                 ..
@@ -467,6 +484,64 @@ impl App {
             liked: !before,
             serial,
         }));
+    }
+
+    /// Whether you follow this person on SoundCloud, as far as the library knows.
+    pub fn follows_soundcloud_user(&self, id: u64) -> bool {
+        let uri = crate::soundcloud::user_uri(id);
+        self.soundcloud_library
+            .snapshot
+            .artists
+            .iter()
+            .any(|artist| artist.uri == uri)
+    }
+
+    /// Shows the change at once and makes it true behind it; a refusal puts it
+    /// back and says so.
+    pub(super) fn toggle_soundcloud_follow(
+        &mut self,
+        id: u64,
+        name: String,
+        image: Option<String>,
+    ) {
+        if !self.can_like_soundcloud() {
+            self.actions
+                .push(Action::ShowDialog(Dialog::SoundCloudConnect(
+                    Default::default(),
+                )));
+            return;
+        }
+        let uri = crate::soundcloud::user_uri(id);
+        let following = !self.follows_soundcloud_user(id);
+        let library = &mut self.soundcloud_library;
+        if following {
+            library.snapshot.artists.insert(
+                0,
+                Artist {
+                    id: id.to_string(),
+                    name,
+                    uri,
+                    images: image
+                        .map(|url| {
+                            vec![crate::api::models::Image {
+                                url,
+                                ..Default::default()
+                            }]
+                        })
+                        .unwrap_or_default(),
+                    ..Default::default()
+                },
+            );
+        } else {
+            library.snapshot.artists.retain(|artist| artist.uri != uri);
+        }
+        library.revision = library.revision.wrapping_add(1);
+        self.backend
+            .send(Command::SoundCloudLibrary(Request::Follow {
+                generation: library.generation,
+                id,
+                following,
+            }));
     }
 
     pub(super) fn load_soundcloud_following(&mut self, more: bool) {

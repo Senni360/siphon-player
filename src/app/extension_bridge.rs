@@ -245,7 +245,7 @@ impl App {
                         content: Loadable::Loaded(SoundCloudCollection {
                             title: name.clone(),
                             tracks,
-                            next: None,
+                            ..Default::default()
                         }),
                         ..Default::default()
                     },

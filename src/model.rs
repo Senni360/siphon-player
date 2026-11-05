@@ -187,11 +187,9 @@ impl Page {
     }
 
     pub fn decode(text: &str) -> Option<Self> {
-        if text == "youtube:likes" {
-            return Some(Page::SoundCloud(text.into()));
-        }
-        if crate::soundcloud::playlist_id(text).is_some()
-            || crate::soundcloud::user_id(text).is_some()
+        if text == "youtube:likes"
+            || crate::youtube::browse::is_page(text)
+            || crate::soundcloud::is_page(text)
         {
             return Some(Page::SoundCloud(text.into()));
         }
@@ -226,7 +224,7 @@ impl Page {
 
     /// Keep foreign schemes in page keys, never reinterpret their numeric IDs.
     pub fn from_uri(uri: &str) -> Option<Self> {
-        if uri == "youtube:likes" {
+        if uri == "youtube:likes" || crate::youtube::browse::is_page(uri) {
             return Some(Page::SoundCloud(uri.into()));
         }
         if crate::soundcloud::is_uri(uri) {
@@ -885,10 +883,11 @@ pub enum SearchSource {
     All,
     Spotify,
     SoundCloud,
+    YouTube,
 }
 
 impl SearchSource {
-    pub const ALL: [Self; 3] = [Self::All, Self::Spotify, Self::SoundCloud];
+    pub const ALL: [Self; 4] = [Self::All, Self::Spotify, Self::SoundCloud, Self::YouTube];
 
     pub fn label(self, locale: crate::i18n::Locale) -> std::borrow::Cow<'static, str> {
         use crate::i18n::{gettext, pgettext};
@@ -896,6 +895,7 @@ impl SearchSource {
             Self::All => pgettext(locale, "filter", "All"),
             Self::Spotify => gettext(locale, "Spotify"),
             Self::SoundCloud => gettext(locale, "SoundCloud"),
+            Self::YouTube => gettext(locale, "YouTube"),
         }
     }
 
@@ -903,12 +903,13 @@ impl SearchSource {
         match self {
             Self::All => Self::Spotify,
             Self::Spotify => Self::SoundCloud,
-            Self::SoundCloud => Self::All,
+            Self::SoundCloud => Self::YouTube,
+            Self::YouTube => Self::All,
         }
     }
 
     pub fn supports(self, filter: SearchFilter) -> bool {
-        self != Self::SoundCloud
+        !matches!(self, Self::SoundCloud | Self::YouTube)
             || matches!(
                 filter,
                 SearchFilter::All
@@ -963,11 +964,64 @@ impl SoundCloudSearchKind {
     }
 }
 
+/// Who a SoundCloud profile or YouTube channel page is about.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceProfile {
+    /// The source's own id for them, to follow them by.
+    pub id: String,
+    pub name: String,
+    pub image: Option<String>,
+    pub banner: Option<String>,
+    /// One line of figures: a handle, followers, where they are.
+    pub details: String,
+    pub about: String,
+    pub link: Option<String>,
+}
+
+/// A card opening another page of a source: a channel, a person, a set.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceCard {
+    pub uri: String,
+    pub title: String,
+    pub subtitle: String,
+    pub image: Option<String>,
+    pub round: bool,
+}
+
+/// A named row of cards on a source's home page.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceShelf {
+    pub title: String,
+    pub cards: Vec<SourceCard>,
+}
+
+/// One page of a source other than Spotify: what it lists, and its cursor.
 #[derive(Clone, Debug, Default)]
 pub struct SoundCloudCollection {
     pub title: String,
     pub tracks: Vec<Track>,
     pub next: Option<String>,
+    pub profile: Option<SourceProfile>,
+    /// The page's own picture, for a set or a playlist.
+    pub image: Option<String>,
+    pub cards: Vec<SourceCard>,
+    pub shelves: Vec<SourceShelf>,
+}
+
+/// What a YouTube search found. A further page holds only `videos`.
+#[derive(Clone, Debug, Default)]
+pub struct YouTubeSearchResults {
+    pub videos: Vec<Track>,
+    pub channels: Vec<SourceCard>,
+    pub playlists: Vec<SourceCard>,
+    pub next: Option<String>,
+    pub error: Option<String>,
+}
+
+impl YouTubeSearchResults {
+    pub fn is_empty(&self) -> bool {
+        self.videos.is_empty() && self.channels.is_empty() && self.playlists.is_empty()
+    }
 }
 
 #[derive(Default)]
@@ -1004,6 +1058,8 @@ pub struct SearchState {
     pub soundcloud: Loadable<SoundCloudSearchResults>,
     pub soundcloud_request: u64,
     pub soundcloud_pending: bool,
+    pub youtube: Loadable<YouTubeSearchResults>,
+    pub youtube_pending: bool,
     pub typed_at: Option<Instant>,
     /// Counts runs of typing in the search field. A run ends when the field
     /// is emptied, its selected text is typed over, or the query is
@@ -1600,6 +1656,18 @@ pub enum Action {
     },
     /// Open a native SoundCloud playlist or uploader page.
     OpenSoundCloud(String),
+    /// Follow someone on SoundCloud, or stop.
+    ToggleSoundCloudFollow {
+        id: u64,
+        name: String,
+        image: Option<String>,
+    },
+    /// Follow a YouTube channel, here in the app, or stop.
+    ToggleYouTubeFollow(crate::youtube::likes::Channel),
+    /// Search YouTube for the committed query, or its next page.
+    SearchYouTube {
+        more: bool,
+    },
     MoreSoundCloud(SoundCloudSearchKind),
     SetTopPeriod(TopPeriod),
     FocusSearch,

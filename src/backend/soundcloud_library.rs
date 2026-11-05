@@ -32,9 +32,20 @@ pub enum Request {
         liked: bool,
         serial: u64,
     },
+    Follow {
+        generation: u64,
+        id: u64,
+        following: bool,
+    },
 }
 
 pub enum Response {
+    Followed {
+        generation: u64,
+        id: u64,
+        following: bool,
+        result: Result<(), String>,
+    },
     Following {
         generation: u64,
         serial: u64,
@@ -216,6 +227,29 @@ impl Worker {
                         generation,
                         id,
                         serial,
+                        result,
+                    });
+                }
+                Request::Follow {
+                    generation,
+                    id,
+                    following,
+                } => {
+                    let result = if session && lease.current() {
+                        match write_client {
+                            Ok(http) => client
+                                .set_following(&http, user_id, id, following)
+                                .await
+                                .map_err(|error| error.to_string()),
+                            Err(error) => Err(error),
+                        }
+                    } else {
+                        Err("Connect a SoundCloud session to follow people.".into())
+                    };
+                    emit(Response::Followed {
+                        generation,
+                        id,
+                        following,
                         result,
                     });
                 }

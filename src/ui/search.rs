@@ -81,6 +81,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     if app.search.filter == SearchFilter::All {
         super::group_songs::search_section(app, ui);
     }
+    if app.search.source == SearchSource::YouTube {
+        super::source_page::youtube_results(app, ui, false);
+        return;
+    }
     // A pasted link is a direct result, ahead of either service's shelves.
     let resolved = (app.search.source != SearchSource::Spotify)
         .then(|| {
@@ -120,6 +124,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             columns[1].add_space(8.0);
             soundcloud(app, &mut columns[1]);
         });
+        youtube_brief(app, ui);
         return;
     }
     if app.search.source != SearchSource::SoundCloud {
@@ -137,6 +142,21 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         soundcloud(app, ui);
     }
+    if app.search.source == SearchSource::All {
+        youtube_brief(app, ui);
+    }
+}
+
+/// YouTube under the other sources, where its filter applies.
+fn youtube_brief(app: &mut App, ui: &mut egui::Ui) {
+    if !SearchSource::YouTube.supports(app.search.filter) {
+        return;
+    }
+    let palette = app.palette;
+    ui.add_space(16.0);
+    theme::section_title(ui, &palette, &gettext(app.locale, "YouTube"));
+    ui.add_space(8.0);
+    super::source_page::youtube_results(app, ui, true);
 }
 
 fn spotify(app: &mut App, ui: &mut egui::Ui) {
@@ -465,8 +485,11 @@ fn recent(app: &mut App, ui: &mut egui::Ui) {
                 SearchSource::All => gettext(app.locale, "Search music"),
                 SearchSource::Spotify => gettext(app.locale, "Search Spotify"),
                 SearchSource::SoundCloud => gettext(app.locale, "Search SoundCloud"),
+                SearchSource::YouTube => gettext(app.locale, "Search YouTube"),
             },
-            &if app.search.source == SearchSource::SoundCloud {
+            &if app.search.source == SearchSource::YouTube {
+                gettext(app.locale, "Find beats, channels, and playlists.")
+            } else if app.search.source == SearchSource::SoundCloud {
                 gettext(app.locale, "Find songs, artists, and playlists.")
             } else {
                 gettext(

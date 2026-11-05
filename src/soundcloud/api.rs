@@ -309,9 +309,20 @@ impl Client {
             [
                 "users",
                 id,
-                "track_likes" | "playlist_likes" | "playlists" | "tracks" | "followings",
+                "track_likes"
+                | "playlist_likes"
+                | "playlists"
+                | "tracks"
+                | "followings"
+                | "albums"
+                | "playlists_without_albums"
+                | "likes"
+                | "toptracks",
             ]
-            | ["users", id, "playlists", "liked_and_owned"] => id.parse::<u64>().is_ok(),
+            | ["users", id, "playlists", "liked_and_owned"]
+            | ["stream", "users", id, "reposts"]
+            | ["tracks", id, "related"] => id.parse::<u64>().is_ok(),
+            ["charts"] => true,
             _ => false,
         };
         if !allowed {
@@ -532,6 +543,81 @@ impl Client {
         }
         self.user_page(id, "playlists/liked_and_owned", limit, offset)
             .await
+    }
+
+    /// One tab of a profile, as a page of whatever that tab lists.
+    pub(crate) async fn user_tab<T: DeserializeOwned>(
+        &self,
+        id: u64,
+        kind: &str,
+        limit: u32,
+    ) -> Result<Page<T>> {
+        self.user_page(id, kind, limit, 0).await
+    }
+
+    pub(crate) async fn user_reposts(
+        &self,
+        id: u64,
+        limit: u32,
+    ) -> Result<Page<super::models::RepostItem>> {
+        self.get(
+            &format!("stream/users/{id}/reposts"),
+            &[
+                ("limit", limit.clamp(1, 200).to_string()),
+                ("linked_partitioning", "1".into()),
+            ],
+        )
+        .await
+    }
+
+    /// What is trending overall. The chart keeps only this one genre; each genre
+    /// has a generated playlist instead, under [`Self::system_playlist`].
+    pub(crate) async fn trending(&self, limit: u32) -> Result<Page<super::models::ChartItem>> {
+        self.get(
+            "charts",
+            &[
+                ("kind", "trending".to_owned()),
+                ("genre", "soundcloud:genres:all-music".to_owned()),
+                ("limit", limit.clamp(1, 200).to_string()),
+                ("linked_partitioning", "1".into()),
+            ],
+        )
+        .await
+    }
+
+    pub(crate) async fn selections(&self) -> Result<Page<super::models::Selection>> {
+        self.get("mixed-selections", &[("limit", "10".to_owned())])
+            .await
+    }
+
+    pub(crate) async fn system_playlist(&self, urn: &str) -> Result<super::models::SystemPlaylist> {
+        self.get(&format!("system-playlists/{urn}"), &[]).await
+    }
+
+    pub async fn related_tracks(&self, id: u64, limit: u32) -> Result<Page<Track>> {
+        self.get(
+            &format!("tracks/{id}/related"),
+            &[
+                ("limit", limit.clamp(1, 200).to_string()),
+                ("linked_partitioning", "1".into()),
+            ],
+        )
+        .await
+    }
+
+    pub async fn set_following(
+        &self,
+        http: &reqwest::Client,
+        user: u64,
+        target: u64,
+        following: bool,
+    ) -> Result<()> {
+        self.set_membership(
+            http,
+            &format!("users/{user}/followings/{target}"),
+            following,
+        )
+        .await
     }
 
     pub async fn user_followings(&self, id: u64, limit: u32, offset: u32) -> Result<Page<User>> {

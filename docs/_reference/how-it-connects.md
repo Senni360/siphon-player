@@ -813,6 +813,20 @@ That lookup runs on the credential worker and does not block the interface or
 shutdown. The password belongs to its host, port, and username; editing any of
 these fields clears it. See [password storage and migration](/settings-and-files/).
 
+## Browsing SoundCloud and YouTube
+
+Neither needs an account to browse. Opening a SoundCloud page or searching it
+reads SoundCloud's API with its public client id: profiles and their tabs, sets,
+trending playlists, its own selections and related tracks. Following someone there
+is a write, and only happens with a connected session.
+
+YouTube pages and searches run the helper's yt-dlp, which reads YouTube directly;
+see [YouTube audio](/youtube/). **New uploads** asks YouTube's public feed
+(`youtube.com/feeds/videos.xml`) about each channel followed when the page opens,
+through the configured HTTP client. Which channels are followed stays on this
+computer, but those requests do tell YouTube their ids. No request carries a Google
+or Spotify credential.
+
 ## Web links
 
 When Encore is the Windows handler for web links, a clicked normal YouTube video

@@ -3,6 +3,7 @@
 //! No Google credentials or video downloads. Metadata is durable; signed audio
 //! URLs stay in memory and are refreshed by the shared external PCM engine.
 
+pub mod browse;
 pub mod likes;
 mod resolver;
 #[cfg(test)]
@@ -92,6 +93,8 @@ pub struct Video {
     #[serde(default)]
     pub channel: Option<String>,
     #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
     pub uploader: Option<String>,
     #[serde(default)]
     pub duration: Option<f64>,
@@ -167,6 +170,14 @@ impl Video {
                     .or(self.uploader.as_ref())
                     .cloned()
                     .unwrap_or_else(|| "YouTube".into()),
+                // Its name is a link to its channel; a channel not known yet is
+                // found through the video when it is opened.
+                uri: Some(
+                    self.channel_id
+                        .as_deref()
+                        .filter(|id| browse::valid_channel(id))
+                        .map_or_else(|| browse::video_channel_uri(&self.id), browse::channel_uri),
+                ),
                 ..Default::default()
             }],
             duration_ms: self

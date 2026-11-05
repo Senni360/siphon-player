@@ -33,6 +33,27 @@ pub struct User {
     pub avatar_url: Option<String>,
     pub permalink_url: Option<String>,
     pub followers_count: Option<u64>,
+    #[serde(default)]
+    pub track_count: Option<u64>,
+    #[serde(default)]
+    pub city: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub visuals: Option<Visuals>,
+}
+
+/// The wide pictures across the top of a profile.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct Visuals {
+    #[serde(default)]
+    pub visuals: Vec<Visual>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct Visual {
+    #[serde(default)]
+    pub visual_url: Option<String>,
 }
 
 impl User {
@@ -385,6 +406,79 @@ pub enum Resolved {
     Playlist(Playlist),
     #[serde(rename = "user")]
     User(User),
+}
+
+/// An entry of a profile's public likes: a track, or a set the page leaves out.
+#[derive(Deserialize)]
+pub(crate) struct LikeItem {
+    #[serde(default)]
+    pub track: Option<Track>,
+}
+
+/// An entry of a profile's reposts.
+#[derive(Deserialize)]
+pub(crate) struct RepostItem {
+    #[serde(default)]
+    pub track: Option<Track>,
+}
+
+/// An entry of a chart.
+#[derive(Deserialize)]
+pub(crate) struct ChartItem {
+    pub track: Track,
+}
+
+/// One of SoundCloud's generated playlists. Its tracks are mostly stubs.
+#[derive(Deserialize)]
+pub(crate) struct SystemPlaylist {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub artwork_url: Option<String>,
+    #[serde(default)]
+    pub calculated_artwork_url: Option<String>,
+    #[serde(default)]
+    pub tracks: Vec<Track>,
+}
+
+/// SoundCloud's own rows of playlists, on its Discover page.
+#[derive(Deserialize)]
+pub(crate) struct Selection {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub items: SelectionItems,
+}
+
+#[derive(Default, Deserialize)]
+pub(crate) struct SelectionItems {
+    #[serde(default)]
+    pub collection: Vec<SelectionItem>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct SelectionItem {
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub id: serde_json::Value,
+    #[serde(default)]
+    pub urn: Option<String>,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub short_description: Option<String>,
+    #[serde(default)]
+    pub artwork_url: Option<String>,
+    #[serde(default)]
+    pub calculated_artwork_url: Option<String>,
+    #[serde(default)]
+    pub user: Option<User>,
+}
+
+/// A picture's URL at a size worth drawing large.
+pub(crate) fn large_artwork(url: Option<&str>) -> Option<String> {
+    artwork(url).into_iter().next().map(|image| image.url)
 }
 
 #[derive(Deserialize)]

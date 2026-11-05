@@ -1671,6 +1671,31 @@ fn item_menu_at(
                     track: Box::new(track.clone()),
                 });
             }
+            // Each source's own way on from a song.
+            if let Some(id) = crate::soundcloud::track_id(&uri)
+                && menu_item(
+                    ui,
+                    &palette,
+                    Some(Icon::Radio),
+                    &gettext(locale, "Related tracks"),
+                )
+            {
+                app.actions.push(Action::Open(Page::SoundCloud(
+                    crate::soundcloud::related_uri(id),
+                )));
+            }
+            if let Some(id) = crate::youtube::video_id(&uri)
+                && menu_item(
+                    ui,
+                    &palette,
+                    Some(Icon::Radio),
+                    &gettext(locale, "Start a mix"),
+                )
+            {
+                app.actions.push(Action::Open(Page::SoundCloud(
+                    crate::youtube::browse::mix_uri(id),
+                )));
+            }
             let artists: Vec<&ArtistRef> = track
                 .artists
                 .iter()
@@ -1681,7 +1706,13 @@ fn item_menu_at(
                     ui,
                     &palette,
                     Some(Icon::User),
-                    &gettext(locale, "Go to artist"),
+                    &if crate::youtube::is_track_uri(&uri) {
+                        gettext(locale, "Go to channel")
+                    } else if crate::soundcloud::is_track_uri(&uri) {
+                        gettext(locale, "Go to profile")
+                    } else {
+                        gettext(locale, "Go to artist")
+                    },
                 ) && let Some(page) = Page::for_artist(artists[0])
                 {
                     app.actions.push(Action::Open(page));
@@ -2775,12 +2806,21 @@ fn track_row_contents(
     }
     // Plays.
     if cols.plays > 0.0 {
-        if let Some(plays) = app.play_counts.get(row.item.uri()) {
+        // Spotify's counts are looked up apart; the other sources' come with the song.
+        let plays = app
+            .play_counts
+            .get(row.item.uri())
+            .copied()
+            .or(match row.item {
+                PlayableItem::Track(track) => track.play_count,
+                _ => None,
+            });
+        if let Some(plays) = plays {
             let cell = Rect::from_min_size(pos2(x, rect.top()), vec2(cols.plays, row_height));
             painter.text(
                 pos2(cell.left(), cell.center().y),
                 egui::Align2::LEFT_CENTER,
-                util::format_count(*plays),
+                util::format_count(plays),
                 theme::regular(13.0),
                 palette.secondary,
             );
@@ -5474,7 +5514,7 @@ mod tests {
         for expected in [
             "Copy SoundCloud link",
             "Open on SoundCloud",
-            "Go to artist",
+            "Go to profile",
             "Repost (connect a SoundCloud session)",
         ] {
             assert!(labels.contains(&expected), "missing {expected}: {labels:?}");

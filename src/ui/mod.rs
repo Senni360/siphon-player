@@ -35,6 +35,7 @@ pub mod show;
 pub mod sidebar;
 mod soloist;
 pub(crate) mod soundcloud;
+mod source_page;
 pub mod topbar;
 mod update;
 pub mod widgets;
@@ -759,7 +760,10 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
                                     Page::MixedPlaylist(id) => {
                                         collection::mixed_playlist(app, ui, &id)
                                     }
-                                    Page::SoundCloud(uri) => collection::soundcloud(app, ui, &uri),
+                                    Page::SoundCloud(uri) if uri == "youtube:likes" => {
+                                        collection::soundcloud(app, ui, &uri)
+                                    }
+                                    Page::SoundCloud(uri) => source_page::show(app, ui, &uri),
                                     Page::Album(id) => collection::album(app, ui, &id),
                                     Page::Artist(id) => artist::show(app, ui, &id),
                                     Page::Show(id) => show::show(app, ui, &id),

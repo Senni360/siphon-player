@@ -65,6 +65,24 @@ pub fn format_count(count: u64) -> String {
     out
 }
 
+/// A large figure in a few characters: `748`, `66.4K`, `2.2M`.
+pub fn format_compact(count: u64) -> String {
+    let scaled = |divisor: f64, unit: &str| {
+        let value = count as f64 / divisor;
+        if value < 100.0 {
+            format!("{:.1}{unit}", (value * 10.0).floor() / 10.0).replace(".0", "")
+        } else {
+            format!("{}{unit}", value.floor())
+        }
+    };
+    match count {
+        0..1_000 => count.to_string(),
+        1_000..1_000_000 => scaled(1e3, "K"),
+        1_000_000..1_000_000_000 => scaled(1e6, "M"),
+        _ => scaled(1e9, "B"),
+    }
+}
+
 /// `Jan 5, 2024` from an ISO-8601 timestamp or a bare date.
 pub fn format_date(locale: Locale, iso: &str) -> String {
     let date = iso.get(..10).unwrap_or(iso);
@@ -306,6 +324,25 @@ pub(crate) fn temporary_files(dir: &std::path::Path) -> Vec<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod compact_tests {
+    use super::format_compact;
+
+    #[test]
+    fn large_figures_are_short_and_never_round_up() {
+        for (count, shown) in [
+            (748, "748"),
+            (1_000, "1K"),
+            (66_400, "66.4K"),
+            (199_990, "199K"),
+            (2_228_750, "2.2M"),
+            (1_500_000_000, "1.5B"),
+        ] {
+            assert_eq!(format_compact(count), shown);
+        }
+    }
 }
 
 #[cfg(test)]

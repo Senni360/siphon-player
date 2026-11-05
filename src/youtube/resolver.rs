@@ -29,6 +29,10 @@ pub enum Error {
     Metadata,
 }
 
+/// How many yt-dlp processes run at once: a search takes three by itself, and a
+/// song waiting to play must not wait behind browsing.
+const MAX_PROCESSES: usize = 5;
+
 #[derive(Clone)]
 pub struct Resolver {
     executable: Option<PathBuf>,
@@ -83,13 +87,35 @@ impl Resolver {
         audio_url(text)
     }
 
+    /// One page of a channel, playlist or search, as yt-dlp's flat JSON. The
+    /// callers build `url` from validated ids or an encoded query, and it follows
+    /// `--`, so it can never be taken for an option.
+    pub async fn listing(&self, url: &str, start: u32, count: u32) -> Result<Vec<u8>, Error> {
+        let items = format!("{start}:{}", start + count.saturating_sub(1));
+        self.run_url(
+            url.to_owned(),
+            &[
+                "--yes-playlist",
+                "--flat-playlist",
+                "-J",
+                "--playlist-items",
+                &items,
+            ],
+        )
+        .await
+    }
+
     async fn run(&self, id: &str, args: &[&str]) -> Result<Vec<u8>, Error> {
         if !valid_id(id) {
             return Err(Error::Unavailable);
         }
+        self.run_url(format!("https://www.youtube.com/watch?v={id}"), args)
+            .await
+    }
+
+    async fn run_url(&self, url: String, args: &[&str]) -> Result<Vec<u8>, Error> {
         let executable = self.executable.clone().ok_or(Error::Missing)?;
         let args: Vec<String> = args.iter().map(|arg| (*arg).into()).collect();
-        let url = format!("https://www.youtube.com/watch?v={id}");
         let timeout = self.timeout;
         let (cancel, mut cancelled) = oneshot::channel::<()>();
         // The owning task survives a cancelled caller just long enough to kill
@@ -98,7 +124,7 @@ impl Resolver {
         tokio::spawn(async move {
             let start = Instant::now();
             static PROCESSES: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
-            let permits = Arc::clone(PROCESSES.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(2))));
+            let permits = Arc::clone(PROCESSES.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_PROCESSES))));
             let _permit = tokio::select! {
                 result = tokio::time::timeout(timeout, permits.acquire_owned()) => result.map_err(|_| Error::Timeout)?.map_err(|_| Error::Network)?,
                 _ = &mut cancelled => return Err(Error::Timeout),
@@ -243,6 +269,7 @@ fn classify(stderr: &str) -> Error {
         "not available",
         "copyright",
         "does not exist",
+        "does not have a",
     ]
     .iter()
     .any(|s| text.contains(s))

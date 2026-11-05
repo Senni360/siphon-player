@@ -15,6 +15,36 @@ pub struct Likes {
     #[serde(default = "version")]
     pub version: u32,
     pub tracks: Vec<Track>,
+    /// Channels followed here, newest first. There is no Google account behind
+    /// them; they live only in this file, like the likes.
+    #[serde(default)]
+    pub channels: Vec<Channel>,
+}
+
+/// A channel followed, as much of it as the library shows without asking YouTube.
+impl Likes {
+    /// Songs saved before channels were kept have no link to theirs. It is found
+    /// through the video when the link is opened.
+    fn link_channels(&mut self) {
+        for track in &mut self.tracks {
+            let Some(id) = super::video_id(&track.uri).map(str::to_owned) else {
+                continue;
+            };
+            if let Some(artist) = track.artists.first_mut()
+                && artist.uri.is_none()
+            {
+                artist.uri = Some(super::browse::video_channel_uri(&id));
+            }
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+pub struct Channel {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub image: Option<String>,
 }
 
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
@@ -95,9 +125,10 @@ impl Writes {
             .accounts
             .get(&account_key(account))
             .is_some_and(|(_, failed)| *failed);
-        let likes = Likes::load(path).map_err(|_| {
+        let mut likes = Likes::load(path).map_err(|_| {
             "Could not read YouTube likes. Your saved file has been kept.".to_owned()
         })?;
+        likes.link_channels();
         Ok(Restored {
             likes,
             missed_save: failed,
@@ -110,6 +141,7 @@ impl Default for Likes {
         Self {
             version: 1,
             tracks: Vec::new(),
+            channels: Vec::new(),
         }
     }
 }

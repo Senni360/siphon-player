@@ -1332,11 +1332,28 @@ fn soundcloud_rows(app: &App, needle: &str) -> Vec<(String, Page, Icon)> {
     if app.soundcloud_account.user().is_none() {
         return Vec::new();
     }
-    let mut rows = vec![(
-        gettext(app.locale, "Likes").into_owned(),
-        Page::SoundCloudLikes,
-        Icon::Heart,
-    )];
+    let mut rows = vec![
+        (
+            gettext(app.locale, "Discover").into_owned(),
+            Page::SoundCloud(crate::soundcloud::HOME.into()),
+            Icon::Compass,
+        ),
+        (
+            gettext(app.locale, "Likes").into_owned(),
+            Page::SoundCloudLikes,
+            Icon::Heart,
+        ),
+    ];
+    if app.can_like_soundcloud() {
+        rows.insert(
+            1,
+            (
+                gettext(app.locale, "Your feed").into_owned(),
+                Page::SoundCloud(crate::soundcloud::FEED.into()),
+                Icon::Users,
+            ),
+        );
+    }
     rows.push((
         if app.can_like_soundcloud() {
             gettext(app.locale, "Your uploads")
@@ -1383,6 +1400,67 @@ fn soundcloud_rows(app: &App, needle: &str) -> Vec<(String, Page, Icon)> {
     rows
 }
 
+/// YouTube's rows: its page, the likes kept here, and the channels followed.
+fn youtube_rows(app: &App, needle: &str) -> Vec<(String, Page, Icon)> {
+    let mut rows = vec![
+        (
+            gettext(app.locale, "New uploads").into_owned(),
+            Page::SoundCloud(crate::youtube::browse::HOME.into()),
+            Icon::ListVideo,
+        ),
+        (
+            gettext(app.locale, "Likes").into_owned(),
+            Page::SoundCloud("youtube:likes".into()),
+            Icon::Heart,
+        ),
+    ];
+    rows.extend(app.youtube_channels().iter().map(|channel| {
+        (
+            channel.name.clone(),
+            Page::SoundCloud(crate::youtube::browse::channel_uri(&channel.id)),
+            Icon::User,
+        )
+    }));
+    rows.retain(|(name, _, _)| name.to_lowercase().contains(needle));
+    rows
+}
+
+/// One dropdown for YouTube, as for SoundCloud, closed each time the app starts.
+fn youtube_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let open_id = egui::Id::new("sidebar-youtube-open");
+    let open = ui
+        .ctx()
+        .data(|data| data.get_temp::<bool>(open_id))
+        .unwrap_or(false);
+    let shown = soundcloud_rows_shown(open, needle);
+    let inside = matches!(app.page(), Page::SoundCloud(uri) if uri.starts_with("youtube:"));
+    let header = nav_row(
+        ui,
+        &palette,
+        if shown {
+            Icon::ChevronDown
+        } else {
+            Icon::ChevronRight
+        },
+        &gettext(locale, "YouTube"),
+        inside && !shown,
+    );
+    if header.clicked() {
+        ui.ctx().data_mut(|data| data.insert_temp(open_id, !shown));
+    }
+    if shown {
+        let rows = youtube_rows(app, needle);
+        super::widgets::virtual_rows(ui, rows.len(), 40.0, |ui, index| {
+            let (name, page, icon) = &rows[index];
+            if nav_row(ui, &palette, *icon, name, app.page() == page).clicked() {
+                app.actions.push(Action::Open(page.clone()));
+            }
+        });
+    }
+}
+
 /// Where the dropdown's state lives. Not in settings: every launch starts with
 /// it collapsed, so a long list of follows never fills the sidebar by itself.
 fn soundcloud_open_id() -> egui::Id {
@@ -1399,6 +1477,19 @@ fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
     let palette = app.palette;
     let locale = app.locale;
     if app.soundcloud_account.user().is_none() {
+        // It browses without an account; an account adds likes and a feed.
+        let discover = Page::SoundCloud(crate::soundcloud::HOME.into());
+        if nav_row(
+            ui,
+            &palette,
+            Icon::Compass,
+            &gettext(locale, "SoundCloud"),
+            app.page() == &discover,
+        )
+        .clicked()
+        {
+            app.actions.push(Action::Open(discover));
+        }
         if nav_row(
             ui,
             &palette,
@@ -1426,7 +1517,7 @@ fn soundcloud_section(app: &mut App, ui: &mut egui::Ui, needle: &str) {
     // Collapsed, the row stands for whichever of its pages is open.
     let inside = match app.page() {
         Page::SoundCloudLikes => true,
-        Page::SoundCloud(uri) => uri != "youtube:likes",
+        Page::SoundCloud(uri) => crate::soundcloud::is_uri(uri),
         _ => false,
     };
     let header = nav_row(
@@ -1987,19 +2078,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 }
             });
             ui.add_space(6.0);
-            if "youtube likes".contains(&needle)
-                && nav_row(
-                    ui,
-                    &palette,
-                    Icon::Heart,
-                    "YouTube Likes",
-                    app.page() == &Page::SoundCloud("youtube:likes".into()),
-                )
-                .clicked()
-            {
-                app.actions
-                    .push(Action::Open(Page::SoundCloud("youtube:likes".into())));
-            }
+            youtube_section(app, ui, &needle);
             if app.friends_feed.account.is_some()
                 && "shared files".contains(&needle)
                 && nav_row(

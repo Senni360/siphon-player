@@ -35,6 +35,120 @@ impl App {
             .map(|likes| likes.tracks.as_slice())
     }
 
+    /// The channels followed here, newest first.
+    pub fn youtube_channels(&self) -> &[crate::youtube::likes::Channel] {
+        if self.youtube.account.as_deref() != self.user_id() {
+            return &[];
+        }
+        self.youtube
+            .likes
+            .get()
+            .map_or(&[], |likes| likes.channels.as_slice())
+    }
+
+    pub fn follows_youtube_channel(&self, id: &str) -> bool {
+        self.youtube_channels()
+            .iter()
+            .any(|channel| channel.id == id)
+    }
+
+    /// Follows the channel or stops. It shows at once and is saved behind it, and
+    /// the feed asks again next time it opens.
+    pub(super) fn toggle_youtube_follow(&mut self, channel: crate::youtube::likes::Channel) {
+        self.request_youtube_likes();
+        let Some(likes) = self.youtube.likes.get_mut() else {
+            return;
+        };
+        if likes.channels.iter().any(|each| each.id == channel.id) {
+            likes.channels.retain(|each| each.id != channel.id);
+        } else {
+            likes.channels.insert(0, channel);
+        }
+        self.save_youtube_likes();
+        self.soundcloud_pages.remove(crate::youtube::browse::HOME);
+        if self.page() == &Page::SoundCloud(crate::youtube::browse::HOME.into()) {
+            self.load_youtube_home();
+        }
+    }
+
+    /// Asks for the channels' newest uploads, once the followed channels are known.
+    pub(super) fn load_youtube_home(&mut self) {
+        self.soundcloud_pages
+            .entry(crate::youtube::browse::HOME.into())
+            .or_default();
+        self.request_youtube_likes();
+        if self.youtube.likes.is_loading() {
+            return;
+        }
+        let channels: Vec<String> = self
+            .youtube_channels()
+            .iter()
+            .map(|channel| channel.id.clone())
+            .collect();
+        let page = self
+            .soundcloud_pages
+            .entry(crate::youtube::browse::HOME.into())
+            .or_default();
+        if page.loading || page.content.get().is_some() {
+            return;
+        }
+        if channels.is_empty() {
+            page.content = Loadable::Loaded(SoundCloudCollection::default());
+            return;
+        }
+        page.generation = page.generation.wrapping_add(1);
+        page.loading = true;
+        page.error = None;
+        self.backend.send(Command::YouTubeFeed {
+            generation: page.generation,
+            channels,
+        });
+    }
+
+    /// Starts a YouTube search for the committed query, or its next page.
+    pub(super) fn start_youtube_search(&mut self, more: bool) {
+        let cursor = if more {
+            let Some(cursor) = self
+                .search
+                .youtube
+                .get()
+                .and_then(|value| value.next.clone())
+            else {
+                return;
+            };
+            Some(cursor)
+        } else {
+            self.search.youtube = Loadable::Loading;
+            None
+        };
+        self.search.youtube_pending = true;
+        self.backend.send(Command::YouTubeSearch {
+            query: self.search.committed.clone(),
+            serial: self.search.serial,
+            cursor,
+        });
+    }
+
+    pub(super) fn youtube_search_finished(
+        &mut self,
+        serial: u64,
+        more: bool,
+        mut results: YouTubeSearchResults,
+    ) {
+        if serial != self.search.serial {
+            return;
+        }
+        self.search.youtube_pending = false;
+        self.cache_soundcloud_tracks(&results.videos);
+        if more && let Some(shown) = self.search.youtube.get_mut() {
+            shown.videos.append(&mut results.videos);
+            shown.next = results.next;
+            shown.error = results.error;
+        } else {
+            self.search.youtube = Loadable::Loaded(results);
+        }
+    }
+
     pub(super) fn reset_youtube(&mut self) {
         self.youtube.generation = self.youtube.generation.wrapping_add(1);
         self.youtube.account = None;
@@ -43,6 +157,7 @@ impl App {
         self.youtube.save_error = false;
         self.youtube.restore_warning = false;
         self.soundcloud_pages.remove("youtube:likes");
+        self.soundcloud_pages.remove(crate::youtube::browse::HOME);
         self.table_rows
             .remove(&Page::SoundCloud("youtube:likes".into()));
         self.track_cache.retain(|uri, track| {
@@ -60,6 +175,12 @@ impl App {
             self.youtube.account = Some(account.clone());
         }
         if !self.youtube.likes.needs_load() {
+            return;
+        }
+        // The demo reads YouTube but keeps nothing: its follows last as it runs.
+        #[cfg(all(feature = "demo", not(test)))]
+        if self.offline {
+            self.youtube.likes = Loadable::Loaded(Likes::default());
             return;
         }
         self.youtube.likes = Loadable::Loading;
@@ -87,6 +208,9 @@ impl App {
         self.youtube.restore_warning = result.as_ref().is_ok_and(|restored| restored.missed_save);
         self.youtube.likes = Loadable::from_result(result.map(|restored| restored.likes));
         self.refresh_youtube_likes_page();
+        if self.page() == &Page::SoundCloud(crate::youtube::browse::HOME.into()) {
+            self.load_youtube_home();
+        }
     }
 
     pub(super) fn load_youtube_likes_page(&mut self) {
@@ -117,7 +241,7 @@ impl App {
         page.content = Loadable::Loaded(SoundCloudCollection {
             title: "YouTube Likes".into(),
             tracks,
-            next: None,
+            ..Default::default()
         });
         self.table_rows
             .remove(&Page::SoundCloud("youtube:likes".into()));
@@ -147,6 +271,10 @@ impl App {
     }
 
     fn save_youtube_likes(&mut self) {
+        #[cfg(all(feature = "demo", not(test)))]
+        if self.offline {
+            return;
+        }
         let Some(account) = self.user_id().map(str::to_owned) else {
             return;
         };

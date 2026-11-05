@@ -54,6 +54,96 @@ pub fn user_uri(id: u64) -> String {
     format!("{USER_PREFIX}{id}")
 }
 
+/// Discover: what's trending, and SoundCloud's own selections.
+pub const HOME: &str = "soundcloud:home";
+/// What the people you follow posted and reposted.
+pub const FEED: &str = "soundcloud:feed";
+const CHARTS_PREFIX: &str = "soundcloud:charts:";
+const SYSTEM_PREFIX: &str = "soundcloud:system:";
+const RELATED_PREFIX: &str = "soundcloud:related:";
+
+/// A profile's tabs other than its uploads, which are its plain URI.
+pub const USER_TABS: [&str; 6] = [
+    "popular",
+    "albums",
+    "playlists",
+    "reposts",
+    "likes",
+    "following",
+];
+
+/// The genres SoundCloud keeps a trending playlist for, by its own key, for
+/// Discover's chips.
+pub const GENRES: [(&str, &str); 12] = [
+    ("all-genres", "All"),
+    ("hip-hop", "Hip-hop"),
+    ("trap", "Trap"),
+    ("r-n-b", "R&B"),
+    ("electronic", "Electronic"),
+    ("house", "House"),
+    ("techno", "Techno"),
+    ("dubstep", "Dubstep"),
+    ("pop", "Pop"),
+    ("indie", "Indie"),
+    ("rock", "Rock"),
+    ("ambient", "Ambient"),
+];
+
+/// The page of the chart of `genre`, one of [`GENRES`].
+pub fn charts_uri(genre: &str) -> String {
+    format!("{CHARTS_PREFIX}{genre}")
+}
+
+/// The genre a chart's page shows.
+pub fn charts_genre(uri: &str) -> Option<&str> {
+    let genre = uri.strip_prefix(CHARTS_PREFIX)?;
+    GENRES.iter().any(|(key, _)| *key == genre).then_some(genre)
+}
+
+/// The page of one of SoundCloud's generated playlists.
+pub fn system_uri(urn: &str) -> String {
+    format!("{SYSTEM_PREFIX}{urn}")
+}
+
+/// The URN of a generated playlist's page. Only SoundCloud's own form of it is
+/// taken, as it goes into a request's path.
+pub fn system_urn(uri: &str) -> Option<&str> {
+    let urn = uri.strip_prefix(SYSTEM_PREFIX)?;
+    (urn.starts_with("soundcloud:system-playlists:")
+        && urn.len() <= 200
+        && urn
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'-' | b'_')))
+    .then_some(urn)
+}
+
+/// The page of the songs SoundCloud relates to track `id`.
+pub fn related_uri(id: u64) -> String {
+    format!("{RELATED_PREFIX}{id}")
+}
+
+pub fn related_id(uri: &str) -> Option<u64> {
+    uri.strip_prefix(RELATED_PREFIX)?.parse().ok()
+}
+
+/// A profile's URI and which of its tabs: `""` for its uploads.
+pub fn user_tab(uri: &str) -> Option<(u64, &str)> {
+    let rest = uri.strip_prefix(USER_PREFIX)?;
+    let (id, tab) = rest.split_once(':').unwrap_or((rest, ""));
+    (tab.is_empty() || USER_TABS.contains(&tab)).then_some((id.parse().ok()?, tab))
+}
+
+/// Whether `uri` is a page of SoundCloud browsing.
+pub fn is_page(uri: &str) -> bool {
+    uri == HOME
+        || uri == FEED
+        || playlist_id(uri).is_some()
+        || user_tab(uri).is_some()
+        || charts_genre(uri).is_some()
+        || system_urn(uri).is_some()
+        || related_id(uri).is_some()
+}
+
 /// Whether `uri` names a SoundCloud track.
 pub fn is_track_uri(uri: &str) -> bool {
     track_id(uri).is_some()

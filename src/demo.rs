@@ -870,7 +870,7 @@ pub fn populate(app: &mut App) {
                 content: Loadable::Loaded(SoundCloudCollection {
                     title,
                     tracks: sc.tracks.clone(),
-                    next: None,
+                    ..Default::default()
                 }),
                 generation: 1,
                 ..Default::default()
@@ -5967,10 +5967,13 @@ mod tests {
                 egui::vec2(1280.0, 2200.0),
             );
             let contains = |name: &str| text.iter().any(|shape| shape.galley.job.text == name);
-            assert_eq!(contains("Rosewood"), source != SearchSource::SoundCloud);
+            assert_eq!(
+                contains("Rosewood"),
+                matches!(source, SearchSource::All | SearchSource::Spotify)
+            );
             assert_eq!(
                 contains("Bonobo - Studio Sketch"),
-                source != SearchSource::Spotify
+                matches!(source, SearchSource::All | SearchSource::SoundCloud)
             );
             assert!(
                 !contains("SC"),
@@ -6547,6 +6550,7 @@ mod tests {
         for expected in [
             SearchSource::Spotify,
             SearchSource::SoundCloud,
+            SearchSource::YouTube,
             SearchSource::All,
         ] {
             accessible_frame(&ctx, &mut app, vec![keyboard(egui::Key::S, modifiers)]);

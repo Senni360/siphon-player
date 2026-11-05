@@ -932,6 +932,16 @@ pub enum Command {
         request: u64,
     },
     SoundCloudSearch(crate::soundcloud::browse::SearchRequest),
+    /// The newest uploads of the channels followed.
+    YouTubeFeed {
+        generation: u64,
+        channels: Vec<String>,
+    },
+    YouTubeSearch {
+        query: String,
+        serial: u64,
+        cursor: Option<String>,
+    },
     SoundCloudCollection {
         uri: String,
         generation: u64,
@@ -1267,6 +1277,11 @@ pub enum Event {
         request: u64,
         complete: bool,
         result: Result<Vec<Track>, String>,
+    },
+    YouTubeSearch {
+        serial: u64,
+        more: bool,
+        results: Box<crate::model::YouTubeSearchResults>,
     },
     SoundCloudSearch {
         request: crate::soundcloud::browse::SearchRequest,
@@ -1710,7 +1725,20 @@ impl Backend {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .push(cache.clone());
         }
+        // The demo has no Spotify, but SoundCloud and YouTube need no account:
+        // it reads them for real, so their pages can be tried in it. Tests never do.
+        #[cfg(all(feature = "demo", not(test)))]
+        let browsing = matches!(
+            command,
+            Command::SoundCloudCollection { .. }
+                | Command::SoundCloudSearch(..)
+                | Command::YouTubeFeed { .. }
+                | Command::YouTubeSearch { .. }
+        );
+        #[cfg(not(all(feature = "demo", not(test))))]
+        let browsing = false;
         if self.offline
+            && !browsing
             && !matches!(
                 command,
                 Command::Accent { .. }
@@ -3296,6 +3324,67 @@ impl Worker {
                             request,
                             complete: true,
                             result,
+                        });
+                        waker.wake();
+                    });
+                }
+                Command::SoundCloudCollection {
+                    uri,
+                    generation,
+                    cursor,
+                } if crate::youtube::browse::is_page(&uri) => {
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let resolver = crate::youtube::Resolver::default();
+                        let result =
+                            crate::youtube::browse::page(&resolver, &uri, cursor.as_deref()).await;
+                        let _ = events.send(Event::SoundCloudCollection {
+                            uri,
+                            generation,
+                            more: cursor.is_some(),
+                            result,
+                        });
+                        waker.wake();
+                    });
+                }
+                Command::YouTubeFeed {
+                    generation,
+                    channels,
+                } => {
+                    let http = self.http.client();
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let result = match http {
+                            Ok(http) => crate::youtube::browse::feed(http, channels).await,
+                            Err(error) => Err(error),
+                        };
+                        let _ = events.send(Event::SoundCloudCollection {
+                            uri: crate::youtube::browse::HOME.into(),
+                            generation,
+                            more: false,
+                            result,
+                        });
+                        waker.wake();
+                    });
+                }
+                Command::YouTubeSearch {
+                    query,
+                    serial,
+                    cursor,
+                } => {
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let resolver = crate::youtube::Resolver::default();
+                        let results =
+                            crate::youtube::browse::search(&resolver, &query, cursor.as_deref())
+                                .await;
+                        let _ = events.send(Event::YouTubeSearch {
+                            serial,
+                            more: cursor.is_some(),
+                            results: Box::new(results),
                         });
                         waker.wake();
                     });

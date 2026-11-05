@@ -216,6 +216,23 @@ pasted links and the playing song, sends to everyone or picked friends,
 and per-share download whose file drags into a DAW on Windows
 (`src/drag_out.rs`).
 
+## The sources' own pages (5 November)
+
+Spotify keeps its pages. SoundCloud and YouTube share one structure in
+`ui/source_page.rs`, a profile or title, then quiet tabs, then what the page
+lists, and differ where the sources do:
+
+- **YouTube** is channels and thumbnails. Search finds videos, channels and
+  playlists. A channel has a banner, picture, Follow, Videos and Playlists. Videos
+  show as a grid of 16:9 cards with their length and views; the channel name is a
+  link. Sidebar: New uploads, Likes, the channels followed. No recommendations.
+- **SoundCloud** is people and rows. Discover has genre chips, its own selections
+  and what's trending. A profile has a banner, picture, Follow and the tabs Tracks,
+  Popular, Albums, Playlists, Reposts, Likes and Following. A song offers Related
+  tracks. Connected, there is also Your feed.
+
+Titles keep their source colour on every page, and a list behaves like any other.
+
 ## What changed (5 November)
 
 - **The player floats over everything.** The page and the panels scroll on
