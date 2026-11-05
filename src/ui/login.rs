@@ -361,7 +361,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
         ui.with_layout(Layout::top_down(Align::Center), |ui| {
             if theme::link(
                 ui,
-                gettext(locale, "Proxy Settings"),
+                gettext(locale, "Proxy settings"),
                 theme::regular(13.0),
                 palette.secondary,
             )
@@ -792,7 +792,7 @@ mod tests {
             (bounds.x0 + bounds.x1) / 2.0
         };
         assert!(
-            (center("Proxy Settings") - center("Sign in with Spotify")).abs() < 1.0,
+            (center("Proxy settings") - center("Sign in with Spotify")).abs() < 1.0,
             "the proxy link stays centered under sign-in"
         );
         frame(vec![

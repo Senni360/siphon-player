@@ -616,12 +616,17 @@ fn big_cover(app: &App, ui: &mut egui::Ui, column: Rect, align: Align) {
 
 fn fullscreen_content_width(viewport_width: f32) -> f32 {
     let available = (viewport_width - 48.0).max(0.0);
-    (viewport_width * 0.72).clamp(400.0, 960.0).min(available)
+    (viewport_width * 0.72).clamp(400.0, 1400.0).min(available)
 }
 
 fn preferred_backdrop_art(small: Option<String>, large: Option<String>) -> Option<String> {
     small.or(large)
 }
+
+/// How far the cover is darkened behind lyrics. A white cover has to end up dark enough
+/// for lines not being sung to stay readable, not just the line that is.
+const BACKDROP_ART_GRAY: u8 = 130;
+const BACKDROP_SHADE: u8 = 150;
 
 fn background(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
     theme::apply_local(ui, &theme::Palette::dark());
@@ -637,11 +642,11 @@ fn background(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
             texture.id(),
             rect,
             cover_uv(rect.size(), texture.size_vec2()),
-            Color32::from_gray(180),
+            Color32::from_gray(BACKDROP_ART_GRAY),
         );
     }
-    painter.rect_filled(rect, 0.0, Color32::from_black_alpha(120));
-    super::now_playing::song_aurora(app, ui.ctx(), &painter, rect, 0.22);
+    painter.rect_filled(rect, 0.0, Color32::from_black_alpha(BACKDROP_SHADE));
+    super::now_playing::song_aurora(app, ui.ctx(), &painter, rect, 0.14);
     widgets::paint_vertical_gradient(
         ui,
         rect,
@@ -810,11 +815,11 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
     let following = app.lyrics_following && !manual_scroll;
     let follow = following && app.lyrics_line_shown != Some(active);
     let animation = crate::motion::scroll(ui.ctx(), 0.45);
-    let size = (ui.available_width() * 0.046).clamp(28.0, 42.0);
+    let size = (ui.available_width() * 0.046).clamp(28.0, 64.0);
     // The line being sung brightens; all lines keep the same font metrics
     // so highlighting cannot rewrap the words during a transition.
     // A line takes 300 ms to light up or fade.
-    let quiet = palette.text.gamma_multiply(0.68);
+    let quiet = palette.text.gamma_multiply(0.78);
     ui.spacing_mut().scroll.fade.strength = 0.0;
     egui::ScrollArea::vertical()
         .id_salt(("fullscreen-lyrics-scroll", &now.uri))
@@ -953,6 +958,30 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
 mod tests {
     use super::{fullscreen_content_width, preferred_backdrop_art};
 
+    /// WCAG's contrast between a light gray and a dark one, from sRGB values of 0 to 1.
+    fn contrast(light: f32, dark: f32) -> f32 {
+        let linear = |value: f32| {
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        (linear(light) + 0.05) / (linear(dark) + 0.05)
+    }
+
+    #[test]
+    fn lines_not_being_sung_stay_readable_on_the_palest_cover() {
+        let shade = 1.0 - f32::from(super::BACKDROP_SHADE) / 255.0;
+        let behind = f32::from(super::BACKDROP_ART_GRAY) / 255.0 * shade;
+        let quiet = 0.93 * 0.78 + behind * 0.22;
+        assert!(
+            contrast(quiet, behind) >= 4.5,
+            "{}",
+            contrast(quiet, behind)
+        );
+    }
+
     #[test]
     fn fullscreen_backdrop_prefers_small_art_with_large_art_as_fallback() {
         let small = "small".to_string();
@@ -976,6 +1005,6 @@ mod tests {
             assert!(width <= (viewport_width - 48.0).max(0.0));
         }
         assert_eq!(fullscreen_content_width(47.0), 0.0);
-        assert_eq!(fullscreen_content_width(2_000.0), 960.0);
+        assert_eq!(fullscreen_content_width(3_000.0), 1400.0);
     }
 }
