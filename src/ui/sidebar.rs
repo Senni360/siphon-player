@@ -2352,7 +2352,9 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 }
                 ui.painter().set(
                     highlight_slot,
-                    egui::Shape::rect_filled(shown, CornerRadius::same(6), palette.surface),
+                    // Lighter than whatever is behind it, or the song's glow
+                    // can rise to its colour and hide it.
+                    egui::Shape::rect_filled(shown, CornerRadius::same(6), palette.surface_active),
                 );
             }
             if let Some(slot) = reorder_slot {
