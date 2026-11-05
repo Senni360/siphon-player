@@ -5,6 +5,7 @@ import { badge } from './badge.js';
 import { audioRoute, type AudioStore } from './audio.js';
 import { HttpError, body, fail, https, json, text, validateUrl } from './http.js';
 import { createLive, song } from './live.js';
+import { createRemote } from './remote.js';
 import { FIRST_GROUP, MAX_DEVICES, admitPending, fullRights, groupById, groupRoute, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
 import type { Payload, Post, SharedPlaylist, State, Storage, User } from './storage.js';
 import { describe, noJev, titleReadings, type Ask, type Track } from './jev.js';
@@ -86,6 +87,13 @@ async function jevAllowed(storage: Storage, userId: string, signal: AbortSignal)
 const ROSTER_MS = 60000;
 const LIVE_READS_PER_MINUTE = 120;
 const LIVE_WRITES_PER_MINUTE = 60;
+// A phone and its computer together, each about once a second while watching.
+const REMOTE_CALLS_PER_MINUTE = 400;
+/** How long a code shown on the computer can be typed into a phone. */
+const LINK_SECONDS = 300;
+// No 0, O, 1, I or L: this gets read off one screen and typed into another.
+const LINK_LETTERS = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+const linkKey = (code: string) => `link:${hash(code)}`;
 
 export { validateUrl };
 
@@ -107,6 +115,7 @@ const seenByReader = (list: SharedPlaylist, reader: string) => !list.to?.length 
 
 export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now, verify: VerifySpotify = verifySpotify, ownerSpotify = '', audioStore: AudioStore | null = null) {
   const live = createLive(storage, clock);
+  const remote = createRemote(storage, clock);
   let roster: { state: State; until: number } | null = null;
   const liveCalls = new Map<string, { count: number; until: number }>();
   function liveAllowed(key: string, maximum: number): boolean {
@@ -127,6 +136,10 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       const state = await storage.read(signal);
       roster = { state, until: clock() + ROSTER_MS };
       user = member(state, secret_hash);
+    }
+    if (path.startsWith('/live/remote/')) {
+      if (!liveAllowed(`${user.user_id}:remote`, REMOTE_CALLS_PER_MINUTE)) return fail(429, 'Too many requests', 60);
+      return await remote(request, path, user, signal) ?? fail(404, 'Route not found');
     }
     const reads = request.method === 'GET';
     if (!liveAllowed(`${user.user_id}:${reads ? 'read' : 'write'}`, reads ? LIVE_READS_PER_MINUTE : LIVE_WRITES_PER_MINUTE)) return fail(429, 'Too many requests', 60);
@@ -242,11 +255,40 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         roster = null;
         return json({ ...answer, secret }, 201);
       }
+      // A phone joins the account of the computer showing this code. The code is
+      // used once, and the phone gets a secret of its own that can be removed alone.
+      if (path === '/link/claim' && method === 'POST') {
+        if (!await storage.limit(`link:${hash(clientIp)}`, 20, 3600, signal)) return fail(429, 'Too many tries', 3600);
+        const input = await body(request, signal, 1024);
+        const code = text(input.code, 'code', 20).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const device = text(input.device, 'device', 60, true) || 'Phone';
+        const [held] = await storage.liveRead([linkKey(code)], signal);
+        if (!held) return fail(404, "That code isn't right, or it ran out. Make a new one on your computer.");
+        const link = JSON.parse(held) as { user_id: string; client_id?: string };
+        await storage.liveDelete(linkKey(code), signal);
+        const secret = randomBytes(32).toString('hex');
+        const name = await change(storage, s => {
+          const account = s.users.find(u => u.user_id === link.user_id) ?? fail(404, 'That account is gone');
+          account.devices = [...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }].slice(-MAX_DEVICES);
+          return account.display_name;
+        }, signal);
+        roster = null;
+        return json({ user_id: link.user_id, display_name: name, secret, client_id: link.client_id ?? null }, 201);
+      }
       const bearer = request.headers.get('authorization');
       if (!bearer || !/^Bearer [a-f0-9]{64}$/.test(bearer)) return fail(401, 'Sign in to the group');
       const secret_hash = hash(bearer.slice(7));
       const state = await storage.read(signal);
       const user = member(state, secret_hash);
+      if (path === '/link/start' && method === 'POST') {
+        if (!await storage.limit(`linkstart:${user.user_id}`, 10, 3600, signal)) return fail(429, 'Too many codes', 3600);
+        const input = await body(request, signal, 1024);
+        const client_id = text(input.client_id, 'client_id', 64, true);
+        if (client_id && !/^[a-zA-Z0-9]+$/.test(client_id)) return fail(400, 'Invalid client_id');
+        const code = Array.from({ length: 8 }, () => LINK_LETTERS[randomInt(LINK_LETTERS.length)]).join('');
+        await storage.livePut(linkKey(code), JSON.stringify({ user_id: user.user_id, ...(client_id ? { client_id } : {}) }), LINK_SECONDS, signal);
+        return json({ code, seconds: LINK_SECONDS }, 201);
+      }
       const reads = method === 'GET';
       if (!await storage.limit(`user:${user.user_id}:${reads ? 'read' : 'write'}`, reads ? 120 : 60, 60, signal)) return fail(429, 'Too many requests', 60);
       signal.throwIfAborted();

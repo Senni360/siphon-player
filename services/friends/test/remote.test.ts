@@ -1,0 +1,156 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createService } from '../src/service.js';
+import { MemoryStorage } from '../src/storage.js';
+import { codeMatches, gateCookie, normalized, passedGate, webAnswer } from '../src/web.js';
+
+const invite = 'a-long-test-invite';
+const ID = '11111111-1111-4111-8111-111111111111';
+
+function fixture() {
+  let time = 1_000_000;
+  const store = new MemoryStorage(() => time);
+  const service = createService(store, invite, undefined, () => time);
+  const call = async (path: string, method = 'GET', input?: unknown, secret?: string, ip = 'a') => {
+    const response = await service(new Request(`https://test/api${path}`, {
+      method,
+      headers: { 'content-type': 'application/json', ...(secret ? { authorization: `Bearer ${secret}` } : {}) },
+      body: input === undefined ? undefined : JSON.stringify(input),
+    }), ip);
+    return { status: response.status, body: await response.json() as any };
+  };
+  const join = async (name: string) => (await call('/join', 'POST', { invite_code: invite, display_name: name })).body as { user_id: string; secret: string };
+  return { call, join, advance: (ms: number) => { time += ms; } };
+}
+
+test('a phone joins the account of the computer that showed the code', async () => {
+  const { call, join } = fixture();
+  const computer = await join('Senni');
+  const started = await call('/link/start', 'POST', { client_id: 'abc123' }, computer.secret);
+  assert.equal(started.status, 201);
+  assert.match(started.body.code, /^[2-9A-HJKMNP-Z]{8}$/);
+
+  const claimed = await call('/link/claim', 'POST', { code: started.body.code.toLowerCase(), device: 'Phone' });
+  assert.equal(claimed.status, 201);
+  assert.equal(claimed.body.user_id, computer.user_id);
+  assert.equal(claimed.body.client_id, 'abc123');
+  assert.notEqual(claimed.body.secret, computer.secret);
+
+  // The same account, on a secret of its own.
+  assert.equal((await call('/me', 'GET', undefined, claimed.body.secret)).body.user_id, computer.user_id);
+  const devices = (await call('/account', 'GET', undefined, computer.secret)).body.devices as { id: string; name: string }[];
+  const phone = devices.find(device => device.name === 'Phone')!;
+  assert.ok(phone);
+
+  // Removing the phone on the computer leaves the computer signed in.
+  assert.equal((await call(`/account/devices/${phone.id}`, 'DELETE', undefined, computer.secret)).status, 200);
+  assert.equal((await call('/me', 'GET', undefined, claimed.body.secret)).status, 401);
+  assert.equal((await call('/me', 'GET', undefined, computer.secret)).status, 200);
+});
+
+test('a link code works once, for a while, and a wrong one gets nothing', async () => {
+  const { call, join, advance } = fixture();
+  const computer = await join('Senni');
+  assert.equal((await call('/link/start', 'POST', {})).status, 401);
+  assert.equal((await call('/link/claim', 'POST', { code: 'WRONGONE' })).status, 404);
+  const first = (await call('/link/start', 'POST', {}, computer.secret)).body.code;
+  assert.equal((await call('/link/claim', 'POST', { code: first })).status, 201);
+  assert.equal((await call('/link/claim', 'POST', { code: first })).status, 404, 'used once');
+  const second = (await call('/link/start', 'POST', {}, computer.secret)).body.code;
+  advance(301_000);
+  assert.equal((await call('/link/claim', 'POST', { code: second })).status, 404, 'ran out');
+});
+
+test('commands reach the computer once and its answers reach the phone', async () => {
+  const { call, join } = fixture();
+  const computer = await join('Senni');
+  const code = (await call('/link/start', 'POST', {}, computer.secret)).body.code;
+  const phone = (await call('/link/claim', 'POST', { code })).body.secret;
+
+  const idle = await call('/live/remote/poll', 'GET', undefined, computer.secret);
+  assert.deepEqual(idle.body, { wanted: false, commands: [] });
+
+  assert.equal((await call('/live/remote/state', 'GET', undefined, phone)).body.state, null);
+  const watched = await call('/live/remote/poll', 'GET', undefined, computer.secret);
+  assert.equal(watched.body.wanted, true, 'a phone looking has the computer hurry');
+
+  assert.equal((await call('/live/remote/send', 'POST', { id: ID, kind: 'next' }, phone)).status, 202);
+  const polled = await call('/live/remote/poll', 'GET', undefined, computer.secret);
+  assert.deepEqual(polled.body.commands, [{ id: ID, kind: 'next' }]);
+  assert.deepEqual((await call('/live/remote/poll', 'GET', undefined, computer.secret)).body.commands, [], 'once');
+
+  await call('/live/remote/state', 'PUT', { title: 'Song', playing: true }, computer.secret);
+  const shown = await call('/live/remote/state', 'GET', undefined, phone);
+  assert.equal(shown.body.state.title, 'Song');
+  assert.ok(shown.body.state.at);
+
+  assert.equal((await call(`/live/remote/reply/${ID}`, 'GET', undefined, phone)).body.ready, false);
+  await call(`/live/remote/reply/${ID}`, 'PUT', { songs: [1] }, computer.secret);
+  assert.deepEqual((await call(`/live/remote/reply/${ID}`, 'GET', undefined, phone)).body, { ready: true, reply: { songs: [1] } });
+});
+
+test('one account can never reach another through the relay', async () => {
+  const { call, join } = fixture();
+  const mine = await join('Senni');
+  const theirs = await join('Friend');
+  assert.equal((await call('/live/remote/send', 'POST', { id: ID, kind: 'next' })).status, 401);
+  await call('/live/remote/send', 'POST', { id: ID, kind: 'next' }, theirs.secret);
+  assert.deepEqual((await call('/live/remote/poll', 'GET', undefined, mine.secret)).body.commands, []);
+  await call('/live/remote/state', 'PUT', { title: 'Private' }, mine.secret);
+  assert.equal((await call('/live/remote/state', 'GET', undefined, theirs.secret)).body.state, null);
+  await call(`/live/remote/reply/${ID}`, 'PUT', { songs: [1] }, mine.secret);
+  assert.equal((await call(`/live/remote/reply/${ID}`, 'GET', undefined, theirs.secret)).body.ready, false);
+});
+
+test('a command that is not a command is refused', async () => {
+  const { call, join } = fixture();
+  const { secret } = await join('Senni');
+  assert.equal((await call('/live/remote/send', 'POST', { id: 'nope', kind: 'next' }, secret)).status, 400);
+  assert.equal((await call('/live/remote/send', 'POST', { id: ID, kind: 'Bad Kind!' }, secret)).status, 400);
+});
+
+const code = 'test words';
+const limits = (allowed = true) => ({ limit: async () => allowed });
+const nothing = async () => ({});
+
+test('the code forgives case and spaces, and nothing else', () => {
+  assert.equal(normalized('  Test   WORDS '), 'testwords');
+  assert.ok(codeMatches('TEST WORDS', code));
+  assert.ok(codeMatches('testwords', code));
+  assert.ok(!codeMatches('test word', code));
+  assert.ok(!codeMatches('anything', ''), 'no code set lets nobody in');
+});
+
+test('the gate cookie is signed, expires and needs the current code', () => {
+  const cookie = gateCookie(code, 1000).split(';')[0];
+  assert.ok(passedGate(`other=1; ${cookie}`, code, 2000));
+  assert.ok(!passedGate(cookie, 'another code', 2000), 'changing the code locks everyone out');
+  assert.ok(!passedGate(cookie, code, 1000 + 366 * 86400 * 1000), 'expired');
+  assert.ok(!passedGate(cookie.replace(/\.[a-f0-9]{4}/, '.0000'), code, 2000), 'forged');
+  assert.ok(!passedGate(undefined, code, 2000));
+  assert.ok(!passedGate('encore_gate=abc', code, 2000));
+});
+
+test('the web address shows only the gate until the code is in', async () => {
+  const ask = (method: string, path: string, cookie?: string, input: () => Promise<unknown> = nothing, allowed = true, set = code) =>
+    webAnswer(method, path, cookie, input, set, limits(allowed), 'ip', 1000);
+  const gate = await ask('GET', '/');
+  assert.match(String(gate!.body), /encore-gate/);
+  assert.equal((await ask('GET', '/app.js'))!.status, 401, 'the app itself stays behind it');
+  assert.equal(await ask('GET', '/api/me'), null, 'the API answers for itself');
+
+  const wrong = await ask('POST', '/gate', undefined, async () => ({ code: 'wrong' }));
+  assert.equal(wrong!.status, 403);
+  assert.equal(wrong!.headers['Set-Cookie'], undefined);
+  assert.equal((await ask('POST', '/gate', undefined, async () => ({ code: 'x' }), false))!.status, 429);
+  assert.equal((await ask('POST', '/gate', undefined, async () => ({ code }), true, ''))!.status, 503, 'closed until set up');
+
+  const right = await ask('POST', '/gate', undefined, async () => ({ code: 'TEST WORDS' }));
+  assert.equal(right!.status, 200);
+  const cookie = right!.headers['Set-Cookie'].split(';')[0];
+  assert.match(right!.headers['Set-Cookie'], /HttpOnly; Secure; SameSite=Lax/);
+  const app = await ask('GET', '/', cookie);
+  assert.match(String(app!.body), /id="app"/);
+  assert.equal((await ask('GET', '/app.js', cookie))!.status, 200);
+  assert.match(String((await ask('GET', '/callback', cookie))!.body), /id="app"/, 'Spotify can return here');
+});

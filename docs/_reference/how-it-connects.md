@@ -114,6 +114,15 @@ app using that port, then choose **Try again**. Since 0.13.2, playback setup
 does the same with its port, 8898: if another app holds it, Settings shows the
 error, the browser stays closed, and a saved playback approval is kept.
 
+A phone can use this computer through `encore.senni.dev`, once linked with a code shown
+in the group panel. The code makes the phone another device of the same group account,
+with a secret of its own that can be signed out alone. Its commands then wait with the
+group service for this computer, which looks every fifteen seconds until a phone is
+watching and every second while one is. Answers (songs, names and pictures, and possibly
+private links in them) pass through the same way and expire within a minute. No sign-in
+ever leaves this computer: the phone doesn't hold Spotify, SoundCloud or Google access.
+This connection only runs on a computer that has linked a phone.
+
 An artist's page also reads what they have elsewhere, so it can list what Spotify
 doesn't have. It searches SoundCloud's and YouTube's public listings for the artist's
 name and reads the likeliest accounts' uploads, with the same requests their own pages
