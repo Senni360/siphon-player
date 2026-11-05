@@ -34,7 +34,16 @@ function page(title: string, head: string, body: string): string {
 const home = () => page('Encore', '', `<h1>Encore</h1>
 <p>A private music app for friends. One library and one queue for Spotify, SoundCloud and YouTube, shared inside your group. Windows only.</p>
 <a class="primary" href="/download">Download for Windows</a>
-<small>Extract the zip and open <b>siphon.exe</b>. If Windows warns you, choose More info, then Run anyway. Encore then shows you how to sign in with your own free Spotify app.</small>`);
+<small><a href="/privacy">Privacy</a><br>Extract the zip and open <b>siphon.exe</b>. If Windows warns you, choose More info, then Run anyway. Encore then shows you how to sign in with your own free Spotify app.</small>`);
+
+const privacy = () => page('Encore privacy', '', `<h1>Privacy</h1>
+<p>Encore is a desktop music app that runs on your computer. It has no ads, analytics or telemetry, and nothing here is sold.</p>
+<p><b>On your computer.</b> Your settings, library copies and listening history stay on your computer. Sign-ins are kept in Windows' credential store.</p>
+<p><b>Spotify, SoundCloud and YouTube.</b> Encore talks to these services directly, with the accounts you connect, to browse and play music. Your data goes between your computer and that service only.</p>
+<p><b>Your Google account.</b> Connecting YouTube is optional and uses a Google project of your own. Encore reads and changes your YouTube subscriptions and likes when you ask it to or when they sync. Your Client ID, secret and sign-in stay on your computer, and your YouTube account data isn't sent to this site or to anyone but Google. You can disconnect in Encore, and remove its access at any time at <a href="https://myaccount.google.com/permissions">your Google account's permissions</a>. Encore's use of Google data follows the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>.</p>
+<p><b>Groups.</b> Only if you join a group, this site's service keeps what the group needs: who you are in it, what you post and share, and what you're listening to if you choose to share that. Only your group sees it. Leave out sharing and nothing about your listening is sent.</p>
+<a class="primary" href="/">Back to Encore</a>
+<small>Questions: <a href="https://github.com/Senni360/siphon-player/issues">open an issue on GitHub</a>.</small>`);
 
 function party(group: string, id: string): string {
   const door = `siphon://party/${group.toLowerCase()}/${id.toLowerCase()}`;
@@ -49,6 +58,7 @@ export function sitePage(method: string | undefined, url: string | undefined): {
   if (method !== 'GET' && method !== 'HEAD') return null;
   const path = new URL(url ?? '/', 'http://localhost').pathname.replace(/\/$/, '');
   if (path === '') return { status: 200, html: home() };
+  if (path === '/privacy') return { status: 200, html: privacy() };
   const parts = path.split('/').slice(1);
   if (parts[0] !== 'party') return null;
   if (parts.length === 3 && UUID.test(parts[1]) && UUID.test(parts[2])) return { status: 200, html: party(parts[1], parts[2]) };

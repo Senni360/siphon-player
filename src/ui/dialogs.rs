@@ -1024,7 +1024,7 @@ fn youtube_connect(app: &mut App, ui: &mut egui::Ui) {
     step(
         ui,
         app,
-        "3. Set up Google Auth Platform: give the app a name, choose External, then under Audience press Publish app. Unpublished, Google signs you out every 7 days.",
+        "3. Set up Google Auth Platform: give the app a name and choose External. Under Branding, enter https://siphon-friends.vercel.app as the home page, https://siphon-friends.vercel.app/privacy as the privacy policy, and siphon-friends.vercel.app as an authorized domain. Then under Audience press Publish app. Unpublished, Google signs you out every 7 days.",
         Some((
             "Open Google Auth Platform",
             "https://console.cloud.google.com/auth/overview",
