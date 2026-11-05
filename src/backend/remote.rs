@@ -142,16 +142,54 @@ impl Worker {
             };
             let sound = async {
                 let client = soundcloud?;
-                client.search_tracks(&query, 20, 0).await.ok().map(|page| {
-                    page.collection
-                        .iter()
-                        .map(|track| track.to_track(None))
-                        .collect::<Vec<_>>()
-                })
+                let (tracks, users) = tokio::join!(
+                    client.search_tracks(&query, 20, 0),
+                    client.search_users(&query, 4, 0)
+                );
+                Some((
+                    tracks
+                        .map(|page| {
+                            page.collection
+                                .iter()
+                                .map(|track| track.to_track(None))
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default(),
+                    users.map(|page| page.collection).unwrap_or_default(),
+                ))
             };
             let resolver = crate::youtube::Resolver::default();
             let video = crate::youtube::browse::videos_for(&resolver, &query);
-            let (spotify, sound, video) = tokio::join!(spotify, sound, video);
+            let channels = crate::youtube::browse::channels(&resolver, &query);
+            let (spotify, sound, video, channels) = tokio::join!(spotify, sound, video, channels);
+            let (sound, users) = sound.unzip();
+            let mut accounts: Vec<serde_json::Value> = users
+                .unwrap_or_default()
+                .iter()
+                .take(4)
+                .map(|user| {
+                    serde_json::json!({
+                        "source": "soundcloud",
+                        "uri": crate::soundcloud::user_uri(user.id),
+                        "name": user.username,
+                        "image": user.avatar_url,
+                    })
+                })
+                .collect();
+            accounts.extend(
+                channels
+                    .unwrap_or_default()
+                    .iter()
+                    .take(3)
+                    .map(|(card, _)| {
+                        serde_json::json!({
+                            "source": "youtube",
+                            "uri": card.uri,
+                            "name": card.title,
+                            "image": card.image,
+                        })
+                    }),
+            );
             let (tracks, artists): (Vec<Track>, Vec<serde_json::Value>) = spotify
                 .map(|found| {
                     (
@@ -175,6 +213,7 @@ impl Worker {
                 .unwrap_or_default();
             serde_json::json!({
                 "artists": artists,
+                "accounts": accounts,
                 "spotify": songs_json(&tracks),
                 "soundcloud": songs_json(&sound.unwrap_or_default()),
                 "youtube": songs_json(&video.unwrap_or_default()),

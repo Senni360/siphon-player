@@ -114,6 +114,18 @@ fn the_song_pressed_on_a_phone_still_plays_when_others_are_filtered_out() {
 }
 
 #[test]
+fn a_phone_can_only_ask_about_things_with_plain_names() {
+    use super::remote::fair_question as fair;
+    assert!(fair(&PhoneCommand::Artist { id: "4uLU6hMCjMI75".into() }));
+    assert!(!fair(&PhoneCommand::Artist { id: "../me/player".into() }));
+    assert!(!fair(&PhoneCommand::Playlist { id: "a?b=c".into() }));
+    assert!(!fair(&PhoneCommand::Album { id: String::new() }));
+    assert!(fair(&PhoneCommand::Source { uri: "soundcloud:user:12".into() }));
+    assert!(fair(&PhoneCommand::Source { uri: "youtube:channel:UC1234567890123456789012".into() }));
+    assert!(!fair(&PhoneCommand::Source { uri: "https://evil.example".into() }));
+}
+
+#[test]
 fn a_question_waits_for_its_page_and_is_answered_when_it_loads() {
     let mut app = artist_page_app("remote-question");
     let ctx = egui::Context::default();

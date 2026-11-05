@@ -63,6 +63,7 @@ pub enum Command {
         url: String,
     },
     Home,
+    Lyrics,
     Library,
     Playlist {
         #[serde(rename = "target")]
@@ -118,6 +119,9 @@ pub struct Song {
     pub duration_ms: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plays: Option<u64>,
+    /// The song's own address, to share it with the group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
 }
 
 impl From<&Track> for Song {
@@ -142,6 +146,7 @@ impl From<&Track> for Song {
                 .map(str::to_owned),
             duration_ms: track.duration_ms,
             plays: track.play_count,
+            link: track.external_urls.spotify.clone(),
         }
     }
 }

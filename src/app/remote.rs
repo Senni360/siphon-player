@@ -34,6 +34,7 @@ fn is_question(command: &Phone) -> bool {
     matches!(
         command,
         Phone::Home
+            | Phone::Lyrics
             | Phone::Library
             | Phone::Playlist { .. }
             | Phone::Album { .. }
@@ -43,6 +44,21 @@ fn is_question(command: &Phone) -> bool {
             | Phone::Artist { .. }
             | Phone::Source { .. }
     )
+}
+
+/// Whether a question is about something a phone may ask about. Ids go into addresses
+/// here, so only plain ones get that far.
+pub(super) fn fair_question(command: &Phone) -> bool {
+    let plain = |id: &str| {
+        !id.is_empty() && id.len() <= 64 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    };
+    match command {
+        Phone::Playlist { id } | Phone::Album { id } | Phone::Artist { id } => plain(id),
+        Phone::Source { uri } => {
+            crate::soundcloud::is_page(uri) || crate::youtube::browse::is_page(uri)
+        }
+        _ => true,
+    }
 }
 
 /// What pressing something on the phone comes to here. Anything it can't ask for,
@@ -200,6 +216,19 @@ impl App {
                 duration_ms: now.duration_ms,
                 ..Default::default()
             });
+        let mut song = song;
+        if song.artist_id.is_none() {
+            song.artist_id = self
+                .now_playing_item()
+                .as_ref()
+                .and_then(|item| match item {
+                    PlayableItem::Track(track) => track.artists.iter().find_map(|artist| {
+                        let (id, _) = self.artist_links.get(artist.uri.as_deref()?)?;
+                        Some(id.clone())
+                    }),
+                    _ => None,
+                });
+        }
         Snapshot {
             liked: self.is_saved(&now.uri).unwrap_or(false),
             song: Some(song),
@@ -230,6 +259,10 @@ impl App {
                 let query = query.trim().chars().take(200).collect();
                 self.backend
                     .send(Command::Remote(RemoteRequest::Search { id, query }));
+                return;
+            }
+            question if is_question(question) && !fair_question(question) => {
+                self.remote_reply(id, json!({ "error": "Encore couldn't load that." }));
                 return;
             }
             question if is_question(question) => {
@@ -263,6 +296,7 @@ impl App {
             Phone::Artist { id } => self.ensure_loaded(Page::Artist(id.clone())),
             Phone::Source { uri } => self.ensure_loaded(Page::SoundCloud(uri.clone())),
             Phone::Home => self.ask_for_you(),
+            Phone::Lyrics => self.request_lyrics(),
             _ => {}
         }
     }
@@ -272,11 +306,44 @@ impl App {
         Some(match question {
             Phone::Home => {
                 let shown = self.for_you.get()?;
+                let made: Vec<Value> = self
+                    .home
+                    .made_for_you
+                    .get()
+                    .map(|lists| {
+                        lists
+                            .iter()
+                            .take(8)
+                            .map(|list| {
+                                json!({
+                                    "id": list.id,
+                                    "name": list.name,
+                                    "image": pick_image(&list.images, 300),
+                                })
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
                 json!({
                     "picks": songs(shown.picks.iter().map(|pick| &pick.track)),
                     "following": songs(&shown.following),
+                    "recent": songs(self.recents_view.iter().take(12).map(|play| &play.track)),
+                    "made_for_you": made,
                 })
             }
+            Phone::Lyrics => match &self.lyrics {
+                Loadable::Loading | Loadable::NotLoaded => return None,
+                Loadable::Failed(_) => json!({ "lines": [] }),
+                Loadable::Loaded(lyrics) => {
+                    let lyrics = lyrics.as_ref();
+                    json!({
+                        "uri": self.lyrics_uri,
+                        "synced": lyrics.is_some_and(|found| found.synced),
+                        "instrumental": lyrics.is_some_and(|found| found.instrumental),
+                        "lines": lyrics.map_or(&[][..], |found| found.lines.as_slice()),
+                    })
+                }
+            },
             Phone::Library => {
                 let playlists: Vec<Value> = self
                     .library
@@ -410,6 +477,7 @@ impl App {
         Some(json!({
             "name": artist.name,
             "uri": artist.uri,
+            "following": self.is_saved(&artist.uri).unwrap_or(false),
             "image": pick_image(&artist.images, 600),
             "followers": artist.followers.as_ref().map(|followers| followers.total),
             "popular": songs(page.top_tracks.get().map_or(&[][..], Vec::as_slice)),
