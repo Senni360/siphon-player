@@ -134,7 +134,10 @@ pub fn welcome(ctx: &Context) {
 /// after waiting `delay`. It waits for a frame or two to be drawn first, as the
 /// first frame is a slow one and would eat the motion.
 pub fn arrival(ctx: &Context, id: Id, duration: f32, delay: f32) -> f32 {
-    if !ctx.data(|data| data.get_temp::<bool>(Id::new("kit-welcome")).unwrap_or(false)) {
+    if !ctx.data(|data| {
+        data.get_temp::<bool>(Id::new("kit-welcome"))
+            .unwrap_or(false)
+    }) {
         return 1.0;
     }
     if ctx.cumulative_frame_nr() < 2 {
@@ -188,6 +191,58 @@ pub fn shift_since(
             egui::emath::TSTransform::from_translation(offset),
         );
     });
+}
+
+/// A ring opening out of `center` as `t` goes from 0 to 1.
+pub fn ring(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    from: f32,
+    to: f32,
+    t: f32,
+    color: egui::Color32,
+) {
+    if t <= 0.0 || t >= 1.0 {
+        return;
+    }
+    painter.circle_stroke(
+        center,
+        from + (to - from) * t,
+        egui::Stroke::new(2.0 * (1.0 - t), color.gamma_multiply(1.0 - t)),
+    );
+}
+
+/// A soft, slow field of colour behind a view about the playing song. The blobs
+/// drift by `clock`, which only runs while the song plays; `swell` (0 to 1) lets
+/// them breathe with the sound.
+pub fn aurora(
+    painter: &egui::Painter,
+    rect: egui::Rect,
+    colors: &[egui::Color32],
+    clock: f32,
+    swell: f32,
+    strength: f32,
+) {
+    const PATHS: [(f32, f32, f32, f32); 4] = [
+        (0.21, 0.13, 0.0, 1.3),
+        (0.13, 0.17, 2.1, 0.4),
+        (0.17, 0.11, 4.0, 2.7),
+        (0.09, 0.23, 5.2, 3.9),
+    ];
+    if colors.is_empty() || rect.width() <= 0.0 {
+        return;
+    }
+    let reach = rect.size().max_elem() * (0.46 + 0.05 * swell);
+    for (index, (speed_x, speed_y, phase_x, phase_y)) in PATHS.iter().enumerate() {
+        let x = 0.5 + 0.42 * (clock * speed_x + phase_x).sin();
+        let y = 0.55 + 0.42 * (clock * speed_y + phase_y).cos();
+        let center = egui::pos2(
+            rect.left() + rect.width() * x,
+            rect.top() + rect.height() * y,
+        );
+        let color = colors[index % colors.len()].gamma_multiply(strength);
+        spotlight(painter, rect, center, reach, color);
+    }
 }
 
 /// Eased progress toward `on`, from 0 (off) to 1 (on), over `duration`.

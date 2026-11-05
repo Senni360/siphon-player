@@ -263,11 +263,15 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                     crate::motion::seconds(ui.ctx(), LIGHT_UP_SECONDS),
                 );
                 let color = blend(quiet, palette.accent, lit);
+                // Lines fall back with their distance from the one being sung.
+                let color = color.gamma_multiply(line_depth(active, index, lit));
                 let font = if lit > 0.5 {
                     theme::bold(LINE_SIZE)
                 } else {
                     theme::regular(LINE_SIZE)
                 };
+                let layer = ui.layer_id();
+                let painted = super::kit::motion::mark(ui.ctx(), layer);
                 // A timed line with no words is the band playing on.
                 let text = if line.text.is_empty() && lyrics.synced {
                     "\u{266a}"
@@ -298,6 +302,13 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                 };
                 crate::autoscroll::row(ui, &response);
                 let rect = response.rect;
+                // The sung line steps forward. Text stays at its size, so it stays sharp.
+                super::kit::motion::shift_since(
+                    ui.ctx(),
+                    layer,
+                    painted,
+                    egui::vec2(lit * 6.0, 0.0),
+                );
                 if lyrics.synced
                     && response.clicked()
                     && let Some(at_ms) = line.at_ms
@@ -339,6 +350,16 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
         app.lyrics_following = false;
     }
     app.lyrics_line_shown = Some(active);
+}
+
+/// How far a line has fallen back, as a strength from 1 down, by how many lines
+/// it is from the one being sung. `lit` holds a line up while it lights or fades.
+fn line_depth(active: Option<usize>, index: usize, lit: f32) -> f32 {
+    let Some(active) = active else {
+        return 1.0;
+    };
+    let away = active.abs_diff(index) as f32;
+    (1.0 - 0.13 * away).max(0.35).max(lit)
 }
 
 pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
@@ -603,6 +624,7 @@ fn background(app: &mut App, ui: &mut egui::Ui, rect: Rect) {
         );
     }
     painter.rect_filled(rect, 0.0, Color32::from_black_alpha(120));
+    super::now_playing::song_aurora(app, ui.ctx(), &painter, rect, 0.22);
     widgets::paint_vertical_gradient(
         ui,
         rect,
@@ -839,13 +861,27 @@ fn fullscreen_contents(app: &mut App, ui: &mut egui::Ui) {
                 let edge = ((center - viewport.top()).min(viewport.bottom() - center)
                     / (size * 2.0))
                     .clamp(0.0, 1.0);
+                let layer = ui.layer_id();
+                let painted = super::kit::motion::mark(ui.ctx(), layer);
+                let stepped = ui.ctx().animate_bool_with_time(
+                    egui::Id::new("fullscreen-line-step").with(index),
+                    is_active,
+                    crate::motion::seconds(ui.ctx(), 0.3),
+                );
                 let response = ui
                     .scope(|ui| {
                         ui.multiply_opacity(edge * edge * (3.0 - 2.0 * edge));
+                        ui.multiply_opacity(line_depth(active, index, stepped));
                         ui.add(egui::Label::new(galley).sense(sense))
                     })
                     .inner;
                 let rect = response.rect;
+                super::kit::motion::shift_since(
+                    ui.ctx(),
+                    layer,
+                    painted,
+                    egui::vec2(stepped * 10.0, 0.0),
+                );
                 if lyrics.synced
                     && response.clicked()
                     && let Some(at_ms) = line.at_ms

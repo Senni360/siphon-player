@@ -112,12 +112,76 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) {
                 egui::Stroke::new(1.0, Color32::from_white_alpha(18)),
                 egui::StrokeKind::Inside,
             );
+            let inside = ui.painter().with_clip_rect(frame.shrink(1.0));
+            song_aurora(app, &ctx, &inside, frame.shrink(1.0), 0.2 * t);
             // Its own words rise in once the frame has mostly grown.
             ui.multiply_opacity(((grown - 0.35) / 0.65).clamp(0.0, 1.0));
             let inner =
                 Rect::from_min_max(content.min + vec2(8.0, 8.0), content.max - vec2(8.0, 0.0));
             body(app, ui, inner, t);
         });
+}
+
+/// How loud the playing song is at this moment, from 0 to about 1, while it plays
+/// on this computer. It rises fast and falls slowly, like a level meter.
+fn sound_level(app: &App, ctx: &egui::Context) -> f32 {
+    let now = app.now_playing();
+    let sounding = now.is_some_and(|now| now.playing && now.local);
+    let level = if sounding {
+        let samples = app.winamp.tap.window(1024, crate::vis::LAG);
+        let power =
+            samples.iter().map(|sample| sample * sample).sum::<f32>() / samples.len().max(1) as f32;
+        (power.sqrt() * 2.6).min(1.0)
+    } else {
+        0.0
+    };
+    motion::spring(
+        ctx,
+        Id::new("now-playing-sound"),
+        level,
+        motion::Spring {
+            period: 0.3,
+            bounce: 0.0,
+        },
+    )
+}
+
+/// The drifting field of the cover's colours behind a view about the song. Its
+/// clock stands still while the song is paused, and costs nothing then.
+pub(super) fn song_aurora(
+    app: &App,
+    ctx: &egui::Context,
+    painter: &egui::Painter,
+    rect: Rect,
+    strength: f32,
+) {
+    let colors: Vec<Color32> = app.now_playing_palette().map_or_else(Vec::new, |art| {
+        art.iter()
+            .map(|rgb| Color32::from_rgb(rgb[0], rgb[1], rgb[2]))
+            .collect()
+    });
+    let playing = app.now_playing().is_some_and(|now| now.playing);
+    let moving = playing && crate::motion::seconds(ctx, 1.0) > 0.0;
+    let id = Id::new("now-playing-aurora");
+    let step = ctx.input(|input| input.stable_dt).min(0.1);
+    let clock = ctx.data_mut(|data| {
+        let clock = data.get_temp_mut_or_default::<f32>(id);
+        if moving {
+            *clock += step;
+        }
+        *clock
+    });
+    motion::aurora(
+        painter,
+        rect,
+        &colors,
+        clock,
+        sound_level(app, ctx),
+        strength,
+    );
+    if moving && !colors.is_empty() {
+        theme::repaint_after(ctx, std::time::Duration::from_millis(33));
+    }
 }
 
 fn body(app: &mut App, ui: &mut Ui, inner: Rect, t: f32) {
@@ -167,12 +231,70 @@ fn body(app: &mut App, ui: &mut Ui, inner: Rect, t: f32) {
         pos2(left.left() + 56.0, top + (1.0 - t) * 18.0),
         vec2(side, side),
     );
-    super::widgets::paint_shadow(ui, &app.palette, cover, 18.0);
+    // The cover leans away from the pointer, as if it floated over the page; it
+    // sits back while paused, steps up to play, and breathes with the sound.
+    let pull = ctx
+        .input(|input| input.pointer.hover_pos())
+        .filter(|pos| inner.contains(*pos))
+        .map_or(egui::Vec2::ZERO, |pos| {
+            (cover.center() - pos) / inner.size().max_elem() * 16.0
+        });
+    let lean = vec2(
+        motion::spring(&ctx, Id::new("now-playing-lean-x"), pull.x, motion::FOLLOW),
+        motion::spring(&ctx, Id::new("now-playing-lean-y"), pull.y, motion::FOLLOW),
+    );
+    let presence = motion::spring(
+        &ctx,
+        Id::new("now-playing-presence"),
+        if now.playing || now.loading { 1.0 } else { 0.9 },
+        motion::LIVELY,
+    );
+    let breath = 1.0 + 0.018 * sound_level(app, &ctx);
+    let shown = Rect::from_center_size(cover.center() + lean, cover.size() * presence * breath);
+    // A new song's cover comes in from the right, over the last one leaving.
+    let art = now.art_url.as_deref().or(now.art_small.as_deref());
+    let change = Id::new("now-playing-cover-change");
+    let before = ctx.data(|data| data.get_temp::<(String, Option<String>)>(change));
+    if let Some((uri, old)) = &before
+        && *uri != now.uri
+    {
+        ctx.data_mut(|data| data.insert_temp(change.with("old"), old.clone()));
+        motion::begin(&ctx, change.with("swap"), motion::ENTER * 1.3);
+    }
+    ctx.data_mut(|data| data.insert_temp(change, (now.uri.clone(), art.map(str::to_string))));
+    let swapping = motion::running(&ctx, change.with("swap"));
+    if let Some(swap) = swapping {
+        let old = ctx
+            .data(|data| data.get_temp::<Option<String>>(change.with("old")))
+            .flatten();
+        let mut leaving = ui.new_child(UiBuilder::new().max_rect(shown));
+        leaving.multiply_opacity(1.0 - swap);
+        super::widgets::paint_cover(
+            &leaving,
+            &app.palette,
+            old.as_deref(),
+            Rect::from_center_size(
+                shown.center() - vec2(swap * 34.0, 0.0),
+                shown.size() * (1.0 - 0.08 * swap),
+            ),
+            18.0,
+            Icon::Music,
+            Some(app.backend.art()),
+        );
+    }
+    let swap = swapping.unwrap_or(1.0);
+    let shown = Rect::from_center_size(
+        shown.center() + vec2((1.0 - swap) * 40.0, 0.0),
+        shown.size() * (0.95 + 0.05 * swap),
+    );
+    let mut arriving = ui.new_child(UiBuilder::new().max_rect(shown));
+    arriving.multiply_opacity(swap);
+    super::widgets::paint_shadow(&arriving, &app.palette, shown, 18.0);
     super::widgets::paint_cover(
-        ui,
+        &arriving,
         &app.palette,
-        now.art_url.as_deref().or(now.art_small.as_deref()),
-        cover,
+        art,
+        shown,
         18.0,
         Icon::Music,
         Some(app.backend.art()),

@@ -114,7 +114,13 @@ fn columns(ui: &mut Ui, palette: &Palette, values: &[u64], labels: &[String], id
     let every = (40.0 / step).ceil().max(1.0) as usize;
     for (index, value) in values.iter().enumerate() {
         let left = rect.left() + step * index as f32;
-        let bar = (*value as f32 / largest * height).max(if *value > 0 { 2.0 } else { 0.0 });
+        // The columns grow up from the baseline as the page comes in, left first.
+        let grown = super::entering(
+            ui.ctx(),
+            super::kit::motion::STAGGER * 0.5 * index.min(24) as f32,
+        );
+        let bar =
+            (*value as f32 / largest * height).max(if *value > 0 { 2.0 } else { 0.0 }) * grown;
         let bar_rect = Rect::from_min_max(
             pos2(left + step * 0.15, rect.top() + height - bar),
             pos2(left + step * 0.85, rect.top() + height),
@@ -154,9 +160,14 @@ fn columns(ui: &mut Ui, palette: &Palette, values: &[u64], labels: &[String], id
 fn bar_row(ui: &mut Ui, palette: &Palette, name: &str, detail: &str, share: f32) {
     let width = ui.available_width();
     let (rect, _) = ui.allocate_exact_size(vec2(width, 30.0), Sense::hover());
+    // The bar runs out to its length as the page comes in, higher rows first.
+    let grown = super::entering(
+        ui.ctx(),
+        super::widgets::entrance_delay(rect.top(), ui.clip_rect()),
+    );
     let fill = Rect::from_min_size(
         rect.min,
-        vec2(rect.width() * share.clamp(0.02, 1.0), rect.height()),
+        vec2(rect.width() * share.clamp(0.02, 1.0) * grown, rect.height()),
     );
     ui.painter().rect_filled(fill, 6.0, palette.surface_hover);
     let clip = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));

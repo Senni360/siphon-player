@@ -214,8 +214,32 @@ fn file_drop_overlay(app: &App, ctx: &Context) {
         .interactable(false)
         .show(ctx, |ui| {
             let painter = ui.painter();
-            painter.rect_filled(window, 0.0, Color32::from_black_alpha(150));
-            let card = Rect::from_center_size(window.center(), vec2(420.0, 132.0));
+            let opened = kit::motion::opening(ctx, Id::new("file-drop-open"), kit::motion::ENTER);
+            painter.rect_filled(
+                window,
+                0.0,
+                Color32::from_black_alpha((150.0 * opened) as u8),
+            );
+            // Rings keep going out from the card, to say the window is listening.
+            if crate::motion::seconds(ctx, 1.0) > 0.0 {
+                let now = ctx.input(|input| input.time);
+                for wave in 0..3 {
+                    let t = ((now * 0.5 + f64::from(wave) / 3.0).fract()) as f32;
+                    kit::motion::ring(
+                        painter,
+                        window.center(),
+                        200.0,
+                        520.0,
+                        t,
+                        palette.text.gamma_multiply(0.35),
+                    );
+                }
+                ctx.request_repaint();
+            }
+            let card = Rect::from_center_size(
+                window.center(),
+                vec2(420.0, 132.0) * (0.92 + 0.08 * opened),
+            );
             painter.rect(
                 card,
                 14.0,
@@ -808,6 +832,15 @@ fn page_opened_id() -> Id {
     Id::new("page-opened-at")
 }
 
+/// Runs the page's entrance again, for what comes in anew with the page still
+/// open: new search results, another filter.
+pub(crate) fn restart_entrance(ctx: &Context) {
+    if crate::motion::seconds(ctx, 1.0) > 0.0 {
+        let now = ctx.input(|input| input.time);
+        ctx.data_mut(|data| data.insert_temp(page_opened_id(), now));
+    }
+}
+
 /// When the open page was opened by navigating, on egui's clock.
 pub(crate) fn page_opened(ctx: &Context) -> Option<f64> {
     ctx.data(|data| data.get_temp::<f64>(page_opened_id()))
@@ -883,7 +916,9 @@ fn page_entrance(ctx: &Context, page: &Page, history_index: usize) -> (f32, f32)
         None => 0.0,
     };
     // The first page, once there are frames to see it by.
-    if ctx.cumulative_frame_nr() <= 2 && kit::motion::arrival(ctx, id.with("welcome"), 0.0, 0.0) < 1.0 {
+    if ctx.cumulative_frame_nr() <= 2
+        && kit::motion::arrival(ctx, id.with("welcome"), 0.0, 0.0) < 1.0
+    {
         kit::motion::begin(ctx, id.with("transition"), PAGE_ENTER * 1.3);
         let now = ctx.input(|input| input.time);
         ctx.data_mut(|data| data.insert_temp(page_opened_id(), now));
@@ -1282,7 +1317,14 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                                         ToastKind::Info => (Icon::CircleCheck, palette.accent),
                                         ToastKind::Error => (Icon::CircleAlert, palette.danger),
                                     };
-                                    theme::icon(ui, icon, 16.0, color);
+                                    let (slot, _) = ui.allocate_exact_size(
+                                        vec2(16.0, 16.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    let pop = kit::motion::pop(kit::motion::ease(
+                                        age / (kit::motion::POP * 1.5),
+                                    ));
+                                    theme::paint_icon(ui, icon, slot, 16.0 * pop, color);
                                     // Laid out at its own width. The area
                                     // remembers its size, so after a short toast a
                                     // label left to wrap at the area's width broke

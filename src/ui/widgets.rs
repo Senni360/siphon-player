@@ -524,7 +524,7 @@ fn in_row_list(ctx: &egui::Context) -> bool {
 
 /// Has the list's gliding light come to `rect`, if a list is being drawn.
 /// Returns whether it did; a row outside any list lights itself.
-fn claim_row_glide(ctx: &egui::Context, rect: Rect, color: Color32) -> bool {
+pub(crate) fn claim_row_glide(ctx: &egui::Context, rect: Rect, color: Color32) -> bool {
     ctx.data_mut(|data| {
         if data.get_temp::<RowGlide>(row_glide_key()).is_none() {
             return false;
@@ -689,15 +689,37 @@ fn menu_item_response(
         },
     );
     if ui.is_rect_visible(rect) {
-        if (response.hovered() || highlighted) && enabled {
-            ui.painter()
-                .rect_filled(rect, CornerRadius::same(6), palette.surface_hover);
+        use super::kit::motion;
+        // Items settle into place from the top of the menu as it opens.
+        let opened = motion::opening(ui.ctx(), ui.id().with("menu-opened"), motion::POPOVER * 2.5);
+        let down = ((rect.top() - ui.max_rect().top()) / 260.0).clamp(0.0, 0.5);
+        let settled = (motion::unease(opened) / (1.0 - down).max(0.5) - down).clamp(0.0, 1.0);
+        let settled = motion::ease(settled);
+        let opacity = ui.opacity();
+        // Never quite nothing: egui leaves out what is wholly transparent.
+        ui.multiply_opacity(settled.max(0.02));
+        let layer = ui.layer_id();
+        let start = motion::mark(ui.ctx(), layer);
+        let lit = motion::toward(
+            ui.ctx(),
+            response.id.with("menu-lit"),
+            (response.hovered() || highlighted) && enabled,
+            motion::FEEDBACK * 0.7,
+        );
+        if lit > 0.0 {
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(6),
+                palette.surface_hover.gamma_multiply(lit),
+            );
         }
         let color = if enabled { palette.text } else { palette.dim };
         let mut x = rect.left() + 10.0;
         if let Some(icon) = icon {
-            let icon_rect =
-                Rect::from_center_size(pos2(x + 8.0, rect.center().y), Vec2::splat(16.0));
+            let icon_rect = Rect::from_center_size(
+                pos2(x + 8.0 + lit * 2.0, rect.center().y),
+                Vec2::splat(16.0),
+            );
             icon.image(
                 if enabled {
                     palette.secondary
@@ -726,6 +748,8 @@ fn menu_item_response(
         );
         ui.painter()
             .galley(crate::bidi::galley_pos(text_rect, &galley), galley, color);
+        motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - settled) * 6.0));
+        ui.set_opacity(opacity);
     }
     response.widget_info(|| {
         let mut info =
@@ -2054,10 +2078,28 @@ pub(crate) fn track_row_response(
             .map(|number| number.saturating_sub(1))
             .unwrap_or(row.index),
     ));
-    ui.scope_builder(UiBuilder::new().id(id), |ui| {
+    // A row outside a list (search results, an artist's top songs) enters by
+    // itself, on the same wave as the rows of a list.
+    let t = if super::rows_enter(ui.ctx()) && !in_row_list(ui.ctx()) {
+        super::entering(
+            ui.ctx(),
+            entrance_delay(ui.next_widget_position().y, ui.clip_rect()),
+        )
+    } else {
+        1.0
+    };
+    let layer = ui.layer_id();
+    let start = super::kit::motion::mark(ui.ctx(), layer);
+    let shown = ui.scope_builder(UiBuilder::new().id(id), |ui| {
+        if t < 1.0 {
+            ui.multiply_opacity(t);
+        }
         track_row_contents(ui, app, row)
-    })
-    .inner
+    });
+    if t < 1.0 {
+        super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 8.0));
+    }
+    shown.inner
 }
 
 fn track_row_contents(
@@ -3318,7 +3360,37 @@ pub fn card_row_height(ui: &mut Ui) -> f32 {
 }
 
 /// A cover-and-title card for grids and shelves.
+/// A card comes in with its page, a beat behind the one on its left.
 pub fn card(
+    ui: &mut Ui,
+    app: &mut App,
+    image: Option<&str>,
+    title: &str,
+    subtitle: &str,
+    cover: CardCover,
+) -> CardResponse {
+    let t = if super::rows_enter(ui.ctx()) {
+        let clip = ui.clip_rect();
+        let at = ui.next_widget_position();
+        let across = ((at.x - clip.left()) / clip.width().max(1.0)).clamp(0.0, 1.0);
+        super::entering(ui.ctx(), entrance_delay(at.y, clip) + across * 0.2)
+    } else {
+        1.0
+    };
+    if t >= 1.0 {
+        return card_body(ui, app, image, title, subtitle, cover);
+    }
+    let opacity = ui.opacity();
+    ui.multiply_opacity(t);
+    let layer = ui.layer_id();
+    let start = super::kit::motion::mark(ui.ctx(), layer);
+    let response = card_body(ui, app, image, title, subtitle, cover);
+    super::kit::motion::shift_since(ui.ctx(), layer, start, vec2(0.0, (1.0 - t) * 14.0));
+    ui.set_opacity(opacity);
+    response
+}
+
+fn card_body(
     ui: &mut Ui,
     app: &mut App,
     image: Option<&str>,
@@ -3950,7 +4022,9 @@ pub fn thin_slider(
     {
         ui.data_mut(|data| data.insert_temp(id.with("jump-from"), value));
         super::kit::motion::begin(ui.ctx(), id.with("jump"), super::kit::motion::POPOVER);
+        super::kit::motion::begin(ui.ctx(), id.with("landed"), super::kit::motion::RIPPLE);
     }
+    ui.data_mut(|data| data.insert_temp(id.with("rect"), rect));
     let shown = match super::kit::motion::running(ui.ctx(), id.with("jump")) {
         Some(t) => {
             let from = ui
@@ -3987,9 +4061,30 @@ pub fn thin_slider(
         let fill = super::blend(palette.text, palette.accent, lit);
         ui.painter().rect_filled(filled, thickness / 2.0, fill);
         if lit > 0.0 {
+            // Held, the knob swells under the finger.
+            let held = super::kit::motion::spring(
+                ui.ctx(),
+                id.with("held"),
+                if response.is_pointer_button_down_on() {
+                    1.5
+                } else {
+                    0.0
+                },
+                super::kit::motion::LIVELY,
+            );
             ui.painter().circle_filled(
                 pos2(filled.right(), bar.center().y),
-                6.0 * lit,
+                (6.0 + held) * lit,
+                palette.text,
+            );
+        }
+        if let Some(t) = super::kit::motion::running(ui.ctx(), id.with("landed")) {
+            super::kit::motion::ring(
+                ui.painter(),
+                pos2(filled.right(), bar.center().y),
+                6.0,
+                20.0,
+                t,
                 palette.text,
             );
         }
@@ -4020,6 +4115,12 @@ pub fn chips<T: PartialEq + Copy>(
 pub fn text_edit(ui: &mut Ui, locale: Locale, edit: egui::TextEdit<'_>) -> egui::Response {
     let mut output = edit.show(ui);
     let response = &output.response;
+    let palette = if ui.visuals().dark_mode {
+        Palette::dark()
+    } else {
+        Palette::light()
+    };
+    focus_ring_in(ui, response.id, response.rect, 6.0, &palette);
     let selection_id = response.id.with("edit-menu-selection");
     // egui moves the caret on any mouse-button press and clears a selection
     // when a popup takes focus. Keep the field's previous selection while its
@@ -4089,6 +4190,30 @@ pub fn text_edit(ui: &mut Ui, locale: Locale, edit: egui::TextEdit<'_>) -> egui:
     output.response.response
 }
 
+/// A field's focus ring closing in on its edge as it takes focus, and a soft halo
+/// outside it. Returns how far it has come, in points of the lean it gives the
+/// field's icon.
+fn focus_ring_in(ui: &Ui, id: egui::Id, rect: Rect, radius: f32, palette: &Palette) -> f32 {
+    use super::kit::motion;
+    let focused = ui.memory(|memory| memory.has_focus(id));
+    let t = motion::toward(ui.ctx(), id.with("focus-ring"), focused, motion::POPOVER);
+    if t > 0.0 {
+        ui.painter().rect_stroke(
+            rect.expand(3.0 * (1.0 - t)),
+            radius + 3.0 * (1.0 - t),
+            Stroke::new(1.5, palette.text.gamma_multiply(0.6 * t)),
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().rect_stroke(
+            rect,
+            radius,
+            Stroke::new(3.0, palette.text.gamma_multiply(0.07 * t)),
+            egui::StrokeKind::Outside,
+        );
+    }
+    t * 2.0
+}
+
 /// A text field with a leading search icon.
 pub fn search_field(
     ui: &mut Ui,
@@ -4108,24 +4233,19 @@ pub fn search_field(
         palette.surface
     };
     ui.painter().rect_filled(rect, height / 2.0, fill);
-    if has_focus {
-        ui.painter().rect_stroke(
-            rect,
-            height / 2.0,
-            Stroke::new(1.5, palette.text.gamma_multiply(0.6)),
-            egui::StrokeKind::Inside,
-        );
-    } else {
-        // A field, not a line of words, on every surface it sits on.
-        ui.painter().rect_stroke(
-            rect,
-            height / 2.0,
-            theme::field_stroke(palette),
-            egui::StrokeKind::Inside,
-        );
-    }
-    let icon_rect =
-        Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), Vec2::splat(16.0));
+    // A field, not a line of words, on every surface it sits on.
+    ui.painter().rect_stroke(
+        rect,
+        height / 2.0,
+        theme::field_stroke(palette),
+        egui::StrokeKind::Inside,
+    );
+    let focused = focus_ring_in(ui, id, rect, height / 2.0, palette);
+    // The glass leans over as the field takes the typing.
+    let icon_rect = Rect::from_center_size(
+        pos2(rect.left() + 18.0 + focused, rect.center().y),
+        Vec2::splat(16.0),
+    );
     Icon::Search
         .image(palette.secondary, 16.0)
         .paint_at(ui, icon_rect);
@@ -4207,22 +4327,42 @@ pub fn switch(ui: &mut Ui, palette: &Palette, label: &str, on: &mut bool) -> egu
         response.mark_changed();
     }
     if ui.is_rect_visible(rect) {
-        let t = ui.ctx().animate_bool(response.id, *on);
+        use super::kit::motion;
+        let t = motion::spring(
+            ui.ctx(),
+            response.id,
+            if *on { 1.0 } else { 0.0 },
+            motion::LIVELY,
+        );
+        // Past its ends the bounce stays inside the track, and the colour holds.
+        let travel = t.clamp(0.0, 1.0);
         let fill = egui::lerp(
             egui::Rgba::from(palette.surface_active)..=egui::Rgba::from(palette.accent),
-            t,
+            travel,
         );
         ui.painter()
             .rect_filled(rect, rect.height() / 2.0, Color32::from(fill));
-        let knob_x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, t);
+        let knob_x = egui::lerp(rect.left() + 11.0..=rect.right() - 11.0, travel);
+        // The knob stretches while it travels and is pressed flat under a finger.
+        let stretch = 4.0 * (travel * std::f32::consts::PI).sin()
+            + 3.0
+                * motion::toward(
+                    ui.ctx(),
+                    response.id.with("held"),
+                    response.is_pointer_button_down_on(),
+                    motion::PRESS,
+                );
         // The knob takes the colour made for the accent, or a white knob
         // vanishes on a white track.
         let knob = egui::lerp(
             egui::Rgba::from(Color32::WHITE)..=egui::Rgba::from(palette.on_accent),
             t,
         );
-        ui.painter()
-            .circle_filled(pos2(knob_x, rect.center().y), 8.0, Color32::from(knob));
+        ui.painter().rect_filled(
+            Rect::from_center_size(pos2(knob_x, rect.center().y), vec2(16.0 + stretch, 16.0)),
+            8.0,
+            Color32::from(knob),
+        );
     }
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *on, label)

@@ -1474,11 +1474,29 @@ fn ticking_time(ctx: &egui::Context, position: u32, dragging: bool) -> u32 {
 /// While the pointer is on the seek bar, the time it points at floats above the
 /// island, following along it.
 fn seek_bubble(ui: &egui::Ui, bar: Rect, duration: u32, palette: &theme::Palette, locked: bool) {
-    let ctx = ui.ctx();
-    let id = egui::Id::new("seek-bubble");
-    let pointer = ui
+    let pointing = ui
         .input(|input| input.pointer.hover_pos())
         .filter(|pos| bar.expand2(vec2(0.0, 4.0)).contains(*pos) && duration > 0 && !locked);
+    floating_value(
+        ui,
+        egui::Id::new("seek-bubble"),
+        bar,
+        pointing,
+        palette,
+        |fraction| util::format_duration_ms((fraction * duration as f32) as u32),
+    );
+}
+
+/// The value at `pointer` on a slider `bar`, floating above the island.
+fn floating_value(
+    ui: &egui::Ui,
+    id: egui::Id,
+    bar: Rect,
+    pointer: Option<egui::Pos2>,
+    palette: &theme::Palette,
+    value: impl FnOnce(f32) -> String,
+) {
+    let ctx = ui.ctx();
     let shown = kit_motion::toward(ctx, id, pointer.is_some(), kit_motion::FEEDBACK);
     if let Some(pos) = pointer {
         if shown < 0.02 {
@@ -1494,7 +1512,7 @@ fn seek_bubble(ui: &egui::Ui, bar: Rect, duration: u32, palette: &theme::Palette
     };
     let x = kit_motion::spring(ctx, id.with("x"), aim, kit_motion::FOLLOW);
     let fraction = ((aim - bar.left()) / bar.width()).clamp(0.0, 1.0);
-    let text = util::format_duration_ms((fraction * duration as f32) as u32);
+    let text = value(fraction);
     let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, id));
     let galley = painter.layout_no_wrap(
         text,
@@ -1564,6 +1582,23 @@ fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_
     // change it.
     let adjustable = now.is_none_or(|now| now.can_set_volume);
     let controls = ui.add_enabled_ui(adjustable, |ui| {
+        let volume_id = egui::Id::new("volume-slider");
+        if let Some(bar) = ui
+            .ctx()
+            .data(|data| data.get_temp::<Rect>(volume_id.with("rect")))
+        {
+            let pointing = ui
+                .input(|input| input.pointer.hover_pos())
+                .filter(|pos| bar.expand2(vec2(0.0, 4.0)).contains(*pos));
+            floating_value(
+                ui,
+                volume_id.with("bubble"),
+                bar,
+                pointing,
+                &palette,
+                |fraction| format!("{}%", (fraction * 100.0).round() as u32),
+            );
+        }
         match thin_slider(
             ui,
             &palette,

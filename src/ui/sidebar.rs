@@ -2114,12 +2114,12 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 }
                 if ui.is_rect_visible(rect) {
                     if !active && response.hovered() {
-                        ui.painter().rect_filled(
-                            rect,
-                            CornerRadius::same(6),
-                            palette.surface_hover.gamma_multiply(0.6),
-                        );
+                        let light = palette.surface_hover.gamma_multiply(0.6);
+                        if !super::widgets::claim_row_glide(ui.ctx(), rect, light) {
+                            ui.painter().rect_filled(rect, CornerRadius::same(6), light);
+                        }
                     }
+                    super::kit::motion::ripple(ui, &response, rect, palette.text);
                     if drop_hover {
                         ui.painter().rect_filled(
                             rect,
@@ -2215,14 +2215,29 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                             ),
                             Vec2::splat(ROW_ART),
                         );
+                        if response.clicked() && entry.folder.is_none() {
+                            super::kit::shared::launch(
+                                ui.ctx(),
+                                entry.image.as_deref(),
+                                cover_rect,
+                                if entry.round { 22.0 } else { 6.0 },
+                            );
+                        }
+                        // The cover steps forward under the pointer.
+                        let lift = super::kit::motion::spring(
+                            ui.ctx(),
+                            response.id.with("cover-lift"),
+                            if response.hovered() { 1.5 } else { 0.0 },
+                            super::kit::motion::LIVELY,
+                        );
                         if entry.liked {
-                            liked_cover(ui, cover_rect, 6.0);
+                            liked_cover(ui, cover_rect.expand(lift), 6.0);
                         } else {
                             super::widgets::paint_cover(
                                 ui,
                                 &palette,
                                 entry.image.as_deref(),
-                                cover_rect,
+                                cover_rect.expand(lift),
                                 if entry.round { 22.0 } else { 6.0 },
                                 if entry.round { Icon::User } else { Icon::Music },
                                 Some(app.backend.art()),

@@ -18,6 +18,20 @@ use super::widgets::{self, TrackRow};
 pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let palette = app.palette;
     let recent_searches = app.search.committed.is_empty() && app.search.typed_at.is_none();
+    // A new search, source or filter brings its results in like a new page.
+    let asked = (
+        app.search.committed.clone(),
+        app.search.source as u8,
+        app.search.filter as u8,
+    );
+    let asked_id = egui::Id::new("search-asked");
+    let before = ui
+        .ctx()
+        .data(|data| data.get_temp::<(String, u8, u8)>(asked_id));
+    if before.is_some_and(|before| before != asked) {
+        super::restart_entrance(ui.ctx());
+    }
+    ui.ctx().data_mut(|data| data.insert_temp(asked_id, asked));
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
