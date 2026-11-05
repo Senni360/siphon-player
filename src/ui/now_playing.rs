@@ -131,6 +131,15 @@ pub fn show(app: &mut App, ui: &mut Ui, content: Rect, island: Rect) -> bool {
 /// How loud the playing song is at this moment, from 0 to about 1, while it plays
 /// on this computer. It rises fast and falls slowly, like a level meter.
 fn sound_level(app: &App, ctx: &egui::Context) -> f32 {
+    // Asked for by the cover and by the colour field: read once a frame, or the
+    // meter would run twice as fast.
+    let frame = ctx.cumulative_frame_nr();
+    let cached = Id::new("now-playing-sound-frame");
+    if let Some((seen, level)) = ctx.data(|data| data.get_temp::<(u64, f32)>(cached))
+        && seen == frame
+    {
+        return level;
+    }
     let now = app.now_playing();
     let sounding = now.is_some_and(|now| now.playing && now.local);
     let level = if sounding {
@@ -141,7 +150,7 @@ fn sound_level(app: &App, ctx: &egui::Context) -> f32 {
     } else {
         0.0
     };
-    motion::spring(
+    let level = motion::spring(
         ctx,
         Id::new("now-playing-sound"),
         level,
@@ -149,7 +158,9 @@ fn sound_level(app: &App, ctx: &egui::Context) -> f32 {
             period: 0.3,
             bounce: 0.0,
         },
-    )
+    );
+    ctx.data_mut(|data| data.insert_temp(cached, (frame, level)));
+    level
 }
 
 /// The drifting field of the cover's colours behind a view about the song. Its

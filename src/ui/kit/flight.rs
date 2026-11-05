@@ -153,7 +153,11 @@ pub fn paint(ctx: &Context, palette: &Palette) {
                     flight.art.as_deref(),
                     slot,
                     6.0,
-                    Icon::Music,
+                    match flight.target.as_str() {
+                        LIKED => Icon::HeartFilled,
+                        QUEUE => Icon::ListMusic,
+                        _ => Icon::Music,
+                    },
                     None,
                 );
             });

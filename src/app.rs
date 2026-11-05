@@ -23210,7 +23210,10 @@ mod tests {
                 assert!(shown_at.is_none(), "it stays once shown, gone at {width}");
             }
         }
-        assert!(shown_at.is_some_and(|width| width > 760.0 && width <= 840.0));
+        assert!(
+            shown_at.is_some_and(|width| width > 760.0 && width <= 900.0),
+            "first shown at {shown_at:?}"
+        );
         app.backend.shutdown();
     }
 

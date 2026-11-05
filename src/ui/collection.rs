@@ -275,8 +275,13 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
                         }
                         None => {
                             // Figures tick up as the page comes in.
-                            let counted =
-                                super::kit::motion::counting(text, super::entering(ui.ctx(), 0.08));
+                            // A bare number is a year, not an amount.
+                            let shown = if text.chars().any(char::is_alphabetic) {
+                                super::entering(ui.ctx(), 0.08)
+                            } else {
+                                1.0
+                            };
+                            let counted = super::kit::motion::counting(text, shown);
                             theme::text(ui, counted, theme::regular(13.5), palette.secondary);
                         }
                     }

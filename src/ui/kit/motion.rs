@@ -134,10 +134,11 @@ pub fn welcome(ctx: &Context) {
 /// after waiting `delay`. It waits for a frame or two to be drawn first, as the
 /// first frame is a slow one and would eat the motion.
 pub fn arrival(ctx: &Context, id: Id, duration: f32, delay: f32) -> f32 {
-    if !ctx.data(|data| {
+    let welcoming = ctx.data(|data| {
         data.get_temp::<bool>(Id::new("kit-welcome"))
             .unwrap_or(false)
-    }) {
+    });
+    if !welcoming || crate::motion::seconds(ctx, 1.0) <= 0.0 {
         return 1.0;
     }
     if ctx.cumulative_frame_nr() < 2 {
