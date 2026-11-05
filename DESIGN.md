@@ -228,6 +228,25 @@ and per-share download whose file drags into a DAW on Windows
 - **The entrance fits the window.** Every row on screen enters when a page
   opens, in a wave timed by where the row sits in the window and not by its
   number, so it reaches the last visible row at any size and zoom.
+- **Now playing runs behind the island too**, to the window's foot, and the
+  island floats over it on the same glass.
+- **Far more motion, by the owner's request.** Each group below can go on its
+  own. The curve is no longer alone: `kit::motion::spring` carries what the
+  pointer moves, because it keeps its speed when interrupted. "Nothing moves
+  while music plays" gives way in three places: the playing row's small bars, the
+  cover's breath with the sound, and the drifting colour field. Everything still
+  respects reduced motion, asks for frames only while it moves, and text is moved
+  and never scaled, so it stays sharp.
+
+| Group | Motion |
+| --- | --- |
+| Pointer | Icons lift and bounce and answer in their own way (a gear turns, a chevron leans, a download dips, Repeat spins); a changed icon pops through the old. Play discs lean toward the pointer and send a ring on press. Primary buttons catch a glint, soft buttons ripple from the press, chips pop on, a link's underline draws out. |
+| Lists | One light glides from row to row, and another stays on the playing song's row and travels with the song. Rows glide to their places when sorted or filtered. A press ripples from where it landed. Covers step forward, and pop when their song starts. Picked rows open from the middle. A dragged chip trails the pointer, and a drop target breathes. |
+| Cards | A spotlight follows the pointer and the nearest edge catches it; covers rise. A pressed card or library row hands its cover over to the page's big cover, which grows out of it. |
+| Island | A new song's colour runs around its edge; the edge nearest the pointer catches light. Its cover sits back when paused, the elapsed time counts through a seek, and the seek bar and volume show their value above it. Long titles slide along. Tiles rise under the pointer and are dealt again by Shuffle. It draws in as the page rushes past under it. |
+| Pages | The sidebar, page and island come in when the app starts. Titles rise word by word. Cards enter a beat behind the one on their left, and section heads slide in. Late lists and new search results get the same entrance. The big cover sits back as the page scrolls, then a frosted pill keeps the page's cover and title and returns to the top. Stats grow in. |
+| Now playing and lyrics | The cover leans from the pointer, sits back when paused, breathes with the sound and swaps with the song, over a drifting field of its colours, which only runs while the song plays. Sung lines step forward and others recede by distance. |
+| Waiting and feedback | Covers come up out of their placeholder, skeletons carry a soft light, the seek bar carries one while a song is fetched, and sign-in's logo sends out rings. Things queued fly to the island's tiles. Switches stretch on a spring, sliders send a ring where clicked, menu items settle in, focus rings close in, chips share one sliding pill, the sort arrow turns over, a toast's time runs out along its foot, a jumped-to setting lights up, and dropping files pulses. |
 
 ## What changed (4 November)
 

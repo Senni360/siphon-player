@@ -2130,12 +2130,30 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                         }
                     }
                     super::kit::motion::ripple(ui, &response, rect, palette.text);
-                    if drop_hover {
+                    let held = super::kit::motion::toward(
+                        ui.ctx(),
+                        response.id.with("drop-held"),
+                        drop_hover,
+                        super::kit::motion::FEEDBACK,
+                    );
+                    if held > 0.0 && !drop_hover {
                         ui.painter().rect_filled(
                             rect,
                             CornerRadius::same(6),
-                            palette.accent.gamma_multiply(0.18),
+                            palette.accent.gamma_multiply(0.18 * held),
                         );
+                    }
+                    if drop_hover {
+                        // It breathes, to say it will take what is held over it.
+                        let breath = (ui.input(|input| input.time) * 5.0).sin() as f32 * 0.5 + 0.5;
+                        ui.painter().rect_filled(
+                            rect,
+                            CornerRadius::same(6),
+                            palette.accent.gamma_multiply((0.14 + 0.1 * breath) * held),
+                        );
+                        if crate::motion::seconds(ui.ctx(), 1.0) > 0.0 {
+                            ui.ctx().request_repaint();
+                        }
                         ui.painter().rect_stroke(
                             rect,
                             CornerRadius::same(6),

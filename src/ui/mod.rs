@@ -944,6 +944,27 @@ pub(crate) fn rise<R>(ui: &mut egui::Ui, index: usize, add: impl FnOnce(&mut egu
     .inner
 }
 
+/// Draws a part of a page that comes in by where it sits in the window.
+pub(crate) fn rise_here<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    if !rows_enter(ui.ctx()) {
+        return add(ui);
+    }
+    let delay = widgets::entrance_delay(ui.next_widget_position().y, ui.clip_rect());
+    let t = entering(ui.ctx(), delay);
+    if t >= 1.0 {
+        return add(ui);
+    }
+    ui.scope(|ui| {
+        ui.multiply_opacity(t.max(0.02));
+        ui.with_visual_transform(
+            egui::emath::TSTransform::from_translation(vec2((1.0 - t) * -10.0, 0.0)),
+            add,
+        )
+        .inner
+    })
+    .inner
+}
+
 /// Whether lists drawn now belong to the page, whose first rows enter when
 /// it opens; the sidebar's and panels' lists never do.
 pub(crate) fn rows_enter(ctx: &Context) -> bool {
@@ -1369,7 +1390,7 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                         0.0,
                     )),
                     |ui| {
-                        Frame::new()
+                        let shown = Frame::new()
                             .fill(palette.overlay)
                             .stroke(Stroke::new(1.0, palette.outline))
                             .corner_radius(CornerRadius::same(theme::RADIUS))
@@ -1427,6 +1448,14 @@ fn toasts(app: &mut App, ctx: &egui::Context, bottom_offset: f32) {
                                     }
                                 });
                             });
+                        // The time it has left runs out along its foot.
+                        let rect = shown.response.rect.shrink2(vec2(10.0, 0.0));
+                        let left = (1.0 - age / life).clamp(0.0, 1.0);
+                        ui.painter().hline(
+                            rect.left()..=rect.left() + rect.width() * left,
+                            shown.response.rect.bottom() - 1.0,
+                            Stroke::new(1.5, palette.text.gamma_multiply(0.35)),
+                        );
                     },
                 );
             }

@@ -143,6 +143,17 @@ pub(super) fn hero(app: &mut App, ui: &mut egui::Ui, hero: Hero<'_>) {
             rect.size() * (1.0 - 0.14 * away),
         );
         ui.multiply_opacity(1.0 - 0.8 * away * away);
+        let lift = super::kit::motion::spring(
+            ui.ctx(),
+            ui.id().with("hero-cover-lift"),
+            if super::pointer_over(ui, rect) {
+                3.0
+            } else {
+                0.0
+            },
+            super::kit::motion::LIVELY,
+        );
+        let rect = rect.expand(lift);
         let handed_over = super::kit::shared::land(ui, &palette, rect, radius);
         widgets::paint_shadow(ui, &palette, rect, radius);
         if handed_over {

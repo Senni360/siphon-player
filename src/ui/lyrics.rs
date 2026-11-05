@@ -368,6 +368,12 @@ pub fn fullscreen(app: &mut App, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             // The backdrop runs behind the player; the words stop above it.
             let mut rect = ui.max_rect();
+            let opened = super::kit::motion::opening(
+                ui.ctx(),
+                egui::Id::new("lyrics-fullscreen-opening"),
+                super::kit::motion::ENTER * 1.5,
+            );
+            ui.multiply_opacity(opened.max(0.02));
             background(app, ui, rect);
             rect.max.y -= theme::PLAYER_BAR_HEIGHT;
             let top = theme::titlebar_inset(ui.ctx()) + 24.0;

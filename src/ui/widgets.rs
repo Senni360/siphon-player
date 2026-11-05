@@ -2326,17 +2326,26 @@ fn track_row_contents(
         claim_playing_row(ui.ctx(), rect);
     }
     let hovered = ui.is_enabled() && (super::pointer_over(ui, rect) || response.has_focus());
-    if row.picked {
+    let picked_in = super::kit::motion::toward(
+        ui.ctx(),
+        response.id.with("picked"),
+        row.picked,
+        super::kit::motion::FEEDBACK,
+    );
+    if row.picked || picked_in > 0.0 {
         // Keep the existing translucent selection, using a neutral palette
-        // color so selecting a song does not mark it as playing.
+        // color so selecting a song does not mark it as playing. It opens from
+        // the middle of the row and closes back to it.
+        let side = (1.0 - picked_in) * rect.width() * 0.12;
         ui.painter().rect_filled(
-            rect,
+            rect.shrink2(vec2(side, 0.0)),
             CornerRadius::same(6),
             palette
                 .secondary
-                .gamma_multiply(if hovered { 0.30 } else { 0.20 }),
+                .gamma_multiply(if hovered { 0.30 } else { 0.20 } * picked_in),
         );
-    } else {
+    }
+    if !row.picked {
         // The hover fill eases in and out, so moving down a list reads as
         // one light passing over the rows.
         let light = palette
@@ -3752,7 +3761,7 @@ pub fn shelf(
     add_contents: impl FnOnce(&mut Ui),
 ) {
     ui.add_space(8.0);
-    theme::section_title(ui, palette, title);
+    super::rise_here(ui, |ui| theme::section_title(ui, palette, title));
     shelf_cards(ui, id, add_contents);
 }
 

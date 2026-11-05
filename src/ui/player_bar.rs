@@ -188,6 +188,7 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
                 } else {
                     empty
                 };
+                kit_motion::ripple(ui, &empty, behind, palette.text);
                 if empty.clicked() {
                     app.actions.push(Action::CyclePlayerBarVis);
                 }
