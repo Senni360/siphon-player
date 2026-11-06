@@ -275,6 +275,7 @@ fn videos(listing: &Listing) -> Vec<Track> {
                     .clone()
                     .or_else(|| listing.channel_id.clone()),
                 uploader: entry.uploader.clone(),
+                description: None,
                 duration: entry.duration,
                 upload_date: None,
                 view_count: entry.view_count,
@@ -619,12 +620,18 @@ fn parse_feed(xml: &str, channel_id: &str) -> Vec<(String, Track)> {
             }
             let published = tag(entry, "<published>", "</published>")?.to_owned();
             let thumbnail = attribute(entry, "<media:thumbnail", "url")?;
+            // The description is where a producer writes the beat's tempo
+            // and key; the entry's own words say nothing more here.
+            let description = tag(entry, "<media:description>", "</media:description>")
+                .map(unescape)
+                .filter(|text| !text.trim().is_empty());
             let track = Video {
                 id: id.to_owned(),
                 title,
                 channel: Some(name.clone()),
                 channel_id: Some(channel_id.to_owned()),
                 uploader: None,
+                description,
                 duration: None,
                 upload_date: published.get(..10).map(|date| date.replace('-', "")),
                 view_count: attribute(entry, "<media:statistics", "views")
@@ -900,9 +907,10 @@ mod tests {
     #[test]
     fn a_feed_gives_uploads_newest_first_without_shorts() {
         let xml = r#"<feed><title>Sanche &amp; Co</title>
-          <entry><yt:videoId>sAXfRSvRVyQ</yt:videoId><title>Old &quot;one&quot;</title>
+          <entry><yt:videoId>sAXfRSvRVyQ</yt:videoId><title>Old &quot;one&quot; | free trap type beat</title>
             <published>2026-01-01T10:00:00+00:00</published>
             <media:thumbnail url="https://i1.ytimg.com/vi/sAXfRSvRVyQ/hqdefault.jpg" width="480" height="360"/>
+            <media:description>Old one up now. 140 BPM &amp; Key: C# minor.</media:description>
             <media:statistics views="1200"/></entry>
           <entry><yt:videoId>7XtFkYxMsRw</yt:videoId><title>A short #Shorts</title>
             <published>2026-03-01T10:00:00+00:00</published>
@@ -914,8 +922,20 @@ mod tests {
         let tracks = merge_feeds(parse_feed(xml, CHANNEL));
         assert_eq!(tracks.len(), 2);
         assert_eq!(tracks[0].uri, "youtube:video:8cCiNHMx41w");
-        assert_eq!(tracks[1].name, "Old \"one\"");
+        // A beat out of a channel's feed carries its own name, and the tempo
+        // and key its description states, without another request made.
+        assert_eq!(tracks[1].name, "one");
         assert_eq!(tracks[1].artists[0].name, "Sanche & Co");
+        let beat = tracks[1].beat.as_ref().unwrap();
+        assert_eq!(beat.for_artists, Vec::<String>::new());
+        assert_eq!(beat.style.as_deref(), Some("Trap"));
+        assert_eq!(beat.bpm, Some(140));
+        assert_eq!(beat.key.as_deref(), Some("C\u{266F}m"));
+        assert_eq!(beat.secondary().as_deref(), Some("Trap"));
+        assert_eq!(
+            crate::beats::tempo_key(&tracks[1]).as_deref(),
+            Some("140 BPM \u{b7} C\u{266F}m")
+        );
         assert_eq!(tracks[1].play_count, Some(1200));
         assert_eq!(tracks[1].release_date.as_deref(), Some("2026-01-01"));
     }

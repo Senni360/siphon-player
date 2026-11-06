@@ -362,13 +362,18 @@ pub struct Track {
     #[serde(default)]
     pub popularity: Option<u8>,
     #[serde(default)]
-    pub external_ids: ExternalIds,
+    pub external_ids: Box<ExternalIds>,
     /// The originally requested track when Spotify substituted a playable
     /// release for the account's market.
     #[serde(default)]
     pub linked_from: Option<Box<LinkedTrack>>,
     #[serde(default)]
     pub external_urls: ExternalUrls,
+    /// How a beat's title was read: its own name, who it's "for", its style
+    /// and its stated tempo. Absent on songs and on tracks that are not
+    /// beats. The track's own name holds the beat's name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beat: Option<Box<crate::beats::BeatTitle>>,
 }
 
 impl Track {

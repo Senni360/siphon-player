@@ -2606,6 +2606,16 @@ fn track_row_contents(
                     theme::regular(12.0),
                     palette.secondary.gamma_multiply(0.6),
                 );
+                // A beat's second line says who it's for, or how it sounds.
+                if let Some(beat) = crate::beats::for_line(track) {
+                    theme::text(&mut child, &beat, theme::regular(13.0), subtitle_color);
+                    theme::text(
+                        &mut child,
+                        "•",
+                        theme::regular(12.0),
+                        palette.secondary.gamma_multiply(0.6),
+                    );
+                }
                 artist_links(
                     &mut child,
                     app,
@@ -2694,6 +2704,10 @@ fn track_row_contents(
                     track_source_badges(ui, &palette, app.locale, track);
                     if track.explicit {
                         explicit_badge(ui, &palette);
+                    }
+                    // A beat's second line says who it's for, or how it sounds.
+                    if let Some(beat) = crate::beats::for_line(track) {
+                        theme::text(ui, &beat, theme::regular(12.5), subtitle_color);
                     }
                     artist_links(
                         ui,

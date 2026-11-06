@@ -98,9 +98,9 @@ pub async fn lookup(
     }
     // Use the same ISRC query representation as Track::recording_key().
     let query_track = Track {
-        external_ids: crate::api::models::ExternalIds {
+        external_ids: Box::new(crate::api::models::ExternalIds {
             isrc: Some(code.clone()),
-        },
+        }),
         ..Default::default()
     };
     let query = query_track.recording_key().expect("validated ISRC");
@@ -133,9 +133,9 @@ mod tests {
         let mut track = Track {
             uri: "spotify:track:4uLU6hMCjMI75M1A2tKUQC".into(),
             duration_ms: 203_000,
-            external_ids: crate::api::models::ExternalIds {
+            external_ids: Box::new(crate::api::models::ExternalIds {
                 isrc: Some("GB-ABC-22-12345".into()),
-            },
+            }),
             ..Default::default()
         };
         assert!(same_recording(&track, "GBABC2212345", 200_000));

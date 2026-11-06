@@ -117,6 +117,8 @@ struct Feature {
     /// What it is: a new album, a pick.
     label: String,
     reason: String,
+    /// A beat it features: who it's for, or how it sounds.
+    beat_line: Option<String>,
     play: Action,
     /// Whether it plays as a context, an album or a set, rather than as a song.
     context: bool,
@@ -181,6 +183,7 @@ fn project_features(app: &App, projects: &[crate::for_you::Project]) -> Vec<Feat
                 }
                 .into_owned(),
                 reason: project.reason.clone(),
+                beat_line: None,
                 play,
                 context,
             }
@@ -202,6 +205,7 @@ fn song_features(app: &App, picks: &[crate::for_you::Pick]) -> Vec<Feature> {
             art_small: pick.track.image(120).map(str::to_owned),
             label: gettext(app.locale, "Picked for you").into_owned(),
             reason: pick.reason.clone(),
+            beat_line: crate::beats::for_line(&pick.track),
             play: Action::PlayUris {
                 uris: uris.clone(),
                 index: index as u32,
@@ -291,6 +295,9 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
         2,
     );
     block.add(egui::Label::new(title).selectable(false));
+    if let Some(beat) = &first.beat_line {
+        theme::text(&mut block, beat, theme::regular(13.0), palette.secondary);
+    }
     widgets::artist_links(
         &mut block,
         app,

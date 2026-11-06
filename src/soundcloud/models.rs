@@ -97,6 +97,10 @@ pub struct Track {
     pub playback_count: Option<u64>,
     #[serde(default)]
     pub genre: Option<String>,
+    /// The upload's own description, which a beat's producer writes its tempo
+    /// and key into. Only kept for reading, never shown whole.
+    #[serde(default)]
+    pub description: Option<String>,
     pub label_name: Option<String>,
     pub permalink_url: Option<String>,
     pub user: Option<User>,
@@ -200,12 +204,12 @@ impl Track {
             play_count: self.playback_count,
             publisher_metadata: self.publisher_metadata.clone(),
             label_name: self.label_name.clone(),
-            external_ids: app::ExternalIds {
+            external_ids: Box::new(app::ExternalIds {
                 isrc: self
                     .publisher_metadata
                     .as_ref()
                     .and_then(|metadata| metadata.isrc.clone()),
-            },
+            }),
             artists: artists.clone(),
             album: Some(app::Album {
                 id: playlist.map(|list| list.id.to_string()).unwrap_or_default(),
@@ -228,6 +232,7 @@ impl Track {
             ..Default::default()
         };
         crate::retitle::apply(&mut track);
+        crate::beats::apply(&mut track, self.description.as_deref());
         track
     }
 }

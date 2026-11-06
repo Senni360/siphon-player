@@ -29688,9 +29688,9 @@ mod tests {
         let mut app = headless_app();
         let recording = |uri: &str| Track {
             uri: uri.into(),
-            external_ids: crate::api::models::ExternalIds {
+            external_ids: Box::new(crate::api::models::ExternalIds {
                 isrc: Some("GBUM71029604".into()),
-            },
+            }),
             ..Default::default()
         };
         let saved_uri = "spotify:track:original";
@@ -29709,9 +29709,9 @@ mod tests {
         let mut app = headless_app();
         let recording = |uri: &str, isrc: &str| Track {
             uri: uri.into(),
-            external_ids: crate::api::models::ExternalIds {
+            external_ids: Box::new(crate::api::models::ExternalIds {
                 isrc: Some(isrc.into()),
-            },
+            }),
             ..Default::default()
         };
         let (first, second) = ("spotify:track:first", "spotify:track:second");

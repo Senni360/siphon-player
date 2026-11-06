@@ -1,0 +1,994 @@
+//! A beat's own name, read out of the upload title it hides in.
+//!
+//! Producers pack several ideas into one title: `[FREE]` tags, who a beat is
+//! "for", its genre, its tempo. The player wants the beat itself in front:
+//! its name as the title, who it's for or its style on the second line, and
+//! its tempo kept on the track for the rest of the app. The producer is
+//! never touched: the channel stays where the uploader is shown, and the
+//! track keeps its uri, its search and its matching.
+//!
+//! Pure string handling only, so a beat's name never waits on the network.
+//! Where a beat is drawn, `for_line` and `tempo_key` turn the reading into
+//! what the interface shows.
+
+use serde::{Deserialize, Serialize};
+
+use crate::api::models::Track;
+
+/// How a beat's title was read.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BeatTitle {
+    /// The beat's own name: `tic tac`, `Smoked`. Never empty.
+    pub name: String,
+    /// The artists it's made in the style of, without "type beat".
+    pub for_artists: Vec<String>,
+    /// Its genre or mood, the first one the title states: `Trap`, `UK rap`.
+    pub style: Option<String>,
+    /// The tempo the producer stated.
+    pub bpm: Option<u16>,
+    /// The key the producer stated, normalised: `C♯m`.
+    pub key: Option<String>,
+}
+
+impl BeatTitle {
+    /// The second line under the name: who it's for, else its style.
+    pub fn secondary(&self) -> Option<String> {
+        if self.for_artists.is_empty() {
+            return self.style.clone();
+        }
+        Some(format!("for {}", self.for_artists.join(" × ")))
+    }
+}
+
+/// The words that say how a beat sounds rather than who it's for.
+const GENRE: [&str; 57] = [
+    "rap",
+    "trap",
+    "drill",
+    "jazz",
+    "soul",
+    "boom",
+    "bap",
+    "funk",
+    "rnb",
+    "lofi",
+    "lo-fi",
+    "ambient",
+    "phonk",
+    "dancehall",
+    "reggaeton",
+    "reggae",
+    "latin",
+    "afro",
+    "afrobeat",
+    "afrobeats",
+    "pop",
+    "hyperpop",
+    "rock",
+    "metal",
+    "punk",
+    "emo",
+    "cloud",
+    "plugg",
+    "rage",
+    "jersey",
+    "club",
+    "house",
+    "techno",
+    "edm",
+    "dubstep",
+    "dnb",
+    "garage",
+    "grime",
+    "uk",
+    "us",
+    "gospel",
+    "orchestral",
+    "cinematic",
+    "classical",
+    "piano",
+    "guitar",
+    "strings",
+    "london",
+    "chill",
+    "dark",
+    "melodic",
+    "emotional",
+    "moody",
+    "dreamy",
+    "bounce",
+    "sample",
+    "samples",
+];
+
+/// The words that carry nothing once the title's ideas are apart: tags,
+/// shout-outs and the keyword stacks producers repeat after "|".
+const FILLER: [&str; 39] = [
+    "type",
+    "beat",
+    "beats",
+    "instrumental",
+    "instrumentals",
+    "freestyle",
+    "free",
+    "profit",
+    "for",
+    "dl",
+    "download",
+    "new",
+    "prod",
+    "prods",
+    "produced",
+    "hard",
+    "raw",
+    "real",
+    "best",
+    "hot",
+    "fire",
+    "dope",
+    "super",
+    "ultimate",
+    "insane",
+    "crazy",
+    "ft",
+    "feat",
+    "remix",
+    "mix",
+    "edit",
+    "official",
+    "audio",
+    "video",
+    "hq",
+    "hd",
+    "4k",
+    "vol",
+    "part",
+];
+
+/// The bracketed tags a beat's title opens or trails with.
+const TAG_NOISE: [&str; 14] = [
+    "free",
+    "profit",
+    "dl",
+    "download",
+    "bpm",
+    "key",
+    "keys",
+    "prod",
+    "remix",
+    "edit",
+    "instrumental",
+    "new",
+    "type",
+    "beat",
+];
+
+/// The phrases that stand for a beat rather than name its content.
+const BEAT_WORDS: [&str; 7] = [
+    "type beat",
+    "typebeat",
+    "type instrumental",
+    "freestyle beat",
+    "instrumental",
+    "instrumentals",
+    "beat",
+];
+
+/// Reads a beat's title, and its description where the producer stated the
+/// tempo or the key. The channel, when known, is dropped from who the beat
+/// is "for": the producer is already shown as the uploader. Nothing leaves
+/// this function and the result never depends on anything outside it.
+pub fn read(title: &str, description: Option<&str>, channel: Option<&str>) -> BeatTitle {
+    let mut beat = BeatTitle {
+        name: own_name(title, channel),
+        ..Default::default()
+    };
+    // Who the beat is for and how it sounds come from the title's ideas that
+    // describe a beat. One style, the first it states; the same artist is not
+    // named twice.
+    for idea in ideas(title) {
+        let Some(head) = before_beat_words(&idea) else {
+            continue;
+        };
+        for phrase in phrases(head) {
+            if said_by_the_producer(&phrase, channel) {
+                continue;
+            }
+            let words = kept(&phrase);
+            if words.is_empty() {
+                continue;
+            }
+            let how = words.iter().any(|word| is_genre(word));
+            if how {
+                if beat.style.is_none() {
+                    beat.style = Some(styled(&words));
+                }
+            } else {
+                let artist = titled(&words);
+                if !beat
+                    .for_artists
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(&artist))
+                {
+                    beat.for_artists.push(artist);
+                }
+            }
+        }
+    }
+    (beat.bpm, beat.key) = tempo(title, description);
+    // A name is never empty when the title offered anything at all.
+    if beat.name.trim().is_empty() && !title.trim().is_empty() {
+        beat.name = title.trim().to_owned();
+    }
+    beat
+}
+
+/// Reads a beat's own name onto a track just built from YouTube or
+/// SoundCloud, if it is one. The uri and the artists stay: the producer
+/// remains who made it, and nothing that matches by uri or title is moved.
+pub fn apply(track: &mut Track, description: Option<&str>) {
+    if !crate::for_you::is_beat(track) {
+        return;
+    }
+    let channel = track
+        .artists
+        .first()
+        .map(|artist| artist.name.as_str())
+        .filter(|name| !name.is_empty());
+    let beat = read(&track.name, description, channel);
+    track.name = beat.name.clone();
+    track.beat = Some(Box::new(beat));
+}
+
+/// What the interface shows under a beat's name, "for Young Nudy × Lucki" or
+/// its style. `None` when the title holds nothing beyond the beat's name.
+pub fn for_line(track: &Track) -> Option<String> {
+    track.beat.as_deref()?.secondary()
+}
+
+/// The tempo and key a beat states, as one small label: `140 BPM · C♯m`.
+pub fn tempo_key(track: &Track) -> Option<String> {
+    let beat = track.beat.as_deref()?;
+    match (beat.bpm, beat.key.as_deref()) {
+        (Some(bpm), Some(key)) => Some(format!("{bpm} BPM · {key}")),
+        (Some(bpm), None) => Some(format!("{bpm} BPM")),
+        (None, Some(key)) => Some(key.to_owned()),
+        (None, None) => None,
+    }
+}
+
+/// The words of a phrase, as they were written, its noise dropped.
+type Words = Vec<String>;
+
+/// The title apart into its ideas: dividers cut, tags and the quoted name
+/// removed, so what is left describes the beat rather than repeating
+/// everything its name already says.
+fn ideas(title: &str) -> Vec<String> {
+    without_quoted(title)
+        .replace(['|', '–', '—', '/', '~'], " - ")
+        .split(" - ")
+        .map(strip_tags)
+        .filter(|idea| !idea.trim().is_empty())
+        .collect()
+}
+
+/// The idea in front of a beat keyword, when the segment holds one: who or
+/// what the beat is described by. `None` when the segment is not describing
+/// a beat.
+fn before_beat_words(idea: &str) -> Option<&str> {
+    let lower = idea.to_lowercase();
+    BEAT_WORDS
+        .iter()
+        .filter_map(|words| lower.find(words))
+        .min()
+        .map(|at| &idea[..at])
+}
+
+/// An idea without its bracketed tags; a tag holding only what says nothing
+/// (`[FREE]`, `(prod. by ...)`) goes, other brackets stay.
+fn strip_tags(idea: &str) -> String {
+    let mut out = String::with_capacity(idea.len());
+    let mut rest = idea;
+    while let Some(open) = rest.find(['(', '[', '{']) {
+        let Some(close) = rest[open + 1..].find([')', ']', '}']) else {
+            break;
+        };
+        let close = open + close + 1;
+        let inside = rest[open + 1..close].to_lowercase();
+        let words: Vec<&str> = inside.split(|c: char| !c.is_alphanumeric()).collect();
+        let noise = TAG_NOISE.iter().any(|word| words.contains(word))
+            || BEAT_WORDS.iter().any(|beat| words.contains(beat));
+        if !noise {
+            break;
+        }
+        out.push_str(&rest[..open]);
+        rest = &rest[close + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The title without its quoted spans, which name the beat itself. An
+/// apostrophe inside a word (`80's`) is not a quote.
+fn without_quoted(title: &str) -> String {
+    const PAIRS: [(char, char); 4] = [
+        ('"', '"'),
+        ('\u{201C}', '\u{201D}'),
+        ('\'', '\''),
+        ('\u{2018}', '\u{2019}'),
+    ];
+    let mut out = String::with_capacity(title.len());
+    let mut chars = title.chars().peekable();
+    let mut previous = ' ';
+    while let Some(c) = chars.next() {
+        let opens = |previous: char| {
+            PAIRS
+                .iter()
+                .find(|(open, _)| *open == c)
+                .filter(|_| c != '\'' || !previous.is_alphanumeric())
+        };
+        if let Some((_, close)) = opens(previous) {
+            for next in chars.by_ref() {
+                if next == *close {
+                    out.push(' ');
+                    break;
+                }
+            }
+        } else {
+            out.push(c);
+        }
+        previous = c;
+    }
+    out
+}
+
+/// A beat's own name: the quoted span when the title holds one, else the
+/// first idea left over that is not a beat keyword or the producer. An
+/// apostrophe inside a word (`80's`) is not a quote.
+fn own_name(title: &str, channel: Option<&str>) -> String {
+    const PAIRS: [(char, char); 4] = [
+        ('"', '"'),
+        ('\u{201C}', '\u{201D}'),
+        ('\'', '\''),
+        ('\u{2018}', '\u{2019}'),
+    ];
+    let chars = title.chars().collect::<Vec<_>>();
+    let mut previous = ' ';
+    for (index, &c) in chars.iter().enumerate() {
+        let Some((_, close)) = PAIRS
+            .iter()
+            .find(|(open, _)| *open == c)
+            .filter(|_| c != '\'' || !previous.is_alphanumeric())
+        else {
+            previous = c;
+            continue;
+        };
+        let mut name = String::new();
+        let mut closed = false;
+        for &next in &chars[index + 1..] {
+            if next == *close {
+                closed = true;
+                break;
+            }
+            name.push(next);
+        }
+        if closed && !name.trim().is_empty() {
+            return sentence_case(&name);
+        }
+        previous = c;
+    }
+    for idea in ideas(title) {
+        if before_beat_words(&idea).is_some() {
+            // The idea describes the beat; what it says goes under the name.
+            continue;
+        }
+        let words: Words = kept(&idea)
+            .into_iter()
+            .filter(|word| !said_by_the_producer(word, channel))
+            .collect();
+        if !words.is_empty() {
+            return sentence_case(&words.join(" "));
+        }
+    }
+    // Nothing of its own to find: the title stands, minus its tags.
+    sentence_case(&strip_tags(title))
+}
+
+/// Whether a phrase is the producer naming themselves.
+fn said_by_the_producer(phrase: &str, channel: Option<&str>) -> bool {
+    channel.is_some_and(|who| phrase.trim().eq_ignore_ascii_case(who.trim()))
+}
+
+/// A name in caps is a producer shouting, not part of the name: `FAMIGLIA`
+/// reads as `Famiglia`. A name that already mixes its case is left alone.
+fn sentence_case(name: &str) -> String {
+    let shouting = name.chars().any(char::is_alphabetic)
+        && !name.chars().any(|c| c.is_lowercase() && c.is_alphabetic());
+    if !shouting {
+        return name.to_owned();
+    }
+    name.split_whitespace()
+        .map(|word| capitalise(word, true))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The first letter up, the rest as they are (`true`) or lower (`false`).
+fn capitalise(word: &str, lower: bool) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => {
+            let rest = chars.as_str();
+            format!(
+                "{}{}",
+                first.to_uppercase(),
+                if lower {
+                    rest.to_lowercase()
+                } else {
+                    rest.to_owned()
+                }
+            )
+        }
+        None => String::new(),
+    }
+}
+
+/// The phrases an idea holds: who the beat is for, or how it sounds, apart
+/// at "x", "&" and commas.
+fn phrases(head: &str) -> Vec<String> {
+    let chars: Vec<char> = head.chars().collect();
+    let mut parts: Vec<(usize, usize)> = Vec::new();
+    let mut start = 0;
+    for i in 0..chars.len() {
+        let apart = matches!(chars[i], 'x' | 'X' | '\u{D7}' | '&')
+            && (i == 0 || chars[i - 1] == ' ')
+            && (i == chars.len() - 1 || chars[i + 1] == ' ');
+        if chars[i] == ',' || chars[i] == '\u{D7}' || apart {
+            if i > start {
+                parts.push((start, i));
+            }
+            start = i + 1;
+        }
+    }
+    if chars.len() > start {
+        parts.push((start, chars.len()));
+    }
+    parts
+        .into_iter()
+        .map(|(from, to)| chars[from..to].iter().collect::<String>())
+        .filter(|part| !part.trim().is_empty())
+        .collect()
+}
+
+/// The words that stay: tags, fillers, years, tempos, keys, producer credits
+/// and emoji dropped. The words keep the case they were written in, so
+/// names show as they were.
+fn kept(phrase: &str) -> Words {
+    let mut words = Vec::new();
+    'words: for word in phrase.split_whitespace() {
+        let bare: String = word
+            .trim_matches(|c: char| !c.is_alphanumeric() && !keeps(c))
+            .chars()
+            .filter(|c| c.is_alphanumeric() || keeps(*c))
+            .collect();
+        if bare.is_empty() {
+            continue;
+        }
+        let lower = bare.to_lowercase();
+        if FILLER.contains(&lower.as_str()) {
+            continue;
+        }
+        for lead in ["prod", "produced"] {
+            if let Some(rest) = lower.strip_prefix(lead) {
+                let rest = rest.trim_start_matches(['.', ' ', 'b', 'y']);
+                if rest.is_empty() {
+                    // The producer's credit runs to the end of the phrase.
+                    break 'words;
+                }
+            }
+        }
+        if says_tempo(&lower) || is_generic_key(&lower) {
+            continue;
+        }
+        words.push(bare);
+    }
+    words
+}
+
+/// The characters that survive inside a kept word, with the alphanumerics.
+fn keeps(c: char) -> bool {
+    matches!(c, '&' | '#' | '\u{266F}' | '\u{266D}')
+}
+
+/// Whether a word states a tempo: a year, "BPM", "140 BPM" as one word.
+fn says_tempo(lower: &str) -> bool {
+    if lower == "bpm" || lower == "key" || lower == "keys" {
+        return true;
+    }
+    if let Some(digits) = lower.strip_suffix("bpm") {
+        return !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit());
+    }
+    // A year the title carries as a number of its own.
+    lower.len() == 4 && lower.starts_with(['1', '2']) && lower.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether a word is a key signature on its own: `c#m`, `f#`, `cmin`. A bare
+/// note letter is not, for it is half the alphabet's words.
+fn is_generic_key(lower: &str) -> bool {
+    let mut chars = lower.chars();
+    if !matches!(chars.next(), Some('a'..='g')) {
+        return false;
+    }
+    let rest: Vec<char> = chars.collect();
+    let rest: String = match rest.first() {
+        Some('#' | 'b' | '\u{266F}' | '\u{266D}') => rest[1..].iter().collect(),
+        Some(_) => rest.iter().collect(),
+        None => return false,
+    };
+    matches!(rest.as_str(), "" | "m" | "min" | "minor" | "maj" | "major")
+}
+
+/// Whether a word says how a beat sounds rather than who it is for.
+fn is_genre(word: &str) -> bool {
+    let word = word.to_lowercase();
+    GENRE.contains(&word.as_str()) || word == "r&b"
+}
+
+/// Artist names as they show: a word already written with its case keeps it,
+/// a shouted word settles down (`BABY KEEM` reads as `Baby Keem`, an
+/// initialism like `JID` stays), a lowercase one is capitalised.
+fn titled(words: &Words) -> String {
+    words
+        .iter()
+        .map(|word| {
+            let shouted =
+                word.chars().any(char::is_alphabetic) && !word.chars().any(char::is_lowercase);
+            if shouted && word.chars().count() > 3 {
+                capitalise(word, true)
+            } else if word.chars().any(char::is_lowercase) {
+                capitalise(word, false)
+            } else {
+                word.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// A style as it shows: `Chill rap`, `UK rap`, `Soul boom bap`.
+fn styled(words: &Words) -> String {
+    words
+        .iter()
+        .enumerate()
+        .map(|(index, word)| match word.to_lowercase().as_str() {
+            "uk" => "UK".to_owned(),
+            "us" => "US".to_owned(),
+            "rnb" => "R&B".to_owned(),
+            lower if index == 0 => capitalise(lower, true),
+            lower => lower.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The tempo and key a title or its description states. The title wins.
+fn tempo(title: &str, description: Option<&str>) -> (Option<u16>, Option<String>) {
+    let mut bpm = bpm_of(title);
+    let mut key = key_of(title);
+    if let Some(text) = description {
+        bpm = bpm.or_else(|| bpm_of(text));
+        key = key.or_else(|| key_of(text));
+    }
+    (bpm, key)
+}
+
+/// The tempo a text states: `140 BPM`, `BPM: 140` or `140BPM`.
+fn bpm_of(text: &str) -> Option<u16> {
+    let lower = text.to_lowercase();
+    let mut at = 0;
+    while let Some(found) = lower[at..].find("bpm") {
+        let start = at + found;
+        let read = number_before(&lower, start).or_else(|| number_after(&lower, start + 3));
+        if read.is_some() {
+            return read;
+        }
+        at = start + 3;
+    }
+    None
+}
+
+/// The digits that end just before `at`, a little space or punctuation in
+/// between: the `140` of `140 BPM`.
+fn number_before(text: &str, at: usize) -> Option<u16> {
+    let bytes = text.as_bytes();
+    let mut idx = at.min(bytes.len());
+    let mut skipped = 0;
+    while idx > 0
+        && skipped < 4
+        && matches!(bytes[idx - 1], b' ' | b'\t' | b':' | b'.' | b',' | b'-')
+    {
+        idx -= 1;
+        skipped += 1;
+    }
+    let end = idx;
+    while idx > 0 && bytes[idx - 1].is_ascii_digit() {
+        idx -= 1;
+    }
+    (idx < end)
+        .then(|| text[idx..end].parse().ok())
+        .flatten()
+        .filter(|bpm| (20..=400).contains(bpm))
+}
+
+/// The digits that start just after `at`: the `140` of `BPM: 140`.
+fn number_after(text: &str, at: usize) -> Option<u16> {
+    let bytes = text.as_bytes();
+    let mut idx = at;
+    let mut skipped = 0;
+    while idx < bytes.len()
+        && skipped < 4
+        && matches!(bytes[idx], b' ' | b'\t' | b':' | b'.' | b',' | b'-')
+    {
+        idx += 1;
+        skipped += 1;
+    }
+    let start = idx;
+    while idx < bytes.len() && bytes[idx].is_ascii_digit() {
+        idx += 1;
+    }
+    (start < idx)
+        .then(|| text[start..idx].parse().ok())
+        .flatten()
+        .filter(|bpm| (20..=400).contains(bpm))
+}
+
+/// The key a text states: `Key: C# minor`, `F#m`, `Cmin`, `C#`.
+fn key_of(text: &str) -> Option<String> {
+    let lower = text.to_lowercase();
+    let chars: Vec<char> = lower.chars().collect();
+    // Said after "key", a bare note or a lone "m" is enough: `Key: C`, `Key:
+    // Am`. Nowhere else: ordinary words would read as keys.
+    let mut at = 0;
+    while let Some(found) = lower[at..].find("key") {
+        let start = at + found;
+        at = start + 3;
+        if chars.get(start + 3).is_some_and(|c| c.is_alphanumeric()) {
+            // "keyboard", "keys" said another way.
+            continue;
+        }
+        let mut idx = start + 3;
+        let mut skipped = 0;
+        while idx < chars.len() && skipped < 16 {
+            if chars[idx].is_alphabetic() && !lower[idx..].starts_with("signature") {
+                break;
+            }
+            if !chars[idx].is_alphanumeric() {
+                skipped += 1;
+            }
+            idx += 1;
+        }
+        if let Some(key) = read_key(&chars, idx, true) {
+            return Some(key);
+        }
+    }
+    // Without "key" having said it, the note must state itself: an accidental
+    // (`C#`, `Bb`) or a mode spelled out (`F#m`, `Cmin`, `B♭ major`).
+    for idx in 0..chars.len() {
+        if idx > 0 && (chars[idx - 1].is_alphanumeric() || chars[idx - 1] == '#') {
+            continue;
+        }
+        if let Some(key) = read_key(&chars, idx, false) {
+            return Some(key);
+        }
+    }
+    None
+}
+
+/// A key signature at `idx`, when the letters there say one: a note A to G,
+/// an optional accidental, an optional mode, ending at a word boundary.
+/// A bare note, or one with a lone `m`, only counts where "key" said it.
+fn read_key(chars: &[char], idx: usize, name_only: bool) -> Option<String> {
+    let letter = chars.get(idx)?.to_ascii_uppercase();
+    if !matches!(letter, 'A'..='G') {
+        return None;
+    }
+    let mut next = idx + 1;
+    let mut accidental = ' ';
+    let flat = matches!(chars.get(next), Some('b' | '\u{266D}'))
+        && (next + 1 >= chars.len() || !chars.get(next + 1).is_some_and(|c| c.is_alphanumeric()));
+    match chars.get(next) {
+        Some('#' | '\u{266F}') => accidental = '\u{266F}',
+        Some(_) if flat => accidental = '\u{266D}',
+        _ => {}
+    }
+    if accidental != ' ' {
+        next += 1;
+    }
+    if chars.get(next) == Some(&' ') {
+        next += 1;
+    }
+    let mut mode = ' ';
+    let says = |chars: &[char], at: usize, word: &str| {
+        word.chars()
+            .enumerate()
+            .all(|(offset, c)| chars.get(at + offset) == Some(&c))
+    };
+    if says(chars, next, "minor") {
+        mode = 'm';
+        next += 5;
+    } else if says(chars, next, "min") {
+        mode = 'm';
+        next += 3;
+    } else if says(chars, next, "major") {
+        next += 5;
+    } else if says(chars, next, "maj") {
+        next += 3;
+    } else if says(chars, next, "m") && (name_only || accidental != ' ') {
+        mode = 'm';
+        next += 1;
+    }
+    if chars.get(next).is_some_and(|c| c.is_alphanumeric()) {
+        return None;
+    }
+    let enough = name_only || accidental != ' ' || mode == 'm';
+    if !enough {
+        return None;
+    }
+    let mut key = String::new();
+    key.push(letter);
+    if accidental != ' ' {
+        key.push(accidental);
+    }
+    if mode != ' ' {
+        key.push(mode);
+    }
+    Some(key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn name_of(title: &str) -> String {
+        read(title, None, None).name
+    }
+
+    fn line_of(title: &str) -> Option<String> {
+        read(title, None, None).secondary()
+    }
+
+    #[test]
+    fn a_beat_shows_its_own_name_and_who_it_is_for() {
+        let beat = read(
+            r#"[FREE] young nudy x lucki type beat "tic tac""#,
+            None,
+            Some("ayohighflyer"),
+        );
+        assert_eq!(beat.name, "tic tac");
+        assert_eq!(beat.for_artists, ["Young Nudy", "Lucki"]);
+        assert_eq!(beat.style, None);
+        assert_eq!(beat.secondary().as_deref(), Some("for Young Nudy × Lucki"));
+    }
+
+    #[test]
+    fn a_keyword_stack_leaves_one_style_and_the_quoted_name() {
+        let beat = read(
+            r#"TRAP TYPE BEAT - "SNAKE" | FREESTYLE BEAT | HARD TYPE BEAT 2026"#,
+            None,
+            Some("STORM"),
+        );
+        assert_eq!(beat.name, "Snake");
+        assert!(beat.for_artists.is_empty());
+        assert_eq!(beat.style.as_deref(), Some("Trap"));
+        assert_eq!(beat.secondary().as_deref(), Some("Trap"));
+
+        let beat = read(
+            r#""GOSPEL" | Trap Type Beat | Freestyle Beat | Type Beat | Hard ..."#,
+            None,
+            None,
+        );
+        assert_eq!(beat.name, "Gospel");
+        assert_eq!(beat.style.as_deref(), Some("Trap"));
+    }
+
+    #[test]
+    fn caps_names_lose_the_shouting_not_the_name() {
+        let beat = read(
+            r#"(FREE) BABY KEEM x JID TYPE BEAT "FAMIGLIA" | CHILL RAP TYPE BEAT"#,
+            None,
+            Some("nolzy"),
+        );
+        assert_eq!(beat.name, "Famiglia");
+        assert_eq!(beat.for_artists, ["Baby Keem", "JID"]);
+        assert_eq!(beat.style.as_deref(), Some("Chill rap"));
+        assert_eq!(beat.secondary().as_deref(), Some("for Baby Keem × JID"));
+    }
+
+    #[test]
+    fn a_producer_named_as_the_one_its_for_stays_out() {
+        let beat = read(
+            r#"[FREE] Veeze x Lucki Type Beat "Tweaker""#,
+            None,
+            Some("99LA"),
+        );
+        assert_eq!(beat.name, "Tweaker");
+        assert_eq!(beat.for_artists, ["Veeze", "Lucki"]);
+
+        let alone = read(
+            "Ayohighflyer type beat \"Tic Tac\"",
+            None,
+            Some("Ayohighflyer"),
+        );
+        assert_eq!(alone.name, "Tic Tac");
+        assert!(alone.for_artists.is_empty());
+        assert_eq!(alone.secondary(), None);
+    }
+
+    #[test]
+    fn a_style_blend_reads_as_a_style_not_as_artists() {
+        let beat = read(
+            r#"(FREE FOR PROFIT) Soul Boom Bap x Chill Jazz Type Beat - "Smoked""#,
+            None,
+            Some("Rama Low"),
+        );
+        assert_eq!(beat.name, "Smoked");
+        assert!(beat.for_artists.is_empty());
+        assert_eq!(beat.style.as_deref(), Some("Soul boom bap"));
+        assert_eq!(beat.secondary().as_deref(), Some("Soul boom bap"));
+    }
+
+    #[test]
+    fn a_style_drops_its_fillers_years_and_the_keyword() {
+        let beat = read(
+            r#""Losing You" | UK Real Rap Instrumental 2026"#,
+            None,
+            None,
+        );
+        assert_eq!(beat.name, "Losing You");
+        assert!(beat.for_artists.is_empty());
+        assert_eq!(beat.style.as_deref(), Some("UK rap"));
+
+        let beat = read(r#"Dark Trap Type Beat "Aurora" 🔥🔥 2026"#, None, None);
+        assert_eq!(beat.name, "Aurora");
+        assert_eq!(beat.style.as_deref(), Some("Dark trap"));
+    }
+
+    #[test]
+    fn an_apostrophe_inside_a_word_is_not_a_quote() {
+        let beat = read("90's Boom Bap Type Beat \"Rewind\"", None, None);
+        assert_eq!(beat.name, "Rewind");
+        assert_eq!(beat.secondary().as_deref(), Some("90s boom bap"));
+
+        let beat = read("Smoky Type Beat - 'Till Dawn'", None, None);
+        assert_eq!(beat.name, "Till Dawn");
+
+        let beat = read("80's Vibes", None, None);
+        assert_eq!(beat.name, "80s Vibes");
+    }
+
+    #[test]
+    fn a_short_title_still_has_its_name() {
+        assert_eq!(name_of(r#"Type Beat "Churka""#), "Churka");
+        assert_eq!(line_of(r#"Type Beat "Churka""#), None);
+    }
+
+    #[test]
+    fn curly_quotes_and_ampersands_read_the_same() {
+        let beat = read(
+            "\u{201C}Midnight\u{201D} | Veeze \u{D7} Lucki Type Beat \u{2013} \u{2018}freestyle\u{2019}",
+            None,
+            None,
+        );
+        assert_eq!(beat.name, "Midnight");
+        assert_eq!(beat.for_artists, ["Veeze", "Lucki"]);
+
+        let beat = read(
+            "Young Nudy & Lucki Type Beat \u{201C}Dreams\u{201D}",
+            None,
+            None,
+        );
+        assert_eq!(beat.for_artists, ["Young Nudy", "Lucki"]);
+        assert_eq!(beat.name, "Dreams");
+    }
+
+    #[test]
+    fn a_producer_credit_is_dropped() {
+        let beat = read(
+            "Trap Type Beat | Dreams (prod. by Ayohighflyer)",
+            None,
+            Some("Ayohighflyer"),
+        );
+        assert_eq!(beat.name, "Dreams");
+        assert_eq!(beat.style.as_deref(), Some("Trap"));
+        assert!(beat.for_artists.is_empty());
+    }
+
+    #[test]
+    fn without_a_quoted_name_the_best_phrase_left_stands() {
+        let beat = read("Tic Tac - free trap type beat 2026", None, None);
+        assert_eq!(beat.name, "Tic Tac");
+        assert_eq!(beat.style.as_deref(), Some("Trap"));
+        assert_eq!(beat.secondary().as_deref(), Some("Trap"));
+
+        // Nothing to read: the title itself stands, never an empty name.
+        assert_eq!(name_of("midnight"), "midnight");
+        assert_eq!(name_of(" "), " ");
+        assert_eq!(name_of(""), "");
+    }
+
+    #[test]
+    fn the_tempo_and_key_are_read_from_the_title_and_the_description() {
+        let from_title = read(
+            r#"Chill Type Beat "Aurora" 140 BPM"#,
+            Some("Made with love."),
+            None,
+        );
+        assert_eq!(from_title.bpm, Some(140));
+        assert_eq!(from_title.style.as_deref(), Some("Chill"));
+
+        let from_text = read(
+            "aurora - trap type beat",
+            Some("BPM: 140\nKey: C# minor\nLeave a like!"),
+            None,
+        );
+        assert_eq!(from_text.bpm, Some(140));
+        assert_eq!(from_text.key.as_deref(), Some("C\u{266F}m"));
+
+        let compact = read("aurora type beat", Some("90bpm | F#m"), None);
+        assert_eq!(compact.bpm, Some(90));
+        assert_eq!(compact.key.as_deref(), Some("F\u{266F}m"));
+
+        let spelled = read("aurora", Some("tempo 140 bpm, key Cmin"), None);
+        assert_eq!(spelled.bpm, Some(140));
+        assert_eq!(spelled.key.as_deref(), Some("Cm"));
+
+        let flat = read("aurora", Some("key: bb major"), None);
+        assert_eq!(flat.key.as_deref(), Some("B\u{266D}"));
+    }
+
+    #[test]
+    fn the_tempo_and_key_lead_one_small_label() {
+        let mut track = Track {
+            beat: Some(Box::new(BeatTitle {
+                bpm: Some(140),
+                key: Some("C\u{266F}m".into()),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        assert_eq!(
+            tempo_key(&track).as_deref(),
+            Some("140 BPM \u{b7} C\u{266F}m")
+        );
+        track.beat.as_mut().unwrap().key = None;
+        assert_eq!(tempo_key(&track).as_deref(), Some("140 BPM"));
+        track.beat.as_mut().unwrap().bpm = None;
+        assert_eq!(tempo_key(&track), None);
+        track.beat = None;
+        assert_eq!(tempo_key(&track), None);
+    }
+
+    #[test]
+    fn years_and_ordinary_words_are_not_tempos() {
+        assert_eq!(bpm_of("Trap Type Beat 2026"), None);
+        assert_eq!(bpm_of("Made in 2026"), None);
+        assert_eq!(key_of("Never Too Much (Official Audio)"), None);
+        assert_eq!(key_of("copyright 2026 am"), None);
+        assert_eq!(bpm_of("BPM: 2026"), None);
+    }
+
+    #[test]
+    fn a_plain_upload_title_reads_its_own_name() {
+        // Where `for_you::is_beat` never says beat none of this runs, and
+        // when it does, a plain title keeps its own name.
+        let beat = read(
+            "Night Loop (Instrumental) - extended arrangement",
+            None,
+            Some("Fixture Producer"),
+        );
+        assert_eq!(beat.name, "Night Loop");
+        assert_eq!(beat.for_artists, Vec::<String>::new());
+        assert_eq!(beat.style, None);
+        assert_eq!(beat.secondary(), None);
+    }
+}

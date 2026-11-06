@@ -1038,6 +1038,17 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         6.0,
     );
     let song = app.now_playing_item();
+    // A beat says who it's for under its name, and its tempo beside them.
+    let (beat_line, tempo) = song
+        .as_ref()
+        .map(|item| match item {
+            PlayableItem::Track(track) => (
+                crate::beats::for_line(track),
+                crate::beats::tempo_key(track),
+            ),
+            _ => (None, None),
+        })
+        .unwrap_or((None, None));
     let drag_sense = if song.is_some() {
         Sense::click_and_drag()
     } else {
@@ -1093,11 +1104,19 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
         let title =
             ui.painter()
                 .layout_no_wrap(now.title.clone(), theme::medium(14.0), palette.text);
-        let subtitle = ui.painter().layout_no_wrap(
-            now.subtitle.clone(),
-            theme::regular(12.0),
-            palette.secondary,
-        );
+        // The line under the title: who a beat is for, the artists, the tempo.
+        let mut shown = String::new();
+        for part in [beat_line.clone(), Some(now.subtitle.clone()), tempo.clone()] {
+            if let Some(part) = part.filter(|part| !part.is_empty()) {
+                if !shown.is_empty() {
+                    shown.push_str("  ·  ");
+                }
+                shown.push_str(&part);
+            }
+        }
+        let subtitle = ui
+            .painter()
+            .layout_no_wrap(shown, theme::regular(12.0), palette.secondary);
         title.size().x.max(subtitle.size().x).min(text_width)
     };
     let info_rect = Rect::from_min_size(pos2(text_left, cy - 18.0), vec2(text_width, 36.0));
@@ -1159,6 +1178,16 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
             responses.push(response);
         } else {
             ui.spacing_mut().item_spacing.x = 0.0;
+            // Who the beat is for, before the producer it comes from.
+            if let Some(beat) = &beat_line {
+                theme::text(ui, beat, theme::regular(12.0), palette.secondary);
+                theme::text(
+                    ui,
+                    "  ·  ",
+                    theme::regular(12.0),
+                    palette.secondary.gamma_multiply(0.6),
+                );
+            }
             for (index, artist) in now.artists.iter().enumerate() {
                 if index > 0 {
                     theme::text(ui, ", ", theme::regular(12.0), palette.secondary);
@@ -1175,6 +1204,16 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
                     app.actions.push(Action::Open(page));
                 }
                 responses.push(response);
+            }
+            // The tempo the beat states, small beside its other credits.
+            if let Some(tempo) = &tempo {
+                theme::text(
+                    ui,
+                    "  ·  ",
+                    theme::regular(12.0),
+                    palette.secondary.gamma_multiply(0.6),
+                );
+                theme::text(ui, tempo, theme::regular(12.0), palette.secondary);
             }
         }
     });

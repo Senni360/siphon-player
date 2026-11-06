@@ -869,7 +869,8 @@ fn video_card(
             app.actions.push(Action::ToggleSaved(track.uri.clone()));
         }
     }
-    // Words: the title in its source's colour, then the channel and its views.
+    // Words: the title in its source's colour, then who a beat is for or how
+    // it sounds, the channel, and the views.
     let words = Rect::from_min_size(
         pos2(rect.left(), rect.top() + thumb_height + 10.0),
         vec2(width, VIDEO_TEXT - 10.0),
@@ -889,6 +890,9 @@ fn video_card(
     );
     line.set_clip_rect(line.max_rect().intersect(ui.clip_rect()));
     line.spacing_mut().item_spacing.x = 4.0;
+    if let Some(beat) = crate::beats::for_line(track) {
+        theme::text(&mut line, &beat, theme::regular(12.0), palette.secondary);
+    }
     widgets::artist_links(
         &mut line,
         app,

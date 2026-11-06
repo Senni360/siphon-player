@@ -499,6 +499,7 @@ fn rated_track(video: RatedVideo) -> Option<Track> {
         channel: video.snippet.channel,
         channel_id: video.snippet.channel_id,
         uploader: None,
+        description: None,
         duration: video.details.duration.as_deref().and_then(iso_seconds),
         upload_date: video
             .snippet

@@ -103,6 +103,11 @@ pub fn looks_messy(title: &str) -> bool {
 /// Applies a remembered reading to an upload just built from SoundCloud or
 /// YouTube, or queues a messy title to be read.
 pub fn apply(track: &mut Track) {
+    // Beats read their own names here instead (`crate::beats`): their titles
+    // pack a whole description in, not just another artist.
+    if crate::for_you::is_beat(track) {
+        return;
+    }
     let reading = {
         let readings = readings().read().unwrap_or_else(|p| p.into_inner());
         readings.known.get(&track.uri).cloned()

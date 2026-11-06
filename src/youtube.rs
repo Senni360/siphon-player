@@ -102,6 +102,10 @@ pub struct Video {
     pub channel_id: Option<String>,
     #[serde(default)]
     pub uploader: Option<String>,
+    /// The video's own description, where a beat's producer states its tempo
+    /// and key. Only kept for reading, never shown whole.
+    #[serde(default)]
+    pub description: Option<String>,
     #[serde(default)]
     pub duration: Option<f64>,
     #[serde(default)]
@@ -205,6 +209,7 @@ impl Video {
             ..Default::default()
         };
         crate::retitle::apply(&mut track);
+        crate::beats::apply(&mut track, self.description.as_deref());
         Ok(track)
     }
 }

@@ -634,6 +634,78 @@ mod tests {
         }
     }
 
+    /// What `is_beat` decides, which the beat titles of `crate::beats` rely
+    /// on: songs never read as beats, whatever the source, and beats say so.
+    #[test]
+    fn songs_say_so_and_beats_say_so_on_every_source() {
+        let upload = |uri: &str, name: &str, artist: &str| Track {
+            uri: uri.into(),
+            name: name.into(),
+            artists: vec![ArtistRef {
+                name: artist.into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Songs.
+        assert!(!is_beat(&upload(
+            "spotify:track:beatTest",
+            "Blinding Lights",
+            "The Weeknd"
+        )));
+        assert!(!is_beat(&upload(
+            "soundcloud:track:9200001",
+            "Midnight City (feat. Rone)",
+            "M83"
+        )));
+        assert!(!is_beat(&upload(
+            "youtube:video:eHz0FSfSLP8",
+            "Song (Official Video)",
+            "Label"
+        )));
+        assert!(!is_beat(&upload(
+            "youtube:video:eHz0FSfSLP8",
+            "Song [Audio]",
+            "Label"
+        )));
+        // Beats, said by the title.
+        assert!(is_beat(&upload(
+            "youtube:video:aB9_-012xyz",
+            "[FREE] young nudy x lucki type beat \"tic tac\"",
+            "ayohighflyer"
+        )));
+        assert!(is_beat(&upload(
+            "youtube:video:aB9_-012xyz",
+            "TRAP TYPE BEAT - \"SNAKE\"",
+            "STORM"
+        )));
+        assert!(is_beat(&upload(
+            "soundcloud:track:9200002",
+            "(FREE FOR PROFIT) Soul Boom Bap x Chill Jazz Type Beat",
+            "Rama Low"
+        )));
+        assert!(is_beat(&upload(
+            "youtube:video:aB9_-012xyz",
+            "Hard Freestyle Instrumental 140 BPM",
+            "STORM"
+        )));
+        // Beats, said by the producer's own name or the upload's genre.
+        assert!(is_beat(&upload(
+            "soundcloud:track:9200003",
+            "Smoked",
+            "Sanche Beats"
+        )));
+        let genre = upload("soundcloud:track:9200004", "Smoked", "Rama Low");
+        crate::stats::note_soundcloud_genre(&genre.uri, "Hip Hop Beats");
+        assert!(is_beat(&genre));
+        // A YouTube upload that says neither is the listener's beat to hear.
+        assert!(is_beat(&upload(
+            "youtube:video:aB9_-012xyz",
+            "Late Night Loop",
+            "Fixture Producer"
+        )));
+    }
+
     #[test]
     fn what_is_played_recently_and_finished_leads_the_seeds() {
         let taste = taste(

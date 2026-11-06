@@ -112,7 +112,14 @@ async fn cached_metadata_works_without_a_helper_and_never_contains_audio_urls() 
         cache: scratch.0.clone(),
     };
     let track = catalogue.track("youtube:video:aB9_-012xyz").await.unwrap();
-    assert_eq!(track.name, video.title);
+    // The fixture says it is an instrumental, so the beat reads its own name
+    // out of the title and keeps the rest of what the title said on itself.
+    assert_eq!(track.name, "Night Loop");
+    let beat = track.beat.as_ref().unwrap();
+    assert_eq!(beat.for_artists, Vec::<String>::new());
+    assert_eq!(beat.style, None);
+    assert_eq!(beat.bpm, Some(140));
+    assert_eq!(beat.key.as_deref(), Some("C\u{266F}m"));
     let text = serde_json::to_string(&track).unwrap();
     assert!(!text.contains("googlevideo.com") && !text.contains("expire="));
 }
