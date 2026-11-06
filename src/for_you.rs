@@ -4,9 +4,14 @@
 //! computer and the likes the accounts sync, and each source is then asked what is
 //! related to the songs at the top of it. Runs on the backend runtime.
 
-use std::collections::{HashMap, HashSet};
+mod projects;
 
-use crate::api::models::Track;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
+pub use projects::{Kind, Project};
+
+use crate::api::models::{Album, PlayHistory, Track};
 use crate::soundcloud::api::Client;
 use crate::stats::Play;
 use crate::youtube::Resolver;
@@ -23,6 +28,8 @@ const SKIP_WEIGHT: f64 = -0.5;
 /// How many songs of each source are asked about.
 const SOUNDCLOUD_SEEDS: usize = 4;
 const YOUTUBE_SEEDS: usize = 3;
+/// How many liked or played YouTube videos are checked for music to find those.
+const YOUTUBE_SEEDS_CHECKED: usize = 9;
 const RELATED_EACH: u32 = 15;
 /// No artist fills the page.
 const PER_ARTIST: usize = 2;
@@ -40,6 +47,16 @@ pub struct ForYou {
     pub picks: Vec<Pick>,
     /// New from the people and channels followed, newest first.
     pub following: Vec<Track>,
+    /// New albums, EPs and singles from the artists played most, best first.
+    pub projects: Vec<Project>,
+}
+
+/// What asking Spotify about an artist takes: the playback session, and the
+/// client its private requests go through.
+#[derive(Clone)]
+pub struct SpotifyReads {
+    pub session: librespot_core::Session,
+    pub web: Arc<crate::api::ApiClient>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -260,7 +277,13 @@ pub struct Request {
     pub spotify: Vec<Track>,
     /// New posts from the people followed on SoundCloud.
     pub soundcloud_feed: Vec<Track>,
+    /// Of those, the songs they put out themselves rather than reposted.
+    pub soundcloud_posts: Vec<Track>,
     pub channels: Vec<String>,
+    /// The play history, local and Spotify's, with every song's accounts.
+    pub heard: Vec<PlayHistory>,
+    /// New releases from the artists followed on Spotify.
+    pub spotify_new: Vec<Album>,
 }
 
 /// Gathers and orders the recommendations. Whatever a source fails to answer is
@@ -268,11 +291,20 @@ pub struct Request {
 pub async fn gather(
     client: Client,
     http: Option<reqwest::Client>,
+    spotify: Option<SpotifyReads>,
     plays: Vec<Play>,
     request: Request,
     now: i64,
 ) -> ForYou {
     let taste = taste(&plays, &request.likes, now);
+    let fans = projects::fans(&plays, &request.heard, &request.likes, now);
+    let reads = projects::Reads {
+        soundcloud: client.clone(),
+        http: http.clone(),
+        spotify,
+    };
+    let asked = projects::to_look_up(&fans, |source| reads.can_ask(source));
+    let releases = tokio::spawn(projects::look_up_all(reads, asked));
     let resolver = Resolver::default();
     let mut reads = tokio::task::JoinSet::new();
     let of = |wanted: Source| {
@@ -285,7 +317,33 @@ pub async fn gather(
         .take(SOUNDCLOUD_SEEDS)
         .cloned()
         .collect();
-    let youtube: Vec<Seed> = of(Source::YouTube).take(YOUTUBE_SEEDS).cloned().collect();
+    // Only music is a seed: a mix made from a football clip is more football.
+    let youtube: Vec<Seed> = match &http {
+        Some(http) => {
+            let checked: Vec<Seed> = of(Source::YouTube)
+                .take(YOUTUBE_SEEDS_CHECKED)
+                .cloned()
+                .collect();
+            let songs = checked
+                .iter()
+                .map(|seed| Track {
+                    uri: seed.uri.clone(),
+                    ..Default::default()
+                })
+                .collect();
+            let music: HashSet<String> = crate::youtube::music::keep_music(http, songs)
+                .await
+                .into_iter()
+                .map(|track| track.uri)
+                .collect();
+            checked
+                .into_iter()
+                .filter(|seed| music.contains(&seed.uri))
+                .take(YOUTUBE_SEEDS)
+                .collect()
+        }
+        None => Vec::new(),
+    };
     let cold_soundcloud = soundcloud.is_empty();
     let cold_youtube = youtube.is_empty() && request.channels.is_empty();
     for seed in soundcloud {
@@ -367,21 +425,59 @@ pub async fn gather(
             candidates.append(&mut read);
         }
     }
+    let mut offers: Vec<projects::Offer> = request
+        .spotify_new
+        .iter()
+        .filter_map(projects::from_album)
+        .chain(
+            request
+                .soundcloud_posts
+                .into_iter()
+                .filter_map(projects::from_song),
+        )
+        .map(|project| projects::Offer {
+            project,
+            followed: true,
+        })
+        .collect();
     if let Some(http) = http
         && !request.channels.is_empty()
-        && let Ok(uploads) = browse::feed(http, request.channels).await
+        && let Ok(uploads) = browse::feed(http.clone(), request.channels).await
     {
+        // Channels are followed for all sorts of things; Home is for music.
+        let uploads = crate::youtube::music::keep_music(&http, uploads.tracks).await;
         candidates.extend(candidates_from(
-            uploads.tracks.clone(),
+            uploads.clone(),
             1.2,
             "From a channel you follow",
         ));
-        following.extend(uploads.tracks);
+        offers.extend(
+            uploads
+                .iter()
+                .cloned()
+                .filter_map(projects::from_song)
+                .map(|project| projects::Offer {
+                    project,
+                    followed: true,
+                }),
+        );
+        following.extend(uploads);
     }
     following.sort_by(|a, b| b.release_date.cmp(&a.release_date));
+    offers.extend(
+        releases
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|project| projects::Offer {
+                project,
+                followed: false,
+            }),
+    );
     ForYou {
         picks: rank(candidates, &taste),
         following,
+        projects: projects::rank(offers, &fans, now),
     }
 }
 
@@ -598,12 +694,16 @@ mod tests {
         let shown = gather(
             client,
             Some(reqwest::Client::new()),
+            None,
             Vec::new(),
             Request {
                 likes: vec![soundcloud, youtube],
                 spotify: Vec::new(),
                 soundcloud_feed: Vec::new(),
+                soundcloud_posts: Vec::new(),
                 channels: Vec::new(),
+                heard: Vec::new(),
+                spotify_new: Vec::new(),
             },
             NOW,
         )

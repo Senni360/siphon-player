@@ -6329,16 +6329,23 @@ impl App {
         }
         let mut likes = self.soundcloud_library.snapshot.likes.clone();
         likes.extend(self.youtube_likes().unwrap_or_default().iter().cloned());
-        let soundcloud_feed = self
-            .soundcloud_library
-            .snapshot
-            .following
-            .items
-            .iter()
-            .filter_map(|item| match &item.content {
-                crate::soundcloud::following::Content::Track(track) => Some((**track).clone()),
-                crate::soundcloud::following::Content::Playlist(_) => None,
-            })
+        let followed_tracks = || {
+            self.soundcloud_library
+                .snapshot
+                .following
+                .items
+                .iter()
+                .filter_map(|item| match &item.content {
+                    crate::soundcloud::following::Content::Track(track) => {
+                        Some((item.kind, (**track).clone()))
+                    }
+                    crate::soundcloud::following::Content::Playlist(_) => None,
+                })
+        };
+        let soundcloud_feed = followed_tracks().map(|(_, track)| track).collect();
+        let soundcloud_posts = followed_tracks()
+            .filter(|(kind, _)| *kind == crate::soundcloud::following::Kind::Posted)
+            .map(|(_, track)| track)
             .collect();
         self.backend.send(Command::ForYou(crate::for_you::Request {
             likes,
@@ -6349,11 +6356,14 @@ impl App {
                 Vec::new()
             },
             soundcloud_feed,
+            soundcloud_posts,
             channels: self
                 .youtube_channels()
                 .iter()
                 .map(|channel| channel.id.clone())
                 .collect(),
+            heard: self.recents_view.to_vec(),
+            spotify_new: self.home.new_releases.get().cloned().unwrap_or_default(),
         }));
     }
 

@@ -71,7 +71,7 @@ impl User {
         }
     }
 
-    fn artist_ref(&self, name: Option<&str>) -> app::ArtistRef {
+    pub(crate) fn artist_ref(&self, name: Option<&str>) -> app::ArtistRef {
         app::ArtistRef {
             id: Some(self.id.to_string()),
             name: name
@@ -347,6 +347,16 @@ pub struct Playlist {
     pub user: Option<User>,
     pub public: Option<bool>,
     pub is_album: Option<bool>,
+    /// `album`, `ep`, `single` or `compilation` for a release; nothing for a
+    /// playlist.
+    #[serde(default)]
+    pub set_type: Option<String>,
+    #[serde(default)]
+    pub release_date: Option<String>,
+    #[serde(default)]
+    pub display_date: Option<String>,
+    #[serde(default)]
+    pub created_at: Option<String>,
     pub track_count: Option<u32>,
     #[serde(default)]
     pub tracks: Vec<Track>,

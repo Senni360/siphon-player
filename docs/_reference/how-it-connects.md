@@ -871,6 +871,22 @@ reveal only the songs asked about. Neither service gets plays from Encore, so it
 recommendations on its own site aren't changed by listening here, only by likes and
 follows on a connected account.
 
+Home recommends only music from YouTube. For each video it would show, from a mix's
+seed or a followed channel's feed, it asks YouTube's player endpoint
+(`www.youtube.com/youtubei/v1/player`, without a sign-in) which category the uploader
+filed it under, and keeps those filed under Music. Each answer is remembered until
+Encore closes. A video YouTube gives no answer about is left out.
+
+Home's new albums, EPs and singles come from up to 64 of the artists you play and
+like most, shared out among the sources by how much of your listening each gets, so
+a source you rarely use is rarely asked. Each artist is asked about on the source
+you play them on: Spotify through the playback session's artist overview (the
+Pathfinder `queryArtistOverview` read Spotify's artist pages make, never the Web
+API's quota), SoundCloud for the account's newest sets and uploads, YouTube through
+the channel's public feed. Without local playback Spotify isn't asked, and its
+followed artists' new releases stand in. What an artist has out is kept for three
+hours. These requests reveal only the artists asked about.
+
 ## Web links
 
 When Encore is the Windows handler for web links, a clicked normal YouTube video

@@ -219,8 +219,10 @@ and per-share download whose file drags into a DAW on Windows
 ## Home and sideways scrolling (5 November)
 
 Home opens on one large pick in its own colour, with why it's there and the next
-few beside it. Then what's new from the group, recent places, more picks across the
-sources, new uploads from who you follow, and each source's picks. Podcasts and
+few beside it: the newest projects from the artists you play most, or songs picked
+for you until there are any. Then what's new from the group, recent places, the
+rest of the new projects as **New for you**, more picks across the sources, new
+uploads from who you follow, and each source's picks. Podcasts and
 audiobooks are not on Home, and in Search they wait below everything in All.
 
 Nothing has a sideways scrollbar. Home's rows hold what fits the page. Elsewhere a
@@ -231,7 +233,18 @@ the page.
 count most, skips count against, an artist you skip sinks), then SoundCloud's related
 tracks and YouTube mixes of the top songs are ordered by it. What was just played
 gives way, no artist fills the page, and each source gets about its share of the
-listening. With no history it starts from what's popular.
+listening. With no history it starts from what's popular. YouTube offers only what
+its uploader filed under Music, so a channel followed for football or the news stays
+off Home.
+
+`src/for_you/projects.rs` works the projects out the same way for everyone: plays,
+the play history and likes on every source make a weight per artist and say where
+each artist is played. The most played are looked up on those sources, each source
+getting as many lookups as its share of the listening, and followed artists' new
+releases come free. A release scores by how much its artists are played, halved for
+every five days since it came out, a little more for an album or EP. One copy of a
+release shows, from the source the listener uses more, and no artist more than
+twice. Releases older than six weeks aren't new.
 
 What friends share wears a mark until looked at: a share or file leaves Home once
 played or seen in the group, and returns if a reply arrives.

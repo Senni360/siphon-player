@@ -796,6 +796,11 @@ impl Client {
         self.user_page(id, "tracks", limit, offset).await
     }
 
+    /// The albums, EPs and singles someone released as sets, newest first.
+    pub async fn user_albums(&self, id: u64, limit: u32) -> Result<Page<Playlist>> {
+        self.user_page(id, "albums", limit, 0).await
+    }
+
     async fn user_page<T: DeserializeOwned>(
         &self,
         id: u64,

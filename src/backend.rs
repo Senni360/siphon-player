@@ -2893,6 +2893,16 @@ impl Worker {
                 Command::ForYou(request) => {
                     let client = self.soundcloud_client().expect("SoundCloud initialized");
                     let http = self.http.client().ok();
+                    // Spotify is asked about artists over the playback session only,
+                    // so recommendations never spend the Web API's quota.
+                    let spotify = self
+                        .engine
+                        .as_ref()
+                        .zip(self.api.prerelease_http_client())
+                        .map(|(engine, web)| crate::for_you::SpotifyReads {
+                            session: engine.session().clone(),
+                            web,
+                        });
                     let dir = self.dirs.listening_dir();
                     let events = self.events.clone();
                     let waker = self.waker.clone();
@@ -2902,7 +2912,9 @@ impl Worker {
                                 .await
                                 .unwrap_or_default();
                         let now = jiff::Timestamp::now().as_second();
-                        let shown = crate::for_you::gather(client, http, plays, request, now).await;
+                        let shown =
+                            crate::for_you::gather(client, http, spotify, plays, request, now)
+                                .await;
                         let _ = events.send(Event::ForYou(Box::new(shown)));
                         waker.wake();
                     });

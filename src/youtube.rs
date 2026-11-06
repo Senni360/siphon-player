@@ -7,6 +7,7 @@
 pub mod account;
 pub mod browse;
 pub mod likes;
+pub mod music;
 mod resolver;
 #[cfg(test)]
 mod tests;

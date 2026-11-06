@@ -54,7 +54,17 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .for_you
         .get()
         .map_or_else(Vec::new, |shown| shown.following.clone());
-    rise(ui, 0, |ui| featured(app, ui, &picks));
+    let projects = app
+        .for_you
+        .get()
+        .map_or_else(Vec::new, |shown| shown.projects.clone());
+    // New projects lead when there are any; until then, the songs picked.
+    let features = if projects.is_empty() {
+        song_features(app, &picks)
+    } else {
+        project_features(app, &projects)
+    };
+    rise(ui, 0, |ui| featured(app, ui, &features));
     ui.add_space(20.0);
     // What's new from the group comes before anything a service suggests.
     rise(ui, 1, |ui| {
@@ -63,7 +73,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     });
     rise(ui, 2, |ui| quick_access(app, ui));
     ui.add_space(16.0);
-    rise(ui, 3, |ui| more_for_you(app, ui, &picks));
+    rise(ui, 3, |ui| new_for_you(app, ui, &projects));
+    // The songs on the featured card aren't repeated below it.
+    let featured_songs = if projects.is_empty() { FEATURED } else { 0 };
+    rise(ui, 3, |ui| more_for_you(app, ui, &picks, featured_songs));
     if app.settings.home.made_for_you.visible {
         rise(ui, 4, |ui| {
             made_for_you(app, ui);
@@ -82,22 +95,130 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     widgets::fit_shelves(ui.ctx(), false);
 }
 
-/// The first thing on Home: the best pick, large, in its own colour, with the next
-/// few beside it. It says why it's here.
-fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
+/// How many things the featured card holds: one large, the rest beside it.
+const FEATURED: usize = 5;
+
+/// One thing on the featured card: a new project, or a song picked.
+struct Feature {
+    /// What plays it, and what its title's colour follows.
+    uri: String,
+    name: String,
+    artists: Vec<crate::api::models::ArtistRef>,
+    art: Option<String>,
+    art_small: Option<String>,
+    /// What it is: a new album, a pick.
+    label: String,
+    reason: String,
+    play: Action,
+    /// Whether it plays as a context, an album or a set, rather than as a song.
+    context: bool,
+}
+
+impl Feature {
+    fn is_current(&self, app: &App) -> bool {
+        if self.context {
+            app.playing_context_uri().as_deref() == Some(self.uri.as_str())
+        } else {
+            app.current_track_uri().is_some_and(|uri| uri == self.uri)
+        }
+    }
+}
+
+/// What playing a project takes, and whether it plays as a context: a song on
+/// its own plays as itself, an album or set as the whole of it.
+fn play_project(project: &crate::for_you::Project) -> (Action, bool) {
+    match &project.track {
+        Some(track) => (
+            Action::PlayUris {
+                uris: vec![track.uri.clone()],
+                index: 0,
+            },
+            false,
+        ),
+        None => (
+            Action::PlayContext {
+                uri: project.uri.clone(),
+                offset_uri: None,
+                offset_index: None,
+            },
+            true,
+        ),
+    }
+}
+
+fn kind_label(app: &App, kind: crate::for_you::Kind) -> std::borrow::Cow<'static, str> {
+    match kind {
+        crate::for_you::Kind::Album => gettext(app.locale, "Album"),
+        crate::for_you::Kind::Ep => gettext(app.locale, "EP"),
+        crate::for_you::Kind::Single => gettext(app.locale, "Single"),
+    }
+}
+
+fn project_features(app: &App, projects: &[crate::for_you::Project]) -> Vec<Feature> {
+    projects
+        .iter()
+        .take(FEATURED)
+        .map(|project| {
+            let (play, context) = play_project(project);
+            Feature {
+                uri: project.uri.clone(),
+                name: project.name.clone(),
+                artists: project.artists.clone(),
+                art: project.image(500).map(str::to_owned),
+                art_small: project.image(120).map(str::to_owned),
+                label: match project.kind {
+                    crate::for_you::Kind::Album => gettext(app.locale, "New album for you"),
+                    crate::for_you::Kind::Ep => gettext(app.locale, "New EP for you"),
+                    crate::for_you::Kind::Single => gettext(app.locale, "New single for you"),
+                }
+                .into_owned(),
+                reason: project.reason.clone(),
+                play,
+                context,
+            }
+        })
+        .collect()
+}
+
+fn song_features(app: &App, picks: &[crate::for_you::Pick]) -> Vec<Feature> {
+    let uris: Vec<String> = picks.iter().map(|pick| pick.track.uri.clone()).collect();
+    picks
+        .iter()
+        .take(FEATURED)
+        .enumerate()
+        .map(|(index, pick)| Feature {
+            uri: pick.track.uri.clone(),
+            name: pick.track.name.clone(),
+            artists: pick.track.artists.clone(),
+            art: pick.track.image(500).map(str::to_owned),
+            art_small: pick.track.image(120).map(str::to_owned),
+            label: gettext(app.locale, "Picked for you").into_owned(),
+            reason: pick.reason.clone(),
+            play: Action::PlayUris {
+                uris: uris.clone(),
+                index: index as u32,
+            },
+            context: false,
+        })
+        .collect()
+}
+
+/// The first thing on Home: the best of what's new, or else the best pick, large,
+/// in its own colour, with the next few beside it. It says why it's here.
+fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
     use super::kit::motion;
     let palette = app.palette;
     let width = ui.available_width();
     const HEIGHT: f32 = 268.0;
     // With nothing to show and nothing on its way, there's no card to hold a place for.
-    if picks.is_empty() && !app.for_you.is_loading() {
+    if features.is_empty() && !app.for_you.is_loading() {
         return;
     }
     let (rect, _) = ui.allocate_exact_size(egui::vec2(width, HEIGHT), egui::Sense::hover());
     if !ui.is_rect_visible(rect) {
         return;
     }
-    let Some(first) = picks.first() else {
+    let Some(first) = features.first() else {
         ui.painter().rect_filled(rect, 18.0, palette.surface);
         if app.for_you.is_loading() {
             motion::glint(
@@ -110,8 +231,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
         }
         return;
     };
-    let uris: Vec<String> = picks.iter().map(|pick| pick.track.uri.clone()).collect();
-    let art = first.track.image(500);
+    let art = first.art.as_deref();
     let tint = app
         .tint_for(art)
         .map(super::glow_color)
@@ -149,14 +269,14 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
     block.spacing_mut().item_spacing.y = 8.0;
     theme::text(
         &mut block,
-        gettext(app.locale, "Picked for you"),
+        first.label.as_str(),
         theme::medium(13.0),
         palette.secondary,
     );
-    let title_color = super::kit::Source::of(&first.track.uri).color(&palette);
+    let title_color = super::kit::Source::of(&first.uri).color(&palette);
     let title = widgets::ellipsized(
         &block,
-        &first.track.name,
+        &first.name,
         theme::semibold(30.0),
         title_color,
         words.width(),
@@ -166,7 +286,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
     widgets::artist_links(
         &mut block,
         app,
-        &first.track.artists,
+        &first.artists,
         theme::regular(14.0),
         palette.text,
     );
@@ -179,9 +299,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
     block.add_space(4.0);
     block.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
-        let current = app
-            .current_track_uri()
-            .is_some_and(|uri| uri == first.track.uri);
+        let current = first.is_current(app);
         let playing = current && app.believed_playing();
         if theme::circle_button(
             ui,
@@ -201,10 +319,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
             app.actions.push(if current {
                 Action::TogglePlay
             } else {
-                Action::PlayUris {
-                    uris: uris.clone(),
-                    index: 0,
-                }
+                first.play.clone()
             });
         }
     });
@@ -214,7 +329,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
             egui::pos2(rect.right() - 16.0, rect.bottom() - 18.0),
         );
         let row_height = list.height() / 4.0;
-        for (index, pick) in picks.iter().skip(1).take(4).enumerate() {
+        for (index, feature) in features.iter().skip(1).take(4).enumerate() {
             let row = egui::Rect::from_min_size(
                 list.min + egui::vec2(0.0, index as f32 * row_height),
                 egui::vec2(list.width(), row_height),
@@ -247,7 +362,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
             widgets::paint_cover(
                 ui,
                 &palette,
-                pick.track.image(120),
+                feature.art_small.as_deref(),
                 art_rect,
                 6.0,
                 Icon::Music,
@@ -255,13 +370,11 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
             );
             let left = art_rect.right() + 10.0;
             let room = (row.right() - left - 6.0).max(10.0);
-            let color = super::kit::Source::of(&pick.track.uri).color(&palette);
-            let name =
-                widgets::ellipsized(ui, &pick.track.name, theme::medium(13.5), color, room, 1);
+            let color = super::kit::Source::of(&feature.uri).color(&palette);
+            let name = widgets::ellipsized(ui, &feature.name, theme::medium(13.5), color, room, 1);
             ui.painter()
                 .galley(egui::pos2(left, row.center().y - 18.0), name, color);
-            let artist = pick
-                .track
+            let artist = feature
                 .artists
                 .first()
                 .map_or("", |artist| artist.name.as_str());
@@ -273,20 +386,94 @@ fn featured(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
                 palette.secondary,
             );
             if response.clicked() {
-                app.actions.push(Action::PlayUris {
-                    uris: uris.clone(),
-                    index: index as u32 + 1,
+                app.actions.push(if feature.is_current(app) {
+                    Action::TogglePlay
+                } else {
+                    feature.play.clone()
                 });
             }
         }
     }
 }
 
+/// The new projects past the featured card's: albums, EPs and singles just out
+/// from the artists played most, on any source.
+fn new_for_you(app: &mut App, ui: &mut egui::Ui, projects: &[crate::for_you::Project]) {
+    let rest: Vec<_> = projects.iter().skip(FEATURED).cloned().collect();
+    if rest.is_empty() {
+        return;
+    }
+    let palette = app.palette;
+    widgets::shelf(
+        ui,
+        &palette,
+        "new-for-you",
+        &gettext(app.locale, "New for you"),
+        |ui| {
+            for project in &rest {
+                project_card(app, ui, project);
+            }
+        },
+    );
+}
+
+fn project_card(app: &mut App, ui: &mut egui::Ui, project: &crate::for_you::Project) {
+    let palette = app.palette;
+    let artists =
+        crate::api::models::join_names(project.artists.iter().map(|artist| artist.name.as_str()));
+    let kind = kind_label(app, project.kind);
+    let subtitle = if artists.is_empty() {
+        kind.into_owned()
+    } else {
+        format!("{kind} • {artists}")
+    };
+    let (play, context) = play_project(project);
+    let current = if context {
+        app.playing_context_uri().as_deref() == Some(project.uri.as_str())
+    } else {
+        app.current_track_uri()
+            .is_some_and(|uri| uri == project.uri)
+    };
+    let card_art = app.art_px(widgets::CARD_ART);
+    let card = widgets::card(
+        ui,
+        app,
+        project.image(card_art),
+        &project.name,
+        &subtitle,
+        widgets::CardCover::square(current && app.believed_playing()),
+    );
+    if card.play {
+        app.actions.push(if current {
+            Action::TogglePlay
+        } else {
+            play.clone()
+        });
+    }
+    if card.clicked {
+        // A song out on its own has no page of its own, so it plays.
+        app.actions
+            .push(match (&project.track, Page::from_uri(&project.uri)) {
+                (None, Some(page)) => Action::Open(page),
+                _ => play,
+            });
+    }
+    egui::Popup::context_menu(&card.response)
+        .id(ui.make_persistent_id(("home-new-for-you-menu", &project.uri)))
+        .frame(widgets::menu_frame(&palette))
+        .show(|ui| match &project.track {
+            Some(track) => {
+                widgets::item_menu(ui, app, &PlayableItem::Track(track.clone()), None, None)
+            }
+            None => widgets::context_menu_items(ui, app, &project.uri, &project.name, None),
+        });
+}
+
 /// More of what's on the featured card, across the sources.
-fn more_for_you(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
+fn more_for_you(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick], skip: usize) {
     let tracks: Vec<_> = picks
         .iter()
-        .skip(5)
+        .skip(skip)
         .map(|pick| pick.track.clone())
         .collect();
     if tracks.is_empty() {

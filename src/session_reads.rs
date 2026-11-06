@@ -485,6 +485,113 @@ pub async fn play_counts(
     Ok(counts)
 }
 
+/// An artist's newest releases, from the overview Spotify's own artist page
+/// reads: the latest, then the first albums and singles, each once. One
+/// request over the playback session, without the Web API's quota.
+pub async fn latest_releases(
+    session: &Session,
+    web: &crate::api::ApiClient,
+    artist: &ArtistRef,
+) -> anyhow::Result<Vec<Album>> {
+    let id = artist
+        .id
+        .as_deref()
+        .filter(|id| id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        .ok_or_else(|| anyhow::anyhow!("not a Spotify artist"))?;
+    let login = session.login5().auth_token().await?;
+    let client_token = session.spclient().client_token().await?;
+    let query = serde_json::json!({
+        "operationName": "queryArtistOverview",
+        "variables": {"uri": format!("spotify:artist:{id}"), "locale": "", "includePrerelease": false},
+        "extensions": {
+            "persistedQuery": {"version": 1, "sha256Hash": ARTIST_OVERVIEW_HASH}
+        }
+    });
+    let body = web
+        .partner_request(&login.access_token, &client_token, &query)
+        .await?;
+    let discography = body
+        .pointer("/data/artistUnion/discography")
+        .ok_or_else(|| anyhow::anyhow!("Spotify answered without the artist's releases"))?;
+    Ok(overview_releases(discography, artist))
+}
+
+/// How many of an artist's albums, and of their singles, are read besides the
+/// latest release.
+const OVERVIEW_RELEASES: usize = 2;
+
+fn overview_releases(discography: &serde_json::Value, artist: &ArtistRef) -> Vec<Album> {
+    let firsts = |group: &str| {
+        discography
+            .pointer(&format!("/{group}/items"))
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|item| item.pointer("/releases/items/0"))
+            .take(OVERVIEW_RELEASES)
+    };
+    let mut found: Vec<Album> = Vec::new();
+    for release in discography
+        .get("latest")
+        .into_iter()
+        .chain(firsts("albums"))
+        .chain(firsts("singles"))
+    {
+        if let Some(album) = overview_release(release, artist)
+            && !found.iter().any(|known| known.uri == album.uri)
+        {
+            found.push(album);
+        }
+    }
+    found
+}
+
+fn overview_release(data: &serde_json::Value, artist: &ArtistRef) -> Option<Album> {
+    let uri = data.get("uri")?.as_str()?;
+    let id = uri
+        .strip_prefix("spotify:album:")
+        .filter(|id| id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric()))?;
+    let date = data.get("date")?;
+    let part = |name: &str| date.get(name).and_then(serde_json::Value::as_u64);
+    let release_date = match (
+        part("year")?,
+        part("month"),
+        part("day"),
+        date.get("precision").and_then(serde_json::Value::as_str),
+    ) {
+        (year, Some(month), Some(day), Some("DAY") | None) => {
+            format!("{year:04}-{month:02}-{day:02}")
+        }
+        (year, Some(month), _, Some("MONTH" | "DAY") | None) => format!("{year:04}-{month:02}"),
+        (year, ..) => format!("{year:04}"),
+    };
+    let images = data
+        .pointer("/coverArt/sources")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|source| serde_json::from_value::<Image>(source.clone()).ok())
+        .filter(|image| image.url.starts_with("https://"))
+        .collect();
+    Some(Album {
+        id: id.to_owned(),
+        uri: uri.to_owned(),
+        name: data.get("name")?.as_str()?.to_owned(),
+        album_type: data
+            .get("type")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_ascii_lowercase),
+        total_tracks: data
+            .pointer("/tracks/totalCount")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|count| u32::try_from(count).ok()),
+        release_date: Some(release_date),
+        images,
+        artists: vec![artist.clone()],
+        ..Album::default()
+    })
+}
+
 /// Adds the counts of a Pathfinder list of `{track: {uri, playcount}}`
 /// rows, and says how many rows it held. Spotify sends each count as a
 /// string of digits.
@@ -2072,6 +2179,50 @@ mod tests {
     use librespot_metadata::Metadata as _;
 
     use super::*;
+
+    /// The overview's shape as Spotify sent it on 2026-11-06.
+    #[test]
+    fn an_artists_latest_releases_come_from_the_overview_once_each() {
+        let release = |id: &str, name: &str, kind: &str, date: serde_json::Value| {
+            serde_json::json!({
+                "uri": format!("spotify:album:{id}"), "id": id, "name": name, "type": kind,
+                "date": date, "tracks": {"totalCount": 1},
+                "coverArt": {"sources": [{"url": "https://i.scdn.co/image/a", "width": 640, "height": 640}]}
+            })
+        };
+        let latest = release(
+            "34WxqtlGgLB9acKnJZxKGt",
+            "stargirl",
+            "SINGLE",
+            serde_json::json!({"year": 2026, "month": 11, "day": 6, "precision": "DAY"}),
+        );
+        let discography = serde_json::json!({
+            "latest": latest,
+            "albums": {"items": [{"releases": {"items": [release(
+                "4oTVSAjT10LvwUVgdsWWvL", "+dB", "ALBUM",
+                serde_json::json!({"year": 2025, "month": 11, "day": 28, "precision": "DAY"}),
+            )]}}]},
+            "singles": {"items": [
+                {"releases": {"items": [latest]}},
+                {"releases": {"items": [release(
+                    "77s9QqbP2iOl9Cx22x8Eop", "Overkill", "SINGLE",
+                    serde_json::json!({"year": 2026, "month": 3, "precision": "MONTH"}),
+                )]}}
+            ]}
+        });
+        let artist = ArtistRef {
+            id: Some("76XW9mOApt8NO24u2Yqzl1".into()),
+            name: "Gunnr".into(),
+            uri: Some("spotify:artist:76XW9mOApt8NO24u2Yqzl1".into()),
+        };
+        let found = overview_releases(&discography, &artist);
+        let names: Vec<&str> = found.iter().map(|album| album.name.as_str()).collect();
+        assert_eq!(names, ["stargirl", "+dB", "Overkill"]);
+        assert_eq!(found[0].release_date.as_deref(), Some("2026-11-06"));
+        assert_eq!(found[0].album_type.as_deref(), Some("single"));
+        assert_eq!(found[0].artists, vec![artist]);
+        assert_eq!(found[2].release_date.as_deref(), Some("2026-03"));
+    }
 
     #[test]
     fn related_artist_cards_keep_order_identity_and_images() {

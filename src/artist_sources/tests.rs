@@ -501,6 +501,7 @@ fn only_sets_spotify_lacks_are_listed_with_albums_first() {
         is_album: Some(is_album),
         track_count: Some(songs),
         tracks: Vec::new(),
+        ..Default::default()
     };
     let catalogue = Catalogue::new("slayr", ["FABULA NOVA"]);
     let kept = sort_sets(
