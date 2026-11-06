@@ -121,6 +121,10 @@ const ASSUMED_CONTEXT_HOLD: Duration = Duration::from_secs(8);
 /// has not caught up yet. Spotify can take a moment to report a command it
 /// has already carried out.
 const PLAYBACK_HOLD: Duration = Duration::from_secs(6);
+/// The pending-play key a pause or resume is recorded under. A toggle is
+/// not a load: nothing has to be fetched before the state asked for can
+/// show, so it never counts as a play waiting to start.
+const TOGGLE_PENDING_KEY: &str = "::toggle";
 /// Delay before checking playback again after a command.
 const REMOTE_RECHECK: Duration = Duration::from_millis(1200);
 /// Delay before checking the queue after a local change.
@@ -2678,7 +2682,14 @@ impl App {
         if self.hybrid_owned() {
             return self.now_playing().is_some_and(|n| n.loading);
         }
-        self.pending_fresh() && !self.pending_play_keys.is_empty()
+        // A pause or resume waits for its answer, but nothing has to load:
+        // its pseudo-request never counts here, so the player bar keeps
+        // showing the state that was asked for instead of a spinner.
+        self.pending_fresh()
+            && self
+                .pending_play_keys
+                .iter()
+                .any(|key| key != TOGGLE_PENDING_KEY)
     }
 
     fn pending_fresh(&self) -> bool {
@@ -11120,7 +11131,7 @@ impl App {
                     }
                     return;
                 }
-                self.set_play_pending(vec!["::toggle".into()]);
+                self.set_play_pending(vec![TOGGLE_PENDING_KEY.into()]);
                 if playing == Some(true) {
                     self.remote(RemoteAction::Pause, device_id);
                 } else {
@@ -16420,6 +16431,84 @@ mod tests {
         assert_eq!(
             app.playing_context_uri().as_deref(),
             Some("spotify:playlist:phone")
+        );
+    }
+
+    /// Pressing pause or play shows the state asked for at once, with no
+    /// spinner standing in for the button: a toggle is not a load. A late
+    /// answer from before the press does not flip it back, and Spotify's
+    /// agreement releases the held state without moving it.
+    #[test]
+    fn a_toggle_shows_its_state_at_once_and_holds_it_past_a_stale_answer() {
+        let ctx = egui::Context::default();
+        let mut app = headless_app();
+        app.local_ready = false;
+        app.selected_device = Some("speaker".into());
+        let snapshot = |is_playing: bool| RemoteSnapshot {
+            state: PlaybackState {
+                device: Some(crate::api::models::Device {
+                    id: Some("speaker".into()),
+                    name: "Speaker".into(),
+                    is_active: true,
+                    ..Default::default()
+                }),
+                item: Some(queued_song("spotify:track:playing")),
+                is_playing,
+                ..Default::default()
+            },
+            received_at: Instant::now(),
+        };
+        app.remote = Some(snapshot(true));
+        assert!(app.believed_playing());
+
+        // Pause on the disc: the pause icon replaces the play at once.
+        app.apply(Action::TogglePlay, &ctx);
+        assert!(
+            !app.believed_playing(),
+            "the state the press asked for shows at once"
+        );
+        assert!(
+            !app.any_play_pending(),
+            "a pause is not a load, so no spinner waits for the player"
+        );
+
+        // A poll taken after the press that still tells the story from
+        // before it does not revert the press.
+        app.remote = Some(snapshot(true));
+        assert!(
+            !app.believed_playing(),
+            "a stale answer from before the press does not win"
+        );
+
+        // Spotify agreeing releases the hold without moving the state.
+        app.remote_poll_seq = 1;
+        app.handle_api(ApiResponse::PlaybackState {
+            seq: 1,
+            result: Ok(Some(snapshot(false).state)),
+        });
+        assert!(!app.believed_playing());
+        assert!(
+            app.optimistic_playing.is_none(),
+            "agreement releases the held state"
+        );
+    }
+
+    /// A play that still has to start something keeps its pending sign, so
+    /// the wait stays visible only where something genuinely loads.
+    #[test]
+    fn a_play_waiting_to_start_keeps_its_pending_sign() {
+        let mut app = headless_app();
+        app.set_play_pending(vec!["spotify:playlist:mix".into()]);
+        assert!(
+            app.any_play_pending(),
+            "a play that must start still shows a sign of waiting"
+        );
+
+        // The toggle's own request never reads as a start waiting to happen.
+        app.set_play_pending(vec![TOGGLE_PENDING_KEY.into()]);
+        assert!(
+            !app.any_play_pending(),
+            "a plain toggle is not a load and shows no spinner"
         );
     }
 

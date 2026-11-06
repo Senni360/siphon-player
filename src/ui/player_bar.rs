@@ -1419,64 +1419,44 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
         app.actions.push(Action::Previous);
     }
 
+    // The disc answers the press at once. Its icon is the state that was
+    // asked for (`now.playing` already carries the optimistic answer), and
+    // the button cross-grows the old glyph into the new one, whether it was
+    // the pointer, a key or another device that changed it. Only a song
+    // still being fetched keeps a sign of waiting: a quiet arc that leaves
+    // the target icon in place, instead of the whole button becoming a
+    // spinner.
     let disc = slot(widths[2]);
-    if loading || app.any_play_pending() {
-        ui.painter()
-            .circle_filled(disc.center(), 18.0, palette.text);
-        let mut cell = centered(ui, disc);
-        theme::spinner(&mut cell, 22.0, palette.window);
+    let icon = if playing {
+        Icon::PauseFilled
     } else {
-        let icon = if playing {
-            Icon::PauseFilled
+        Icon::PlayFilled
+    };
+    let hover = if palette.dark {
+        egui::Color32::WHITE
+    } else {
+        palette.text
+    };
+    let mut cell = centered(ui, disc);
+    if theme::circle_button(
+        &mut cell,
+        icon,
+        36.0,
+        palette.text,
+        hover,
+        palette.window,
+        &if playing {
+            gettext(app.locale, "Pause")
         } else {
-            Icon::PlayFilled
-        };
-        let hover = if palette.dark {
-            egui::Color32::WHITE
-        } else {
-            palette.text
-        };
-        let mut cell = centered(ui, disc);
-        if theme::circle_button(
-            &mut cell,
-            icon,
-            36.0,
-            palette.text,
-            hover,
-            palette.window,
-            &if playing {
-                gettext(app.locale, "Pause")
-            } else {
-                gettext(app.locale, "Play")
-            },
-        )
-        .clicked()
-        {
-            app.actions.push(Action::TogglePlay);
-        }
-    }
-
-    // However it was asked for (a key, another device, the disc), starting and
-    // stopping sends a ring out of the disc.
-    let was_playing = egui::Id::new("island-was-playing");
-    if ui
-        .ctx()
-        .data(|data| data.get_temp::<bool>(was_playing))
-        .is_some_and(|was| was != playing)
+            gettext(app.locale, "Play")
+        },
+    )
+    .clicked()
     {
-        kit_motion::begin(ui.ctx(), was_playing.with("ring"), kit_motion::RIPPLE);
+        app.actions.push(Action::TogglePlay);
     }
-    ui.ctx()
-        .data_mut(|data| data.insert_temp(was_playing, playing));
-    if let Some(t) = kit_motion::running(ui.ctx(), was_playing.with("ring")) {
-        kit_motion::ring(
-            ui.painter(),
-            disc.center(),
-            18.0,
-            34.0,
-            t,
-            palette.text.gamma_multiply(0.7),
-        );
+    if loading || app.any_play_pending() {
+        starting_arc(ui, disc.center(), palette.window);
     }
 
     let forward = slot(widths[3]).translate(vec2(lean(ui, "next-lean", 1.0), 0.0));
@@ -1738,6 +1718,33 @@ fn state_dot(ui: &egui::Ui, button: Rect, on: bool, palette: &theme::Palette, na
             palette.accent.gamma_multiply(t),
         );
     }
+}
+
+/// A quiet arc circling the disc's icon while the song on its way still has
+/// to load: the disc stays the control it always is, showing the state that
+/// was asked for, and the arc only says the first sound is a moment away.
+/// It loops, so when less motion is asked for it stays off and the icon
+/// speaks for itself.
+fn starting_arc(ui: &egui::Ui, center: egui::Pos2, color: egui::Color32) {
+    if crate::motion::seconds(ui.ctx(), 1.0) <= 0.0 {
+        return;
+    }
+    ui.ctx()
+        .request_repaint_after(std::time::Duration::from_millis(33));
+    let radius = 12.0;
+    let sweep = 250_f64.to_radians();
+    let rotation = ui.input(|input| input.time) * std::f64::consts::TAU * 1.2;
+    let points = (0..20)
+        .map(|index| {
+            let angle = rotation + sweep * f64::from(index) / 19.0;
+            let (sin, cos) = angle.sin_cos();
+            center + radius * vec2(cos as f32, sin as f32)
+        })
+        .collect();
+    ui.painter().add(egui::Shape::line(
+        points,
+        egui::Stroke::new(1.5, color.gamma_multiply(0.3)),
+    ));
 }
 
 fn extras(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, transport_right: f32) {

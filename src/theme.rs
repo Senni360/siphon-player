@@ -853,7 +853,7 @@ pub fn circle_button(
         let previous = ctx.data(|data| data.get_temp::<Icon>(swap_id));
         if previous.is_some_and(|previous| previous != icon) {
             ctx.data_mut(|data| data.insert_temp(swap_id.with("from"), previous));
-            motion::begin(ctx, swap_id.with("swap"), motion::FEEDBACK * 1.6);
+            motion::begin(ctx, swap_id.with("swap"), motion::FEEDBACK);
         }
         ctx.data_mut(|data| data.insert_temp(swap_id, icon));
         let icon_size = diameter * 0.46;
