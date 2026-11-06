@@ -1216,9 +1216,12 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
                 theme::text(ui, tempo, theme::regular(12.0), palette.secondary);
             }
         }
-        // A beat's tempo and key, quiet, after they have settled. The
-        // label fades in once known (see `crate::beat_analysis`).
-        if let Some((bpm, key)) = app.known_bpm_key(&now.uri) {
+        // A beat's tempo and key, heard from the audio, quiet, after they have
+        // settled (see `crate::beat_analysis`). What the title or description
+        // states wins and shows at once, above; this fills in when they don't.
+        if tempo.is_none()
+            && let Some((bpm, key)) = app.known_bpm_key(&now.uri)
+        {
             let arrived = kit_motion::toward(
                 ui.ctx(),
                 egui::Id::new("island-beat-key").with(&now.uri),
