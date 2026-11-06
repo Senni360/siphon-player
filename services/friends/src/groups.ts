@@ -18,6 +18,16 @@ export const fullRights = (): Rights => ({ share: true, host: true, queue: true,
 
 export const newInvite = () => randomBytes(12).toString('base64url');
 
+/** A device lasts while it's used. An account keeps at most MAX_DEVICES, and
+ *  when it holds too many, the one least recently seen goes — never one still
+ *  being used, however long ago it was added. The rows keep their order. */
+export function keepDevices(devices: Device[]): Device[] {
+  if (devices.length <= MAX_DEVICES) return devices;
+  const seen = (device: Device) => device.seen ?? device.created_at;
+  const keep = new Set([...devices].sort((a, b) => seen(b) - seen(a)).slice(0, MAX_DEVICES));
+  return devices.filter(device => keep.has(device));
+}
+
 /** Gives a document from before groups its one group, holding everyone in it. */
 export function withGroups(state: State): Group[] {
   if (!state.groups) {
@@ -92,7 +102,7 @@ export function mergeUsers(state: State, from: User, into: User) {
     if (group.owner_id === from.user_id) group.owner_id = into.user_id;
   }
   // Their other computers keep working, as the merged account.
-  into.devices = [...into.devices ?? [], { id: randomUUID(), hash: from.secret_hash, name: 'Earlier device', created_at: 0 }, ...from.devices ?? []].slice(-MAX_DEVICES);
+  into.devices = keepDevices([...into.devices ?? [], { id: randomUUID(), hash: from.secret_hash, name: 'Earlier device', created_at: 0 }, ...from.devices ?? []]);
   state.users = state.users.filter(u => u !== from);
 }
 

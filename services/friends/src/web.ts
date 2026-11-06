@@ -8,7 +8,15 @@ import type { Storage } from './storage.js';
 
 export const WEB_HOST = 'encore.senni.dev';
 const COOKIE = 'encore_gate';
-const KEEP_SECONDS = 365 * 86400;
+// The gate stays open to whoever keeps coming back: the cookie is good for
+// about ninety days and slides forward on use, so a phone used at least every
+// ninety days never has to type the code again. A changed code locks everyone
+// out, always.
+const KEEP_SECONDS = 90 * 86400;
+/** Once a cookie is older than its first few days, using it brings a fresh one. */
+const SLIDE_AFTER_SECONDS = 3 * 86400;
+/** A passing cookie with less than this left is renewed on use. */
+const RENEW_WITHIN_MS = (KEEP_SECONDS - SLIDE_AFTER_SECONDS) * 1000;
 const ATTEMPTS_PER_HOUR = 20;
 
 /** Spacing and case don't matter on a phone's keyboard. */
@@ -23,13 +31,18 @@ export function gateCookie(code: string, now: number): string {
   return `${COOKIE}=${until}.${sign(until, code)}; Path=/; Max-Age=${KEEP_SECONDS}; HttpOnly; Secure; SameSite=Lax`;
 }
 
-export function passedGate(cookies: string | null | undefined, code: string, now: number): boolean {
+/** The moment a passing gate cookie expires, or null when there is none. */
+export function gateUntil(cookies: string | null | undefined, code: string, now: number): number | null {
   const found = cookies?.split(';').map(part => part.trim()).find(part => part.startsWith(`${COOKIE}=`));
   const [until, signature] = found?.slice(COOKIE.length + 1).split('.') ?? [];
-  if (!until || !signature || !/^\d+$/.test(until) || Number(until) <= now) return false;
+  if (!until || !signature || !/^\d+$/.test(until) || Number(until) <= now) return null;
   const expected = Buffer.from(sign(Number(until), code));
   const given = Buffer.from(signature);
-  return expected.length === given.length && timingSafeEqual(expected, given);
+  return expected.length === given.length && timingSafeEqual(expected, given) ? Number(until) : null;
+}
+
+export function passedGate(cookies: string | null | undefined, code: string, now: number): boolean {
+  return gateUntil(cookies, code, now) !== null;
 }
 
 export function codeMatches(given: string, code: string): boolean {
@@ -69,11 +82,14 @@ const HEADERS = {
 
 export interface WebAnswer { status: number; headers: Record<string, string>; body: string | Buffer }
 
-const page = (status: number, name: string): WebAnswer => ({
+const page = (status: number, name: string, extra: Record<string, string> = {}): WebAnswer => ({
   status,
-  headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+  headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', ...extra },
   body: file(name),
 });
+/** The page that asks for the code: the front door for a stranger, or a regular
+ *  whose cookie ran out because they were away for the whole of its life. */
+const deferringGate = (path: string) => page(path === '/' ? 200 : 401, 'gate.html');
 
 /** The answer to a browser on the web address, or null when it's the API's to answer. */
 export async function webAnswer(
@@ -97,8 +113,15 @@ export async function webAnswer(
   // The gate needs its own look and its one script to work before the code is in.
   if (path === '/gate.js') return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT['/app.js'], 'Cache-Control': 'no-store' }, body: file('gate.js') };
   if (path === '/app.css' || path === '/icon.svg' || path === '/manifest.webmanifest' || /^\/icon-\d+\.png$/.test(path) && CONTENT[path]) return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT[path], 'Cache-Control': 'no-cache' }, body: file(path.slice(1)) };
-  if (!code || !passedGate(cookies, code, now)) return page(path === '/' ? 200 : 401, 'gate.html');
-  if (CONTENT[path]) return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT[path], 'Cache-Control': 'no-cache' }, body: file(path.slice(1)) };
+  if (!code) return deferringGate(path);
+  const until = gateUntil(cookies, code, now);
+  if (until === null) return deferringGate(path);
+  // Used, the gate slides forward: an old-style long cookie becomes the
+  // sliding kind at once, and a sliding one older than its first few days is
+  // renewed, so a regular never has to type the code again.
+  const stale = until - now > KEEP_SECONDS * 1000 || until - now < RENEW_WITHIN_MS;
+  const fresh: Record<string, string> = stale ? { 'Set-Cookie': gateCookie(code, now) } : {};
+  if (CONTENT[path]) return { status: 200, headers: { ...HEADERS, 'Content-Type': CONTENT[path], 'Cache-Control': 'no-cache', ...fresh }, body: file(path.slice(1)) };
   // The app routes its own screens, and Spotify returns to /callback.
-  return page(200, 'index.html');
+  return page(200, 'index.html', fresh);
 }

@@ -73,6 +73,62 @@ function toast(message) {
 
 // ---------------------------------------------------------------- the service
 class SignedOut extends Error {}
+// [signout-begin]
+/**
+ * Whether a refused request means this device really was removed. Only the
+ * service's own word counts, and only after being asked again about this very
+ * secret: a transient failure — the network, a timeout, 5xx, 429, a storage
+ * blip, a proxy's or another site's 401 page, Spotify refusing its own token —
+ * never signs the phone out. `probe` asks the service once more whether this
+ * secret still works.
+ */
+async function removedDevice(answer, attached, probe) {
+  if (!attached || answer.status !== 401) return false;
+  const said = await answer.json().catch(() => null);
+  if (said?.error !== 'Sign in to the group') return false;
+  try {
+    const again = await probe();
+    const confirm = await again.json().catch(() => null);
+    return again.status === 401 && confirm?.error === 'Sign in to the group';
+  } catch {
+    return false;  // asking again said nothing for certain: hold the sign-in.
+  }
+}
+// [signout-end]
+
+// ---------------------------------------------------------------- keeping the sign-in
+// iOS quietly puts a site's localStorage away after a while of not opening it,
+// unless that site is on the home screen. So the secret also lives in a
+// first-party cookie only this address can send, and an emptied localStorage
+// fills back from it. The cookie can't be HttpOnly — the page itself must read
+// the secret to send it, and the service only ever stores hashes, so it cannot
+// set this cookie for us. It stays narrow: Secure, SameSite=Strict, Path=/.
+const SECRET_COOKIE = 'encore.device';
+const SECRET_MAX_AGE = 90 * 86400;  // slides forward: rewritten every time the app opens
+function keepSecret(secret) {
+  localStorage.setItem(STORE.secret, secret);
+  document.cookie = `${SECRET_COOKIE}=${secret}; Path=/; Max-Age=${SECRET_MAX_AGE}; SameSite=Strict; Secure`;
+}
+function forgetSecret() {
+  localStorage.removeItem(STORE.secret);
+  document.cookie = `${SECRET_COOKIE}=; Path=/; Max-Age=0; SameSite=Strict; Secure`;
+}
+/** The secret from the backup cookie, if the browser kept it and nothing else. */
+function rememberedSecret() {
+  const held = (document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(`${SECRET_COOKIE}=`)) ?? '').slice(SECRET_COOKIE.length + 1);
+  return /^[a-f0-9]{64}$/.test(held) ? held : null;
+}
+// Where the browser offers it, asking to keep this site's storage slows the
+// quiet clearing of it further.
+function askToKeep() {
+  try { navigator.storage?.persist?.()?.catch?.(() => {}); } catch { /* an old browser */ }
+}
+
+const authHeaders = (secret, group) => ({
+  ...(secret ? { authorization: `Bearer ${secret}` } : {}),
+  ...(group ? { 'x-siphon-group': group } : {}),
+});
+
 async function api(path, method = 'GET', body) {
   const secret = localStorage.getItem(STORE.secret);
   const group = localStorage.getItem(STORE.group);
@@ -80,14 +136,20 @@ async function api(path, method = 'GET', body) {
     method,
     headers: {
       ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(secret ? { authorization: `Bearer ${secret}` } : {}),
-      ...(group ? { 'x-siphon-group': group } : {}),
+      ...authHeaders(secret, group),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  // A 401 might mean this device was removed — or nothing of the sort. Only
+  // the service's own fresh, repeated refusal about this very secret signs
+  // the phone out; never a first word on its own.
   if (answer.status === 401 && secret) {
-    localStorage.removeItem(STORE.secret);
-    throw new SignedOut();
+    const gone = await removedDevice(answer, true, () => fetch('/api/me', { headers: authHeaders(secret, group) }));
+    if (gone) {
+      forgetSecret();
+      throw new SignedOut();
+    }
+    throw new Error("Encore couldn't be reached for a moment.");
   }
   const value = await answer.json().catch(() => ({}));
   if (!answer.ok) throw new Error(value.error || 'Something went wrong.');
@@ -139,7 +201,7 @@ async function spotifyReturn() {
   if (!params.get('code') || !state || params.get('state') !== state || !verifier) throw new Error("That sign-in didn't match. Try again.");
   const tokens = await spotifyTokens({ grant_type: 'authorization_code', code: params.get('code'), redirect_uri: redirectUri(), code_verifier: verifier });
   const joined = await api('/auth/spotify', 'POST', { token: tokens.access, device: phoneName() });
-  localStorage.setItem(STORE.secret, joined.secret);
+  keepSecret(joined.secret);
   localStorage.setItem(STORE.name, joined.display_name);
 }
 
@@ -1454,6 +1516,7 @@ function shell() {
 
 function unlink() {
   for (const key of Object.values(STORE)) localStorage.removeItem(key);
+  forgetSecret();
   start();
 }
 
@@ -1489,7 +1552,7 @@ function linkScreen() {
     problem.hidden = true;
     try {
       const linked = await api('/link/claim', 'POST', { code: input.value, device: phoneName() });
-      localStorage.setItem(STORE.secret, linked.secret);
+      keepSecret(linked.secret);
       localStorage.setItem(STORE.name, linked.display_name);
       if (linked.client_id) localStorage.setItem(STORE.client, linked.client_id);
       start();
@@ -1519,7 +1582,15 @@ async function arrive() {
   if (arrival) { toast(arrival); arrival = null; }
 }
 function start() {
+  // The browser may have emptied its storage since last time (iOS does, for
+  // sites gone quiet): the backup cookie puts the sign-in back.
+  if (!localStorage.getItem(STORE.secret)) {
+    const remembered = rememberedSecret();
+    if (remembered) localStorage.setItem(STORE.secret, remembered);
+  }
   if (localStorage.getItem(STORE.secret)) {
+    keepSecret(localStorage.getItem(STORE.secret));  // the backup slides forward
+    askToKeep();
     shell();
     if (!polling) { polling = true; pollState(); }
     listenComputer();

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { createService } from '../src/service.js';
 import { MemoryStorage } from '../src/storage.js';
 import { codeMatches, gateCookie, normalized, passedGate, webAnswer } from '../src/web.js';
@@ -244,13 +245,45 @@ test('the code forgives case and spaces, and nothing else', () => {
 });
 
 test('the gate cookie is signed, expires and needs the current code', () => {
+  const day = 86400_000;
   const cookie = gateCookie(code, 1000).split(';')[0];
   assert.ok(passedGate(`other=1; ${cookie}`, code, 2000));
+  assert.ok(passedGate(cookie, code, 1000 + 89 * day), 'nearly its whole ninety days');
   assert.ok(!passedGate(cookie, 'another code', 2000), 'changing the code locks everyone out');
-  assert.ok(!passedGate(cookie, code, 1000 + 366 * 86400 * 1000), 'expired');
+  assert.ok(!passedGate(cookie, code, 1000 + 91 * day), 'expired');
   assert.ok(!passedGate(cookie.replace(/\.[a-f0-9]{4}/, '.0000'), code, 2000), 'forged');
   assert.ok(!passedGate(undefined, code, 2000));
   assert.ok(!passedGate('encore_gate=abc', code, 2000));
+});
+
+test('a used gate cookie slides forward, renewing when it is a few days old', async () => {
+  const day = 86400_000;
+  const ask = (path: string, cookie: string | undefined, now: number) =>
+    webAnswer('GET', path, cookie, nothing, code, limits(true), 'ip', now);
+  const issued = gateCookie(code, 0).split(';')[0];
+  assert.match(String((await ask('/', issued, 2 * day))!.body), /id="app"/);
+  assert.equal((await ask('/', issued, 2 * day))!.headers['Set-Cookie'], undefined, 'only a few days old: nothing to renew');
+  const renewed = (await ask('/', issued, 4 * day))!.headers['Set-Cookie'];
+  assert.match(renewed, /^encore_gate=\d+\.[a-f0-9]{64}; Path=\/; Max-Age=7776000; HttpOnly; Secure; SameSite=Lax$/);
+  const sliding = renewed.split(';')[0];
+  assert.equal(Number(sliding.slice('encore_gate='.length).split('.')[0]), 4 * day + 90 * day, 'renewed for ninety days from now');
+  assert.equal((await ask('/', sliding, 5 * day))!.headers['Set-Cookie'], undefined, 'and fresh again');
+  assert.ok(!passedGate(sliding, 'another code', 5 * day), 'a renewed cookie needs the current code');
+  // Ninety days without a visit outlives it: the code is asked for again.
+  const gate = await ask('/', sliding, 95 * day);
+  assert.match(String(gate!.body), /encore-gate/);
+  assert.equal(gate!.status, 200);
+});
+
+test('a cookie from before the slide, still good, becomes the sliding kind at once', async () => {
+  const day = 86400_000;
+  const until = 365 * day;  // what the gate used to hand out
+  const signature = createHmac('sha256', `encore-gate:${normalized(code)}`).update(String(until)).digest('hex');
+  const old = `encore_gate=${until}.${signature}`;
+  assert.ok(passedGate(old, code, 1000));
+  const first = await webAnswer('GET', '/', old, nothing, code, limits(true), 'ip', 1000);
+  assert.match(first!.headers['Set-Cookie'] ?? '', /^encore_gate=/, 'renewed into the sliding kind on use');
+  assert.match(String(first!.body), /id="app"/);
 });
 
 test('the web address shows only the gate until the code is in', async () => {

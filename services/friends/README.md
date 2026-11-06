@@ -114,7 +114,9 @@ reads the id with `GET https://api.spotify.com/v1/me`, and answers `201 {user_id
 display_name, secret, created}`. The token is used for that one read and is never
 stored or logged. Each computer gets its own secret, stored hashed. A bearer sent
 along links the identity it names; a second identity of the same person folds into
-the account, and their old secret keeps working as one of its devices.
+the account, and their old secret keeps working as one of its devices. A device
+stays while it's used: an account keeps at most twenty, and when it holds too many
+the one least recently seen is the one that goes.
 
 Every feed, live and playlist request is about one group, named by the
 `X-Siphon-Group` header. Without it a request means the first group, which holds

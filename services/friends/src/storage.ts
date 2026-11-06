@@ -1,7 +1,15 @@
 import { httpsUrl, sourceUrl } from './urls.js';
 
 /** One signed-in computer. The secret it holds is only ever stored hashed. */
-export interface Device { id: string; hash: string; name: string; created_at: number }
+export interface Device {
+  id: string;
+  hash: string;
+  name: string;
+  created_at: number;
+  /** When this device was last used. When the account holds too many, the
+   *  least recently seen is the one that goes, so a used device survives. */
+  seen?: number;
+}
 export interface User {
   user_id: string;
   display_name: string;
@@ -84,7 +92,7 @@ function storedState(value: unknown): State {
       new Set(state.users.map(u => u.secret_hash)).size !== state.users.length ||
       !state.users.every(u => (u.spotify_id === undefined || text(u.spotify_id, 128)) &&
         (u.soundcloud === undefined || !!u.soundcloud && text(u.soundcloud.id, 40) && text(u.soundcloud.username, 100)) &&
-        (u.devices === undefined || Array.isArray(u.devices) && u.devices.length <= 20 && u.devices.every(d => d && id(d.id) && /^[a-f0-9]{64}$/.test(d.hash) && text(d.name, 60) && Number.isSafeInteger(d.created_at)))) ||
+        (u.devices === undefined || Array.isArray(u.devices) && u.devices.length <= 20 && u.devices.every(d => d && id(d.id) && /^[a-f0-9]{64}$/.test(d.hash) && text(d.name, 60) && Number.isSafeInteger(d.created_at) && (d.seen === undefined || Number.isSafeInteger(d.seen) && d.seen >= 0)))) ||
       new Set(state.users.flatMap(u => u.spotify_id ? [u.spotify_id] : [])).size !== state.users.filter(u => u.spotify_id).length ||
       (state.groups !== undefined && !(Array.isArray(state.groups) && state.groups.every(g => g && id(g.id) && text(g.name, 60) && Array.isArray(g.members) && g.members.every(m => m && id(m.user_id) && ['owner', 'admin', 'member'].includes(m.role) && m.rights && typeof m.rights === 'object') && Array.isArray(g.pending) && Array.isArray(g.removed)))) ||
       (state.playlists !== undefined && !(Array.isArray(state.playlists) && state.playlists.every(p => p && id(p.id) && id(p.group_id) && id(p.by) && text(p.name, 100) && Number.isSafeInteger(p.count))))) {

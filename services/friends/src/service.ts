@@ -6,7 +6,7 @@ import { audioRoute, type AudioStore } from './audio.js';
 import { HttpError, body, fail, https, json, text, validateUrl } from './http.js';
 import { createLive, song } from './live.js';
 import { createRemote } from './remote.js';
-import { FIRST_GROUP, MAX_DEVICES, admitPending, fullRights, groupById, groupRoute, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
+import { FIRST_GROUP, admitPending, fullRights, groupById, groupRoute, keepDevices, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
 import type { Payload, Post, SharedPlaylist, State, Storage, User } from './storage.js';
 import { describe, noJev, titleReadings, type Ask, type Track } from './jev.js';
 
@@ -118,6 +118,30 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
   const remote = createRemote(storage, clock);
   let roster: { state: State; until: number } | null = null;
   const liveCalls = new Map<string, { count: number; until: number }>();
+  // When each device here was last noticed, so a phone that's constantly used
+  // never pays for a write: at most once an hour per device, and only a real
+  // write when the remembered time is a day old.
+  const SEEN_EVERY_MS = 3600_000;
+  const SEEN_FRESH_MS = 24 * 3600_000;
+  const seenTimes = new Map<string, number>();
+  /** Notes that a device is being used, which is what keeps it from being the
+   *  one pruned when the account holds too many. A tiny write now and then;
+   *  nothing is lost when it fails, so it may never block the answer. */
+  async function noteSeen(secretHash: string, signal: AbortSignal): Promise<void> {
+    const now = clock();
+    if (seenTimes.has(secretHash) && now - seenTimes.get(secretHash)! < SEEN_EVERY_MS) return;
+    seenTimes.set(secretHash, now);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      signal.throwIfAborted();
+      const state = await storage.read(signal);
+      const device = state.users.flatMap(user => user.devices ?? []).find(d => d.hash === secretHash);
+      if (!device) return; // the account's own first secret: nothing prunes it.
+      if (device.seen !== undefined && now - device.seen < SEEN_FRESH_MS) return;
+      device.seen = now;
+      state.revision++;
+      if (await storage.compareAndSet(state.revision - 1, state, signal)) return;
+    }
+  }
   function liveAllowed(key: string, maximum: number): boolean {
     const now = clock();
     for (const [name, value] of liveCalls) if (value.until <= now) liveCalls.delete(name);
@@ -137,6 +161,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       roster = { state, until: clock() + ROSTER_MS };
       user = member(state, secret_hash);
     }
+    await noteSeen(secret_hash, signal).catch(() => {});
     if (path.startsWith('/live/remote/')) {
       if (!liveAllowed(`${user.user_id}:remote`, REMOTE_CALLS_PER_MINUTE)) return fail(429, 'Too many requests', 60);
       return await remote(request, path, user, signal) ?? fail(404, 'Route not found');
@@ -241,7 +266,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
             state.users.push(account);
             created = true;
           }
-          account.devices = [...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }].slice(-MAX_DEVICES);
+          account.devices = keepDevices([...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }]);
           admitPending(state, account);
           // The owner the deployment names takes the first group once they prove who they are.
           const first = groupById(state, FIRST_GROUP);
@@ -271,7 +296,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         const secret = randomBytes(32).toString('hex');
         const name = await change(storage, s => {
           const account = s.users.find(u => u.user_id === link.user_id) ?? fail(404, 'That account is gone');
-          account.devices = [...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }].slice(-MAX_DEVICES);
+          account.devices = keepDevices([...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }]);
           return account.display_name;
         }, signal);
         roster = null;
@@ -282,6 +307,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       const secret_hash = hash(bearer.slice(7));
       const state = await storage.read(signal);
       const user = member(state, secret_hash);
+      await noteSeen(secret_hash, signal).catch(() => {});
       if (path === '/link/start' && method === 'POST') {
         if (!await storage.limit(`linkstart:${user.user_id}`, 10, 3600, signal)) return fail(429, 'Too many codes', 3600);
         const input = await body(request, signal, 1024);

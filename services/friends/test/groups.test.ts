@@ -74,6 +74,31 @@ test('a removed device stops working at once', async () => {
   assert.equal((await call(laptop.secret, 'GET', '/account')).status, 401);
 });
 
+test('a device in use is never the one that goes when the account is full', async () => {
+  const { call, signIn, advance } = world();
+  // Twenty devices fit. Each is added an hour after the one before.
+  const devices: { secret: string }[] = [];
+  for (let i = 0; i < 21; i++) {
+    advance(3600_000);
+    devices.push(await signIn('senni', `Device${i}`));
+  }
+  // The twenty-first arrived: the earliest, never used, is the one that went.
+  assert.equal((await call(devices[0].secret, 'GET', '/me')).status, 401);
+  assert.equal((await call(devices[1].secret, 'GET', '/me')).status, 200);
+
+  // A day and an hour later, the second device is used again, and then one
+  // more arrives: the one that goes is the least recently seen, not the used one.
+  advance(25 * 3600_000);
+  assert.equal((await call(devices[1].secret, 'GET', '/me')).status, 200);
+  advance(3600_000);
+  devices.push(await signIn('senni', 'Device21'));
+  assert.equal((await call(devices[1].secret, 'GET', '/me')).status, 200, 'the used one survives');
+  assert.equal((await call(devices[2].secret, 'GET', '/me')).status, 401, 'the one seen longest ago goes');
+  assert.equal((await call(devices[20].secret, 'GET', '/me')).status, 200, 'the recent arrivals survive');
+  const { body: account } = await call(devices[20].secret, 'GET', '/account');
+  assert.equal(account.devices.length, 20, 'the account is bounded');
+});
+
 test('a member from before accounts keeps everything when they sign in, and two identities fold into one', async () => {
   const { call, signIn, legacy } = world();
   const first = await legacy('Senni');
