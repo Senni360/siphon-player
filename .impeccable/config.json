@@ -1,3 +1,15 @@
 {
-  "buildPath": "comp"
+  "buildPath": "comp",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-11-05T20:07:20.291Z",
+        "reason": "DESIGN.md names Geist as Encore's interface face; the summary page follows the product's design system"
+      }
+    ]
+  }
 }
