@@ -1,5 +1,5 @@
 {
-  "functions": { "api/index.ts": { "includeFiles": "assets/**" } },
+  "functions": { "api/index.ts": { "includeFiles": "assets/**", "maxDuration": 300 } },
   "rewrites": [
     { "source": "/((?!api/).*)", "has": [{ "type": "host", "value": "encore.senni.dev" }], "destination": "/api" },
     { "source": "/api/(.*)", "destination": "/api" },

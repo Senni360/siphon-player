@@ -7,8 +7,8 @@ use serde_json::{Value, json};
 use super::*;
 use crate::backend::remote::{RemoteEvent, RemoteRequest};
 use crate::remote::{
-    ANSWER_WITHIN, Command as Phone, Incoming, STATE_AT_LEAST, STATE_EVERY, Snapshot, allowed_uri,
-    song_of, songs,
+    ANSWER_WITHIN, Command as Phone, Incoming, STATE_AT_LEAST, STATE_EVERY, STATE_LOOK, Snapshot,
+    allowed_uri, song_of, songs,
 };
 
 /// How long a code stays usable, which is also how long it's shown.
@@ -28,6 +28,51 @@ pub struct Remote {
     pub asking_code: bool,
     /// Commands that have arrived, carried out on the next frame.
     incoming: Vec<Incoming>,
+    /// What the phone plays itself, while it does.
+    pub there: Option<PlayingThere>,
+}
+
+/// Longer than this without word from the phone, and what it played is forgotten.
+const THERE_FORGOTTEN_MS: i64 = 120_000;
+/// How long a press here shows on the phone's song before the phone agrees.
+const THERE_HOLD: Duration = Duration::from_secs(4);
+
+/// A song playing on the linked phone itself, as Spotify shows another device.
+#[derive(Clone, Debug)]
+pub struct PlayingThere {
+    pub song: crate::friends::PhoneSong,
+    playing: bool,
+    position_ms: f64,
+    /// When `position_ms` was true, here.
+    at: Instant,
+    pub device: Option<String>,
+    /// A press here, shown at once until the phone says the same or time's up.
+    held: Option<(bool, Instant)>,
+}
+
+impl PlayingThere {
+    pub fn playing(&self) -> bool {
+        match self.held {
+            Some((playing, since)) if since.elapsed() < THERE_HOLD => playing,
+            _ => self.playing,
+        }
+    }
+
+    /// Where the song has got to by now.
+    pub fn position_ms(&self) -> u32 {
+        let moved = if self.playing {
+            self.at.elapsed().as_millis() as f64
+        } else {
+            0.0
+        };
+        let at = self.position_ms + moved;
+        let end = if self.song.duration_ms > 0.0 {
+            self.song.duration_ms
+        } else {
+            f64::MAX
+        };
+        at.clamp(0.0, end) as u32
+    }
 }
 
 fn is_question(command: &Phone) -> bool {
@@ -114,6 +159,7 @@ impl App {
             RemoteEvent::Commands(commands) => {
                 self.phone.incoming.extend(commands);
             }
+            RemoteEvent::Phone(word) => self.heard_from_phone(word),
             RemoteEvent::Code(answer) => {
                 self.phone.asking_code = false;
                 let linked = answer.is_ok();
@@ -125,6 +171,72 @@ impl App {
                 self.remote_start();
             }
         }
+    }
+
+    /// Takes in what the phone plays itself. A word older than one already shown
+    /// is passed over, and a press here holds until the phone agrees.
+    fn heard_from_phone(&mut self, word: Option<(crate::friends::PhonePlaying, i64)>) {
+        let Some((phone, age_ms)) = word.filter(|(_, age)| *age < THERE_FORGOTTEN_MS) else {
+            self.phone.there = None;
+            return;
+        };
+        let Some(song) = phone.song.filter(|song| !song.name.is_empty()) else {
+            self.phone.there = None;
+            return;
+        };
+        let at = Instant::now()
+            .checked_sub(Duration::from_millis(age_ms.max(0) as u64))
+            .unwrap_or_else(Instant::now);
+        let held = self.phone.there.as_ref().and_then(|there| {
+            there
+                .held
+                .filter(|(wanted, since)| *wanted != phone.playing && since.elapsed() < THERE_HOLD)
+        });
+        // The same word again, from a look after the stream already said it.
+        if let Some(there) = &self.phone.there
+            && there.song == song
+            && there.playing == phone.playing
+            && there.at > at
+        {
+            return;
+        }
+        self.phone.there = Some(PlayingThere {
+            song,
+            playing: phone.playing,
+            position_ms: phone.position_ms,
+            at,
+            device: phone.device,
+            held,
+        });
+    }
+
+    /// Works the phone's own player, and shows the result here at once.
+    pub(super) fn phone_control(&mut self, kind: &'static str) {
+        if kind == "toggle"
+            && let Some(there) = self.phone.there.as_mut()
+        {
+            there.held = Some((!there.playing(), Instant::now()));
+        }
+        self.backend
+            .send(Command::Remote(RemoteRequest::Control { kind, ms: None }));
+    }
+
+    /// Plays here what the phone was playing, from where it had got to, and stops
+    /// it there: the song moves, as it does between Spotify's devices.
+    pub(super) fn take_from_phone(&mut self) {
+        let Some(there) = self.phone.there.take() else {
+            return;
+        };
+        self.backend.send(Command::Remote(RemoteRequest::Control {
+            kind: "pause",
+            ms: None,
+        }));
+        if !allowed_uri(&there.song.uri) {
+            return;
+        }
+        let mut request = PlayRequest::tracks(vec![there.song.uri.clone()]).starting_at_index(0);
+        request.position_ms = there.position_ms();
+        self.play_request(request, false);
     }
 
     fn remote_start(&mut self) {
@@ -167,12 +279,15 @@ impl App {
         if !self.phone.watched {
             return;
         }
-        ctx.request_repaint_after(STATE_EVERY);
+        ctx.request_repaint_after(STATE_LOOK);
         if self
             .phone
             .last_try
             .is_some_and(|at| at.elapsed() < STATE_EVERY)
         {
+            // Looked just now: look again as soon as allowed, so a change made
+            // in between isn't left for the slow look.
+            ctx.request_repaint_after(STATE_EVERY);
             return;
         }
         self.phone.last_try = Some(Instant::now());

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createService, hash, validateUrl } from '../src/service.js';
 import { MemoryStorage, RedisStorage, configuredStorage, type Storage } from '../src/storage.js';
-const liveOf = (m: MemoryStorage) => ({ liveRead: m.liveRead.bind(m), livePut: m.livePut.bind(m), liveDelete: m.liveDelete.bind(m), liveCas: m.liveCas.bind(m) });
+const liveOf = (m: MemoryStorage) => ({ liveRead: m.liveRead.bind(m), livePut: m.livePut.bind(m), liveDelete: m.liveDelete.bind(m), liveCas: m.liveCas.bind(m), livePublish: m.livePublish.bind(m), liveListen: m.liveListen.bind(m) });
 
 const invite = 'a-long-test-invite';
 const post = { url: 'https://soundcloud.com/friend/song/s-private?secret_token=s-private', source: 'soundcloud', title: 'Beat', artists: ['Friend'], artwork_url: null, duration_ms: 12345, note: 'Listen to this' };

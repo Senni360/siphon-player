@@ -12639,6 +12639,8 @@ impl App {
                 let request = PlayRequest::tracks(uris).starting_at_index(index);
                 self.play_request(request, false);
             }
+            Action::PhoneControl(kind) => self.phone_control(kind),
+            Action::TakeFromPhone => self.take_from_phone(),
             Action::PlayEpisode { uri, resume_ms } => {
                 // A started episode continues from the place the row or card
                 // showed as time left. The playing episode is left where it

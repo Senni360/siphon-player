@@ -80,3 +80,40 @@ test('disconnecting a Node HTTP client aborts its pending Redis operation', { ti
   await finished;
   assert(aborted);
 });
+
+test('an event stream reaches a real HTTP client as it happens, and ends when it leaves', { timeout: 5000 }, async t => {
+  const invite = 'local-stream-test-invite';
+  const { createHandler } = await import('../src/handler.js');
+  const handler = createHandler({ SIPHON_FRIENDS_INVITE_CODE: invite });
+  const server = createServer((req, res) => { void handler(req, res); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+  const joined = await (await fetch(`${base}/join`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ invite_code: invite, display_name: 'Stream listener' }),
+  })).json() as { secret: string };
+  const auth = { authorization: `Bearer ${joined.secret}` };
+  const stop = new AbortController();
+  const stream = await fetch(`${base}/live/remote/events?for=computer`, { headers: auth, signal: stop.signal });
+  assert.equal(stream.status, 200);
+  assert.match(stream.headers.get('content-type') ?? '', /^text\/event-stream/);
+  const reader = stream.body!.pipeThrough(new TextDecoderStream()).getReader();
+  let seen = '';
+  const until = async (text: string) => {
+    while (!seen.includes(text)) {
+      const part = await reader.read();
+      if (part.done) throw new Error(`ended before ${text}`);
+      seen += part.value;
+    }
+  };
+  await until('"t":"phone"');
+  const sent = await fetch(`${base}/live/remote/send`, {
+    method: 'POST', headers: { ...auth, 'content-type': 'application/json' },
+    body: JSON.stringify({ id: '11111111-1111-4111-8111-111111111111', kind: 'toggle' }),
+  });
+  assert.equal(sent.status, 202);
+  await until('{"t":"command"}');
+  stop.abort();
+  await reader.cancel().catch(() => {});
+});

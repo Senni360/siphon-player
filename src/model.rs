@@ -1526,6 +1526,11 @@ impl Toast {
 pub enum Action {
     /// Make a code for a phone to type.
     LinkPhone,
+    /// Works the linked phone's own player while it plays there: `toggle`,
+    /// `next` or `previous`.
+    PhoneControl(&'static str),
+    /// Brings what the phone plays itself over here, from where it is, and stops it there.
+    TakeFromPhone,
     /// Puts songs just removed from a playlist back where they were.
     UndoPlaylistRemoval {
         playlist_id: String,

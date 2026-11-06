@@ -118,10 +118,25 @@ A phone can use this computer through `encore.senni.dev`, once linked with a cod
 in the group panel. The code makes the phone another device of the same group account,
 with a secret of its own that can be signed out alone. Its commands then wait with the
 group service for this computer, which looks every fifteen seconds until a phone is
-watching and every second while one is. Answers (songs, names and pictures, and possibly
-private links in them) pass through the same way and expire within a minute. No sign-in
-ever leaves this computer: the phone doesn't hold Spotify, SoundCloud or Google access.
-This connection only runs on a computer that has linked a phone.
+watching. Answers (songs, names and pictures, and possibly private links in them) pass
+through the same way and expire within a minute. No sign-in ever leaves this computer:
+the phone doesn't hold Spotify, SoundCloud or Google access. This connection only runs
+on a computer that has linked a phone.
+
+While the phone's page is open, the phone and this computer each also keep an event
+stream open to the group service (`/live/remote/events`), which hears through Redis
+publish and subscribe. A waiting command, a change to what plays here, or a ready answer
+then reaches the other side within moments, and the looks slow to every five or six
+seconds as a safety net. The service ends each stream after four minutes and it's
+opened again. While no phone is open, no stream is.
+
+When the phone plays music itself, it tells the group service what it plays, whether
+it's paused and where it is, when that changes and at least every half minute, and the
+service keeps it for two minutes. This computer reads it with its looks, every four
+seconds while the phone plays, and shows it over the player. Pressing pause or play
+there sends a word on the phone's stream, which only a phone with Encore open hears.
+**Play here** plays the same song on this computer from the same place and pauses the
+phone.
 
 When the phone plays music itself, it asks this computer where a song's audio is and
 gets back a short-lived address it fetches directly: SoundCloud's stream, YouTube's

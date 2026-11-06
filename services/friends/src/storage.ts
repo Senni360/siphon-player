@@ -122,13 +122,53 @@ export interface Storage {
   liveDelete(key: string, signal?: AbortSignal): Promise<void>;
   /** Stores `value` if the key's JSON `revision` is still `previous` (0 when absent). */
   liveCas(key: string, previous: number, value: string, seconds: number, signal?: AbortSignal): Promise<boolean>;
+  /** Tells whoever is listening on `channel` right now. Nobody listening is fine. */
+  livePublish(channel: string, message: string, signal?: AbortSignal): Promise<void>;
+  /** What's said on `channel` from now until `signal` ends, one message at a time. */
+  liveListen(channel: string, signal: AbortSignal): AsyncIterable<string>;
+}
+
+/** The longest message a channel carries; anything longer is dropped. */
+export const MAX_MESSAGE_BYTES = 32 * 1024;
+
+/** Messages handed to a listener as they arrive, until its signal ends. */
+async function* queued(subscribe: (deliver: (message: string) => void) => () => void, signal: AbortSignal): AsyncGenerator<string> {
+  const waiting: string[] = [];
+  let wake: (() => void) | null = null;
+  const unsubscribe = subscribe(message => { waiting.push(message); wake?.(); });
+  const ended = () => wake?.();
+  signal.addEventListener('abort', ended, { once: true });
+  try {
+    while (!signal.aborted) {
+      const message = waiting.shift();
+      if (message !== undefined) { yield message; continue; }
+      await new Promise<void>(resolve => { wake = resolve; });
+      wake = null;
+    }
+  } finally {
+    unsubscribe();
+    signal.removeEventListener('abort', ended);
+  }
 }
 
 export class MemoryStorage implements Storage {
   private state = empty();
   private limits = new Map<string, { count: number; until: number }>();
   private live = new Map<string, { value: string; until: number }>();
+  private listeners = new Map<string, Set<(message: string) => void>>();
   constructor(private clock: () => number = Date.now) {}
+  async livePublish(channel: string, message: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    for (const deliver of this.listeners.get(channel) ?? []) deliver(message);
+  }
+  liveListen(channel: string, signal: AbortSignal): AsyncIterable<string> {
+    return queued(deliver => {
+      const set = this.listeners.get(channel) ?? new Set();
+      set.add(deliver);
+      this.listeners.set(channel, set);
+      return () => { set.delete(deliver); if (!set.size) this.listeners.delete(channel); };
+    }, signal);
+  }
   private liveValue(key: string) {
     const entry = this.live.get(key);
     if (entry && entry.until <= this.clock()) this.live.delete(key);
@@ -247,6 +287,47 @@ export class RedisStorage implements Storage {
     const result = await this.command(['EVAL', LIVE_CAS, 1, this.liveKey(key), previous, value, seconds], signal);
     if (result !== 0 && result !== 1) throw new Error('Storage unavailable');
     return result === 1;
+  }
+  async livePublish(channel: string, message: string, signal?: AbortSignal) {
+    await this.command(['PUBLISH', this.liveKey(channel), message], signal);
+  }
+  /** Upstash's REST subscribe: a stream of `data: message,<channel>,<payload>` lines. */
+  async *liveListen(channel: string, signal: AbortSignal): AsyncGenerator<string> {
+    const name = this.liveKey(channel);
+    const endpoint = new URL(this.url);
+    endpoint.pathname = `${endpoint.pathname.replace(/\/$/, '')}/subscribe/${encodeURIComponent(name)}`;
+    const response = await fetch(endpoint, {
+      method: 'POST', headers: { Authorization: `Bearer ${this.token}`, Accept: 'text/event-stream' },
+      signal, redirect: 'error',
+    });
+    if (!response.ok || !response.body) {
+      await response.body?.cancel();
+      throw new Error('Storage unavailable');
+    }
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    const cancel = () => { void reader.cancel().catch(() => {}); };
+    signal.addEventListener('abort', cancel, { once: true });
+    const prefix = `message,${name},`;
+    let pending = '';
+    try {
+      while (!signal.aborted) {
+        const part = await reader.read();
+        if (part.done) return;
+        pending += part.value;
+        let end: number;
+        while ((end = pending.indexOf('\n')) >= 0) {
+          const line = pending.slice(0, end).replace(/\r$/, '');
+          pending = pending.slice(end + 1);
+          const data = line.startsWith('data:') ? line.slice(5).trimStart() : '';
+          if (data.startsWith(prefix)) yield data.slice(prefix.length);
+        }
+        // A line that never ends is not a message this service sent.
+        if (pending.length > MAX_MESSAGE_BYTES * 2) return;
+      }
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      cancel();
+    }
   }
   async limit(key: string, maximum: number, seconds: number, signal?: AbortSignal) {
     const result = await this.command(['EVAL', LIMIT, 1, `${this.prefix}:limit:${key}`, seconds], signal);

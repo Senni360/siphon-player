@@ -415,6 +415,60 @@ impl Client {
             .await
     }
 
+    /// The computer's event stream: a word the moment a command is waiting or the
+    /// phone's own playback changes. The service ends it after a few minutes.
+    pub async fn remote_events(&self, id: &Identity) -> Result<reqwest::Response, String> {
+        if id.base_url != self.base_url() {
+            return Err("This Friends identity belongs to another service.".into());
+        }
+        let mut url = self.base.clone();
+        url.set_path(&format!("{}/live/remote/events", self.base.path()));
+        url.query_pairs_mut().append_pair("for", "computer");
+        let mut request = self
+            .http
+            .client()?
+            .get(url)
+            .bearer_auth(&id.secret)
+            .header(reqwest::header::ACCEPT, "text/event-stream")
+            // Longer than the service keeps it open, which ends it first.
+            .timeout(std::time::Duration::from_secs(300));
+        if let Some(group) = super::account::current_group() {
+            request = request.header("X-Siphon-Group", group);
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|_| "Friends could not be reached. Try again.".to_owned())?;
+        if !response.status().is_success() {
+            return Err("Friends is unavailable. Try again later.".into());
+        }
+        Ok(response)
+    }
+
+    /// Works the phone's own player: `toggle`, `pause`, `play`, `next`,
+    /// `previous`, or `seek` to `ms`. Only a phone that's open hears it.
+    pub async fn remote_control(
+        &self,
+        id: &Identity,
+        kind: &str,
+        ms: Option<u32>,
+    ) -> Result<(), String> {
+        let mut body = serde_json::json!({ "kind": kind });
+        if let Some(ms) = ms {
+            body["ms"] = ms.into();
+        }
+        let _: serde_json::Value = self
+            .request(
+                Method::POST,
+                "/live/remote/control",
+                Some(id),
+                Some(body),
+                None,
+            )
+            .await?;
+        Ok(())
+    }
+
     pub async fn remote_state(
         &self,
         id: &Identity,
@@ -616,4 +670,102 @@ pub struct RemotePoll {
     pub wanted: bool,
     #[serde(default)]
     pub commands: Vec<serde_json::Value>,
+    /// What the phone plays itself, if it does.
+    #[serde(default)]
+    pub phone: Option<PhonePlaying>,
+    /// The service's clock, in milliseconds, to tell how old `phone` is.
+    #[serde(default)]
+    pub now: Option<i64>,
+}
+
+/// A song playing on the linked phone itself, as the phone last told it.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct PhonePlaying {
+    #[serde(default)]
+    pub song: Option<PhoneSong>,
+    #[serde(default)]
+    pub playing: bool,
+    #[serde(default)]
+    pub position_ms: f64,
+    #[serde(default)]
+    pub device: Option<String>,
+    /// When the phone said it, by the service's clock, in milliseconds.
+    #[serde(default)]
+    pub at: i64,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct PhoneSong {
+    #[serde(default)]
+    pub uri: String,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub artists: Vec<String>,
+    #[serde(default)]
+    pub image: Option<String>,
+    #[serde(default)]
+    pub duration_ms: f64,
+}
+
+/// One word on the computer's event stream.
+#[derive(Debug, PartialEq)]
+pub enum RemoteWord {
+    /// A command is waiting in the inbox.
+    Command,
+    /// What the phone plays itself changed; `None` when it stopped.
+    Phone {
+        phone: Option<PhonePlaying>,
+        now: Option<i64>,
+    },
+}
+
+impl RemoteWord {
+    /// Reads one `data:` payload; anything else on the stream is passed over.
+    pub fn read(data: &str) -> Option<Self> {
+        #[derive(Deserialize)]
+        struct Word {
+            t: String,
+            #[serde(default)]
+            phone: Option<PhonePlaying>,
+            #[serde(default)]
+            now: Option<i64>,
+        }
+        let word: Word = serde_json::from_str(data).ok()?;
+        match word.t.as_str() {
+            "command" => Some(Self::Command),
+            "phone" => Some(Self::Phone {
+                phone: word.phone,
+                now: word.now,
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Splits server-sent events as they arrive, keeping a partial one for later.
+#[derive(Default)]
+pub struct EventLines {
+    pending: String,
+}
+
+impl EventLines {
+    /// The longest event this reads; longer means something's wrong.
+    const MOST: usize = 64 * 1024;
+
+    /// Takes in a chunk and gives back the `data:` of every event it completed.
+    /// `None` when the stream has gone wrong and should be dropped.
+    pub fn push(&mut self, chunk: &[u8]) -> Option<Vec<String>> {
+        self.pending.push_str(&String::from_utf8_lossy(chunk));
+        let mut found = Vec::new();
+        while let Some(end) = self.pending.find("\n\n") {
+            let event: String = self.pending.drain(..end + 2).collect();
+            for line in event.lines() {
+                if let Some(data) = line.strip_prefix("data:") {
+                    found.push(data.trim_start().to_owned());
+                }
+            }
+        }
+        (self.pending.len() <= Self::MOST).then_some(found)
+    }
 }

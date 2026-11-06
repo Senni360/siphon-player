@@ -180,10 +180,12 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
 
   return async (request: Request, clientIp = 'local'): Promise<Response> => {
     try {
-      const signal = AbortSignal.any([request.signal, AbortSignal.timeout(12000)]);
+      const path = new URL(request.url).pathname.replace(/^\/api/, '').replace(/\/$/, '');
+      // An event stream runs as long as it's listened to, up to its own limit.
+      const streaming = path === '/live/remote/events';
+      const signal = streaming ? request.signal : AbortSignal.any([request.signal, AbortSignal.timeout(12000)]);
       signal.throwIfAborted();
       if (inviteCode.length < 12 || inviteCode.length > 256 || inviteCode.trim() !== inviteCode || /[\x00-\x1f\x7f]/.test(inviteCode)) return fail(503, 'Group invite is not configured');
-      const path = new URL(request.url).pathname.replace(/^\/api/, '').replace(/\/$/, '');
       const method = request.method;
       // A Discord button can only open https. This names no song and no person,
       // and the app only lets in those already in the group.

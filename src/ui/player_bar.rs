@@ -234,6 +234,118 @@ pub fn show_in(app: &mut App, ui: &mut egui::Ui, strip: Rect) {
         before,
         vec2(0.0, (1.0 - rising) * 64.0 + dip),
     );
+    phone_capsule(app, ui, island_rect(strip));
+}
+
+/// While the linked phone plays something itself, a capsule over the island says
+/// so, as Spotify shows another device: the phone's song, its play and pause, and
+/// a way to bring it over here.
+fn phone_capsule(app: &mut App, ui: &mut egui::Ui, island: Rect) {
+    let Some(there) = app.phone.there.clone() else {
+        return;
+    };
+    let palette = app.palette;
+    let locale = app.locale;
+    const HEIGHT: f32 = 36.0;
+    let width = (island.width() - 48.0).clamp(260.0, 560.0);
+    let rect = Rect::from_center_size(
+        pos2(island.center().x, island.top() - 10.0 - HEIGHT / 2.0),
+        vec2(width, HEIGHT),
+    );
+    let playing = there.playing();
+    super::widgets::paint_shadow(ui, &palette, rect, HEIGHT / 2.0);
+    ui.painter().rect(
+        rect,
+        HEIGHT / 2.0,
+        palette.panel,
+        egui::Stroke::new(1.0, palette.accent.gamma_multiply(0.45)),
+        egui::StrokeKind::Inside,
+    );
+    ui.painter()
+        .rect_filled(rect, HEIGHT / 2.0, palette.accent.gamma_multiply(0.12));
+    let mut child = ui.new_child(
+        UiBuilder::new()
+            .max_rect(rect.shrink2(vec2(14.0, 0.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+    );
+    child.spacing_mut().item_spacing.x = 8.0;
+    theme::icon(&mut child, Icon::Smartphone, 15.0, palette.accent);
+    let label = gettext(
+        locale,
+        if playing {
+            "Playing on your phone"
+        } else {
+            "Paused on your phone"
+        },
+    );
+    child.add(
+        egui::Label::new(
+            egui::RichText::new(label.as_ref())
+                .font(theme::semibold(12.5))
+                .color(palette.accent),
+        )
+        .selectable(false),
+    );
+    let mut actions = Vec::new();
+    child.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 6.0;
+        if theme::soft_button(
+            ui,
+            &palette,
+            Some(Icon::Laptop),
+            &gettext(locale, "Play here"),
+            false,
+        )
+        .on_hover_text(gettext(
+            locale,
+            "Carries on here from the same place, and stops it on the phone",
+        ))
+        .clicked()
+        {
+            actions.push(Action::TakeFromPhone);
+        }
+        if theme::icon_button(
+            ui,
+            if playing {
+                Icon::PauseFilled
+            } else {
+                Icon::PlayFilled
+            },
+            16.0,
+            palette.text,
+            palette.accent,
+            &gettext(
+                locale,
+                if playing {
+                    "Pause on your phone"
+                } else {
+                    "Play on your phone"
+                },
+            ),
+        )
+        .clicked()
+        {
+            actions.push(Action::PhoneControl("toggle"));
+        }
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            let artists = there.song.artists.join(", ");
+            let song = if artists.is_empty() {
+                there.song.name.clone()
+            } else {
+                format!("{} · {artists}", there.song.name)
+            };
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(song)
+                        .font(theme::regular(12.5))
+                        .color(palette.secondary),
+                )
+                .truncate()
+                .selectable(false),
+            );
+        });
+    });
+    app.actions.extend(actions);
 }
 
 /// How far the island settles down when the page moved by `delta` in a frame. A

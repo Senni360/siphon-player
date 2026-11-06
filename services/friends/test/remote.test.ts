@@ -20,7 +20,34 @@ function fixture() {
     return { status: response.status, body: await response.json() as any };
   };
   const join = async (name: string) => (await call('/join', 'POST', { invite_code: invite, display_name: name })).body as { user_id: string; secret: string };
-  return { call, join, advance: (ms: number) => { time += ms; } };
+  /** An event stream, read one event at a time, until `close`. */
+  const listen = async (side: 'computer' | 'phone', secret: string) => {
+    const stop = new AbortController();
+    const response = await service(new Request(`https://test/api/live/remote/events?for=${side}`, {
+      headers: { authorization: `Bearer ${secret}` }, signal: stop.signal,
+    }), 'a');
+    assert.equal(response.status, 200);
+    assert.match(response.headers.get('content-type') ?? '', /^text\/event-stream/);
+    const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let pending = '';
+    const next = async (): Promise<any> => {
+      while (true) {
+        const end = pending.indexOf('\n\n');
+        if (end >= 0) {
+          const event = pending.slice(0, end);
+          pending = pending.slice(end + 2);
+          const data = event.split('\n').find(line => line.startsWith('data: '));
+          if (data) return JSON.parse(data.slice(6));
+          continue;
+        }
+        const part = await reader.read();
+        if (part.done) return null;
+        pending += part.value;
+      }
+    };
+    return { next, close: () => { stop.abort(); void reader.cancel().catch(() => {}); } };
+  };
+  return { call, join, listen, advance: (ms: number) => { time += ms; } };
 }
 
 test('a phone joins the account of the computer that showed the code', async () => {
@@ -68,7 +95,9 @@ test('commands reach the computer once and its answers reach the phone', async (
   const phone = (await call('/link/claim', 'POST', { code })).body.secret;
 
   const idle = await call('/live/remote/poll', 'GET', undefined, computer.secret);
-  assert.deepEqual(idle.body, { wanted: false, commands: [] });
+  assert.equal(idle.body.wanted, false);
+  assert.deepEqual(idle.body.commands, []);
+  assert.equal(idle.body.phone, null);
 
   assert.equal((await call('/live/remote/state', 'GET', undefined, phone)).body.state, null);
   const watched = await call('/live/remote/poll', 'GET', undefined, computer.secret);
@@ -87,6 +116,90 @@ test('commands reach the computer once and its answers reach the phone', async (
   assert.equal((await call(`/live/remote/reply/${ID}`, 'GET', undefined, phone)).body.ready, false);
   await call(`/live/remote/reply/${ID}`, 'PUT', { songs: [1] }, computer.secret);
   assert.deepEqual((await call(`/live/remote/reply/${ID}`, 'GET', undefined, phone)).body, { ready: true, reply: { songs: [1] } });
+});
+
+test('while both listen, a command, a new state and a ready answer arrive at once', async () => {
+  const { call, join, listen } = fixture();
+  const computer = await join('Senni');
+  const code = (await call('/link/start', 'POST', {}, computer.secret)).body.code;
+  const phone = (await call('/link/claim', 'POST', { code })).body.secret;
+  await call('/live/remote/state', 'PUT', { title: 'Before', playing: true }, computer.secret);
+
+  const toComputer = await listen('computer', computer.secret);
+  const toPhone = await listen('phone', phone);
+  try {
+    assert.deepEqual((await toComputer.next()).phone, null, 'it opens with what the phone plays');
+    const opening = await toPhone.next();
+    assert.equal(opening.t, 'state');
+    assert.equal(opening.state.title, 'Before', 'it opens with where things stand');
+    assert.equal((await call('/live/remote/poll', 'GET', undefined, computer.secret)).body.wanted, true, 'a phone listening is watching');
+
+    await call('/live/remote/send', 'POST', { id: ID, kind: 'toggle' }, phone);
+    assert.deepEqual(await toComputer.next(), { t: 'command' });
+    // The word only wakes it: the command itself waits in the inbox, as before.
+    assert.deepEqual((await call('/live/remote/poll', 'GET', undefined, computer.secret)).body.commands, [{ id: ID, kind: 'toggle' }]);
+
+    await call('/live/remote/state', 'PUT', { title: 'After', playing: false }, computer.secret);
+    const changed = await toPhone.next();
+    assert.equal(changed.t, 'state');
+    assert.equal(changed.state.playing, false);
+
+    await call(`/live/remote/reply/${ID}`, 'PUT', { songs: [] }, computer.secret);
+    assert.deepEqual(await toPhone.next(), { t: 'reply', id: ID });
+  } finally {
+    toComputer.close();
+    toPhone.close();
+  }
+});
+
+test('the computer sees what the phone plays itself, and can work it', async () => {
+  const { call, join, listen, advance } = fixture();
+  const computer = await join('Senni');
+  const code = (await call('/link/start', 'POST', {}, computer.secret)).body.code;
+  const phone = (await call('/link/claim', 'POST', { code })).body.secret;
+  const toComputer = await listen('computer', computer.secret);
+  const toPhone = await listen('phone', phone);
+  try {
+    await toComputer.next();
+    await toPhone.next();
+    await call('/live/remote/phone', 'PUT', { song: { name: 'On the phone' }, playing: true, position_ms: 1000 }, phone);
+    const heard = await toComputer.next();
+    assert.equal(heard.t, 'phone');
+    assert.equal(heard.phone.song.name, 'On the phone');
+    assert.equal((await call('/live/remote/poll', 'GET', undefined, computer.secret)).body.phone.playing, true, 'a look finds it too');
+
+    assert.equal((await call('/live/remote/control', 'POST', { kind: 'pause' }, computer.secret)).status, 202);
+    assert.deepEqual(await toPhone.next(), { t: 'control', kind: 'pause' });
+    assert.equal((await call('/live/remote/control', 'POST', { kind: 'seek', ms: 61000.4 }, computer.secret)).status, 202);
+    assert.deepEqual(await toPhone.next(), { t: 'control', kind: 'seek', ms: 61000 });
+    assert.equal((await call('/live/remote/control', 'POST', { kind: 'delete_everything' }, computer.secret)).status, 400);
+
+    await call('/live/remote/phone', 'DELETE', undefined, phone);
+    assert.deepEqual((await toComputer.next()).phone, null, 'stopping there says so');
+    await call('/live/remote/phone', 'PUT', { playing: true }, phone);
+    advance(121_000);
+    assert.equal((await call('/live/remote/poll', 'GET', undefined, computer.secret)).body.phone, null, 'a phone gone quiet is forgotten');
+  } finally {
+    toComputer.close();
+    toPhone.close();
+  }
+});
+
+test('an event stream hears only its own account', async () => {
+  const { call, join, listen } = fixture();
+  const mine = await join('Senni');
+  const theirs = await join('Friend');
+  const mineHears = await listen('computer', mine.secret);
+  try {
+    await mineHears.next();
+    await call('/live/remote/send', 'POST', { id: ID, kind: 'next' }, theirs.secret);
+    await call('/live/remote/phone', 'PUT', { playing: true }, theirs.secret);
+    await call('/live/remote/send', 'POST', { id: ID, kind: 'next' }, mine.secret);
+    assert.deepEqual(await mineHears.next(), { t: 'command' }, 'the first word it hears is its own');
+    assert.equal((await call('/live/remote/events?for=nobody', 'GET', undefined, mine.secret)).status, 400);
+  } finally {
+    mineHears.close();
+  }
 });
 
 test('playing a long list fits in one command', async () => {

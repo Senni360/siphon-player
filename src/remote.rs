@@ -11,10 +11,13 @@ use crate::api::models::{PlayableItem, Track, pick_image};
 
 /// With no phone there, how often to look whether one has turned up.
 pub const IDLE_POLL: Duration = Duration::from_secs(15);
-/// With a phone watching, how quickly its commands are picked up.
+/// With a phone watching and no event stream, how quickly its commands are picked up.
 pub const WATCHED_POLL: Duration = Duration::from_secs(1);
-/// How often the phone is told how playback is going, if anything's changed.
-pub const STATE_EVERY: Duration = Duration::from_millis(1000);
+/// The least time between telling the phone two changes. A change is told at
+/// once otherwise: the phone hears it over its event stream within moments.
+pub const STATE_EVERY: Duration = Duration::from_millis(150);
+/// How often to look for a change when nothing else wakes the app.
+pub const STATE_LOOK: Duration = Duration::from_millis(1000);
 /// How often it's told regardless, which is how it knows this computer is there.
 pub const STATE_AT_LEAST: Duration = Duration::from_secs(8);
 /// How long an answer that has to load first is worked on.

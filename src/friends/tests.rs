@@ -860,3 +860,32 @@ fn autoplay_picks_only_friends_spotify_songs_it_has_not_just_played() {
     assert_eq!(song.title.encode_utf16().count(), 300);
     assert_eq!(song.artists, ["Name"]);
 }
+
+#[test]
+fn the_event_stream_is_read_in_whatever_pieces_it_arrives() {
+    let mut lines = EventLines::default();
+    assert_eq!(
+        lines.push(b": ping\n\ndata: {\"t\":\"comm").unwrap(),
+        Vec::<String>::new()
+    );
+    let found = lines
+        .push(b"and\"}\n\ndata: {\"t\":\"phone\",\"phone\":null,\"now\":5}\n\n")
+        .unwrap();
+    assert_eq!(found.len(), 2);
+    assert_eq!(RemoteWord::read(&found[0]), Some(RemoteWord::Command));
+    assert_eq!(
+        RemoteWord::read(&found[1]),
+        Some(RemoteWord::Phone {
+            phone: None,
+            now: Some(5)
+        })
+    );
+    assert_eq!(
+        RemoteWord::read(r#"{"t":"state"}"#),
+        None,
+        "not for the computer"
+    );
+    assert_eq!(RemoteWord::read("not json"), None);
+    // An event that never ends isn't one this service sends.
+    assert!(lines.push(&vec![b'x'; 70 * 1024]).is_none());
+}

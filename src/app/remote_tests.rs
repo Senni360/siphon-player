@@ -177,3 +177,82 @@ fn a_question_waits_for_its_page_and_is_answered_when_it_loads() {
     app.remote_tick(&ctx);
     assert!(app.phone.waiting.is_empty(), "answered");
 }
+
+fn on_the_phone(playing: bool, position_ms: f64) -> crate::friends::PhonePlaying {
+    crate::friends::PhonePlaying {
+        song: Some(crate::friends::PhoneSong {
+            uri: "soundcloud:track:7".into(),
+            name: "On the phone".into(),
+            artists: vec!["Someone".into()],
+            image: None,
+            duration_ms: 180_000.0,
+        }),
+        playing,
+        position_ms,
+        device: Some("This phone".into()),
+        at: 0,
+    }
+}
+
+#[test]
+fn what_the_phone_plays_shows_here_and_goes_when_it_stops() {
+    let mut app = artist_page_app("remote-there");
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(true, 10_000.0),
+        2_000,
+    ))));
+    let there = app.phone.there.clone().expect("shown");
+    assert!(there.playing());
+    let at = there.position_ms();
+    assert!((12_000..13_000).contains(&at), "counted on from the word: {at}");
+
+    // A look that read an older word than the stream already gave changes nothing.
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(true, 0.0),
+        60_000,
+    ))));
+    assert!(app.phone.there.as_ref().unwrap().position_ms() >= 12_000);
+
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(None));
+    assert!(app.phone.there.is_none(), "stopped there");
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(true, 0.0),
+        200_000,
+    ))));
+    assert!(app.phone.there.is_none(), "a phone long silent is forgotten");
+}
+
+#[test]
+fn pausing_the_phone_from_here_shows_at_once_and_a_late_word_does_not_undo_it() {
+    let mut app = artist_page_app("remote-there-pause");
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(true, 0.0),
+        0,
+    ))));
+    app.phone_control("toggle");
+    assert!(!app.phone.there.as_ref().unwrap().playing(), "paused at once");
+    // The phone hadn't heard yet: its word still says playing.
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(true, 500.0),
+        0,
+    ))));
+    assert!(!app.phone.there.as_ref().unwrap().playing(), "held");
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(false, 900.0),
+        0,
+    ))));
+    let there = app.phone.there.as_ref().unwrap();
+    assert!(!there.playing(), "the phone agrees");
+    assert_eq!(there.position_ms(), 900, "paused, the place stays put");
+}
+
+#[test]
+fn playing_the_phones_song_here_takes_it_over() {
+    let mut app = artist_page_app("remote-there-take");
+    app.remote_event(crate::backend::remote::RemoteEvent::Phone(Some((
+        on_the_phone(true, 30_000.0),
+        0,
+    ))));
+    app.take_from_phone();
+    assert!(app.phone.there.is_none(), "it's here now, not there");
+}

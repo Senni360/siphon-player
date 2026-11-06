@@ -258,14 +258,22 @@ async function ask(kind, args = {}, patience = 45000) {
   const id = uuid();
   await api('/live/remote/send', 'POST', { id, kind, ...args });
   const until = Date.now() + patience;
-  while (Date.now() < until) {
-    await new Promise(resolve => setTimeout(resolve, 600));
-    const answer = await api(`/live/remote/reply/${id}`);
-    if (answer.ready) {
-      if (answer.reply.error) throw new Error(answer.reply.error);
-      return answer.reply;
+  try {
+    while (Date.now() < until) {
+      // The event stream says the moment it's ready; without it, look every so often.
+      if (!readyReplies.delete(id)) {
+        await new Promise(resolve => {
+          const timer = setTimeout(resolve, events.open ? 2000 : 600);
+          replyWaiters.set(id, () => { clearTimeout(timer); resolve(); });
+        });
+      }
+      const answer = await api(`/live/remote/reply/${id}`);
+      if (answer.ready) {
+        if (answer.reply.error) throw new Error(answer.reply.error);
+        return answer.reply;
+      }
     }
-  }
+  } finally { replyWaiters.delete(id); }
   throw new Error(player.online ? 'Encore took too long to answer.' : "Encore isn't open on your computer.");
 }
 
@@ -290,6 +298,7 @@ function hereAudio() {
     playIndex(here.index + 1);
   });
   for (const event of ['play', 'pause', 'loadedmetadata']) audio.addEventListener(event, refreshPlayer);
+  for (const event of ['play', 'pause', 'seeked']) audio.addEventListener(event, () => tellComputer(true));
   here.audio = audio;
   return audio;
 }
@@ -305,6 +314,7 @@ function stopHere() {
   here.active = false;
   here.spotify = null;
   refreshPlayer();
+  tellComputer();
 }
 
 async function playIndex(index) {
@@ -320,6 +330,7 @@ async function playIndex(index) {
   mediaSession(song);
   refreshPlayer();
   markPlaying();
+  tellComputer(true);
   try {
     const found = await streamOf(song);
     if (here.index !== index) return;
@@ -386,6 +397,7 @@ function followSpotify(index, song) {
       if (same) {
         Object.assign(here.spotify, { position: now.progress_ms ?? 0, playing: now.is_playing, at: Date.now(), seen: true });
         refreshPlayer();
+        tellComputer();
         const length = now.item.duration_ms ?? song.duration_ms ?? 0;
         const finished = !now.is_playing && ((now.progress_ms ?? 0) >= length - 3000
           || ((now.progress_ms ?? 0) === 0 && Date.now() - here.spotify.started > length - 5000));
@@ -416,6 +428,39 @@ function hereState() {
     next: here.list.slice(here.index + 1, here.index + 6), here: true,
   };
 }
+
+// ---------------------------------------------------------------- telling the computer
+// What plays on this phone shows on the computer too, as Spotify shows another
+// device, so the listener sees it there and can stop it or take it back.
+const told = { at: 0, timer: null, key: '' };
+const TELL_EVERY_MS = 400;
+/** Tells the computer what this phone plays now; quickly, but not more than it needs. */
+function tellComputer(force = false) {
+  if (!localStorage.getItem(STORE.secret)) return;
+  const state = here.active ? hereState() : null;
+  if (!state) {
+    if (told.key) { told.key = ''; api('/live/remote/phone', 'DELETE').catch(() => {}); }
+    return;
+  }
+  const key = `${state.song.uri}|${state.playing}`;
+  // A song going on as expected needs no word: the computer counts the time itself.
+  // A new song, a pause, a seek or a long while does.
+  const due = force || key !== told.key || Date.now() - told.at > 30000;
+  if (!due) return;
+  if (Date.now() - told.at < TELL_EVERY_MS) {
+    clearTimeout(told.timer);
+    told.timer = setTimeout(() => tellComputer(true), TELL_EVERY_MS);
+    return;
+  }
+  told.at = Date.now();
+  told.key = key;
+  const { song } = state;
+  api('/live/remote/phone', 'PUT', {
+    song: { uri: song.uri, name: song.name, artists: song.artists, image: song.image ?? null, duration_ms: Math.round(song.duration_ms || 0) },
+    playing: state.playing, position_ms: Math.round(state.position_ms), device: state.device,
+  }).catch(() => {});
+}
+setInterval(() => { if (here.active) tellComputer(); }, 2000);
 
 const HERE_ACTS = {
   toggle: () => {
@@ -508,45 +553,125 @@ function position(state) {
   return Math.min(state.position_ms + moved, state.song?.duration_ms ?? Infinity);
 }
 
+/** Takes in the computer's state, from a look or from the event stream. */
+async function applyState(state, now) {
+  const fresh = state && now - state.at < 30000;
+  const wasOnline = player.online;
+  player.online = !!fresh;
+  if (fresh) {
+    const sought = player.sought;
+    player.state = state;
+    player.direct = false;
+    player.at = Date.now() - Math.max(0, now - state.at);
+    // An answer from before a seek still has the old place: keep the new one a while.
+    if (sought && Date.now() < sought.until && sought.uri === state.song?.uri) {
+      const expected = sought.ms + (state.playing ? Date.now() - sought.at : 0);
+      if (Math.abs(position(state) - expected) > 2500) {
+        player.state = { ...state, position_ms: expected };
+        player.at = Date.now();
+      } else player.sought = null;
+    }
+  } else if (hasSpotify()) {
+    await pollSpotify();
+  } else {
+    player.direct = false;
+  }
+  if (wasOnline !== player.online) {
+    renderBanner();
+    // Only Spotify's own answers differ from the computer's, so nothing else reloads.
+    if (booted && hasSpotify()) { tabViews.clear(); render(true); }
+  }
+  booted = true;
+  refreshPlayer();
+}
+
 async function pollState() {
   if (!document.hidden && localStorage.getItem(STORE.secret)) {
     try {
       const { state, now } = await api('/live/remote/state');
-      const fresh = state && now - state.at < 30000;
-      const wasOnline = player.online;
-      player.online = !!fresh;
-      if (fresh) {
-        const sought = player.sought;
-        player.state = state;
-        player.direct = false;
-        player.at = Date.now() - Math.max(0, now - state.at);
-        // An answer from before a seek still has the old place: keep the new one a while.
-        if (sought && Date.now() < sought.until && sought.uri === state.song?.uri) {
-          const expected = sought.ms + (state.playing ? Date.now() - sought.at : 0);
-          if (Math.abs(position(state) - expected) > 2500) {
-            player.state = { ...state, position_ms: expected };
-            player.at = Date.now();
-          } else player.sought = null;
-        }
-      } else if (hasSpotify()) {
-        await pollSpotify();
-      } else {
-        player.direct = false;
-      }
-      if (wasOnline !== player.online) {
-        renderBanner();
-        // Only Spotify's own answers differ from the computer's, so nothing else reloads.
-        if (booted && hasSpotify()) { tabViews.clear(); render(true); }
-      }
-      booted = true;
-      refreshPlayer();
+      await applyState(state, now);
     } catch (error) {
       if (error instanceof SignedOut) { start(); return; }
     }
   }
-  setTimeout(pollState, player.online || !hasSpotify() ? 1200 : 3000);
+  // With the event stream open, a look is only a safety net.
+  const every = events.open ? 6000 : player.online || !hasSpotify() ? 1200 : 3000;
+  setTimeout(pollState, every);
 }
 let booted = false;
+
+// ---------------------------------------------------------------- hearing the computer at once
+// While this page is in front, the computer's every change, every ready answer and
+// every word for the phone's own player arrive over one event stream, instead of at
+// the next look. The service closes it every few minutes; it's opened again at once.
+const events = { open: false, stop: null };
+/** Answers being waited for, woken the moment the computer has put them up. */
+const replyWaiters = new Map();
+const readyReplies = new Set();
+
+async function listenComputer() {
+  if (events.stop || document.hidden || !localStorage.getItem(STORE.secret)) return;
+  const stop = new AbortController();
+  events.stop = stop;
+  let failed = false;
+  try {
+    const secret = localStorage.getItem(STORE.secret);
+    const group = localStorage.getItem(STORE.group);
+    const answer = await fetch('/api/live/remote/events?for=phone', {
+      headers: { authorization: `Bearer ${secret}`, ...(group ? { 'x-siphon-group': group } : {}), accept: 'text/event-stream' },
+      signal: stop.signal, cache: 'no-store',
+    });
+    if (!answer.ok || !answer.body) throw new Error('no stream');
+    events.open = true;
+    const reader = answer.body.pipeThrough(new TextDecoderStream()).getReader();
+    let pending = '';
+    while (true) {
+      const part = await reader.read();
+      if (part.done) break;
+      pending += part.value;
+      let end;
+      while ((end = pending.indexOf('\n\n')) >= 0) {
+        const event = pending.slice(0, end);
+        pending = pending.slice(end + 2);
+        const data = event.split('\n').find(line => line.startsWith('data: '));
+        if (data) heard(JSON.parse(data.slice(6)));
+      }
+    }
+  } catch { failed = !stop.signal.aborted; }
+  events.open = false;
+  events.stop = null;
+  // Closed by the service on time: straight back. Refused or cut off: give it a moment.
+  if (!stop.signal.aborted) setTimeout(listenComputer, failed ? 5000 : 0);
+}
+
+function heard(message) {
+  if (message.t === 'state') applyState(message.state, message.now ?? Date.now()).catch(() => {});
+  else if (message.t === 'reply') {
+    const wake = replyWaiters.get(message.id);
+    if (wake) wake();
+    else if (readyReplies.size < 50) {
+      // Ready before it was waited for: the wait skips straight to it.
+      readyReplies.add(message.id);
+      setTimeout(() => readyReplies.delete(message.id), 60000);
+    }
+  }
+  else if (message.t === 'control') controlHere(message);
+}
+
+/** The computer working this phone's own player. */
+function controlHere({ kind, ms }) {
+  if (!here.active) return;
+  const playing = hereState()?.playing;
+  if (kind === 'pause' && !playing) return;
+  if (kind === 'play' && playing) return;
+  const act = kind === 'pause' || kind === 'play' ? 'toggle' : kind;
+  Promise.resolve(HERE_ACTS[act]?.({ ms })).catch(() => {});
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) events.stop?.abort();
+  else { listenComputer(); if (here.active) tellComputer(true); }
+});
 
 /** With the computer off, what's playing is whatever Spotify says, on any device. */
 async function pollSpotify() {
@@ -1397,6 +1522,7 @@ function start() {
   if (localStorage.getItem(STORE.secret)) {
     shell();
     if (!polling) { polling = true; pollState(); }
+    listenComputer();
   } else {
     player.mini = null;
     linkScreen();

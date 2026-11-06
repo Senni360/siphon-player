@@ -60,6 +60,17 @@ export function createHandler(env: NodeJS.ProcessEnv) {
       const ip = env.VERCEL ? headers.get('x-vercel-forwarded-for') ?? 'unknown' : req.socket.remoteAddress ?? 'local';
       const result = await service(request, ip);
       res.writeHead(result.status, Object.fromEntries(result.headers));
+      // An event stream goes out as it's written; everything else whole.
+      if (result.body && result.headers.get('content-type')?.startsWith('text/event-stream')) {
+        res.flushHeaders();
+        const reader = result.body.getReader();
+        disconnected.signal.addEventListener('abort', () => { void reader.cancel().catch(() => {}); }, { once: true });
+        try {
+          for (let part = await reader.read(); !part.done; part = await reader.read()) res.write(part.value);
+        } catch { /* the listener went away */ }
+        res.end();
+        return;
+      }
       res.end(Buffer.from(await result.arrayBuffer()));
     } catch {
       res.writeHead(503, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });

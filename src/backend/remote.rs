@@ -9,6 +9,11 @@ pub enum RemoteRequest {
     /// Start looking for commands, if nothing is already.
     Start,
     State(serde_json::Value),
+    /// Works the phone's own player: `toggle`, `pause`, `next`, `previous` or `seek`.
+    Control {
+        kind: &'static str,
+        ms: Option<u32>,
+    },
     Reply {
         id: String,
         value: serde_json::Value,
@@ -36,6 +41,58 @@ pub enum RemoteEvent {
     Commands(Vec<Incoming>),
     Watched(bool),
     Code(Result<String, String>),
+    /// What the phone plays itself, and how old that word is, in milliseconds.
+    Phone(Option<(crate::friends::PhonePlaying, i64)>),
+}
+
+/// While the phone itself plays, how often to look, so a pause or a new song there
+/// shows here soon even when the phone's page is closed and can't say so at once.
+const PHONE_PLAYING_POLL: std::time::Duration = std::time::Duration::from_secs(4);
+/// With the event stream open, a look is only a safety net.
+const STREAMED_POLL: std::time::Duration = std::time::Duration::from_secs(5);
+/// The stream pings every 15 seconds; this long without a word means it's gone.
+const STREAM_SILENCE: std::time::Duration = std::time::Duration::from_secs(40);
+
+fn phone_age(
+    phone: Option<crate::friends::PhonePlaying>,
+    now: Option<i64>,
+) -> Option<(crate::friends::PhonePlaying, i64)> {
+    phone.map(|phone| {
+        let age = now.map_or(0, |now| (now - phone.at).max(0));
+        (phone, age)
+    })
+}
+
+/// Listens on the computer's event stream until it ends: wakes the looks for a
+/// waiting command, and passes on what the phone plays.
+async fn listen(
+    client: crate::friends::Client,
+    identity: crate::friends::Identity,
+    wake: Arc<tokio::sync::Notify>,
+    emit: impl Fn(RemoteEvent),
+) {
+    let Ok(mut response) = client.remote_events(&identity).await else {
+        return;
+    };
+    let mut lines = crate::friends::EventLines::default();
+    loop {
+        let chunk = match tokio::time::timeout(STREAM_SILENCE, response.chunk()).await {
+            Ok(Ok(Some(chunk))) => chunk,
+            _ => return,
+        };
+        let Some(found) = lines.push(&chunk) else {
+            return;
+        };
+        for data in found {
+            match crate::friends::RemoteWord::read(&data) {
+                Some(crate::friends::RemoteWord::Command) => wake.notify_one(),
+                Some(crate::friends::RemoteWord::Phone { phone, now }) => {
+                    emit(RemoteEvent::Phone(phone_age(phone, now)));
+                }
+                None => {}
+            }
+        }
+    }
 }
 
 /// The group sign-in, read from the system's credential store at most once a minute
@@ -98,8 +155,12 @@ impl Worker {
                     return;
                 }
                 self.hybrid.remote_running = true;
+                let emit = Arc::new(emit);
                 tokio::spawn(async move {
                     let mut watched = false;
+                    let wake = Arc::new(tokio::sync::Notify::new());
+                    // The event stream, open only while a phone is watching.
+                    let mut stream: Option<tokio::task::JoinHandle<()>> = None;
                     loop {
                         let wait = match signin.get(&credentials).await {
                             None => IDLE_POLL,
@@ -117,7 +178,32 @@ impl Worker {
                                     if !commands.is_empty() {
                                         emit(RemoteEvent::Commands(commands));
                                     }
-                                    if watched { WATCHED_POLL } else { IDLE_POLL }
+                                    let phone_playing =
+                                        polled.phone.as_ref().is_some_and(|phone| phone.playing);
+                                    emit(RemoteEvent::Phone(phone_age(polled.phone, polled.now)));
+                                    if !watched {
+                                        if let Some(open) = stream.take() {
+                                            open.abort();
+                                        }
+                                    } else if stream.as_ref().is_none_or(|open| open.is_finished())
+                                    {
+                                        let (client, emit, wake) =
+                                            (client.clone(), Arc::clone(&emit), Arc::clone(&wake));
+                                        stream = Some(tokio::spawn(listen(
+                                            client,
+                                            identity,
+                                            wake,
+                                            move |event| emit(event),
+                                        )));
+                                    }
+                                    let streaming =
+                                        stream.as_ref().is_some_and(|open| !open.is_finished());
+                                    match (watched, streaming, phone_playing) {
+                                        (true, true, _) => STREAMED_POLL,
+                                        (true, false, _) => WATCHED_POLL,
+                                        (false, _, true) => PHONE_PLAYING_POLL,
+                                        (false, _, false) => IDLE_POLL,
+                                    }
                                 }
                                 Err(_) => {
                                     signin.forget();
@@ -125,11 +211,25 @@ impl Worker {
                                         watched = false;
                                         emit(RemoteEvent::Watched(false));
                                     }
+                                    if let Some(open) = stream.take() {
+                                        open.abort();
+                                    }
                                     IDLE_POLL
                                 }
                             },
                         };
-                        tokio::time::sleep(wait).await;
+                        // A word on the stream that a command is waiting looks at once.
+                        tokio::select! {
+                            () = tokio::time::sleep(wait) => {}
+                            () = wake.notified() => {}
+                        }
+                    }
+                });
+            }
+            RemoteRequest::Control { kind, ms } => {
+                tokio::spawn(async move {
+                    if let Some(identity) = signin.get(&credentials).await {
+                        let _ = client.remote_control(&identity, kind, ms).await;
                     }
                 });
             }
