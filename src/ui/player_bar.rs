@@ -1216,6 +1216,26 @@ fn now_playing_block(app: &mut App, ui: &mut egui::Ui, region: Rect, now: Option
                 theme::text(ui, tempo, theme::regular(12.0), palette.secondary);
             }
         }
+        // A beat's tempo and key, quiet, after they have settled. The
+        // label fades in once known (see `crate::beat_analysis`).
+        if let Some((bpm, key)) = app.known_bpm_key(&now.uri) {
+            let arrived = kit_motion::toward(
+                ui.ctx(),
+                egui::Id::new("island-beat-key").with(&now.uri),
+                true,
+                0.3,
+            );
+            if arrived > 0.0 {
+                let label = if key.is_empty() {
+                    format!("{bpm} BPM")
+                } else {
+                    format!("{bpm} BPM · {key}")
+                };
+                let colour = palette.dim.gamma_multiply(arrived);
+                ui.add_space(10.0);
+                theme::text(ui, label, theme::medium(11.0), colour);
+            }
+        }
     });
     if responses
         .iter()

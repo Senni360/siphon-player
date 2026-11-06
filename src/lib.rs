@@ -9,6 +9,7 @@ pub mod artist_sources;
 pub mod auth;
 pub mod autoscroll;
 pub mod backend;
+pub mod beat_analysis;
 pub mod beats;
 pub mod bidi;
 pub mod brand;

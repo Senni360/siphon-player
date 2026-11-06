@@ -58,6 +58,9 @@ pub struct EngineConfig {
     /// Output buffer length in milliseconds.
     pub buffer_ms: u32,
     pub tap: Arc<AudioTap>,
+    /// The beat BPM and key reading's collector, tapped by the external
+    /// (SoundCloud and YouTube) branch of the sink only.
+    pub beats: Arc<crate::beat_analysis::Collector>,
     /// The equalizer's settings, shared with the window that sets them.
     pub eq: crate::eq::SharedEq,
     /// Proxy used by the Web API client. Librespot only uses the HTTP form.
@@ -1086,6 +1089,7 @@ fn sink_builder(
     let device = config.audio_device.clone();
     let buffer_ms = config.buffer_ms;
     let tap = Arc::clone(&config.tap);
+    let beats = Arc::clone(&config.beats);
     let eq = Arc::clone(&config.eq);
     let notify_device = Arc::clone(&notify);
     let report: ErrorHook = Arc::new(move |message: String| {
@@ -1120,6 +1124,7 @@ fn sink_builder(
                 sink: Arc::clone(&sink),
                 control: Arc::clone(&audio),
                 tap: Arc::clone(&tap),
+                beats: Arc::clone(&beats),
                 volume: external_ceiling,
                 eq: crate::eq::Processor::new(Arc::clone(&eq)),
                 limiter: crate::limiter::Limiter::new(f64::from(librespot_playback::SAMPLE_RATE)),
@@ -2523,6 +2528,7 @@ mod tests {
         let config = EngineConfig {
             buffer_ms: crate::sink::DEFAULT_BUFFER_MS,
             tap: AudioTap::new(),
+            beats: crate::beat_analysis::Collector::new(),
             eq: crate::eq::shared(),
             device_name: "Siphon".into(),
             bitrate_kbps: 320,

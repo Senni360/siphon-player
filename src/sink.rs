@@ -298,6 +298,10 @@ pub(crate) struct ExternalPcm {
     pub sink: Arc<Mutex<RodioSink>>,
     pub control: Arc<AudioControl>,
     pub tap: Arc<crate::vis::AudioTap>,
+    /// Collects the same external-engine PCM for the beat BPM and key
+    /// reading (`crate::beat_analysis`), which never sees Spotify's branch
+    /// of the sink.
+    pub beats: Arc<crate::beat_analysis::Collector>,
     pub eq: crate::eq::Processor,
     pub volume: Box<dyn VolumeGetter + Send>,
     pub limiter: crate::limiter::Limiter,
@@ -317,6 +321,7 @@ impl Sink for ExternalPcm {
         self.eq.reset();
         self.limiter = crate::limiter::Limiter::new(f64::from(SAMPLE_RATE));
         self.tap.clear();
+        self.beats.stopped();
         self.sink
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -327,6 +332,7 @@ impl Sink for ExternalPcm {
             self.eq.reset();
             self.limiter = crate::limiter::Limiter::new(f64::from(SAMPLE_RATE));
             self.tap.clear();
+            self.beats.stopped();
         }
         let AudioPacket::Samples(mut samples) = packet else {
             return Err(SinkError::InvalidParams(
@@ -338,6 +344,9 @@ impl Sink for ExternalPcm {
         // The shared limiter remains after normalization and EQ. The tap
         // sees post-EQ, pre-volume PCM, even at mute.
         self.tap.push(&samples, 1.0);
+        // The beat reading hears the same post-EQ, pre-volume sound; only
+        // tracks the app has called instrumentals are ever collected.
+        self.beats.push(&samples);
         let volume = self.volume.attenuation_factor();
         if volume > f64::EPSILON {
             self.limiter.process(&mut samples, 1.0 / volume);
@@ -463,12 +472,9 @@ impl ExternalOutput {
     /// URL. Call after claim and on every Load/seek/refresh. Off the UI thread.
     pub fn begin_track(&self, uri: &str, from_start: bool) {
         if self.1 {
-            self.0
-                .sink
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .loudness
-                .begin_track(uri, from_start);
+            let mut sink = self.0.sink.lock().unwrap_or_else(PoisonError::into_inner);
+            sink.loudness.begin_track(uri, from_start);
+            sink.beats.begin_track(uri, from_start);
         }
     }
 
@@ -1623,6 +1629,7 @@ mod tests {
             sink: Arc::new(Mutex::new(sink)),
             control,
             tap,
+            beats: crate::beat_analysis::Collector::new(),
             eq: crate::eq::Processor::new(eq),
             volume: Box::new(FixedVolume(volume)),
             limiter: crate::limiter::Limiter::new(f64::from(SAMPLE_RATE)),

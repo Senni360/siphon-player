@@ -350,6 +350,13 @@ const PLAY_COUNT_RETRY: Duration = Duration::from_secs(60);
 pub struct App {
     pub playback_owner: PlaybackOwner,
     hybrid: hybrid::HybridPlayback,
+    /// The beat BPM and key reading, collected from the own engine's audio
+    /// (see `crate::beat_analysis`). Shared with the engine's sink and read
+    /// by the player bar.
+    pub beats: std::sync::Arc<crate::beat_analysis::Collector>,
+    /// The track already considered for the beat reading, so the playing
+    /// track is only looked up once, not every frame.
+    beat_armed: Option<String>,
     pub soundcloud_account: crate::soundcloud::account::Account,
     pub soundcloud_reconnect: bool,
     pub soundcloud_library: crate::soundcloud::library::Library,
@@ -1079,6 +1086,8 @@ impl App {
             crate::retitle::load(&bytes);
         }
         let tap = crate::vis::AudioTap::new();
+        let beats = crate::beat_analysis::Collector::new();
+        beats.set_threshold(settings.beat_key_after_secs.map(u32::from));
         let eq = crate::eq::shared();
         if let Ok(mut shared) = eq.lock() {
             *shared = eq_settings(&settings);
@@ -1093,6 +1102,7 @@ impl App {
             &settings,
             applied_proxy.clone(),
             std::sync::Arc::clone(&tap),
+            std::sync::Arc::clone(&beats),
             std::sync::Arc::clone(&eq),
         );
         let backend = Backend::spawn(
@@ -1172,6 +1182,8 @@ impl App {
             youtube: Default::default(),
             playback_owner: PlaybackOwner::SpotifyConnect,
             hybrid: hybrid::HybridPlayback::default(),
+            beats,
+            beat_armed: None,
             soundcloud_account: crate::soundcloud::account::Account::Disconnected,
             soundcloud_reconnect: false,
             soundcloud_library: Default::default(),
@@ -13925,6 +13937,10 @@ impl App {
             }
             Action::SettingsChanged => {
                 self.settings_dirty = true;
+                // The beat reading reads its waiting time from the shared
+                // collector, so a change applies without an engine restart.
+                self.beats
+                    .set_threshold(self.settings.beat_key_after_secs.map(u32::from));
                 ctx.set_theme(self.theme_preference());
             }
             Action::SetStartWithComputer(start) => {
@@ -13986,6 +14002,7 @@ impl App {
                     &self.settings,
                     self.applied_proxy.clone(),
                     std::sync::Arc::clone(&self.winamp.tap),
+                    std::sync::Arc::clone(&self.beats),
                     std::sync::Arc::clone(&self.winamp.eq),
                 );
                 self.backend.send(Command::RestartEngine(config));
@@ -14682,6 +14699,7 @@ impl App {
         self.handle_notch_commands();
         self.tick(ctx);
         self.note_listening();
+        self.arm_beats();
         // MilkDrop runs in a child process and can outlive the main window.
         // Poll it before applying actions because its keys produce actions.
         self.apply_actions(ctx);
@@ -14859,6 +14877,70 @@ impl App {
         } else {
             Headless::WaitFor(wait)
         }
+    }
+
+    /// Tells the beat reading which track is an instrumental worth hearing:
+    /// only SoundCloud and YouTube tracks, which play through Encore's own
+    /// engine, and only ones `crate::for_you::is_beat` calls a beat. Spotify
+    /// audio, podcasts and ordinary songs are never armed, so the collector
+    /// never buffers them at all; see `crate::beat_analysis`.
+    ///
+    /// The lookup of the playing track is done once per track, not once per
+    /// frame; a later play of the same track needs no second arm, because
+    /// the collector keeps its armed set by URI.
+    fn arm_beats(&mut self) {
+        let Some(now) = self.now_playing_live() else {
+            return;
+        };
+        if self.beat_armed.as_deref() == Some(now.uri.as_str()) {
+            return;
+        }
+        if !(crate::soundcloud::is_track_uri(&now.uri) || crate::youtube::is_track_uri(&now.uri)) {
+            return;
+        }
+        self.beat_armed = Some(now.uri.clone());
+        if self.beats.known(&now.uri).is_some() {
+            return;
+        }
+        let track = self
+            .hybrid_current_item()
+            .and_then(|item| match item {
+                PlayableItem::Track(mut track) => {
+                    track.duration_ms = now.duration_ms;
+                    Some(track)
+                }
+                _ => None,
+            })
+            .or_else(|| {
+                crate::soundcloud::is_track_uri(&now.uri)
+                    .then(|| self.soundcloud_track(&now.uri).cloned())
+                    .flatten()
+            })
+            .unwrap_or_else(|| crate::history::played_track(&now));
+        if crate::for_you::is_beat(&track) {
+            self.beats.arm(&now.uri);
+        }
+    }
+
+    /// The BPM and key known for a track, for the player bar's quiet label:
+    /// `Some((140, "C♯m"))`. The key is empty when the analysis could not
+    /// name one confidently enough to show.
+    ///
+    /// Integration point: when `src/beats.rs` lands with BPM and key read
+    /// from a track's title or description, return that metadata answer
+    /// *first* here, so it wins and shows immediately, and fall back to
+    /// this session's audio analysis
+    /// ([`crate::beat_analysis::Collector::known`]) only when the metadata
+    /// says nothing.
+    pub fn known_bpm_key(&self, uri: &str) -> Option<(u16, String)> {
+        let reading = self.beats.known(uri)?;
+        Some((
+            reading.bpm,
+            reading
+                .key
+                .map(|(key, _)| key.compact())
+                .unwrap_or_default(),
+        ))
     }
 
     /// Records a track after enough active listening time.
@@ -15476,10 +15558,12 @@ pub fn engine_config(
     settings: &Settings,
     proxy: crate::settings::ProxyConfig,
     tap: std::sync::Arc<crate::vis::AudioTap>,
+    beats: std::sync::Arc<crate::beat_analysis::Collector>,
     eq: crate::eq::SharedEq,
 ) -> EngineConfig {
     EngineConfig {
         tap,
+        beats,
         eq,
         device_name: settings.device_name.trim().to_string(),
         bitrate_kbps: settings.bitrate,

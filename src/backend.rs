@@ -9654,6 +9654,7 @@ mod authorization_tests {
             &settings,
             ProxyConfig::Off,
             crate::vis::AudioTap::new(),
+            crate::beat_analysis::Collector::new(),
             crate::eq::shared(),
         );
         let http = Http::new(reqwest::Client::new());

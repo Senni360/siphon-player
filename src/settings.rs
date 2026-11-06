@@ -327,6 +327,12 @@ pub struct Settings {
     pub player_bar_vis: PlayerBarVis,
     /// Allow clicks on the player bar background to cycle visualizer modes.
     pub player_bar_vis_click: bool,
+    /// After how many seconds of listening to a beat Encore works out and
+    /// shows its BPM and key; [`None`] never does. Only instrumentals from
+    /// SoundCloud and YouTube, played through Encore's own engine, are ever
+    /// analysed. See `crate::beat_analysis`.
+    #[serde(default = "default_beat_key_after_secs")]
+    pub beat_key_after_secs: Option<u8>,
     /// Hides what identifies you on screen: Client ID, account names and invite codes.
     pub streamer_mode: bool,
     /// Mixed playback set Soloist aside, to come back when it ends.
@@ -512,6 +518,7 @@ impl Default for Settings {
             accent_from_art: true,
             player_bar_vis: PlayerBarVis::Off,
             player_bar_vis_click: true,
+            beat_key_after_secs: default_beat_key_after_secs(),
             streamer_mode: false,
             soloist_resume: false,
             visualizer_fps: crate::vis::DEFAULT_FPS,
@@ -579,6 +586,12 @@ impl Default for Settings {
 
 fn default_buffer_ms() -> u32 {
     crate::sink::DEFAULT_BUFFER_MS
+}
+
+/// A beat's BPM and key show after ten seconds of listening, in files from
+/// before the setting existed.
+fn default_beat_key_after_secs() -> Option<u8> {
+    Some(10)
 }
 
 impl Settings {
@@ -1016,6 +1029,25 @@ mod tests {
         assert!(settings.system_theme_cache.is_none());
         assert_eq!(settings.theme, ThemeChoice::Dark);
         assert_eq!(settings.volume, 37);
+    }
+
+    /// A beat's BPM and key: ten seconds for files from before the setting
+    /// existed, the saved choice after that, and Never preserved.
+    #[test]
+    fn the_beat_key_waiting_time_survives_files_from_every_version() {
+        assert_eq!(Settings::default().beat_key_after_secs, Some(10));
+        let absent: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(absent.beat_key_after_secs, Some(10));
+        let old_file: Settings = serde_json::from_value(serde_json::json!({"volume": 37})).unwrap();
+        assert_eq!(old_file.beat_key_after_secs, Some(10));
+        for choice in [None, Some(0), Some(3), Some(10), Some(60)] {
+            let saved = Settings {
+                beat_key_after_secs: choice,
+                ..Default::default()
+            };
+            let reloaded: Settings = serde_json::from_str(&saved.encode().unwrap()).unwrap();
+            assert_eq!(reloaded.beat_key_after_secs, choice);
+        }
     }
 
     /// Files from before fastframe-audio was the only output name a

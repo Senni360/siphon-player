@@ -689,6 +689,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     let keep_playing = gettext(locale, "Keep music playing when the window closes");
     let update_checks = gettext(locale, "Automatic update checks");
     let discord_presence = gettext(locale, "Show what I'm playing on Discord");
+    let beat_key_title = gettext(locale, "Show a beat's tempo and key");
     let audio_cache = gettext(locale, "Audio cache");
     let apply_playback = gettext(locale, "Apply and restart playback");
     let apply_playback_note = gettext(locale, "Restart local playback to apply these settings.");
@@ -802,9 +803,17 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 "While Discord is open, your profile shows your song. Songs from private SoundCloud links stay hidden.",
             ),
         ),
+        RowText::new(
+            beat_key_title,
+            gettext(
+                locale,
+                "After a while listening to an instrumental from SoundCloud or YouTube, work out and show its BPM and key.",
+            ),
+        ),
     ];
-    let discord_row = playback_rows.len() - 1;
-    for index in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 14] {
+    let discord_row = playback_rows.len() - 2;
+    let beat_key_row = playback_rows.len() - 1;
+    for index in [0, 1, 2, 3, 4, 5, 8, 9, 10, 11, 14, beat_key_row] {
         playback_rows[index].available &= built_in;
     }
     if section_matches(&needle, &playback, &playback_rows) {
@@ -932,6 +941,44 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                     playback_dirty = true;
                 }
             });
+            // The beat reading's waiting time, and Never. Moving the slider
+            // turns the feature back on where it was left.
+            filtered_row(
+                ui,
+                &palette,
+                &needle,
+                &playback,
+                &playback_rows[beat_key_row],
+                |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let never = gettext(locale, "Never");
+                        let off = app.settings.beat_key_after_secs.is_none();
+                        if theme::soft_button(ui, &palette, None, &never, off).changed() && !off {
+                            app.settings.beat_key_after_secs = None;
+                            changed = true;
+                        }
+                        let mut seconds = app.settings.beat_key_after_secs.unwrap_or(10);
+                        let moved = ui
+                            .add_enabled_ui(!off, |ui| {
+                                setting_slider(
+                                    ui,
+                                    &palette,
+                                    &mut seconds,
+                                    0..=60,
+                                    |slider| slider,
+                                    |value| value.suffix(" s"),
+                                )
+                                .changed()
+                            })
+                            .inner;
+                        if moved {
+                            app.settings.beat_key_after_secs = Some(seconds);
+                            changed = true;
+                        }
+                    });
+                },
+            );
             filtered_row(ui, &palette, &needle, &playback, &playback_rows[6], |ui| {
                 if widgets::switch(
                     ui,
