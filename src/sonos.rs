@@ -93,6 +93,11 @@ impl Controller {
         }
     }
 
+    /// Notes a device the Web API refused, though it didn't say it was restricted.
+    pub fn mark_restricted(&self, device_id: &str) {
+        self.known().restricted.insert(device_id.to_owned());
+    }
+
     /// Updates the active restricted device, ignoring older playback polls.
     pub fn observe_playing(&self, seq: u64, device: Option<&Device>) {
         let mut known = self.known();

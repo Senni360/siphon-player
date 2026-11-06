@@ -6457,7 +6457,93 @@ where
 }
 
 /// Tries the session Home route before the shared fallback and routes other API work.
+/// A device the Web API refuses ("Restriction violated") without having said it
+/// was restricted, as Soloist and some speakers are, is remembered as one, and the
+/// command goes again over the Connect state service, as Spotify's own apps send it.
 async fn handle(
+    api: &ApiGateway,
+    made_for_you: &crate::made_for_you::MadeForYou,
+    new_releases: &crate::new_releases::NewReleases,
+    connect: &crate::sonos::Controller,
+    engine: Option<&Engine>,
+    background_session: &tokio::sync::Semaphore,
+    request: ApiRequest,
+) -> (ApiResponse, Vec<ApiSource>) {
+    let device = refusable_device(&request);
+    let again = device.is_some().then(|| request.clone());
+    let (response, expired) = handle_once(
+        api,
+        made_for_you,
+        new_releases,
+        connect,
+        engine,
+        background_session,
+        request,
+    )
+    .await;
+    if let (Some(device), Some(again)) = (device, again)
+        && refused_as_restricted(&response)
+        && connect.restricted_target(Some(&device)).is_none()
+        && let Some(engine) = engine
+            .filter(|engine| same_account(&engine.session().username(), api.account().as_ref()))
+    {
+        log::info!("Spotify refused a player command for a restricted device; using Connect");
+        connect.mark_restricted(&device);
+        if let Some(retried) = over_connect(engine, connect, &again).await {
+            return (retried, expired);
+        }
+    }
+    let mut response = response;
+    if refused_as_restricted(&response) {
+        explain_restricted(&mut response);
+    }
+    (response, expired)
+}
+
+/// Without this computer's own Spotify connection there's no other way to reach
+/// the device, so say what would help rather than Spotify's bare refusal.
+fn explain_restricted(response: &mut ApiResponse) {
+    if let ApiResponse::Remote {
+        result: Err(ApiError::Status { message, .. }),
+        ..
+    }
+    | ApiResponse::Transferred {
+        result: Err(ApiError::Status { message, .. }),
+        ..
+    } = response
+    {
+        *message = "Spotify won't let the Web API control this player. Turn on playback in Settings first, so Encore can reach it the way the Spotify app does."
+            .into();
+    }
+}
+
+/// The device a player command is aimed at, for the commands Connect can carry.
+fn refusable_device(request: &ApiRequest) -> Option<String> {
+    match request {
+        ApiRequest::Remote { device_id, .. }
+        | ApiRequest::ShufflePlay { device_id, .. }
+        | ApiRequest::AddToQueue { device_id, .. }
+        | ApiRequest::AddManyToQueue { device_id, .. } => device_id.clone(),
+        ApiRequest::Transfer { device_id, .. } => Some(device_id.clone()),
+        _ => None,
+    }
+}
+
+fn refused_as_restricted(response: &ApiResponse) -> bool {
+    let result = match response {
+        ApiResponse::Remote { result, .. }
+        | ApiResponse::Transferred { result, .. }
+        | ApiResponse::QueueAdded { result, .. }
+        | ApiResponse::QueueBatchAdded { result, .. } => result,
+        _ => return false,
+    };
+    matches!(
+        result,
+        Err(ApiError::Status { status: 403, message }) if message.contains("Restriction violated")
+    )
+}
+
+async fn handle_once(
     api: &ApiGateway,
     made_for_you: &crate::made_for_you::MadeForYou,
     new_releases: &crate::new_releases::NewReleases,
@@ -9001,6 +9087,40 @@ mod authorization_tests {
             crate::app::percent_to_volume(5)
         );
         assert!(worker.heard.is_none());
+    }
+
+    #[test]
+    fn a_device_spotify_refuses_as_restricted_is_tried_over_connect() {
+        let play = ApiRequest::Remote {
+            action: RemoteAction::Play,
+            device_id: Some("soloist".into()),
+            play: None,
+            position_ms: 0,
+            percent: 0,
+            flag: false,
+            repeat: String::new(),
+        };
+        assert_eq!(refusable_device(&play).as_deref(), Some("soloist"));
+        let refused = |message: &str| ApiResponse::Remote {
+            action: RemoteAction::Play,
+            result: Err(ApiError::Status {
+                status: 403,
+                message: message.into(),
+            }),
+        };
+        assert!(refused_as_restricted(&refused(
+            "Player command failed: Restriction violated"
+        )));
+        assert!(!refused_as_restricted(&refused(
+            "Player command failed: Premium required"
+        )));
+        let connect = crate::sonos::Controller::default();
+        assert_eq!(connect.restricted_target(Some("soloist")), None);
+        connect.mark_restricted("soloist");
+        assert_eq!(
+            connect.restricted_target(Some("soloist")).as_deref(),
+            Some("soloist")
+        );
     }
 
     #[test]
