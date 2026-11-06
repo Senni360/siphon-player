@@ -866,7 +866,14 @@ trending playlists, its own selections and related tracks. Following someone the
 is a write, and only happens with a connected session.
 
 YouTube pages and searches run the helper's yt-dlp, which reads YouTube directly;
-see [YouTube audio](/youtube/). **New uploads** asks YouTube's public feed
+see [YouTube audio](/youtube/). Playing a YouTube song asks the same yt-dlp
+for its audio link once, sending only its video ID; the link stays in memory
+until it expires. While a YouTube song plays, the links of the queued YouTube
+songs it leads into are found ahead of time: the next one as a preload, and
+the one after that as a link lookup. Browsing may occupy at most three of the
+five concurrent yt-dlp processes, so a song waiting to play is never queued
+behind a search or a channel page.
+**New uploads** asks YouTube's public feed
 (`youtube.com/feeds/videos.xml`) about each channel followed when the page opens,
 through the configured HTTP client. Which channels are followed stays on this
 computer, but those requests do tell YouTube their ids. No browsing request carries

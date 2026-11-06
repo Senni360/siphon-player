@@ -29,9 +29,65 @@ pub enum Error {
     Metadata,
 }
 
-/// How many yt-dlp processes run at once: a search takes three by itself, and a
-/// song waiting to play must not wait behind browsing.
+/// How many yt-dlp processes run at once: a search takes three by itself.
 const MAX_PROCESSES: usize = 5;
+/// How many of those a browse may occupy. The remaining slots stay free for
+/// playback resolutions, so a song waiting to play is never queued behind
+/// browsing no matter how many searches are running.
+const BROWSE_SLOTS: usize = 3;
+
+/// Whose request this run serves. Only playback resolutions are guaranteed a
+/// process slot; browsing races for its own sharing slice.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Priority {
+    /// Resolving a song that is about to sound: `playable` and `audio_url`.
+    Playback,
+    /// Searches, channel and playlist listings, and standalone metadata reads.
+    Browse,
+}
+
+/// The process slots shared by every yt-dlp run in this session. A browse
+/// takes its sharing permit before the shared one, so a browse still waiting
+/// for its slice holds nothing a play resolution needs.
+#[derive(Clone)]
+struct Slots {
+    total: Arc<tokio::sync::Semaphore>,
+    browse: Arc<tokio::sync::Semaphore>,
+}
+
+struct Slot {
+    _browse: Option<tokio::sync::OwnedSemaphorePermit>,
+    _total: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl Slots {
+    fn new() -> Self {
+        Self {
+            total: Arc::new(tokio::sync::Semaphore::new(MAX_PROCESSES)),
+            browse: Arc::new(tokio::sync::Semaphore::new(BROWSE_SLOTS)),
+        }
+    }
+
+    async fn acquire(&self, priority: Priority) -> Result<Slot, Error> {
+        let browse = match priority {
+            Priority::Browse => Some(
+                Arc::clone(&self.browse)
+                    .acquire_owned()
+                    .await
+                    .map_err(|_| Error::Network)?,
+            ),
+            Priority::Playback => None,
+        };
+        let total = Arc::clone(&self.total)
+            .acquire_owned()
+            .await
+            .map_err(|_| Error::Network)?;
+        Ok(Slot {
+            _browse: browse,
+            _total: total,
+        })
+    }
+}
 
 #[derive(Clone)]
 pub struct Resolver {
@@ -71,7 +127,9 @@ impl Default for Resolver {
 
 impl Resolver {
     pub async fn metadata(&self, id: &str) -> Result<Video, Error> {
-        let bytes = self.run(id, &["-J", "--skip-download"]).await?;
+        let bytes = self
+            .run(id, &["-J", "--skip-download"], Priority::Browse)
+            .await?;
         let video: Video = serde_json::from_slice(&bytes).map_err(|_| Error::Metadata)?;
         if video.id != id {
             return Err(Error::Metadata);
@@ -80,7 +138,9 @@ impl Resolver {
     }
 
     pub async fn audio_url(&self, id: &str) -> Result<String, Error> {
-        let bytes = self.run(id, &["-f", "140", "-g"]).await?;
+        let bytes = self
+            .run(id, &["-f", "140", "-g"], Priority::Playback)
+            .await?;
         let text = std::str::from_utf8(&bytes)
             .map_err(|_| Error::Metadata)?
             .trim();
@@ -91,7 +151,11 @@ impl Resolver {
     /// apart costs two runs, about two seconds each, before a new song sounds.
     pub async fn playable(&self, id: &str) -> Result<(Video, String), Error> {
         let bytes = self
-            .run(id, &["-f", "140", "-J", "--skip-download"])
+            .run(
+                id,
+                &["-f", "140", "-J", "--skip-download"],
+                Priority::Playback,
+            )
             .await?;
         playable(&bytes, id)
     }
@@ -110,19 +174,29 @@ impl Resolver {
                 "--playlist-items",
                 &items,
             ],
+            Priority::Browse,
         )
         .await
     }
 
-    async fn run(&self, id: &str, args: &[&str]) -> Result<Vec<u8>, Error> {
+    async fn run(&self, id: &str, args: &[&str], priority: Priority) -> Result<Vec<u8>, Error> {
         if !valid_id(id) {
             return Err(Error::Unavailable);
         }
-        self.run_url(format!("https://www.youtube.com/watch?v={id}"), args)
-            .await
+        self.run_url(
+            format!("https://www.youtube.com/watch?v={id}"),
+            args,
+            priority,
+        )
+        .await
     }
 
-    async fn run_url(&self, url: String, args: &[&str]) -> Result<Vec<u8>, Error> {
+    async fn run_url(
+        &self,
+        url: String,
+        args: &[&str],
+        priority: Priority,
+    ) -> Result<Vec<u8>, Error> {
         let executable = self.executable.clone().ok_or(Error::Missing)?;
         let args: Vec<String> = args.iter().map(|arg| (*arg).into()).collect();
         let timeout = self.timeout;
@@ -132,10 +206,10 @@ impl Resolver {
         let _cancel = Cancel(Some(cancel));
         tokio::spawn(async move {
             let start = Instant::now();
-            static PROCESSES: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
-            let permits = Arc::clone(PROCESSES.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(MAX_PROCESSES))));
+            static PROCESSES: OnceLock<Arc<Slots>> = OnceLock::new();
+            let slots = Arc::clone(PROCESSES.get_or_init(|| Arc::new(Slots::new())));
             let _permit = tokio::select! {
-                result = tokio::time::timeout(timeout, permits.acquire_owned()) => result.map_err(|_| Error::Timeout)?.map_err(|_| Error::Network)?,
+                result = tokio::time::timeout(timeout, slots.acquire(priority)) => result.map_err(|_| Error::Timeout)?,
                 _ = &mut cancelled => return Err(Error::Timeout),
             };
             let lock = tokio::select! {
@@ -373,6 +447,51 @@ mod tests {
         );
     }
 
+    /// A song waiting to play gets a process slot even while browsing holds
+    /// every slot a browse may take, browsing waits for its own slice, and
+    /// the pool as a whole stays bounded no matter who is asking.
+    #[tokio::test]
+    async fn playback_resolutions_never_queue_behind_browsing() {
+        let slots = Slots::new();
+        let mut browsing = Vec::new();
+        for _ in 0..BROWSE_SLOTS {
+            browsing.push(slots.acquire(Priority::Browse).await.unwrap());
+        }
+        assert_eq!(browsing.len(), BROWSE_SLOTS);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(75), slots.acquire(Priority::Browse))
+                .await
+                .is_err(),
+            "a fourth browse waits for the sharing slice"
+        );
+        let play =
+            tokio::time::timeout(Duration::from_millis(75), slots.acquire(Priority::Playback))
+                .await
+                .expect("a play resolution still starts behind full browsing");
+        assert_eq!(
+            slots.total.available_permits(),
+            MAX_PROCESSES - BROWSE_SLOTS - 1
+        );
+        let rest =
+            tokio::time::timeout(Duration::from_millis(75), slots.acquire(Priority::Playback))
+                .await
+                .expect("playback may use the rest of the pool");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(75), slots.acquire(Priority::Playback))
+                .await
+                .is_err(),
+            "the pool as a whole stays bounded"
+        );
+        drop(rest);
+        drop(play);
+        drop(browsing);
+        // A freed browse slot lets the next browse through again.
+        tokio::time::timeout(Duration::from_secs(5), slots.acquire(Priority::Browse))
+            .await
+            .expect("browse resumes once a slot frees")
+            .unwrap();
+    }
+
     #[cfg(unix)]
     mod process {
         use super::*;
@@ -425,7 +544,7 @@ mod tests {
             let tool = Tool::new("printf '%s\\n' \"$@\"", Duration::from_secs(5));
             let result = tool
                 .resolver
-                .run("aB9_-012xyz", &["-g", "-f", "140"])
+                .run("aB9_-012xyz", &["-g", "-f", "140"], Priority::Playback)
                 .await
                 .unwrap();
             let args = std::str::from_utf8(&result)
@@ -443,7 +562,7 @@ mod tests {
                 ]
             );
             assert_eq!(
-                tool.resolver.run("--exec=bad", &[]).await,
+                tool.resolver.run("--exec=bad", &[], Priority::Browse).await,
                 Err(Error::Unavailable)
             );
             assert!(tool.lock().try_lock().is_ok());
@@ -454,13 +573,18 @@ mod tests {
             let _serial = PROCESS_TESTS.lock().await;
             let tool = Tool::new("exec sleep 30", Duration::from_millis(100));
             assert_eq!(
-                tool.resolver.run("aB9_-012xyz", &[]).await,
+                tool.resolver
+                    .run("aB9_-012xyz", &[], Priority::Browse)
+                    .await,
                 Err(Error::Timeout)
             );
             assert!(tool.lock().try_lock().is_ok());
             let noisy = Tool::new("exec yes x", Duration::from_secs(5));
             assert_eq!(
-                noisy.resolver.run("aB9_-012xyz", &[]).await,
+                noisy
+                    .resolver
+                    .run("aB9_-012xyz", &[], Priority::Browse)
+                    .await,
                 Err(Error::Metadata)
             );
             assert!(noisy.lock().try_lock().is_ok());
@@ -473,7 +597,10 @@ mod tests {
             let lock = blocked.lock();
             lock.lock().unwrap();
             assert_eq!(
-                blocked.resolver.run("aB9_-012xyz", &[]).await,
+                blocked
+                    .resolver
+                    .run("aB9_-012xyz", &[], Priority::Browse)
+                    .await,
                 Err(Error::Updating)
             );
             drop(lock);
@@ -489,7 +616,10 @@ mod tests {
                 .unwrap()
                 .with_file_name("fake-tool.pid");
             let resolver = tool.resolver.clone();
-            let request = tokio::spawn(async move { resolver.run("aB9_-012xyz", &[]).await });
+            let request =
+                tokio::spawn(
+                    async move { resolver.run("aB9_-012xyz", &[], Priority::Browse).await },
+                );
             tokio::time::timeout(Duration::from_secs(5), async {
                 while !pid_path.is_file() {
                     tokio::time::sleep(Duration::from_millis(10)).await;

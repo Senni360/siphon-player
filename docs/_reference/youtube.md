@@ -70,7 +70,10 @@ MP4). Starting a song asks once for its details and link together, since a yt-dl
 run takes about two seconds. Links are remembered in memory for the session, a row
 the pointer rests on for a quarter of a second is looked up ahead of a press (two at
 a time at most), and a press during that lookup waits for it instead of starting
-another. It never selects a video format or requests Google cookies. It inherits
+another. The queue preload path prepares the next queued song, and also finds
+the link of the YouTube song after it, so a second skip sounds as quickly as the
+first; pausing cancels those look-aheads and playing reissues them. It never
+selects a video format or requests Google cookies. It inherits
 the process environment for yt-dlp proxy handling; the app's custom proxy
 preferences are not yet passed to this separate executable. Signed HTTPS
 URLs must belong to `*.googlevideo.com`, contain no embedded credentials, and
@@ -78,7 +81,10 @@ remain in memory. The shared external PCM engine owns bounded range reads,
 seek, URL refresh after expiry/refusal, cancellation, EQ/limiter and output
 handoff. The shared loudness work applies at that same PCM seam.
 
-At most five yt-dlp processes run concurrently, because a search takes three. A 30-second deadline covers
+At most five yt-dlp processes run concurrently, because a search takes three.
+Browsing may occupy at most three of the five, and the remaining slots stay
+free for playback resolutions, so a song waiting to play is never queued
+behind a search or a channel page. A 30-second deadline covers
 process-slot waiting, update-lock waiting, execution and draining pipes.
 Metadata output is limited to 4 MiB and diagnostics to 64 KiB. Timeout,
 oversized output or cancelled work kills and reaps the directly launched

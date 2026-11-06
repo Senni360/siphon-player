@@ -306,6 +306,28 @@ impl HybridQueue {
         self.upcoming().map(Entry::source)
     }
 
+    /// Up to `limit` future occurrences in the order they sound, beginning
+    /// with the one natural completion preloads ([`Self::upcoming`]). Only
+    /// the Preload look-ahead reads this. Repeat-one plays the occurrence it
+    /// already has, so it offers nothing to look ahead to.
+    pub fn upcoming_entries(&self, limit: usize) -> Vec<&Entry> {
+        if limit == 0 || self.state.repeat == Repeat::Track {
+            return Vec::new();
+        }
+        let mut entries: Vec<&Entry> = Vec::new();
+        for entry in self
+            .state
+            .manual
+            .iter()
+            .chain(self.next_up(usize::MAX).iter().copied())
+        {
+            if entries.len() < limit && !entries.iter().any(|e| e.id == entry.id) {
+                entries.push(entry);
+            }
+        }
+        entries
+    }
+
     pub fn playing_next(&self, limit: usize) -> Vec<&Entry> {
         self.state.manual.iter().take(limit).collect()
     }
@@ -807,6 +829,32 @@ mod tests {
                 .next_up(1)
                 .iter()
                 .all(|entry| !ids.contains(&entry.id))
+        );
+    }
+
+    /// The look-ahead order: manual rows first, then context order, wrapping
+    /// once under repeat-context, and nothing under repeat-one, which only
+    /// replays the occurrence playback already holds.
+    #[test]
+    fn upcoming_entries_follows_the_order_preloads_want() {
+        let mut queue = queue(&["a", "b", "c", "d"]);
+        assert_eq!(names(queue.upcoming_entries(usize::MAX)), ["b", "c", "d"]);
+        queue.add_to_queue(tracks(&["x"]));
+        assert_eq!(names(queue.upcoming_entries(2)), ["x", "b"]);
+        assert_eq!(
+            names(queue.upcoming_entries(usize::MAX)),
+            ["x", "b", "c", "d"]
+        );
+        assert!(queue.upcoming_entries(0).is_empty());
+        queue.next();
+        assert_eq!(current(&queue), Some("x"));
+        assert_eq!(names(queue.upcoming_entries(2)), ["b", "c"]);
+        queue.set_repeat(Repeat::Track);
+        assert!(queue.upcoming_entries(usize::MAX).is_empty());
+        queue.set_repeat(Repeat::Context);
+        assert_eq!(
+            names(queue.upcoming_entries(usize::MAX)),
+            ["b", "c", "d", "a"]
         );
     }
 

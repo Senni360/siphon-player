@@ -210,6 +210,117 @@ fn hybrid_seek_decoder_reopen_does_not_restore_initial_load_exception() {
 }
 
 #[test]
+fn hybrid_youtube_rows_prepare_the_next_song_and_its_follower_link() {
+    use crate::backend::HybridCommand;
+
+    // A queue of YouTube songs preloads the next one, and also finds the link
+    // of the song after it, which costs a helper run of its own.
+    let mut app = hybrid_fixture();
+    let ctx = egui::Context::default();
+    app.apply(
+        Action::PlayUris {
+            uris: vec![
+                "youtube:video:dQw4w9WgXcQ".into(),
+                "youtube:video:abcdefghijk".into(),
+                "youtube:video:1234567890_".into(),
+            ],
+            index: 0,
+        },
+        &ctx,
+    );
+    assert_eq!(
+        app.current_track_uri().as_deref(),
+        Some("youtube:video:dQw4w9WgXcQ")
+    );
+    let commands = app.backend.take_hybrid_commands();
+    assert_eq!(
+        commands
+            .iter()
+            .filter(|command| matches!(command, HybridCommand::Preload { .. }))
+            .count(),
+        1,
+        "the immediate next song is preloaded exactly once"
+    );
+    let preload_track = commands
+        .iter()
+        .find_map(|command| match command {
+            HybridCommand::Preload { track, .. } => Some(track.uri.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(preload_track, "youtube:video:abcdefghijk");
+    assert_eq!(
+        commands
+            .iter()
+            .filter(
+                |command| matches!(command, HybridCommand::PreloadAhead { track, .. }
+                    if track.uri == "youtube:video:1234567890_")
+            )
+            .count(),
+        1,
+        "the YouTube song after the next one has its link found ahead of time"
+    );
+    app.backend.shutdown();
+
+    // Nothing extra is asked for the other sources: their streams come from a
+    // plain request, not a helper run. The queue's second song after the
+    // current one is still YouTube here, so it is still looked up ahead of
+    // time, across the SoundCloud row in between.
+    let mut app = hybrid_fixture();
+    app.apply(
+        Action::PlayUris {
+            uris: vec![
+                "youtube:video:dQw4w9WgXcQ".into(),
+                "soundcloud:track:7".into(),
+                "youtube:video:abcdefghijk".into(),
+            ],
+            index: 0,
+        },
+        &egui::Context::default(),
+    );
+    let commands = app.backend.take_hybrid_commands();
+    let preload_track = commands
+        .iter()
+        .find_map(|command| match command {
+            HybridCommand::Preload { track, .. } => Some(track.uri.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!(preload_track, "soundcloud:track:7");
+    assert_eq!(
+        commands
+            .iter()
+            .filter(
+                |command| matches!(command, HybridCommand::PreloadAhead { track, .. }
+                    if track.uri == "youtube:video:abcdefghijk")
+            )
+            .count(),
+        1
+    );
+    app.backend.shutdown();
+
+    // A queue with no YouTube song after the next one asks for no link ahead.
+    let mut app = hybrid_fixture();
+    app.apply(
+        Action::PlayUris {
+            uris: vec![
+                "youtube:video:dQw4w9WgXcQ".into(),
+                "soundcloud:track:7".into(),
+            ],
+            index: 0,
+        },
+        &egui::Context::default(),
+    );
+    assert!(
+        app.backend
+            .take_hybrid_commands()
+            .iter()
+            .all(|command| !matches!(command, HybridCommand::PreloadAhead { .. }))
+    );
+    app.backend.shutdown();
+}
+
+#[test]
 fn hybrid_unresolved_context_survives_manual_exhaustion_and_waiting_navigation() {
     use crate::{backend::HybridCommand, player::HybridEvent};
 

@@ -4,6 +4,17 @@ use crate::player::PlaybackTag;
 use crate::soundcloud::engine as pcm;
 use std::sync::atomic::Ordering;
 
+/// Which pending YouTube resolution this is: the song being loaded, the queued
+/// next song's preload, or only the link of the song after that one. Each
+/// lookup's answer is shared through the session link cache, so whichever
+/// path asks first carries the others waiting on the same video.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum StreamSlot {
+    Current,
+    Next,
+    After,
+}
+
 impl Worker {
     pub(super) fn youtube_catalogue(&self) -> crate::youtube::Catalogue {
         crate::youtube::Catalogue {
@@ -24,6 +35,7 @@ impl Worker {
         for task in [
             &mut self.hybrid.youtube_load,
             &mut self.hybrid.youtube_preload,
+            &mut self.hybrid.youtube_ahead,
             &mut self.hybrid.youtube_context,
         ] {
             if let Some(task) = task.take() {
@@ -62,9 +74,10 @@ impl Worker {
         &mut self,
         tag: PlaybackTag,
         uri: String,
-        preload: bool,
+        slot: StreamSlot,
         refresh: Option<u64>,
     ) {
+        let preload = slot != StreamSlot::Current;
         let catalogue = self.youtube_catalogue();
         let commands = self.commands.clone();
         let task = tokio::spawn(async move {
@@ -94,12 +107,12 @@ impl Worker {
             });
         })
         .abort_handle();
-        let slot = if preload {
-            &mut self.hybrid.youtube_preload
-        } else {
-            &mut self.hybrid.youtube_load
+        let pending = match slot {
+            StreamSlot::Current => &mut self.hybrid.youtube_load,
+            StreamSlot::Next => &mut self.hybrid.youtube_preload,
+            StreamSlot::After => &mut self.hybrid.youtube_ahead,
         };
-        if let Some(old) = slot.replace(task) {
+        if let Some(old) = pending.replace(task) {
             old.abort();
         }
     }

@@ -23,6 +23,12 @@ pub enum HybridCommand {
         tag: PlaybackTag,
         track: Box<Track>,
     },
+    /// Resolve only the link of the queued song after the next one, so a
+    /// second skip is as fast as the first. Never hands a stream to the engine.
+    PreloadAhead {
+        tag: PlaybackTag,
+        track: Box<Track>,
+    },
     Playing {
         tag: PlaybackTag,
         playing: bool,
@@ -69,6 +75,11 @@ pub(super) struct HybridRuntime {
     pub(super) signout_pending: bool,
     pub(super) youtube_load: Option<tokio::task::AbortHandle>,
     pub(super) youtube_preload: Option<tokio::task::AbortHandle>,
+    /// Resolution of only the link of the song after the queued next one.
+    pub(super) youtube_ahead: Option<tokio::task::AbortHandle>,
+    /// The queue row whose after-next link is being found, so the same row
+    /// is not asked for twice.
+    pub(super) ahead_uri: Option<String>,
     pub(super) youtube_context: Option<tokio::task::AbortHandle>,
     pub(super) youtube_tracks: HashMap<String, tokio::task::AbortHandle>,
     /// Audio links found this session, shared by everything that plays.
@@ -527,6 +538,25 @@ impl Worker {
                     let _ = engine.preload(&track.uri);
                 }
             }
+            HybridCommand::PreloadAhead { tag, track } => {
+                // Whose link is wanted: the row after the preloaded next one.
+                // Only the session's in-memory link cache keeps the answer; a
+                // superseded or late result is discarded, like any other
+                // overwritten lookahead, instead of handed to the engine.
+                if self.hybrid.tag != Some(tag) || !self.hybrid.playing {
+                    return;
+                }
+                if self.hybrid.ahead_uri.as_ref() == Some(&track.uri) {
+                    return;
+                }
+                self.hybrid.ahead_uri = Some(track.uri.clone());
+                self.resolve_youtube_stream(
+                    tag,
+                    track.uri,
+                    super::youtube::StreamSlot::After,
+                    None,
+                );
+            }
             HybridCommand::Playing {
                 tag,
                 playing,
@@ -540,6 +570,7 @@ impl Worker {
                     for task in [
                         &mut self.hybrid.soundcloud_preload,
                         &mut self.hybrid.youtube_preload,
+                        &mut self.hybrid.youtube_ahead,
                     ] {
                         if let Some(task) = task.take() {
                             task.abort();
@@ -548,6 +579,7 @@ impl Worker {
                     // The app reissues the upcoming row on Play. Forget this
                     // request so its cancelled/queued reply cannot refill it.
                     self.hybrid.preload_uri = None;
+                    self.hybrid.ahead_uri = None;
                 }
                 if let Some(HybridCommand::Load { play, .. }) = &mut self.hybrid.pending {
                     *play = playing;
@@ -779,7 +811,16 @@ impl Worker {
         refresh: Option<u64>,
     ) {
         if crate::youtube::is_track_uri(&uri) {
-            self.resolve_youtube_stream(tag, uri, preload, refresh);
+            self.resolve_youtube_stream(
+                tag,
+                uri,
+                if preload {
+                    super::youtube::StreamSlot::Next
+                } else {
+                    super::youtube::StreamSlot::Current
+                },
+                refresh,
+            );
             return;
         }
         if crate::shared_songs::is_song(&uri) {
@@ -1220,6 +1261,97 @@ mod tests {
                 .unwrap()
                 .unwrap()
         }
+    }
+
+    /// Link-ahead lookups behave like preloads: only the newest target runs,
+    /// a stale tag starts nothing, and pausing cancels and forgets the wait.
+    /// The lookup itself is never run here, so no helper is needed.
+    #[test]
+    fn youtube_link_ahead_is_deduplicated_superseded_and_cancelled() {
+        let (runtime, mut worker, _) =
+            super::super::authorization_tests::worker("youtube-link-ahead");
+        let tag = PlaybackTag {
+            generation: 1,
+            occurrence: crate::hybrid_queue::EntryId(1),
+        };
+        let stale = PlaybackTag {
+            generation: 2,
+            occurrence: crate::hybrid_queue::EntryId(2),
+        };
+        runtime.block_on(async {
+            worker.hybrid.tag = Some(tag);
+            worker.hybrid.playing = true;
+            worker
+                .hybrid_command(HybridCommand::PreloadAhead {
+                    tag,
+                    track: Box::new(Track {
+                        uri: "youtube:video:abcdefghijk".into(),
+                        ..Default::default()
+                    }),
+                })
+                .await;
+            assert_eq!(
+                worker.hybrid.ahead_uri.as_deref(),
+                Some("youtube:video:abcdefghijk")
+            );
+            assert!(worker.hybrid.youtube_ahead.is_some());
+            // The same row is not asked for twice; a repeated command must not
+            // replace the lookup that is already finding the link.
+            let running = worker.hybrid.youtube_ahead.take();
+            worker
+                .hybrid_command(HybridCommand::PreloadAhead {
+                    tag,
+                    track: Box::new(Track {
+                        uri: "youtube:video:abcdefghijk".into(),
+                        ..Default::default()
+                    }),
+                })
+                .await;
+            assert!(
+                worker.hybrid.youtube_ahead.is_none(),
+                "a repeated row keeps its running lookup"
+            );
+            worker.hybrid.youtube_ahead = running;
+            // A stale tag starts nothing.
+            worker
+                .hybrid_command(HybridCommand::PreloadAhead {
+                    tag: stale,
+                    track: Box::new(Track {
+                        uri: "youtube:video:1234567890_".into(),
+                        ..Default::default()
+                    }),
+                })
+                .await;
+            assert_eq!(
+                worker.hybrid.ahead_uri.as_deref(),
+                Some("youtube:video:abcdefghijk")
+            );
+            // The next song becomes the newest target, replacing the old one.
+            worker
+                .hybrid_command(HybridCommand::PreloadAhead {
+                    tag,
+                    track: Box::new(Track {
+                        uri: "youtube:video:1234567890_".into(),
+                        ..Default::default()
+                    }),
+                })
+                .await;
+            assert_eq!(
+                worker.hybrid.ahead_uri.as_deref(),
+                Some("youtube:video:1234567890_")
+            );
+            assert!(worker.hybrid.youtube_ahead.is_some());
+            // Pausing cancels and forgets the wait, exactly like a preload.
+            worker
+                .hybrid_command(HybridCommand::Playing {
+                    tag,
+                    playing: false,
+                    sequence: 1,
+                })
+                .await;
+            assert!(worker.hybrid.youtube_ahead.is_none());
+            assert_eq!(worker.hybrid.ahead_uri, None);
+        });
     }
 
     #[test]

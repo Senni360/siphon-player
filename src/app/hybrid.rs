@@ -1352,11 +1352,34 @@ impl App {
         if self.hybrid.state.playback != Playback::Playing {
             return;
         }
-        if let (Some(tag), Some(entry)) = (self.hybrid.tag, self.hybrid.queue.upcoming()) {
+        let Some(tag) = self.hybrid.tag else {
+            return;
+        };
+        let upcoming = self.hybrid.queue.upcoming_entries(2);
+        // Repeat-one is playable too: upcoming_entries stays empty for it, so
+        // the engine still gets the occurrence it will play again.
+        if let Some(entry) = upcoming
+            .first()
+            .copied()
+            .or_else(|| self.hybrid.queue.upcoming())
+        {
             self.backend.send(Command::Hybrid(HybridCommand::Preload {
                 tag,
                 track: Box::new(entry.track.clone()),
             }));
+        }
+        // A YouTube link takes a helper run, so the song after the next one
+        // is found now too; skipping to it then starts without the wait.
+        // The other sources resolve their streams through a plain request.
+        if let Some(ahead) = upcoming
+            .get(1)
+            .filter(|entry| crate::youtube::is_track_uri(&entry.track.uri))
+        {
+            self.backend
+                .send(Command::Hybrid(HybridCommand::PreloadAhead {
+                    tag,
+                    track: Box::new(ahead.track.clone()),
+                }));
         }
     }
 
