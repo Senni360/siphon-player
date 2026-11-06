@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use egui::{CornerRadius, Rect, Sense, Vec2, pos2, vec2};
 
-use crate::api::models::{Album, PlayableItem, Playlist, pick_image};
+use crate::api::models::{PlayableItem, Playlist, pick_image};
 use crate::app::App;
 use crate::i18n::gettext;
 use crate::model::{Action, Loadable, Page, RowContext, TopPeriod};
@@ -50,19 +50,26 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         .for_you
         .get()
         .map_or_else(Vec::new, |shown| shown.picks.clone());
-    let following = app
-        .for_you
-        .get()
-        .map_or_else(Vec::new, |shown| shown.following.clone());
     let projects = app
         .for_you
         .get()
         .map_or_else(Vec::new, |shown| shown.projects.clone());
-    // New projects lead when there are any; until then, the songs picked.
-    let features = if projects.is_empty() {
+    let beats = app
+        .for_you
+        .get()
+        .map_or_else(Vec::new, |shown| shown.beats.clone());
+    // The new uploads of artists followed on Spotify are among the new releases,
+    // so they are looked for here, and asked about again once they've arrived.
+    app.ask_artist_news();
+    app.refresh_for_you();
+    // New projects lead when there are any; until then, the songs picked. Beats
+    // only when there's nothing else: they have a place of their own below.
+    let features = if !projects.is_empty() {
+        project_features(app, &projects)
+    } else if !picks.is_empty() {
         song_features(app, &picks)
     } else {
-        project_features(app, &projects)
+        song_features(app, &beats)
     };
     rise(ui, 0, |ui| featured(app, ui, &features));
     ui.add_space(20.0);
@@ -73,22 +80,23 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     });
     rise(ui, 2, |ui| quick_access(app, ui));
     ui.add_space(16.0);
+    // One shelf of what's new, from every source at once.
     rise(ui, 3, |ui| new_for_you(app, ui, &projects));
     // The songs on the featured card aren't repeated below it.
     let featured_songs = if projects.is_empty() { FEATURED } else { 0 };
     rise(ui, 3, |ui| more_for_you(app, ui, &picks, featured_songs));
+    let featured_beats = if projects.is_empty() && picks.is_empty() {
+        FEATURED
+    } else {
+        0
+    };
+    rise(ui, 4, |ui| beats_for_you(app, ui, &beats, featured_beats));
     if app.settings.home.made_for_you.visible {
         rise(ui, 4, |ui| {
             made_for_you(app, ui);
             top_mixes(app, ui);
         });
     }
-    rise(ui, 5, |ui| new_from_followed(app, ui, &following));
-    app.ask_artist_news();
-    let news = app.artist_news.clone();
-    rise(ui, 5, |ui| beyond_spotify(app, ui, &news));
-    rise(ui, 5, |ui| source_picks(app, ui, &picks));
-    rise(ui, 6, |ui| new_releases(app, ui));
     rise(ui, 6, |ui| recently_played(app, ui));
     rise(ui, 7, |ui| top_artists(app, ui));
     rise(ui, 7, |ui| top_tracks(app, ui));
@@ -368,8 +376,47 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
                 Icon::Music,
                 Some(app.backend.art()),
             );
+            // The one playing says so, as the large one does with its button: bars
+            // that move while it plays, a pause to press under the pointer.
+            let current = feature.is_current(app);
+            let playing = current && app.believed_playing();
+            let mark = egui::Rect::from_center_size(
+                egui::pos2(row.right() - 18.0, row.center().y),
+                egui::Vec2::splat(16.0),
+            );
+            if response.hovered() {
+                let glyph = if playing {
+                    Icon::PauseFilled
+                } else {
+                    Icon::PlayFilled
+                };
+                theme::paint_icon(ui, glyph, mark, 16.0, palette.text);
+            } else if current {
+                let time = ui.input(|input| input.time) as f32;
+                for bar in 0..3 {
+                    let lift = if playing {
+                        0.35 + 0.65 * ((time * 6.0 + bar as f32 * 1.7).sin() * 0.5 + 0.5)
+                    } else {
+                        0.3
+                    };
+                    let x = mark.left() + 2.0 + bar as f32 * 5.0;
+                    let height = mark.height() * lift;
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(
+                            egui::pos2(x, mark.bottom() - height),
+                            egui::pos2(x + 3.0, mark.bottom()),
+                        ),
+                        1.0,
+                        palette.accent,
+                    );
+                }
+                if playing {
+                    ui.ctx()
+                        .request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            }
             let left = art_rect.right() + 10.0;
-            let room = (row.right() - left - 6.0).max(10.0);
+            let room = (row.right() - left - 36.0).max(10.0);
             let color = super::kit::Source::of(&feature.uri).color(&palette);
             let name = widgets::ellipsized(ui, &feature.name, theme::medium(13.5), color, room, 1);
             ui.painter()
@@ -397,7 +444,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
 }
 
 /// The new projects past the featured card's: albums, EPs and singles just out
-/// from the artists played most, on any source.
+/// from the artists played most, from Spotify and SoundCloud together.
 fn new_for_you(app: &mut App, ui: &mut egui::Ui, projects: &[crate::for_you::Project]) {
     let rest: Vec<_> = projects.iter().skip(FEATURED).cloned().collect();
     if rest.is_empty() {
@@ -408,7 +455,7 @@ fn new_for_you(app: &mut App, ui: &mut egui::Ui, projects: &[crate::for_you::Pro
         ui,
         &palette,
         "new-for-you",
-        &gettext(app.locale, "New for you"),
+        &gettext(app.locale, "New releases"),
         |ui| {
             for project in &rest {
                 project_card(app, ui, project);
@@ -485,60 +532,21 @@ fn more_for_you(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]
     ui.add_space(12.0);
 }
 
-/// New from the people and channels followed on SoundCloud and YouTube.
-fn new_from_followed(app: &mut App, ui: &mut egui::Ui, tracks: &[crate::api::models::Track]) {
+/// Beats, apart from the songs: what producers followed just put out, then
+/// beats like the ones played. Mostly YouTube's, where beats live.
+fn beats_for_you(app: &mut App, ui: &mut egui::Ui, beats: &[crate::for_you::Pick], skip: usize) {
+    let tracks: Vec<_> = beats
+        .iter()
+        .skip(skip)
+        .map(|pick| pick.track.clone())
+        .collect();
     if tracks.is_empty() {
         return;
     }
-    theme::section_title(
-        ui,
-        &app.palette,
-        &gettext(app.locale, "New from who you follow"),
-    );
+    theme::section_title(ui, &app.palette, &gettext(app.locale, "Beats for you"));
     ui.add_space(6.0);
-    super::source_page::song_cards(app, ui, tracks, 1);
+    super::source_page::video_cards(app, ui, &tracks, 1);
     ui.add_space(12.0);
-}
-
-/// New SoundCloud uploads from artists followed on Spotify. Some will also be on
-/// Spotify, so it says where they're from rather than that Spotify lacks them.
-fn beyond_spotify(app: &mut App, ui: &mut egui::Ui, tracks: &[crate::api::models::Track]) {
-    if tracks.is_empty() {
-        return;
-    }
-    theme::section_title(
-        ui,
-        &app.palette,
-        &gettext(app.locale, "New on SoundCloud from artists you follow"),
-    );
-    ui.add_space(6.0);
-    super::source_page::song_cards(app, ui, tracks, 1);
-    ui.add_space(12.0);
-}
-
-/// Each source's own picks: SoundCloud's as cards, YouTube's as thumbnails.
-fn source_picks(app: &mut App, ui: &mut egui::Ui, picks: &[crate::for_you::Pick]) {
-    let of = |wanted: fn(&str) -> bool| -> Vec<crate::api::models::Track> {
-        picks
-            .iter()
-            .filter(|pick| wanted(&pick.track.uri))
-            .map(|pick| pick.track.clone())
-            .collect()
-    };
-    let soundcloud = of(crate::soundcloud::is_track_uri);
-    if !soundcloud.is_empty() {
-        theme::section_title(ui, &app.palette, &gettext(app.locale, "SoundCloud for you"));
-        ui.add_space(6.0);
-        super::source_page::song_cards(app, ui, &soundcloud, 1);
-        ui.add_space(12.0);
-    }
-    let youtube = of(crate::youtube::is_track_uri);
-    if !youtube.is_empty() {
-        theme::section_title(ui, &app.palette, &gettext(app.locale, "YouTube for you"));
-        ui.add_space(6.0);
-        super::source_page::video_cards(app, ui, &youtube, 1);
-        ui.add_space(12.0);
-    }
 }
 
 struct Tile {
@@ -900,84 +908,6 @@ fn top_mixes(app: &mut App, ui: &mut egui::Ui) {
         &gettext(app.locale, "Your top mixes"),
         |ui| playlist_cards(app, ui, "home-top_mixes-menu", &playlists),
     );
-}
-
-/// The latest releases from followed artists. A card opens its release;
-/// the title opens the page that plays all their songs, newest first.
-fn new_releases(app: &mut App, ui: &mut egui::Ui) {
-    let palette = app.palette;
-    let (albums, loading, failure) = match &app.home.new_releases {
-        Loadable::Loaded(albums) => (albums.clone(), false, None),
-        Loadable::Loading | Loadable::NotLoaded => (Vec::new(), true, None),
-        Loadable::Failed(error) => (Vec::new(), false, Some(error.clone())),
-    };
-    if albums.is_empty() && !loading && failure.is_none() {
-        return;
-    }
-    let open = widgets::linked_shelf(
-        ui,
-        &palette,
-        "new-releases",
-        &gettext(app.locale, "New releases"),
-        |ui| {
-            if albums.is_empty() && loading {
-                widgets::loading_row(ui, &palette, app.locale);
-            } else if albums.is_empty()
-                && let Some(message) = &failure
-            {
-                widgets::error_row(ui, app, message, Some(Page::Home));
-            }
-            for album in &albums {
-                release_card(app, ui, album);
-            }
-        },
-    );
-    if open {
-        app.actions.push(Action::Open(Page::NewReleases));
-    }
-}
-
-fn release_card(app: &mut App, ui: &mut egui::Ui, album: &Album) {
-    let palette = app.palette;
-    let artists =
-        crate::api::models::join_names(album.artists.iter().map(|artist| artist.name.as_str()));
-    let subtitle = if artists.is_empty() {
-        album.kind_label(app.locale).into_owned()
-    } else {
-        format!("{} • {artists}", album.kind_label(app.locale))
-    };
-    let context_here = app.playing_context_uri().as_deref() == Some(album.uri.as_str());
-    let playing_here = context_here && app.believed_playing();
-    let card_art = app.art_px(widgets::CARD_ART);
-    let card = widgets::card(
-        ui,
-        app,
-        pick_image(&album.images, card_art),
-        &album.name,
-        &subtitle,
-        widgets::CardCover::square(playing_here),
-    );
-    if card.play {
-        if context_here {
-            app.actions.push(Action::TogglePlay);
-        } else {
-            app.actions.push(Action::PlayContext {
-                uri: album.uri.clone(),
-                offset_uri: None,
-                offset_index: None,
-            });
-        }
-    }
-    if card.clicked {
-        app.actions
-            .push(Action::Open(Page::Album(album.id.clone())));
-    }
-    egui::Popup::context_menu(&card.response)
-        .id(ui.make_persistent_id(("home-new-releases-menu", &album.uri)))
-        .frame(widgets::menu_frame(&palette))
-        .show(|ui| {
-            widgets::context_menu_items(ui, app, &album.uri, &album.name, None);
-        });
 }
 
 fn playlist_cards(app: &mut App, ui: &mut egui::Ui, menu: &str, playlists: &[Playlist]) {

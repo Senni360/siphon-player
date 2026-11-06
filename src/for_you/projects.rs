@@ -45,7 +45,8 @@ const FRESH_HALF_LIFE_DAYS: f64 = 5.0;
 /// What following an artist adds, next to how much they're played.
 const FOLLOW_PULL: f64 = 0.5;
 const PER_ARTIST: usize = 2;
-const MOST_PROJECTS: usize = 24;
+/// Room for new beats as well as songs: the two are split after ranking.
+const MOST_PROJECTS: usize = 48;
 /// Shorter than this is a snippet, not a single.
 const SHORTEST_SONG_MS: u32 = 60_000;
 const SOUNDCLOUD_SETS: u32 = 4;

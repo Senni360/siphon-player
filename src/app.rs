@@ -53,6 +53,30 @@ const REMOTE_POLL_MIN: Duration = Duration::from_secs(15);
 const REMOTE_COMMAND_WINDOW: Duration = Duration::from_secs(10);
 /// With nobody able to see the window and nothing playing anywhere.
 const REMOTE_POLL_UNSEEN: Duration = Duration::from_secs(30);
+
+/// How much Home's recommendations had to go on when they were asked for.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ForYouInputs {
+    playback: bool,
+    new_releases: usize,
+    likes: usize,
+    channels: usize,
+    followed: usize,
+    artist_news: usize,
+}
+
+impl ForYouInputs {
+    /// Whether something has arrived since `asked`. Less than before (a list
+    /// reloading) is no reason to ask again.
+    fn knows_more_than(&self, asked: &Self) -> bool {
+        (self.playback && !asked.playback)
+            || self.new_releases > asked.new_releases
+            || self.likes > asked.likes
+            || self.channels > asked.channels
+            || self.followed > asked.followed
+            || self.artist_news > asked.artist_news
+    }
+}
 const REMOTE_FRESH: Duration = Duration::from_secs(60);
 /// How often the open Friend activity panel asks for news.
 const FRIENDS_POLL: Duration = Duration::from_secs(15);
@@ -519,6 +543,10 @@ pub struct App {
     /// Home's recommendations, and when they were asked for.
     pub for_you: Loadable<crate::for_you::ForYou>,
     pub for_you_asked: Option<Instant>,
+    /// Which request for Home's recommendations was sent last.
+    for_you_serial: u64,
+    /// What was known when it was sent: asked again once more is known.
+    for_you_inputs: Option<ForYouInputs>,
     /// A linked phone's connection.
     pub phone: remote::Remote,
     /// Which artist each SoundCloud and YouTube account page leads back to.
@@ -1254,6 +1282,8 @@ impl App {
             home: HomeData::default(),
             for_you: Loadable::NotLoaded,
             for_you_asked: None,
+            for_you_serial: 0,
+            for_you_inputs: None,
             phone: remote::Remote::default(),
             artist_links: HashMap::new(),
             artist_links_asked: false,
@@ -3111,11 +3141,19 @@ impl App {
                     let tracks: Vec<Track> = shown
                         .picks
                         .iter()
+                        .chain(&shown.beats)
                         .map(|pick| pick.track.clone())
                         .chain(shown.following.iter().cloned())
                         .collect();
                     self.cache_soundcloud_tracks(&tracks);
-                    self.for_you = Loadable::Loaded(*shown);
+                    // An answer to an older request than the one shown is stale.
+                    if self
+                        .for_you
+                        .get()
+                        .is_none_or(|current| current.asked <= shown.asked)
+                    {
+                        self.for_you = Loadable::Loaded(*shown);
+                    }
                 }
                 Event::SoundCloudLibrary(response) => self.handle_soundcloud_library(response),
                 Event::SoundCloudSaveFailed => self.toast_error(gettext(self.locale, "Could not save the SoundCloud connection or library on this computer. Try again.")),
@@ -6318,12 +6356,43 @@ impl App {
     }
 
     /// Asks for Home's recommendations, unless they're fresh.
+    /// What Home's recommendations are worked out from, as far as it has
+    /// arrived. Everything after the first frame arrives in its own time: the
+    /// playback session, Spotify's new releases, the likes.
+    fn for_you_inputs(&self) -> ForYouInputs {
+        ForYouInputs {
+            playback: self.local_ready,
+            new_releases: self.home.new_releases.get().map_or(0, Vec::len),
+            likes: self.soundcloud_library.snapshot.likes.len()
+                + self.youtube_likes().map_or(0, |likes| likes.len()),
+            channels: self.youtube_channels().len(),
+            followed: self.soundcloud_library.snapshot.following.items.len(),
+            artist_news: self.artist_news.len(),
+        }
+    }
+
+    /// Asks again as soon as something the last request lacked has arrived, so
+    /// Home doesn't sit for half an hour on what it knew in its first second.
+    pub(crate) fn refresh_for_you(&mut self) {
+        const SETTLE: Duration = Duration::from_secs(8);
+        let inputs = self.for_you_inputs();
+        let grew = self
+            .for_you_inputs
+            .is_some_and(|asked| inputs.knows_more_than(&asked));
+        if grew && self.for_you_asked.is_some_and(|at| at.elapsed() >= SETTLE) {
+            self.for_you_asked = None;
+            self.ask_for_you();
+        }
+    }
+
     pub(crate) fn ask_for_you(&mut self) {
         const FRESH: Duration = Duration::from_secs(30 * 60);
         if self.for_you_asked.is_some_and(|at| at.elapsed() < FRESH) {
             return;
         }
         self.for_you_asked = Some(Instant::now());
+        self.for_you_inputs = Some(self.for_you_inputs());
+        self.for_you_serial += 1;
         if self.for_you.get().is_none() {
             self.for_you = Loadable::Loading;
         }
@@ -6364,6 +6433,8 @@ impl App {
                 .collect(),
             heard: self.recents_view.to_vec(),
             spotify_new: self.home.new_releases.get().cloned().unwrap_or_default(),
+            asked: self.for_you_serial,
+            artist_news: self.artist_news.clone(),
         }));
     }
 

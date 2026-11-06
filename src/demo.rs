@@ -8180,7 +8180,7 @@ mod tests {
             for (label, expected) in [
                 ("Made for you", made_for_you),
                 ("Your top mixes", made_for_you),
-                ("New releases", true),
+                // New releases come with the recommendations, from every source.
                 ("Liked Songs", true),
                 ("Recently played", true),
                 ("Your top artists", true),

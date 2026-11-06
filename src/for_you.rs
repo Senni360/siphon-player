@@ -44,11 +44,80 @@ pub struct Pick {
 
 #[derive(Clone, Debug, Default)]
 pub struct ForYou {
+    /// Songs picked for the listener, best first. Never beats.
     pub picks: Vec<Pick>,
+    /// Beats, apart from the songs: new ones from who's followed first, then picked.
+    pub beats: Vec<Pick>,
     /// New from the people and channels followed, newest first.
     pub following: Vec<Track>,
-    /// New albums, EPs and singles from the artists played most, best first.
+    /// New albums, EPs and singles from the artists played most, on any source,
+    /// best first. Never beats.
     pub projects: Vec<Project>,
+    /// Which request this answers, so an older answer can't replace a newer one.
+    pub asked: u64,
+}
+
+/// Whether a track is a beat (an instrumental made for others to rap or sing
+/// on) rather than a song. Beats have a place of their own on Home.
+///
+/// Producers say so in the title: "type beat", "instrumental", "[FREE]",
+/// "free for profit", a tempo. On YouTube, where the songs people play are
+/// mostly on Spotify or SoundCloud too, an upload is a beat unless it says
+/// it's a song's video or audio.
+pub fn is_beat(track: &Track) -> bool {
+    let title = track.name.to_lowercase();
+    let words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let said = [
+        "type beat",
+        "typebeat",
+        "instrumental",
+        "free for profit",
+        "freestyle beat",
+    ]
+    .iter()
+    .any(|phrase| title.contains(phrase))
+        || words
+            .iter()
+            .any(|word| matches!(*word, "beat" | "beats" | "bpm"))
+        || title.trim_start().starts_with("[free]")
+        || title.trim_start().starts_with("(free)");
+    if said {
+        return true;
+    }
+    let by_producer = track.artists.iter().any(|artist| {
+        let name = artist.name.to_lowercase();
+        name.split(|c: char| !c.is_alphanumeric())
+            .any(|word| matches!(word, "beats" | "beatz" | "instrumentals"))
+            || name.ends_with("beats")
+    });
+    let genre = crate::stats::soundcloud_genre(&track.uri).is_some_and(|genre| {
+        let genre = genre.to_lowercase();
+        genre.contains("beat") || genre.contains("instrumental")
+    });
+    if by_producer || genre {
+        return true;
+    }
+    if crate::youtube::is_track_uri(&track.uri) {
+        let song = [
+            "official video",
+            "official audio",
+            "music video",
+            "official visualizer",
+            "visualizer",
+            "lyric",
+            "(audio)",
+            "[audio]",
+            "live at",
+            "live from",
+        ]
+        .iter()
+        .any(|marker| title.contains(marker));
+        return !song;
+    }
+    false
 }
 
 /// What asking Spotify about an artist takes: the playback session, and the
@@ -272,6 +341,10 @@ fn rank(candidates: Vec<Candidate>, taste: &Taste) -> Vec<Pick> {
 
 /// What the app knows that isn't in the listening log.
 pub struct Request {
+    /// Which request this is; the answer says so.
+    pub asked: u64,
+    /// New SoundCloud uploads from the artists followed on Spotify.
+    pub artist_news: Vec<Track>,
     pub likes: Vec<Track>,
     /// What Spotify suggests, which the taste then orders among the rest.
     pub spotify: Vec<Track>,
@@ -344,8 +417,11 @@ pub async fn gather(
         }
         None => Vec::new(),
     };
-    let cold_soundcloud = soundcloud.is_empty();
-    let cold_youtube = youtube.is_empty() && request.channels.is_empty();
+    // Only someone with nothing to go on at all starts from what's popular. Someone
+    // who just doesn't use a source isn't new to music.
+    let cold = taste.seeds.is_empty() && request.channels.is_empty() && request.likes.is_empty();
+    let cold_soundcloud = cold;
+    let cold_youtube = cold;
     for seed in soundcloud {
         let client = client.clone();
         reads.spawn(async move {
@@ -433,6 +509,7 @@ pub async fn gather(
             request
                 .soundcloud_posts
                 .into_iter()
+                .chain(request.artist_news)
                 .filter_map(projects::from_song),
         )
         .map(|project| projects::Offer {
@@ -474,10 +551,43 @@ pub async fn gather(
                 followed: false,
             }),
     );
+    // Beats and songs are ranked apart, so neither crowds the other out.
+    let (beat_candidates, song_candidates): (Vec<Candidate>, Vec<Candidate>) = candidates
+        .into_iter()
+        .partition(|candidate| is_beat(&candidate.track));
+    let (new_beats, projects): (Vec<Project>, Vec<Project>) = projects::rank(offers, &fans, now)
+        .into_iter()
+        .partition(|project| match &project.track {
+            Some(track) => is_beat(track),
+            None => is_beat(&Track {
+                uri: project.uri.clone(),
+                name: project.name.clone(),
+                artists: project.artists.clone(),
+                ..Default::default()
+            }),
+        });
+    let mut beats: Vec<Pick> = new_beats
+        .into_iter()
+        // A beat put out as a set has no one song to play, so it stays out.
+        .filter_map(|project| {
+            Some(Pick {
+                track: project.track?,
+                reason: project.reason,
+            })
+        })
+        .collect();
+    for pick in rank(beat_candidates, &taste) {
+        if !beats.iter().any(|known| known.track.uri == pick.track.uri) {
+            beats.push(pick);
+        }
+    }
+    beats.truncate(MOST_PICKS);
     ForYou {
-        picks: rank(candidates, &taste),
+        picks: rank(song_candidates, &taste),
+        beats,
         following,
-        projects: projects::rank(offers, &fans, now),
+        projects,
+        asked: request.asked,
     }
 }
 
@@ -704,6 +814,8 @@ mod tests {
                 channels: Vec::new(),
                 heard: Vec::new(),
                 spotify_new: Vec::new(),
+                asked: 1,
+                artist_news: Vec::new(),
             },
             NOW,
         )
