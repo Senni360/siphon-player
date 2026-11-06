@@ -646,10 +646,18 @@ fn number_after(text: &str, at: usize) -> Option<u16> {
 fn key_of(text: &str) -> Option<String> {
     let lower = text.to_lowercase();
     let chars: Vec<char> = lower.chars().collect();
+    let says = |at: usize, word: &str| {
+        word.chars()
+            .enumerate()
+            .all(|(offset, c)| chars.get(at + offset) == Some(&c))
+    };
     // Said after "key", a bare note or a lone "m" is enough: `Key: C`, `Key:
     // Am`. Nowhere else: ordinary words would read as keys.
     let mut at = 0;
-    while let Some(found) = lower[at..].find("key") {
+    while let Some(found) = chars[at..]
+        .windows(3)
+        .position(|window| window == ['k', 'e', 'y'].as_slice())
+    {
         let start = at + found;
         at = start + 3;
         if chars.get(start + 3).is_some_and(|c| c.is_alphanumeric()) {
@@ -659,7 +667,7 @@ fn key_of(text: &str) -> Option<String> {
         let mut idx = start + 3;
         let mut skipped = 0;
         while idx < chars.len() && skipped < 16 {
-            if chars[idx].is_alphabetic() && !lower[idx..].starts_with("signature") {
+            if chars[idx].is_alphabetic() && !says(idx, "signature") {
                 break;
             }
             if !chars[idx].is_alphanumeric() {
@@ -944,6 +952,22 @@ mod tests {
 
         let flat = read("aurora", Some("key: bb major"), None);
         assert_eq!(flat.key.as_deref(), Some("B\u{266D}"));
+    }
+
+    #[test]
+    fn multibyte_text_around_a_key_is_read_without_panicking() {
+        // Real upload descriptions carry zero-width spaces and curly quotes
+        // wrapped around "key"; walking them by byte once cut a character in
+        // half and crashed the app seconds after start-up.
+        let description = "\u{200b}140 bpm \u{200b}Key\u{200b}\u{200b}: C# minor\nprod. by me";
+        let beat = read("aurora", Some(description), None);
+        assert_eq!(beat.bpm, Some(140));
+        assert_eq!(beat.key.as_deref(), Some("C\u{266F}m"));
+
+        assert_eq!(
+            key_of("prod \u{201c}key\u{201d}: F#m\u{201d}\u{2026}").as_deref(),
+            Some("F\u{266F}m")
+        );
     }
 
     #[test]
