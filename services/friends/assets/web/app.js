@@ -1209,7 +1209,7 @@ async function pollState() {
       const { state, now } = await api('/live/remote/state');
       await applyState(state, now);
     } catch (error) {
-      if (error instanceof SignedOut) { start(); return; }
+      if (error instanceof SignedOut) { start({ signedOut: true }); return; }
     }
   }
   // With the event stream open, a look is only a safety net.
@@ -1721,7 +1721,7 @@ async function load(fill, into) {
       const content = await fill();
       if (into.loading === mine) into.replaceChildren(...[content].flat(Infinity).filter(Boolean));
     } catch (error) {
-      if (error instanceof SignedOut) start();
+      if (error instanceof SignedOut) start({ signedOut: true });
       else if (into.loading === mine) into.replaceChildren(failed(error, run));
     }
   };
@@ -1925,7 +1925,7 @@ function artistScreen() {
       // What's on the other sources arrives while the page is open.
       if (found.looking && tries++ < 12) setTimeout(read, 3000);
     } catch (error) {
-      if (error instanceof SignedOut) start();
+      if (error instanceof SignedOut) start({ signedOut: true });
       else if (!body.querySelector('.hero')) body.replaceChildren(backButton(), failed(error, () => { body.replaceChildren(bones(8)); read(); }));
     }
   };
@@ -2138,8 +2138,60 @@ function spotifyPanel() {
 }
 
 // ---------------------------------------------------------------- linking
-function linkScreen() {
-  const problem = h('p', { class: 'problem', role: 'alert', hidden: true });
+/** A code in a /link address's fragment: a fragment never reaches the server. */
+function linkingCode() {
+  if (location.pathname !== '/link') return null;
+  let raw;
+  try { raw = decodeURIComponent(location.hash.slice(1)); } catch { raw = location.hash.slice(1); }
+  const code = raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return code.length === 8 ? code : null;
+}
+
+/** Claims a code and keeps the device secret it answers with. */
+async function claimCode(code) {
+  const linked = await api('/link/claim', 'POST', { code, device: phoneName() });
+  keepSecret(linked.secret);
+  localStorage.setItem(STORE.name, linked.display_name);
+  if (linked.client_id) localStorage.setItem(STORE.client, linked.client_id);
+  return linked;
+}
+
+/** Linking from an address, so nobody has to type eight letters on a phone. */
+async function linkFromAddress() {
+  const code = linkingCode();
+  if (!code) return false;
+  app.replaceChildren(h('div', { class: 'door-page' }, h('div', { class: 'door', role: 'status' },
+    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
+    h('h1', { text: 'Encore' }), h('p', { text: 'Linking this phone…' }))));
+  try {
+    await claimCode(code);
+  } catch (error) {
+    // Spent or wrong: take the code out of the address, and let them type another.
+    history.replaceState(null, '', '/link');
+    linkScreen(error.message);
+    return true;
+  }
+  app.replaceChildren(h('div', { class: 'door-page' }, h('div', { class: 'door', role: 'status' },
+    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
+    h('h1', { text: 'This phone is linked' }), h('p', { text: 'Opening your music…' }))));
+  history.replaceState(null, '', '/');
+  setTimeout(start, 700);
+  return true;
+}
+
+/** A phone whose device secret the service no longer accepts. */
+function signedOutScreen() {
+  app.replaceChildren(h('div', { class: 'door-page' }, h('div', { class: 'door' },
+    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
+    h('h1', { text: 'This phone was signed out' }),
+    h('p', { text: 'Encore on your computer removed this phone, or its sign-in was cleared. Your other devices are still signed in.' }),
+    h('p', { class: 'small', text: 'To link it again, open Encore on your computer, go to Group, then People, and press Link a phone. Open the link it shows on this phone, or type the code below.' }),
+    h('button', { class: 'primary', text: 'Link this phone again', onclick: () => linkScreen() }),
+    h('button', { class: 'quiet', type: 'button', text: 'Sign in with Spotify instead', onclick: spotifyPanel }))));
+}
+
+function linkScreen(problemText) {
+  const problem = h('p', { class: 'problem', role: 'alert', hidden: !problemText, text: problemText ?? '' });
   const input = h('input', { class: 'code', 'aria-label': 'Code from your computer', maxlength: 9, autocapitalize: 'characters', autocorrect: 'off', autocomplete: 'one-time-code', spellcheck: 'false', enterkeyhint: 'go', required: true });
   const button = h('button', { class: 'primary', type: 'submit', text: 'Link this phone' });
   const form = h('form', { class: 'door', onsubmit: async event => {
@@ -2147,10 +2199,7 @@ function linkScreen() {
     button.disabled = true;
     problem.hidden = true;
     try {
-      const linked = await api('/link/claim', 'POST', { code: input.value, device: phoneName() });
-      keepSecret(linked.secret);
-      localStorage.setItem(STORE.name, linked.display_name);
-      if (linked.client_id) localStorage.setItem(STORE.client, linked.client_id);
+      await claimCode(input.value);
       start();
     } catch (error) {
       problem.textContent = error.message;
@@ -2161,7 +2210,7 @@ function linkScreen() {
     h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
     h('h1', { text: 'Encore' }),
     h('p', { text: 'Use your own account on this phone: your library, your groups, and playback on your computer.' }),
-    h('p', { class: 'small', text: 'On your computer, open Encore, go to Group, then People, and press Link a phone. Type the code here.' }),
+    h('p', { class: 'small', text: 'On your computer, open Encore, go to Group, then People, and press Link a phone. Type the code here, or open the link it shows.' }),
     input, problem, button,
     h('button', { class: 'quiet', type: 'button', text: 'Sign in with Spotify instead', onclick: spotifyPanel }));
   app.replaceChildren(h('div', { class: 'door-page' }, form));
@@ -2174,10 +2223,11 @@ async function arrive() {
   if (location.pathname === '/callback') {
     try { await spotifyReturn(); } catch (error) { arrival = error.message; }
   }
+  if (await linkFromAddress()) return;
   start();
   if (arrival) { toast(arrival); arrival = null; }
 }
-function start() {
+function start({ signedOut = false } = {}) {
   // The browser may have emptied its storage since last time (iOS does, for
   // sites gone quiet): the backup cookie puts the sign-in back.
   if (!localStorage.getItem(STORE.secret)) {
@@ -2193,7 +2243,8 @@ function start() {
     edgeLive();
   } else {
     player.mini = null;
-    linkScreen();
+    if (signedOut) signedOutScreen();
+    else linkScreen();
   }
 }
 arrive();

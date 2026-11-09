@@ -261,17 +261,24 @@ export class PhoneServer {
   port = 0;
   requests: string[] = [];
   sent: Array<Record<string, unknown>> = [];
+  claims: Array<Record<string, unknown>> = [];
   eventRequests = 0;
   eventConnections = 0;
   droppedStreams = 0;
   phoneWrites = 0;
   computerOffline = false;
+  revoked = false;
   private readonly allowedSecret = 'a'.repeat(64);
   private readonly edgeMedia = 'edge-media-token';
   private readonly edgeSync = 'edge-sync-token';
   private readonly edgeLive = 'edge-live-token';
   private readonly peers: TestSocket[] = [];
   private wsSeq = 0;
+
+  /** The service stops accepting the phone's secret, as after a removal. */
+  revoke(): void {
+    this.revoked = true;
+  }
 
   get url(): string {
     return `http://127.0.0.1:${this.port}`;
@@ -529,6 +536,7 @@ export class PhoneServer {
   }
 
   private authorized(request: IncomingMessage): boolean {
+    if (this.revoked) return false;
     const header = request.headers.authorization ?? '';
     return header.startsWith('Bearer ') && /^[a-f0-9]{64}$/.test(header.slice(7));
   }
@@ -538,6 +546,8 @@ export class PhoneServer {
     const method = request.method ?? 'GET';
 
     if (path === '/link/claim' || path === '/auth/spotify') {
+      const input = await this.readJson(request).catch(() => null);
+      if (path === '/link/claim') this.claims.push((input ?? {}) as Record<string, unknown>);
       return this.json(response, 200, { secret: this.allowedSecret, display_name: 'Sam' });
     }
     if (!this.authorized(request)) return this.json(response, 401, { error: 'Sign in to the group' });

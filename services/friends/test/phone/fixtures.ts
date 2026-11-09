@@ -271,6 +271,8 @@ interface Observed {
    * are never allowed.
    */
   allowConsole(pattern: RegExp): void;
+  /** A browser-reported page error this test knowingly causes. */
+  allowPageError(pattern: RegExp): void;
 }
 
 type Fixtures = {
@@ -310,10 +312,12 @@ export const test = base.extend<Fixtures>({
   // and on any attempt to leave the app's origin.
   observed: [async ({ page, guard }, use) => {
     const allowed: RegExp[] = [];
+    const allowedPage: RegExp[] = [];
     const seen: Observed = {
       consoleErrors: [],
       pageErrors: [],
       allowConsole(pattern) { allowed.push(pattern); },
+      allowPageError(pattern) { allowedPage.push(pattern); },
     };
     page.on('console', message => {
       if (message.type() === 'error') seen.consoleErrors.push(message.text());
@@ -332,8 +336,9 @@ export const test = base.extend<Fixtures>({
     }).catch(() => [] as string[]);
 
     const unexpected = seen.consoleErrors.filter(text => !allowed.some(pattern => pattern.test(text)));
+    const unexpectedPage = seen.pageErrors.filter(text => !allowedPage.some(pattern => pattern.test(text)));
     expect(unexpected, 'console errors').toEqual([]);
-    expect(seen.pageErrors, 'page errors').toEqual([]);
+    expect(unexpectedPage, 'page errors').toEqual([]);
     expect(unhandled, 'unhandled rejections').toEqual([]);
     expect(opened, 'window.open calls').toEqual([]);
     expect(guard.violations, 'navigation away from the app origin').toEqual([]);
