@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "tsx src/local.ts",
     "test": "tsx --test test/*.test.ts",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test:phone": "playwright test --config test/phone/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.58.2",
     "@types/node": "^24.0.0",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
