@@ -5,10 +5,10 @@ nav_order: 6
 ---
 
 Siphon follows your computer's language when it has a translation for it,
-and uses English otherwise. **Settings → Appearance → Language** picks another
-language, listed under its own name, and applies it at once; **System** follows
-the computer again. This arrived in 0.10.0. Corrections from
-fluent speakers are welcome.
+and uses English otherwise. There is no language picker in Settings: the saved
+`language` value in `settings.json` names another language, and `system`
+follows the computer again. `--demo-language` previews one without saving it.
+This arrived in 0.10.0. Corrections from fluent speakers are welcome.
 
 Translations are stored in `.po` files, a common format supported by editors
 such as Poedit and Weblate. They are included with Siphon, so the app does
@@ -131,7 +131,7 @@ Create another PO from the template using your editor's new-translation command,
 or `msginit`. Set its language and plural rules and translate what you can.
 A maintainer must also register the locale in the app, including how system
 language tags map to it, and preview it before it becomes available. Adding a
-PO alone does not add a language to the Settings list.
+PO alone does not make a language available.
 
 Use the [translation problem form](https://github.com/crmne/spotifast/issues/new?template=translation.yml)
 for incorrect wording, missing translations or text that does not fit. Each

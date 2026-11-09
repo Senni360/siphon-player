@@ -66,8 +66,8 @@ Spotify asks you to approve playback separately from library access. Follow
 the browser prompt once; Siphon remembers this approval too.
 [Read more about the two sign-ins](/how-it-connects/).
 
-The computer then appears as a Spotify Connect device named **Siphon**.
-You can rename it in Settings.
+The computer then appears as a Spotify Connect device named **Encore**.
+You can rename it under **Settings → Devices → Device name**.
 
 ## Basics
 
@@ -146,14 +146,14 @@ Long titles are shortened with dots to fit the available space.
 
 ![Japanese, Chinese, and Korean titles in a playlist](/assets/images/scripts.png)
 
-## Choosing the interface language
+## The interface language
 
 Siphon uses your computer's language when it has a translation for it, and
-English otherwise. To pick another language, open **Settings → Appearance →
-Language**. Each language is listed under its own name, and the change applies
-at once. Choose **System** to follow the computer again. Spanish, Turkish and
-Ukrainian are complete; other translations are in progress, and anything not yet
-translated appears in English. See [Translating Siphon](/translating/) to help.
+English otherwise. Settings has no language picker: to use another language,
+quit the app and set `language` in `settings.json` to its tag, such as `es` or
+`de-DE`; `system` follows the computer again. The bundled translations are
+complete, with anything a catalogue lacks appearing in English. See
+[Translating Siphon](/translating/) to help.
 
 ## Choosing which app opens Spotify links
 
@@ -169,10 +169,10 @@ xdg-mime default siphon.desktop x-scheme-handler/spotify
 
 ## If your network needs a proxy
 
-**In development, not included in 0.8.0:** you can configure a proxy, a server
-your network uses to reach the internet, on the sign-in screen or in
-**Settings → Proxy**. Enter the address, port, and any login details supplied
-by your network administrator. Siphon protects the saved proxy password.
+You can configure a proxy, a server your network uses to reach the internet,
+on the sign-in screen or in **Settings → Network**. Enter the address, port, and
+any login details supplied by your network administrator. Siphon protects the
+saved proxy password.
 If it cannot save the password, it tells you and uses it only until you quit.
 
 Playing music on this computer supports only HTTP proxies without a login.

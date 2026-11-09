@@ -69,17 +69,11 @@ Point at a horizontal shelf, such as Made for you or Recently played on
 Home, and hold `Shift` while turning the mouse wheel. The shelf moves while
 the surrounding page stays put. Release `Shift` to scroll the page normally.
 
-## Podcasts on Home
+## Podcasts
 
-Since 0.10.0, Home has a **Your podcasts** shelf below Recently
-played. It lists episodes you have started and not finished, with the time
-left, followed by each podcast's newest episode if it came out in the last 30
-days and you have not started it, marked **New**. It covers the eight podcasts
-you saved most recently and the five newest episodes of each. Audiobooks are
-left out. The shelf is hidden when there is nothing to show. Click a card to
-open the podcast, or use its play button to play the episode. An episode you
-have started continues from where you left it. The same is true of Play on a
-podcast page, a saved episode, or a search result.
+Podcasts are not in the library and have no shelf on Home. Spotify's podcast
+and episode results still appear in Search, and open and play from there. An
+episode you have started continues from where you left it.
 
 ## Dragging beyond the visible list
 
@@ -205,8 +199,8 @@ stay until the new list arrives.
 
 ## Playing from the sidebar
 
-Double-click a playlist, Liked Songs, album, artist, or podcast row in the
-Library sidebar to start playing it. A single click still opens the row's page.
+Double-click a playlist, Liked Songs, album or artist row in the Library
+sidebar to start playing it. A single click still opens the row's page.
 Pointing at a row's cover art also shows a play button, but only when the
 sidebar is not in compact mode.
 
@@ -285,7 +279,6 @@ Unmodified letter shortcuts still yield to the focused control.
 
 This is the first part of screen-reader support. Windows testing with NVDA
 remains tracked in [#262](https://github.com/crmne/spotifast/issues/262).
-Winamp skins do not yet have equivalent accessibility coverage.
 
 ## Keyboard shortcuts
 
@@ -310,7 +303,6 @@ Winamp skins do not yet have equivalent accessibility coverage.
 | `Ctrl+A` | Select every song in a playlist, album or Liked Songs |
 | `Ctrl+C` / `Ctrl+V` | Copy the selected songs' links / add copied song links to your playlist |
 | `Ctrl+X` | Copy the selected songs' links and remove the songs from your playlist |
-| `Ctrl+M` | Winamp mini player |
 | `Ctrl+,` | Settings |
 | `Ctrl+/` or `?` | All shortcuts |
 | `Ctrl+Q` | Quit |
@@ -412,8 +404,7 @@ additional Spotify requests.
 
 Since 0.8.0, the menu below the Library filters selects an order
 for each section. **Name** and **Recently played** are available throughout.
-Albums and podcasts also offer **Recently added**, using their actual save
-dates. Spotify does not supply equivalent dates for followed playlists or
+Albums also offer **Recently added**, using their actual save dates. Spotify does not supply equivalent dates for followed playlists or
 artists, so those sections do not offer that choice. Entries with missing save
 dates come last.
 
@@ -502,20 +493,8 @@ and raises Siphon. Use **Show or hide Siphon** in the tray menu to hide
 it again.
 
 Closing to the tray removes the window and its preview. Reopening the main
-window or switching to the Winamp window creates its controls again. Media
-keys and the system's now-playing controls continue working while the window
-is closed.
-
-For the Winamp mini player, turn off **Show in taskbar** in its options menu.
-The choice survives restarts. The mini player stays visible; the skin logo and
-launching Siphon again remain ways to reach
-the app. Returning to the main window always restores its taskbar button.
-Changing the option while the mini player is open replaces that window while
-playback continues. This setting is available on Windows and in Linux X11
-sessions, where it hides the mini player from panels and task switchers that
-follow the window manager's skip-taskbar state. Wayland has no standard way
-for an app to leave the taskbar, so the option is not offered there; use your
-desktop's window rules instead. It does not change the macOS Dock.
+window creates its controls again. Media keys and the system's now-playing
+controls continue working while the window is closed.
 
 A window saved on a display that is no longer connected opens on the
 primary display instead: on Windows and X11 it moves to the middle of the
@@ -529,8 +508,8 @@ position left on an unplugged display.
 Click Siphon's menu-bar icon to open its menu. From there you can show or
 hide the window, control playback, or quit Siphon. The menu opens from
 either a primary or secondary click, as other macOS menu-bar items do.
-It stays available with the main window open, with the Winamp mini player,
-and after closing the window to the menu bar.
+It stays available with the main window open and after closing the window to
+the menu bar.
 
 Siphon also shows its Dock icon when run directly through Cargo, without
 an installed app bundle.
@@ -555,16 +534,6 @@ Finder or Launchpad also brings the window back. Turn the setting on to put
 Siphon back in the Dock. The choice survives restarts, and Siphon
 starts without the Dock icon; the Dock may show it for a moment as the app
 launches. This option is only on macOS.
-
-## Keeping the mini player above other windows
-
-**Always on top** works on Windows, macOS and X11. On Wayland the app's
-controls are unavailable, because your desktop manages which windows stay above
-others.
-Use your desktop's window rule or shortcut instead. In KDE Plasma, configure
-**Keep Window Above Others** under **Settings > Keyboard > Shortcuts >
-Window Management**. Your saved preference remains available when you use
-Siphon on Windows, macOS, or X11 again.
 
 Since 0.8.0, the top bar reserves room for the device and update
 badges beside Search. In narrow windows those badges show only their icons.
