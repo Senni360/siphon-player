@@ -8,7 +8,10 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::{Mutex, mpsc, oneshot, watch};
 
-use super::{Event, Progress, Source, Summary, discovery, framing, matching, saved};
+use super::{
+    Event, FORMATS, Preferences, Progress, QUALITIES, Source, Summary, discovery, framing,
+    matching, saved,
+};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const JOB_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -154,11 +157,17 @@ impl<W: AsyncWrite + Unpin> Session<W> {
         job: &str,
         source: &Source,
         url: &str,
+        preferences: &Preferences,
         progress: &mut Progress,
         emit: &impl Fn(Progress),
     ) -> Result<Vec<String>, String> {
-        self.download_with_request(job, download_request(job, source, url), progress, emit)
-            .await
+        self.download_with_request(
+            job,
+            download_request(job, source, url, preferences),
+            progress,
+            emit,
+        )
+        .await
     }
 
     async fn download_with_request(
@@ -321,7 +330,7 @@ fn result_data(message: Value) -> Result<Value, String> {
     }
 }
 
-fn download_request(job: &str, source: &Source, url: &str) -> Value {
+fn download_request(job: &str, source: &Source, url: &str, preferences: &Preferences) -> Value {
     // Missing options use options.rs defaults, identical to the extension:
     // MP3 320, Music/Siphon, leading-silence trim, metadata, cover and BPM/key.
     // The helper does not read chrome.storage.sync or accept tag overrides.
@@ -331,9 +340,34 @@ fn download_request(job: &str, source: &Source, url: &str) -> Value {
     } else {
         "youtube"
     };
+    let mut options = serde_json::Map::new();
+    if let Some(folder) = preferences
+        .folder
+        .as_deref()
+        .map(str::trim)
+        .filter(|folder| !folder.is_empty())
+    {
+        options.insert("outputDir".into(), folder.into());
+    }
+    if let Some(format) = preferences
+        .format
+        .as_deref()
+        .filter(|format| FORMATS.contains(format))
+    {
+        options.insert("format".into(), format.into());
+    }
+    if let Some(quality) = preferences
+        .quality
+        .as_deref()
+        .filter(|quality| QUALITIES.contains(quality))
+    {
+        options.insert("quality".into(), quality.into());
+    }
+    if all {
+        options.insert("playlist".into(), "all".into());
+    }
     json!({"type": "download", "jobId": job, "url": url,
-        "source": kind,
-        "options": if all { json!({"playlist": "all"}) } else { json!({}) }})
+        "source": kind, "options": Value::Object(options)})
 }
 
 fn command(helper: &discovery::Helper) -> tokio::process::Command {
@@ -376,6 +410,7 @@ pub(crate) async fn run(
     sources: Vec<Source>,
     searcher: matching::Searcher,
     saved: saved::Saved,
+    preferences: Preferences,
     mut cancel: watch::Receiver<bool>,
     emit: impl Fn(Event) + Send + 'static,
 ) -> Result<Summary, String> {
@@ -414,6 +449,7 @@ pub(crate) async fn run(
         sources,
         searcher,
         saved,
+        preferences,
         cancel,
         emit.clone(),
     )
@@ -443,6 +479,7 @@ async fn run_session<W: AsyncWrite + Unpin + Send + Sync + 'static>(
     sources: Vec<Source>,
     searcher: matching::Searcher,
     saved: saved::Saved,
+    preferences: Preferences,
     mut cancel: watch::Receiver<bool>,
     emit: Emit,
 ) -> Result<Summary, String> {
@@ -450,7 +487,7 @@ async fn run_session<W: AsyncWrite + Unpin + Send + Sync + 'static>(
     let outcome = tokio::select! {
         biased;
         _ = cancel.changed() => Outcome::Cancelled,
-        result = run_sources(&session, id, sources, &searcher, &saved, &totals, &emit) => Outcome::Done(result),
+        result = run_sources(&session, id, sources, &searcher, &saved, &preferences, &totals, &emit) => Outcome::Done(result),
     };
     let summary = {
         let totals = totals
@@ -502,6 +539,7 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
     sources: Vec<Source>,
     searcher: &matching::Searcher,
     saved: &saved::Saved,
+    preferences: &Preferences,
     totals: &Arc<std::sync::Mutex<Totals>>,
     emit: &Emit,
 ) -> Result<(), String> {
@@ -533,6 +571,7 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
         let queue = Arc::clone(&queue);
         let searcher = searcher.clone();
         let saved = saved.clone();
+        let preferences = preferences.clone();
         let totals = Arc::clone(totals);
         let emit = Arc::clone(emit);
         tasks.spawn(async move {
@@ -541,7 +580,16 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
                     return None;
                 };
                 if let Some(fatal) = one_source(
-                    &session, id, total, index, source, &searcher, &saved, &totals, &emit,
+                    &session,
+                    id,
+                    total,
+                    index,
+                    source,
+                    &searcher,
+                    &saved,
+                    &preferences,
+                    &totals,
+                    &emit,
                 )
                 .await
                 {
@@ -582,6 +630,7 @@ async fn one_source<W: AsyncWrite + Unpin>(
     source: Source,
     searcher: &matching::Searcher,
     saved: &saved::Saved,
+    preferences: &Preferences,
     totals: &Arc<std::sync::Mutex<Totals>>,
     emit: &Emit,
 ) -> Option<String> {
@@ -611,7 +660,14 @@ async fn one_source<W: AsyncWrite + Unpin>(
     let mut result = match url {
         Ok(url) => {
             session
-                .download(&job, &source, &url, &mut progress, &progress_event)
+                .download(
+                    &job,
+                    &source,
+                    &url,
+                    preferences,
+                    &mut progress,
+                    &progress_event,
+                )
                 .await
         }
         Err(error) => Err(error),
@@ -626,7 +682,14 @@ async fn one_source<W: AsyncWrite + Unpin>(
             {
                 job = job_id(id, index, Some("retry"));
                 result = session
-                    .download(&job, &source, &found, &mut progress, &progress_event)
+                    .download(
+                        &job,
+                        &source,
+                        &found,
+                        preferences,
+                        &mut progress,
+                        &progress_event,
+                    )
                     .await;
             }
         }
@@ -688,7 +751,12 @@ mod tests {
             title: "Song".into(),
             all: false,
         };
-        let request = download_request("a", &source, "https://soundcloud.com/test/track");
+        let request = download_request(
+            "a",
+            &source,
+            "https://soundcloud.com/test/track",
+            &Preferences::default(),
+        );
         assert_eq!(request["options"], json!({}));
         assert_eq!(request["type"], "download");
         assert_eq!(request["jobId"], "a");
@@ -699,14 +767,46 @@ mod tests {
             all: true,
         };
         assert_eq!(
-            download_request("b", &set, "https://soundcloud.com/test/sets/set")["options"],
+            download_request(
+                "b",
+                &set,
+                "https://soundcloud.com/test/sets/set",
+                &Preferences::default()
+            )["options"],
             json!({"playlist": "all"})
         );
         let spotify = Source::Spotify(Box::default());
-        let request =
-            download_request("c", &spotify, "https://www.youtube.com/watch?v=abcdefghijk");
+        let request = download_request(
+            "c",
+            &spotify,
+            "https://www.youtube.com/watch?v=abcdefghijk",
+            &Preferences::default(),
+        );
         assert_eq!(request["source"], "youtube");
         assert!(!request["url"].as_str().unwrap().contains("spotify"));
+        let chosen = Preferences {
+            folder: Some("D:\\Music".into()),
+            format: Some("flac".into()),
+            quality: Some("V0".into()),
+            tray: true,
+        };
+        let request = download_request("d", &source, "https://soundcloud.com/test/track", &chosen);
+        assert_eq!(
+            request["options"],
+            json!({"outputDir": "D:\\Music", "format": "flac", "quality": "V0"})
+        );
+        // A hand-edited value the helper does not know is left out, so the
+        // rest of the download still starts.
+        let unknown = Preferences {
+            folder: Some("  ".into()),
+            format: Some("aiff".into()),
+            quality: Some("999".into()),
+            tray: true,
+        };
+        assert_eq!(
+            download_request("e", &source, "https://soundcloud.com/test/track", &unknown)["options"],
+            json!({})
+        );
     }
 
     fn saved_matches() -> saved::Saved {
@@ -804,6 +904,7 @@ mod tests {
             vec![soundcloud("https://soundcloud.com/test/track", "Song")],
             &matching::Searcher::no_network(),
             &saved_matches(),
+            &Preferences::default(),
             &totals,
             &emit,
         )
@@ -864,6 +965,7 @@ mod tests {
             sources,
             &matching::Searcher::no_network(),
             &saved_matches(),
+            &Preferences::default(),
             &totals,
             &emit,
         )
@@ -922,6 +1024,7 @@ mod tests {
             ],
             &matching::Searcher::no_network(),
             &saved_matches(),
+            &Preferences::default(),
             &totals,
             &emit,
         )
@@ -979,6 +1082,7 @@ mod tests {
             sources,
             matching::Searcher::no_network(),
             saved_matches(),
+            Preferences::default(),
             receiver,
             EmitQueue::new(|_| {}),
         ));
@@ -1115,7 +1219,7 @@ mod tests {
                     .expect("confident match")
             }
         };
-        let mut request = download_request("player-smoke", &source, &url);
+        let mut request = download_request("player-smoke", &source, &url, &Preferences::default());
         request["options"]["outputDir"] = root.to_string_lossy().as_ref().into();
         let mut progress = Progress::queued("Crypto".into());
         let result = session

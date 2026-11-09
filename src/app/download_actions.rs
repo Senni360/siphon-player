@@ -131,7 +131,8 @@ impl App {
             self.toast_error(crate::downloads::INSTALL_HELP);
             return;
         }
-        if let Some(request) = self.downloads.enqueue(title, target) {
+        let preferences = crate::downloads::Preferences::from_settings(&self.settings);
+        if let Some(request) = self.downloads.enqueue(title, target, preferences) {
             if let Some(key) = key {
                 self.download_keys.insert(request.id, key);
             }

@@ -296,6 +296,15 @@ pub struct Settings {
     /// The folder, searched with its subfolders, that a playlist's
     /// `spotify:local:` songs play from; `None` plays none.
     pub local_files_folder: Option<String>,
+    /// Where the Siphon helper saves downloads; `None` keeps Music\Siphon.
+    pub download_folder: Option<String>,
+    /// The helper's audio format: mp3, m4a, opus, flac, wav, ogg or best.
+    /// `None` keeps MP3.
+    pub download_format: Option<String>,
+    /// The helper's quality for lossy re-encoding; `None` keeps 320.
+    pub download_quality: Option<String>,
+    /// Show finished downloads in the helper's drag tray, when it has one.
+    pub download_tray: bool,
     pub theme: ThemeChoice,
     /// The interface language; older files without it follow the system.
     pub language: LanguageChoice,
@@ -505,6 +514,10 @@ impl Default for Settings {
             gapless: true,
             audio_device: None,
             local_files_folder: None,
+            download_folder: None,
+            download_format: None,
+            download_quality: None,
+            download_tray: true,
             audio_buffer_ms: default_buffer_ms(),
             audio_cache: true,
             audio_cache_mb: 1024,
@@ -601,6 +614,32 @@ impl Settings {
             .as_deref()
             .filter(|folder| !folder.trim().is_empty())
             .map(std::path::PathBuf::from)
+    }
+
+    /// The download folder, when one is set.
+    pub fn download_folder(&self) -> Option<std::path::PathBuf> {
+        self.download_folder
+            .as_deref()
+            .filter(|folder| !folder.trim().is_empty())
+            .map(std::path::PathBuf::from)
+    }
+
+    /// The helper's format, MP3 when none was chosen or the saved one is not
+    /// one the helper knows.
+    pub fn download_format(&self) -> &str {
+        self.download_format
+            .as_deref()
+            .filter(|format| crate::downloads::FORMATS.contains(format))
+            .unwrap_or("mp3")
+    }
+
+    /// The helper's quality, 320 when none was chosen or the saved one is not
+    /// one the helper knows.
+    pub fn download_quality(&self) -> &str {
+        self.download_quality
+            .as_deref()
+            .filter(|quality| crate::downloads::QUALITIES.contains(quality))
+            .unwrap_or("320")
     }
 
     /// The one palette shown whatever the system's appearance: a chosen
@@ -1153,6 +1192,38 @@ mod tests {
         let encoded = serde_json::to_string(&hidden).unwrap();
         let decoded: Settings = serde_json::from_str(&encoded).unwrap();
         assert!(!decoded.mac_show_in_dock);
+    }
+
+    #[test]
+    fn download_settings_default_to_the_helpers_own_and_load_from_older_files() {
+        let empty: Settings = serde_json::from_str("{}").unwrap();
+        assert!(empty.download_folder().is_none());
+        assert_eq!(empty.download_format(), "mp3");
+        assert_eq!(empty.download_quality(), "320");
+        assert!(empty.download_tray);
+        // A file written before these fields existed loads unchanged.
+        let older: Settings = serde_json::from_str(r#"{"bitrate":160}"#).unwrap();
+        assert_eq!(older.bitrate, 160);
+        assert_eq!(older.download_format(), "mp3");
+        assert!(older.download_tray);
+        let chosen: Settings = serde_json::from_str(
+            r#"{"download_folder":"D:\\Music","download_format":"flac","download_quality":"V0","download_tray":false}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            chosen.download_folder().as_deref(),
+            Some(std::path::Path::new("D:\\Music"))
+        );
+        assert_eq!(chosen.download_format(), "flac");
+        assert_eq!(chosen.download_quality(), "V0");
+        assert!(!chosen.download_tray);
+        // A hand-edited value the helper does not know never reaches it.
+        let unknown: Settings =
+            serde_json::from_str(r#"{"download_format":"aiff","download_quality":"999"}"#).unwrap();
+        assert_eq!(unknown.download_format(), "mp3");
+        assert_eq!(unknown.download_quality(), "320");
+        let encoded = serde_json::to_string(&chosen).unwrap();
+        assert_eq!(serde_json::from_str::<Settings>(&encoded).unwrap(), chosen);
     }
 
     #[test]

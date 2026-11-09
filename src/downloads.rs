@@ -71,11 +71,58 @@ pub enum Target {
     SpotifyContext(String),
 }
 
+/// The helper's audio formats and lossy qualities, as SPEC.md allows them.
+pub(crate) const FORMATS: [&str; 7] = ["mp3", "m4a", "opus", "flac", "wav", "ogg", "best"];
+pub(crate) const QUALITIES: [&str; 6] = ["320", "256", "192", "128", "V0", "best"];
+
+/// What the listener chose for downloads. Omitted values keep the helper's
+/// own defaults: MP3 320 in Music\Siphon.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Preferences {
+    pub folder: Option<String>,
+    pub format: Option<String>,
+    pub quality: Option<String>,
+    /// Show a finished download in the helper's drag tray, when it has one.
+    pub tray: bool,
+}
+
+impl Default for Preferences {
+    fn default() -> Self {
+        Self {
+            folder: None,
+            format: None,
+            quality: None,
+            tray: true,
+        }
+    }
+}
+
+impl Preferences {
+    pub fn from_settings(settings: &crate::settings::Settings) -> Self {
+        Self {
+            folder: settings
+                .download_folder
+                .clone()
+                .filter(|folder| !folder.trim().is_empty()),
+            format: settings
+                .download_format
+                .clone()
+                .filter(|format| FORMATS.contains(&format.as_str())),
+            quality: settings
+                .download_quality
+                .clone()
+                .filter(|quality| QUALITIES.contains(&quality.as_str())),
+            tray: settings.download_tray,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Request {
     pub id: u64,
     pub title: String,
     pub target: Target,
+    pub preferences: Preferences,
 }
 
 #[derive(Clone, Debug)]
@@ -134,7 +181,12 @@ pub struct State {
 }
 
 impl State {
-    pub fn enqueue(&mut self, title: String, target: Target) -> Option<Request> {
+    pub fn enqueue(
+        &mut self,
+        title: String,
+        target: Target,
+        preferences: Preferences,
+    ) -> Option<Request> {
         if !self.available || self.active.len() >= MAX_BATCHES {
             return None;
         }
@@ -145,6 +197,7 @@ impl State {
             id: self.next_id,
             title,
             target,
+            preferences,
         })
     }
 
@@ -177,7 +230,9 @@ mod tests {
             available: true,
             ..Default::default()
         };
-        let request = state.enqueue("Song".into(), Target::Items(vec![])).unwrap();
+        let request = state
+            .enqueue("Song".into(), Target::Items(vec![]), Preferences::default())
+            .unwrap();
         state.active.get_mut(&request.id).unwrap().cancelling = true;
         state.progress(request.id, Progress::queued("Song".into()));
         assert!(state.active[&request.id].cancelling);
@@ -191,20 +246,20 @@ mod tests {
         let mut state = State::default();
         assert!(
             state
-                .enqueue("Song".into(), Target::Items(vec![]))
+                .enqueue("Song".into(), Target::Items(vec![]), Preferences::default())
                 .is_none()
         );
         state.available = true;
         for _ in 0..MAX_BATCHES {
             assert!(
                 state
-                    .enqueue("Song".into(), Target::Items(vec![]))
+                    .enqueue("Song".into(), Target::Items(vec![]), Preferences::default())
                     .is_some()
             );
         }
         assert!(
             state
-                .enqueue("Song".into(), Target::Items(vec![]))
+                .enqueue("Song".into(), Target::Items(vec![]), Preferences::default())
                 .is_none()
         );
     }

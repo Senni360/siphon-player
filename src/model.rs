@@ -1940,6 +1940,8 @@ pub enum Action {
     OpenSkinsFolder,
     /// Pick the folder a playlist's local files play from.
     ChooseLocalFilesFolder,
+    /// Pick the folder the Siphon helper saves downloads in.
+    ChooseDownloadFolder,
     /// Stop playing local files.
     ForgetLocalFilesFolder,
     OpenLocalFilesFolder,

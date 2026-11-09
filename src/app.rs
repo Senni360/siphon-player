@@ -3084,6 +3084,12 @@ impl App {
                     self.set_local_files_folder(Some(folder));
                 }
                 Event::LocalFilesFolderChosen(None) => {}
+                Event::DownloadFolderChosen(Some(folder)) => {
+                    self.settings.download_folder =
+                        Some(folder.to_string_lossy().into_owned());
+                    self.settings_dirty = true;
+                }
+                Event::DownloadFolderChosen(None) => {}
                 Event::LocalFiles { folder, uris } => {
                     // A scan of a folder since replaced says nothing now.
                     if self.settings.local_files_folder().as_ref() == Some(&folder) {
@@ -14318,6 +14324,7 @@ impl App {
             }
             Action::OpenSkinsFolder => self.open_folder(self.dirs.skins_dir()),
             Action::ChooseLocalFilesFolder => self.backend.choose_local_files_folder(),
+            Action::ChooseDownloadFolder => self.backend.choose_download_folder(),
             Action::ForgetLocalFilesFolder => self.set_local_files_folder(None),
             Action::OpenLocalFilesFolder => {
                 if let Some(folder) = self.settings.local_files_folder() {
@@ -27355,7 +27362,11 @@ mod tests {
         assert_eq!(app.toasts.len(), toasts);
         let batch = app
             .downloads
-            .enqueue("Album".into(), crate::downloads::Target::Items(vec![]))
+            .enqueue(
+                "Album".into(),
+                crate::downloads::Target::Items(vec![]),
+                crate::downloads::Preferences::default(),
+            )
             .unwrap();
         app.downloads
             .progress(batch.id, Progress::queued("Last song".into()));

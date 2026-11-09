@@ -1246,6 +1246,106 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         section(ui, &palette, &soloist, |ui| super::soloist::show(app, ui));
     }
 
+    let downloads = gettext(locale, "Downloads");
+    if row_matches(
+        &needle,
+        &downloads,
+        &gettext(
+            locale,
+            "Saved downloads folder format quality bitrate mp3 m4a opus flac wav",
+        ),
+    ) {
+        any_visible = true;
+        let choose_folder = gettext(locale, "Choose folder");
+        let folder_detail = match app.settings.download_folder() {
+            Some(folder) => app.private_path(&folder),
+            None => gettext(locale, "Music\\Siphon in your user folder.").into_owned(),
+        };
+        let format_labels = [
+            ("mp3", "MP3"),
+            ("m4a", "M4A"),
+            ("opus", "Opus"),
+            ("flac", "FLAC"),
+            ("wav", "WAV"),
+        ];
+        let quality_labels = [
+            ("320", "320 kbps"),
+            ("256", "256 kbps"),
+            ("192", "192 kbps"),
+            ("128", "128 kbps"),
+        ];
+        let current_format = app.settings.download_format().to_owned();
+        let current_quality = app.settings.download_quality().to_owned();
+        section(ui, &palette, &downloads, |ui| {
+            let folder_width = theme::soft_button_width(ui, &choose_folder) + 16.0;
+            widgets::setting_row_sized(
+                ui,
+                &palette,
+                &gettext(locale, "Download folder"),
+                &folder_detail,
+                folder_width,
+                |ui| {
+                    if theme::pill_button(ui, &palette, &choose_folder, false).clicked() {
+                        app.actions.push(Action::ChooseDownloadFolder);
+                    }
+                },
+            );
+            let choice_gap = 6.0;
+            let format_width = format_labels
+                .iter()
+                .map(|(_, label)| theme::soft_button_width(ui, label))
+                .sum::<f32>()
+                + choice_gap * (format_labels.len() - 1) as f32;
+            widgets::setting_row_sized(
+                ui,
+                &palette,
+                &gettext(locale, "Format"),
+                &gettext(locale, "The audio format new downloads are saved in."),
+                format_width,
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = choice_gap;
+                    // The control area lays out right to left.
+                    for (value, label) in format_labels.iter().rev() {
+                        if theme::soft_button(ui, &palette, None, label, current_format == *value)
+                            .clicked()
+                            && current_format != *value
+                        {
+                            app.settings.download_format = Some((*value).into());
+                            changed = true;
+                        }
+                    }
+                },
+            );
+            let quality_width = quality_labels
+                .iter()
+                .map(|(_, label)| theme::soft_button_width(ui, label))
+                .sum::<f32>()
+                + choice_gap * (quality_labels.len() - 1) as f32;
+            widgets::setting_row_sized(
+                ui,
+                &palette,
+                &gettext(locale, "Quality"),
+                &gettext(
+                    locale,
+                    "The bitrate for lossy formats. FLAC and WAV keep their own quality.",
+                ),
+                quality_width,
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = choice_gap;
+                    for (value, label) in quality_labels.iter().rev() {
+                        if theme::soft_button(ui, &palette, None, label, current_quality == *value)
+                            .clicked()
+                            && current_quality != *value
+                        {
+                            app.settings.download_quality = Some((*value).into());
+                            changed = true;
+                        }
+                    }
+                },
+            );
+        });
+    }
+
     let streamer = gettext(locale, "Streamer mode");
     if row_matches(
         &needle,

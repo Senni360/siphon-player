@@ -1012,6 +1012,10 @@ pub enum Command {
         selected:
             std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>,
     },
+    ChooseDownloadFolder {
+        selected:
+            std::pin::Pin<Box<dyn std::future::Future<Output = Option<rfd::FileHandle>> + Send>>,
+    },
     /// Find the songs in the local files folder, off the UI thread, as the
     /// player does when it starts.
     ScanLocalFiles(std::path::PathBuf),
@@ -1345,6 +1349,8 @@ pub enum Event {
     Soloist(crate::soloist::Update),
     /// The folder picked in the local files dialog; `None` when cancelled.
     LocalFilesFolderChosen(Option<std::path::PathBuf>),
+    /// The folder picked in the download folder dialog; `None` when cancelled.
+    DownloadFolderChosen(Option<std::path::PathBuf>),
     /// The songs in `folder`, by the `spotify:local:` URIs they play for.
     LocalFiles {
         folder: std::path::PathBuf,
@@ -1842,6 +1848,17 @@ impl Backend {
             .set_title("Choose the local files folder")
             .pick_folder();
         self.send(Command::ChooseLocalFilesFolder {
+            selected: Box::pin(selected),
+        });
+    }
+
+    /// Construct the download folder dialog on the UI thread, like the
+    /// local files folder's.
+    pub fn choose_download_folder(&self) {
+        let selected = rfd::AsyncFileDialog::new()
+            .set_title("Choose the download folder")
+            .pick_folder();
+        self.send(Command::ChooseDownloadFolder {
             selected: Box::pin(selected),
         });
     }
@@ -3168,6 +3185,15 @@ impl Worker {
                     tokio::spawn(async move {
                         let folder = selected.await.map(|folder| folder.path().to_path_buf());
                         let _ = events.send(Event::LocalFilesFolderChosen(folder));
+                        waker.wake();
+                    });
+                }
+                Command::ChooseDownloadFolder { selected } => {
+                    let events = self.events.clone();
+                    let waker = self.waker.clone();
+                    tokio::spawn(async move {
+                        let folder = selected.await.map(|folder| folder.path().to_path_buf());
+                        let _ = events.send(Event::DownloadFolderChosen(folder));
                         waker.wake();
                     });
                 }
