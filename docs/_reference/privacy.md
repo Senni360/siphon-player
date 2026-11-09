@@ -55,7 +55,7 @@ no analytics.
 
 ## Questions
 
-Ask on [GitHub](https://github.com/crmne/spotifast/issues).
+Ask on [GitHub](https://github.com/Senni360/siphon-player/issues).
 
 ## Optional Soloist
 

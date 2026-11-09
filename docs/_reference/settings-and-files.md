@@ -796,8 +796,8 @@ or hook. A package uninstall removes the shared integration assets; your user
 configuration remains, like the rest of your preferences.
 
 For a manual installation, the repository includes an
-[Omarchy template](https://github.com/crmne/spotifast/blob/main/contrib/omarchy/siphon.json.tpl)
-and a [theme-change hook](https://github.com/crmne/spotifast/blob/main/contrib/omarchy/siphon-theme).
+[Omarchy template](https://github.com/Senni360/siphon-player/blob/main/contrib/omarchy/siphon.json.tpl)
+and a [theme-change hook](https://github.com/Senni360/siphon-player/blob/main/contrib/omarchy/siphon-theme).
 Omarchy resolves its light/dark mode and colors through its
 [template system](https://omarchy.org/manual/making-your-own-theme/).
 The hook copies the result atomically into `themes/omarchy.json`, then asks a
@@ -837,7 +837,7 @@ existing user files are preserved. Selecting Dark or Light is sufficient to stop
 ## Spotify Soloist
 
 The optional `soloist_enabled` preference defaults to false. Setup lives in
-Settings → Spotify Soloist. The personal key uses the protected credential
+Settings → Playback → Spotify Soloist. The personal key uses the protected credential
 store; pairing/cache files live under `soloist/accounts/` in the state directory,
 and downloaded executables under `soloist/builds/`. Disabling keeps the key
 and pairing; Spotify sign-out removes them. Builds renew while inactive.

@@ -133,8 +133,8 @@ A maintainer must also register the locale in the app, including how system
 language tags map to it, and preview it before it becomes available. Adding a
 PO alone does not make a language available.
 
-Use the [translation problem form](https://github.com/crmne/spotifast/issues/new?template=translation.yml)
-for incorrect wording, missing translations or text that does not fit. Each
-report gets its own issue. Include the language, version, affected control, and
+Open an [issue](https://github.com/Senni360/siphon-player/issues) for incorrect
+wording, missing translations or text that does not fit. Each report gets its
+own issue. Include the language, version, affected control, and
 the text you see; a suggested correction is welcome. The catalog headers link
 to this form too.
