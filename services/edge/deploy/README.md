@@ -115,9 +115,10 @@ Validate the whole file in a throwaway container, then ask the running Caddy
 to read it again. Never restart Caddy or any other container:
 
 ```sh
+CADDY_IMAGE=caddy:2                 # the image the running Caddy container uses
 docker run --rm \
   -v "$CADDYFILE":/etc/caddy/Caddyfile:ro \
-  caddy:2 caddy validate --config /etc/caddy/Caddyfile
+  "$CADDY_IMAGE" caddy validate --config /etc/caddy/Caddyfile
 
 docker exec "$CADDY_CONTAINER" caddy reload --config /etc/caddy/Caddyfile
 ```
