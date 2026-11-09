@@ -1,0 +1,19 @@
+[Unit]
+Description=Update yt-dlp for Encore edge
+Documentation=https://github.com/yt-dlp/yt-dlp#update
+
+[Service]
+Type=oneshot
+# Standalone binary. If yt-dlp came from pip, replace this with:
+#   ExecStart=/opt/encore-edge/venv/bin/pip install --upgrade yt-dlp
+ExecStart=/usr/local/bin/yt-dlp -U
+User=root
+Group=root
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/usr/local/bin
+
+[Install]
+WantedBy=multi-user.target

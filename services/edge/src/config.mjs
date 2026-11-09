@@ -1,0 +1,149 @@
+// Configuration comes from the environment only. Nothing here reads a file or
+// logs a secret; a missing token secret refuses to start.
+
+import path from "node:path";
+import { MIN_SECRET_LENGTH } from "./tokens.mjs";
+
+const GIB = 1024 ** 3;
+const MIB = 1024 ** 2;
+
+export const DEFAULTS = Object.freeze({
+  port: 8787,
+  host: "127.0.0.1",
+  dataDir: "./data",
+  cacheMaxBytes: 10 * GIB,
+  uploadUserMaxBytes: 5 * GIB,
+  uploadFileMaxBytes: 512 * MIB,
+  syncUserMaxBytes: 4 * MIB,
+  mediaTokenTtlSeconds: 60 * 60,
+  wsRatePerSecond: 40,
+  wsRateBurst: 80,
+  wsHeartbeatMs: 15_000,
+  liveBufferMs: 120_000,
+  liveBufferMessages: 500,
+  resolveConcurrency: 2,
+  resolveTimeoutMs: 180_000,
+  ffmpegTimeoutMs: 120_000,
+  searchTimeoutMs: 45_000,
+  maxJsonBytes: 8 * MIB,
+  allowedOrigins: "https://encore.senni.dev,http://localhost:5173,http://127.0.0.1:5173",
+  ytdlpBin: "yt-dlp",
+  ffmpegBin: "ffmpeg",
+});
+
+export class ConfigError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+function integer(value, fallback, { min = 0, max = Number.MAX_SAFE_INTEGER, name }) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max) {
+    throw new ConfigError(`${name} must be an integer between ${min} and ${max}`);
+  }
+  return parsed;
+}
+
+function bytes(value, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER, name }) {
+  return integer(value, fallback, { min, max, name });
+}
+
+function list(value) {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+export function loadConfig(env = process.env) {
+  const secret = env.EDGE_TOKEN_SECRET;
+  if (typeof secret !== "string" || secret.length < MIN_SECRET_LENGTH) {
+    throw new ConfigError(`EDGE_TOKEN_SECRET is required and must be at least ${MIN_SECRET_LENGTH} characters`);
+  }
+  const allowedOrigins = list(env.EDGE_ALLOWED_ORIGINS ?? DEFAULTS.allowedOrigins);
+  if (allowedOrigins.length === 0) {
+    throw new ConfigError("EDGE_ALLOWED_ORIGINS must list at least one browser origin");
+  }
+  for (const origin of allowedOrigins) {
+    let parsed;
+    try {
+      parsed = new URL(origin);
+    } catch {
+      throw new ConfigError("EDGE_ALLOWED_ORIGINS contains an invalid origin");
+    }
+    if (!["http:", "https:"].includes(parsed.protocol) || parsed.origin !== origin) {
+      throw new ConfigError("EDGE_ALLOWED_ORIGINS entries must be exact http(s) origins");
+    }
+  }
+  return Object.freeze({
+    port: integer(env.EDGE_PORT ?? env.PORT, DEFAULTS.port, { max: 65535, name: "EDGE_PORT" }),
+    host: env.EDGE_HOST ?? DEFAULTS.host,
+    dataDir: path.resolve(env.EDGE_DATA_DIR ?? DEFAULTS.dataDir),
+    tokenSecret: secret,
+    adminToken: env.EDGE_ADMIN_TOKEN ?? "",
+    allowedOrigins: Object.freeze(allowedOrigins),
+    cacheMaxBytes: bytes(env.EDGE_CACHE_MAX_BYTES, DEFAULTS.cacheMaxBytes, { name: "EDGE_CACHE_MAX_BYTES" }),
+    uploadUserMaxBytes: bytes(env.EDGE_UPLOAD_USER_MAX_BYTES, DEFAULTS.uploadUserMaxBytes, {
+      name: "EDGE_UPLOAD_USER_MAX_BYTES",
+    }),
+    uploadFileMaxBytes: bytes(env.EDGE_UPLOAD_FILE_MAX_BYTES, DEFAULTS.uploadFileMaxBytes, {
+      name: "EDGE_UPLOAD_FILE_MAX_BYTES",
+    }),
+    syncUserMaxBytes: bytes(env.EDGE_SYNC_USER_MAX_BYTES, DEFAULTS.syncUserMaxBytes, { name: "EDGE_SYNC_USER_MAX_BYTES" }),
+    mediaTokenTtlSeconds: integer(env.EDGE_MEDIA_TOKEN_TTL_SECONDS, DEFAULTS.mediaTokenTtlSeconds, {
+      min: 30,
+      max: 7 * 24 * 60 * 60,
+      name: "EDGE_MEDIA_TOKEN_TTL_SECONDS",
+    }),
+    wsRatePerSecond: integer(env.EDGE_WS_RATE_PER_SECOND, DEFAULTS.wsRatePerSecond, {
+      min: 1,
+      max: 1000,
+      name: "EDGE_WS_RATE_PER_SECOND",
+    }),
+    wsRateBurst: integer(env.EDGE_WS_RATE_BURST, DEFAULTS.wsRateBurst, {
+      min: 1,
+      max: 10_000,
+      name: "EDGE_WS_RATE_BURST",
+    }),
+    wsHeartbeatMs: integer(env.EDGE_WS_HEARTBEAT_MS, DEFAULTS.wsHeartbeatMs, {
+      min: 1000,
+      max: 120_000,
+      name: "EDGE_WS_HEARTBEAT_MS",
+    }),
+    liveBufferMs: integer(env.EDGE_LIVE_BUFFER_MS, DEFAULTS.liveBufferMs, {
+      min: 1000,
+      max: 15 * 60_000,
+      name: "EDGE_LIVE_BUFFER_MS",
+    }),
+    liveBufferMessages: integer(env.EDGE_LIVE_BUFFER_MESSAGES, DEFAULTS.liveBufferMessages, {
+      min: 10,
+      max: 10_000,
+      name: "EDGE_LIVE_BUFFER_MESSAGES",
+    }),
+    // A hard ceiling: two encoders, never more, keeps a small box predictable.
+    resolveConcurrency: Math.min(2, integer(env.EDGE_RESOLVE_CONCURRENCY, DEFAULTS.resolveConcurrency, {
+      min: 1,
+      max: 2,
+      name: "EDGE_RESOLVE_CONCURRENCY",
+    })),
+    resolveTimeoutMs: integer(env.EDGE_RESOLVE_TIMEOUT_MS, DEFAULTS.resolveTimeoutMs, {
+      min: 1000,
+      name: "EDGE_RESOLVE_TIMEOUT_MS",
+    }),
+    ffmpegTimeoutMs: integer(env.EDGE_FFMPEG_TIMEOUT_MS, DEFAULTS.ffmpegTimeoutMs, {
+      min: 1000,
+      name: "EDGE_FFMPEG_TIMEOUT_MS",
+    }),
+    searchTimeoutMs: integer(env.EDGE_SEARCH_TIMEOUT_MS, DEFAULTS.searchTimeoutMs, {
+      min: 1000,
+      name: "EDGE_SEARCH_TIMEOUT_MS",
+    }),
+    maxJsonBytes: bytes(env.EDGE_MAX_JSON_BYTES, DEFAULTS.maxJsonBytes, { name: "EDGE_MAX_JSON_BYTES" }),
+    ytdlpBin: env.EDGE_YTDLP_BIN || DEFAULTS.ytdlpBin,
+    ffmpegBin: env.EDGE_FFMPEG_BIN || DEFAULTS.ffmpegBin,
+    logLevel: env.EDGE_LOG_LEVEL ?? "info",
+  });
+}

@@ -1,0 +1,30 @@
+# Example only. Replace the site address with your own DNS name; the service
+# itself holds no certificate and listens on loopback.
+#
+# Do not enable Caddy's `encode` directive for this host: media responses must
+# stay uncompressed and Caddy must not touch Content-Length or ETag.
+edge.encore.senni.dev {
+	request_body {
+		max_size 1GB
+	}
+
+	reverse_proxy 127.0.0.1:8787 {
+		# WebSocket relays and long media reads must not be buffered.
+		flush_interval -1
+		transport http {
+			read_timeout 0
+			write_timeout 0
+		}
+	}
+
+	# Access logs would contain media tokens and query strings. Discard them.
+	log {
+		output discard
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		-Server
+	}
+}
