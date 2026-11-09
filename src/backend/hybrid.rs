@@ -86,8 +86,6 @@ pub(super) struct HybridRuntime {
     pub(super) youtube_links: Arc<crate::youtube::Links>,
     pub(super) remote_running: bool,
     pub(super) remote_signin: super::remote::Signin,
-    /// Spotify songs found on YouTube or SoundCloud for the phone, this session.
-    pub(super) phone_matches: Arc<std::sync::Mutex<HashMap<String, String>>>,
     pub(super) artist_links: Arc<tokio::sync::Mutex<Option<crate::artist_sources::Links>>>,
     pub(super) youtube_warming: Arc<std::sync::atomic::AtomicUsize>,
     soundcloud_load: Option<tokio::task::AbortHandle>,

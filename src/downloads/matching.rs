@@ -384,10 +384,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(found.uri, "youtube:video:abcdefghijk");
-        assert_eq!(
-            found.source,
-            "https://www.youtube.com/watch?v=abcdefghijk"
-        );
+        assert_eq!(found.source, "https://www.youtube.com/watch?v=abcdefghijk");
         // No qualifying listing means no match at all.
         assert!(pick(&track(), &[], &[]).is_none());
     }

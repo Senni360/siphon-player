@@ -259,6 +259,11 @@ impl AppDirs {
         self.state.join("mixed-playlists.json")
     }
 
+    /// Spotify songs already matched to a YouTube or SoundCloud source.
+    pub fn spotify_matches_file(&self) -> PathBuf {
+        self.state.join("spotify-matches.json")
+    }
+
     /// Local SoundCloud insertions into Spotify playlists.
     pub fn playlist_overlay_file(&self) -> PathBuf {
         self.state.join("playlist-overlay.json")

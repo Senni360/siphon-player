@@ -68,6 +68,7 @@ impl Worker {
             self.youtube_catalogue(),
             self.soundcloud_client(),
         );
+        let saved = self.saved_matches.clone();
         let reader = CollectionReader {
             api: self.api.clone(),
             made_for_you: self.made_for_you.clone(),
@@ -98,7 +99,7 @@ impl Worker {
                 }),
                 Some(Err(error)) => Err(error),
                 Some(Ok(sources)) => {
-                    downloads::run(id, sources, searcher, cancelled, |event| {
+                    downloads::run(id, sources, searcher, saved, cancelled, |event| {
                         let _ = events.send(Event::Download(event));
                         waker.wake();
                     })

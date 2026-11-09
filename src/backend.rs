@@ -2302,6 +2302,8 @@ struct Worker {
     live: Option<mpsc::UnboundedSender<crate::friends::live::Request>>,
     discord: Option<Option<mpsc::UnboundedSender<Option<crate::discord::Status>>>>,
     download_jobs: download_jobs::Jobs,
+    /// Spotify songs already matched to a source, shared with the phone path.
+    saved_matches: crate::downloads::saved::Saved,
     track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
     soloist: Option<crate::soloist::Handle>,
@@ -2431,12 +2433,14 @@ impl Worker {
         commands: mpsc::UnboundedSender<Command>,
         waker: Waker,
     ) -> Self {
+        let saved_matches = crate::downloads::saved::Saved::new(dirs.spotify_matches_file());
         Self {
             hybrid: hybrid::HybridRuntime::default(),
             friends_feed: None,
             live: None,
             discord: None,
             download_jobs: download_jobs::Jobs::default(),
+            saved_matches,
             track_details: track_details::Jobs::default(),
             soloist: None,
             soloist_generation: 0,

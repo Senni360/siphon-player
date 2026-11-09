@@ -288,7 +288,7 @@ impl Worker {
     /// The address of a song's audio for the phone. A Spotify song can't play in a
     /// phone's browser, so by the owner's choice (2026-11-05) the phone plays the same
     /// song from YouTube or SoundCloud, found with the download matcher's strict rules
-    /// and remembered for the session. The computer itself still plays Spotify.
+    /// and remembered on disk. The computer itself still plays Spotify.
     fn remote_stream(
         &self,
         uri: String,
@@ -297,77 +297,64 @@ impl Worker {
     ) -> impl std::future::Future<Output = Result<serde_json::Value, String>> + Send + 'static {
         let catalogue = self.youtube_catalogue();
         let soundcloud = self.soundcloud_client();
-        let matches = Arc::clone(&self.hybrid.phone_matches);
+        let saved = self.saved_matches.clone();
         let credentials = self.credentials.clone();
         let http = crate::http::build_collection_client(&self.engine_config.proxy)
             .map(Http::new)
             .unwrap_or_else(Http::unavailable);
         async move {
-            let mut uri = uri;
-            let mut share_url = share_url;
             if let Some(wanted) = wanted.filter(|_| uri.starts_with("spotify:track:")) {
-                let known = matches.lock().ok().and_then(|held| held.get(&uri).cloned());
-                let found = match known {
-                    Some(found) => found,
-                    None => {
-                        let found = crate::downloads::matching::Searcher::new(
-                            catalogue.clone(),
-                            soundcloud.clone(),
-                        )
-                        .same_song(&wanted)
-                        .await
-                        .map(|found| found.uri)
-                        .ok_or("This song isn't on YouTube or SoundCloud.")?;
-                        if let Ok(mut held) = matches.lock() {
-                            held.insert(uri.clone(), found.clone());
+                let spotify_uri = uri;
+                let mut next = saved
+                    .get(&spotify_uri)
+                    .await
+                    .and_then(|found| (!found.uri.trim().is_empty()).then_some(found.uri));
+                let mut from_saved = next.is_some();
+                loop {
+                    let found = match next.take() {
+                        Some(found) => found,
+                        None => {
+                            let found = crate::downloads::matching::Searcher::new(
+                                catalogue.clone(),
+                                soundcloud.clone(),
+                            )
+                            .same_song(&wanted)
+                            .await
+                            .ok_or("This song isn't on YouTube or SoundCloud.")?;
+                            saved.remember(&spotify_uri, &found).await;
+                            found.uri
                         }
-                        found
+                    };
+                    match stream_target(
+                        &found,
+                        None,
+                        &catalogue,
+                        soundcloud.as_ref(),
+                        &credentials,
+                        &http,
+                    )
+                    .await
+                    {
+                        Ok(value) => return Ok(value),
+                        // A saved match can stop playing, for example when a
+                        // video is removed. Search once more.
+                        Err(_) if from_saved => {
+                            saved.forget(&spotify_uri).await;
+                            from_saved = false;
+                        }
+                        Err(error) => return Err(error),
                     }
-                };
-                uri = found;
-                share_url = None;
-            }
-            if crate::youtube::is_track_uri(&uri) {
-                let (track, url) = catalogue
-                    .playable(&uri, false)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                return Ok(serde_json::json!({
-                    "url": url,
-                    "mime": "audio/mp4",
-                    "duration_ms": track.duration_ms,
-                }));
-            }
-            if crate::shared_songs::is_song(&uri) {
-                let id = crate::shared_songs::song_id(&uri).ok_or("That song is gone.")?;
-                let identity = crate::friends::saved_identity(&credentials)
-                    .await
-                    .ok_or("Connect to your group to play this song.")?;
-                let client = crate::friends::Client::configured(http)?;
-                let (url, mime) = client.song_stream(&identity, id).await?;
-                return Ok(serde_json::json!({ "url": url, "mime": mime }));
-            }
-            if crate::soundcloud::track_id(&uri).is_some() {
-                let client = soundcloud.ok_or("SoundCloud isn't ready yet.")?;
-                let track = client
-                    .track_for_playback(&uri, share_url.as_deref(), None)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let info = client
-                    .resolve_stream(&track)
-                    .await
-                    .map_err(|error| error.to_string())?;
-                if info.is_preview {
-                    return Err("SoundCloud only plays a preview of this song.".into());
                 }
-                return Ok(serde_json::json!({
-                    "url": info.url,
-                    "mime": info.mime,
-                    "hls": matches!(info.protocol, crate::soundcloud::models::Protocol::Hls),
-                    "duration_ms": info.duration_ms,
-                }));
             }
-            Err("This song plays from Spotify.".into())
+            stream_target(
+                &uri,
+                share_url.as_deref(),
+                &catalogue,
+                soundcloud.as_ref(),
+                &credentials,
+                &http,
+            )
+            .await
         }
     }
 
@@ -463,4 +450,58 @@ impl Worker {
             })
         }
     }
+}
+
+/// Resolves one URI to the stream the phone can play: a YouTube link, a
+/// shared group song, or a SoundCloud track. Spotify URIs reach here only
+/// when nothing could be matched.
+async fn stream_target(
+    uri: &str,
+    share_url: Option<&str>,
+    catalogue: &crate::youtube::Catalogue,
+    soundcloud: Option<&crate::soundcloud::api::Client>,
+    credentials: &CredentialStore,
+    http: &Http,
+) -> Result<serde_json::Value, String> {
+    if crate::youtube::is_track_uri(uri) {
+        let (track, url) = catalogue
+            .playable(uri, false)
+            .await
+            .map_err(|error| error.to_string())?;
+        return Ok(serde_json::json!({
+            "url": url,
+            "mime": "audio/mp4",
+            "duration_ms": track.duration_ms,
+        }));
+    }
+    if crate::shared_songs::is_song(uri) {
+        let id = crate::shared_songs::song_id(uri).ok_or("That song is gone.")?;
+        let identity = crate::friends::saved_identity(credentials)
+            .await
+            .ok_or("Connect to your group to play this song.")?;
+        let client = crate::friends::Client::configured(http.clone())?;
+        let (url, mime) = client.song_stream(&identity, id).await?;
+        return Ok(serde_json::json!({ "url": url, "mime": mime }));
+    }
+    if crate::soundcloud::track_id(uri).is_some() {
+        let client = soundcloud.ok_or("SoundCloud isn't ready yet.")?;
+        let track = client
+            .track_for_playback(uri, share_url, None)
+            .await
+            .map_err(|error| error.to_string())?;
+        let info = client
+            .resolve_stream(&track)
+            .await
+            .map_err(|error| error.to_string())?;
+        if info.is_preview {
+            return Err("SoundCloud only plays a preview of this song.".into());
+        }
+        return Ok(serde_json::json!({
+            "url": info.url,
+            "mime": info.mime,
+            "hls": matches!(info.protocol, crate::soundcloud::models::Protocol::Hls),
+            "duration_ms": info.duration_ms,
+        }));
+    }
+    Err("This song plays from Spotify.".into())
 }

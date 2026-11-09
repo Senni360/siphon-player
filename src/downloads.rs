@@ -7,6 +7,7 @@ mod client;
 mod discovery;
 mod framing;
 pub(crate) mod matching;
+pub(crate) mod saved;
 
 use std::collections::BTreeMap;
 

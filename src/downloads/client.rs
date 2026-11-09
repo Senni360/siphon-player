@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
 
-use super::{Event, Progress, Source, Summary, discovery, framing, matching};
+use super::{Event, Progress, Source, Summary, discovery, framing, matching, saved};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const JOB_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -204,6 +204,7 @@ pub(crate) async fn run(
     id: u64,
     sources: Vec<Source>,
     searcher: matching::Searcher,
+    saved: saved::Saved,
     mut cancel: watch::Receiver<bool>,
     emit: impl Fn(Event),
 ) -> Result<Summary, String> {
@@ -245,7 +246,7 @@ pub(crate) async fn run(
     let outcome = tokio::select! {
         biased;
         _ = cancel.changed() => { summary.cancelled = true; Ok(()) },
-        result = run_sources(&mut session, id, sources, &searcher, &mut job, &mut summary, &emit) => result,
+        result = run_sources(&mut session, id, sources, &searcher, &saved, &mut job, &mut summary, &emit) => result,
     };
     if *cancel.borrow() {
         session.cancel(&job).await;
@@ -267,6 +268,7 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     id: u64,
     sources: Vec<Source>,
     searcher: &matching::Searcher,
+    saved: &saved::Saved,
     job: &mut String,
     summary: &mut Summary,
     emit: &impl Fn(Event),
@@ -284,7 +286,7 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     }
     let total = sources.len();
     for (index, source) in sources.into_iter().enumerate() {
-        *job = format!("player-{id}-{}", index + 1);
+        *job = job_id(id, index, None);
         let mut progress = Progress {
             title: source.title().into(),
             stage: "probing".into(),
@@ -295,20 +297,19 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         };
         let progress_event = |progress| emit(Event::Progress { id, progress });
         progress_event(progress.clone());
+        let mut from_saved = false;
         let url = match &source {
             Source::SoundCloud { url, .. } | Source::YouTube { url, .. } => Ok(url.clone()),
-            Source::Spotify(track) => searcher
-                .same_song(track)
-                .await
-                .map(|found| found.source)
-                .ok_or_else(|| {
-                    format!(
-                        "No confident match for {}. Nothing was downloaded.",
-                        track.name
-                    )
-                }),
+            Source::Spotify(track) => match saved.source(&track.uri).await {
+                Some(url) => {
+                    from_saved = true;
+                    Ok(url)
+                }
+                None => remember_match(searcher, saved, track).await,
+            },
         };
-        let result = match url {
+        let used = url.as_ref().ok().cloned();
+        let mut result = match url {
             Ok(url) => {
                 session
                     .download(job, &source, &url, &mut progress, &progress_event)
@@ -316,6 +317,21 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
             }
             Err(error) => Err(error),
         };
+        // A match saved earlier can go away, for example when a video is
+        // removed. Forget it and search once more, rather than failing.
+        if result.is_err() && from_saved && !session.broken {
+            if let Source::Spotify(track) = &source {
+                saved.forget(&track.uri).await;
+                if let Ok(found) = remember_match(searcher, saved, track).await
+                    && used.as_deref() != Some(found.as_str())
+                {
+                    *job = job_id(id, index, Some("retry"));
+                    result = session
+                        .download(job, &source, &found, &mut progress, &progress_event)
+                        .await;
+                }
+            }
+        }
         match result {
             Ok(files) => {
                 summary.downloaded += files.len();
@@ -334,6 +350,30 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         }
     }
     Ok(())
+}
+
+fn job_id(batch: u64, index: usize, attempt: Option<&str>) -> String {
+    match attempt {
+        Some(attempt) => format!("player-{batch}-{}-{attempt}", index + 1),
+        None => format!("player-{batch}-{}", index + 1),
+    }
+}
+
+/// Finds the song once and remembers where it was found, with no repeat
+/// search next time.
+async fn remember_match(
+    searcher: &matching::Searcher,
+    saved: &saved::Saved,
+    track: &crate::api::models::Track,
+) -> Result<String, String> {
+    let found = searcher.same_song(track).await.ok_or_else(|| {
+        format!(
+            "No confident match for {}. Nothing was downloaded.",
+            track.name
+        )
+    })?;
+    saved.remember(&track.uri, &found).await;
+    Ok(found.source)
 }
 
 #[cfg(test)]
@@ -421,11 +461,16 @@ mod tests {
             all: false,
         };
         let mut summary = Summary::default();
+        let saved = saved::Saved::new(
+            crate::test_dirs::temp_dir()
+                .join(format!("siphon-matches-{}.json", std::process::id())),
+        );
         run_sources(
             &mut session,
             1,
             vec![source],
             &matching::Searcher::no_network(),
+            &saved,
             &mut job,
             &mut summary,
             &|event| events.lock().unwrap().push(event),
