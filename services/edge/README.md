@@ -58,9 +58,16 @@ npm run check   # node --check on every source file
 | `EDGE_SEARCH_TIMEOUT_MS` | `45000` | one search |
 | `EDGE_YTDLP_BIN` | `yt-dlp` | executable path or name |
 | `EDGE_FFMPEG_BIN` | `ffmpeg` | executable path or name |
+| `EDGE_VAULT_KEY` | empty | 64 hex characters; unset disables the vault and answers `503` on vault, library, search and home routes |
+| `EDGE_SPOTIFY_CACHE_TTL_MS` | `60000` | one Spotify/SoundCloud metadata read |
+| `EDGE_SPOTIFY_HOME_CACHE_TTL_MS` | `600000` | a complete Home shelf |
+| `EDGE_SPOTIFY_SEARCH_TTL_MS` | `120000` | one search |
+| `EDGE_LIBRARY_TIMEOUT_MS` | `15000` | one provider request |
+| `EDGE_HOME_ARTIST_LIMIT` | `20` | followed artists read for new releases, 1–50 |
 | `EDGE_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error`, `silent` |
 
-No secret is ever written to disk or logged.
+No secret is ever written unencrypted or logged. The optional sign-in vault is
+the one place a credential is written, and only as AES-256-GCM ciphertext.
 
 ## Tokens
 
@@ -111,6 +118,19 @@ All JSON responses carry `v: 1` on success. Errors are
 | `GET/PUT /v1/sync/playlists` | sync | playlist snapshot, mixed playlists included |
 | `GET/PUT /v1/sync/queue` | sync | queue and position record |
 | `GET/PUT /v1/sync/matches` | sync | Spotify URI → source choice |
+| `PUT/DELETE /v1/vault/spotify` | sync, computer | store or remove a Spotify refresh token and its Client ID |
+| `PUT/DELETE /v1/vault/soundcloud` | sync, computer | store or remove a SoundCloud OAuth token |
+| `GET /v1/library/playlists` | sync, phone | saved Spotify playlists plus mixed playlists from the sync snapshot |
+| `GET /v1/library/playlists/:id` | sync, phone | one playlist and its songs |
+| `GET /v1/library/liked` | sync, phone | liked songs |
+| `GET /v1/library/albums` | sync, phone | saved albums |
+| `GET /v1/library/artists` | sync, phone | followed artists |
+| `GET /v1/library/soundcloud/likes` | sync, phone | SoundCloud likes, when a token is stored |
+| `GET /v1/library/soundcloud/playlists` | sync, phone | SoundCloud own and liked playlists, when a token is stored |
+| `GET /v1/search?q=` | sync, phone | Spotify and SoundCloud in one answer |
+| `GET /v1/artist/:id` | sync, phone | artist and top tracks |
+| `GET /v1/album/:id` | sync, phone | album and songs |
+| `GET /v1/home` | sync, phone | recently played and new releases |
 | `POST /v1/resolve` | media | resolve a source and return a media URL |
 | `POST /v1/warm` | media | prepare at most two upcoming sources |
 | `POST /v1/match` | media | score YouTube and SoundCloud search results |
@@ -139,6 +159,110 @@ Matches are merged, not blindly replaced. Each entry is:
 A `manual: true` entry always outranks an automatic one, even when the
 automatic answer is newer or more confident. `remove: ["spotify:track:…"]`
 deletes automatic entries only; hand-chosen entries are returned in `kept`.
+
+### Sign-in vault, library, search and home
+
+The vault lets the always-on service use a listener's own Spotify and
+SoundCloud sign-ins while their computer is off. A listener opts in by having
+their computer `PUT` a credential; a phone can never write one.
+
+```json
+PUT /v1/vault/spotify     { "client_id": "…", "refresh_token": "…" }
+PUT /v1/vault/soundcloud  { "oauth_token": "…" }
+→ { "v": 1, "provider": "spotify" }
+
+DELETE /v1/vault/spotify  → { "v": 1, "provider": "spotify", "deleted": true }
+```
+
+Both routes need a `computer`/`sync` token. No route returns a token, and no
+token is logged. The Spotify Client ID is the listener's own app; the service
+never uses anyone else's. `oauth_token` accepts only a token value, not a pasted
+cookie or `Authorization:` header.
+
+On disk each user's entry is AES-256-GCM encrypted with `EDGE_VAULT_KEY` and
+written atomically. Deleting the last provider removes the file. If
+`EDGE_VAULT_KEY` is unset, the vault and every route below answer `503
+vault_not_configured`; the rest of the service still runs.
+
+Spotify access uses the PKCE refresh grant with the stored Client ID, without a
+client secret. Access tokens stay in memory; a rotated refresh token is written
+back atomically before the access token is used. One refresh runs per listener
+at a time, a `429` response pauses that listener until its `Retry-After` has
+passed (also sent to the phone), and successful reads are cached briefly so
+reopening a screen spends no quota.
+
+All library routes need a `phone`/`sync` token, accept `limit` from 1 to 50
+(default 50) and an opaque `cursor`, and return:
+
+```json
+{ "v": 1, "items": [ … ], "next": "opaque-cursor-or-null" }
+```
+
+Search pages are capped at 10 results per source, because a personal Spotify
+app in Development Mode refuses a larger page, and its cursor is shared by both
+sources. A compact track is:
+
+```json
+{ "source": "spotify", "uri": "spotify:track:…", "name": "…",
+  "artists": [{ "id": "…", "name": "…" }],
+  "album": { "id": "…", "name": "…" },
+  "image": "https://…", "duration_ms": 200000 }
+```
+
+A compact album carries `id`, `uri`, `name`, `image`, `artists`, `release_date`,
+`total_tracks` and `album_type`. An artist carries `id`, `uri`, `name`, `image`,
+`genres` and `followers`. A playlist carries `id`, `uri`, `name`, `image`,
+`owner`, `track_count` and `collaborative`.
+
+- `GET /v1/library/playlists` returns Spotify playlists in Spotify's order and,
+  on the first page only, the mixed playlists from the phone's sync snapshot.
+  A mixed row has `source: "mixed"`, its snapshot `id`, `uri`, `name`, `image`
+  and `track_count`. If Spotify is not linked, the first page still returns the
+  mixed rows with `"error": "spotify_not_linked"`.
+- `GET /v1/library/playlists/:id` returns `{v, playlist, items, next}`. An id
+  that is not a Spotify playlist falls back to the same mixed snapshot.
+- `GET /v1/library/liked` and `/v1/library/albums` return Spotify saved items.
+- `GET /v1/library/artists` pages through followed artists with a `cursor`
+  carrying Spotify's `after` value.
+- `GET /v1/library/soundcloud/likes` and
+  `/v1/library/soundcloud/playlists` return SoundCloud rows when the listener
+  stored an OAuth token. Without one they answer `409 soundcloud_not_linked`.
+- `GET /v1/search?q=` answers both sources and never lets one failure hide the
+  other:
+
+  ```json
+  { "v": 1, "query": "…", "next": null,
+    "spotify": { "tracks": [], "artists": [], "albums": [], "playlists": [],
+                 "error": "spotify_rate_limited" },
+    "soundcloud": { "tracks": [], "playlists": [],
+                    "error": "soundcloud_unavailable" } }
+  ```
+
+  An `error` field appears only for a source that failed; the other source's
+  rows are still there.
+- `GET /v1/artist/:id` returns `{v, artist, top_tracks}`.
+- `GET /v1/album/:id` returns `{v, album, items, next}`.
+- `GET /v1/home` returns the first 50 recently played tracks (deduplicated,
+  each with `played_at`) and up to 50 new albums and singles from followed
+  artists, newest first. It is cached for `EDGE_SPOTIFY_HOME_CACHE_TTL_MS` only
+  when both sections succeed:
+
+  ```json
+  { "v": 1, "recently_played": [ … ], "new_releases": [ … ],
+    "generated_at": "…", "errors": { "recently_played": "spotify_rate_limited" } }
+  ```
+
+New releases use the Web API fallback the desktop app describes: followed
+artists, then each artist's latest albums and singles. `GET /browse/new-releases`
+is not that feed, `/recommendations`, related artists and audio features are
+refused to apps created since November 2024, and no private Pathfinder request
+is made here.
+
+SoundCloud metadata follows `src/soundcloud/` in the Rust app:
+`api-v2.soundcloud.com` search and user routes, the public client ID discovered
+from `soundcloud.com`'s script bundles, and `Authorization: OAuth …` only for
+the listener's own likes and playlists. Public search needs no account. A stale
+public client ID is refreshed once. Audio is never requested.
 
 ### Resolve, warm, match
 
@@ -256,6 +380,7 @@ $EDGE_DATA_DIR/
   sync/<user-hash>/playlists.json
   sync/<user-hash>/queue.json
   sync/<user-hash>/matches.json
+  vault/<user-hash>.json
   cache/<key>.m4a|mp3|ogg|flac|wav
   cache/last-played.json
   uploads/<owner-prefix>/<key>.<ext>
@@ -281,3 +406,17 @@ log line.
   refused by the strict allowlist.
 - There is no HTTP endpoint that mints upload tokens; the computer sends a
   `computer`/`media` token and the key is fixed by the route.
+- The vault has no key rotation: changing `EDGE_VAULT_KEY` makes old entries
+  unreadable and the listener must connect again.
+- Library routes only read. Saving, liking, playlist edits and playback control
+  stay on the computer.
+- A personal Spotify app in Development Mode answers at most ten results per
+  search type, so search pages are ten. Playlists Spotify withholds from a
+  personal app, and related artists, recommendations, audio features and the
+  private Pathfinder feed are not requested; Home's new releases use followed
+  artists and their albums instead.
+- SoundCloud likes and playlists need a stored OAuth token and are not refreshed
+  by the service. SoundCloud audio is never resolved here.
+- Home reads up to `EDGE_HOME_ARTIST_LIMIT` followed artists, one album request
+  each. A rate limit keeps the albums already read and leaves the section
+  partial instead of caching it.

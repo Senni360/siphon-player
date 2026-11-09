@@ -5,13 +5,17 @@ import fs from "node:fs/promises";
 import http from "node:http";
 import { CacheStore } from "./cache.mjs";
 import { createLogger } from "./log.mjs";
+import { LibraryService } from "./library.mjs";
 import { LiveHub } from "./live.mjs";
 import { MatchService } from "./search.mjs";
 import { MediaService } from "./media.mjs";
 import { ResolveService } from "./resolve.mjs";
+import { SoundCloudClient } from "./soundcloud.mjs";
+import { SpotifyClient } from "./spotify.mjs";
 import { SYNC_DOCS, SyncStore } from "./sync.mjs";
 import { TokenError, sameSecret, verifyToken } from "./tokens.mjs";
 import { UploadError, UploadStore } from "./uploads.mjs";
+import { Vault } from "./vault.mjs";
 
 const DOC_SET = new Set(SYNC_DOCS);
 
@@ -80,6 +84,31 @@ function decodeKey(pathname, prefix) {
   return key;
 }
 
+function routeId(rest) {
+  let id;
+  try {
+    id = decodeURIComponent(rest);
+  } catch {
+    throw new HttpError("invalid_id", 400);
+  }
+  if (typeof id !== "string" || !/^[A-Za-z0-9]{1,64}$/.test(id)) throw new HttpError("invalid_id", 400);
+  return id;
+}
+
+function pageQuery(url, { defaultLimit } = {}) {
+  const raw = url.searchParams.get("limit");
+  let limit;
+  if (raw !== null) {
+    limit = Number(raw);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new HttpError("invalid_limit", 400);
+  } else if (defaultLimit !== undefined) {
+    limit = defaultLimit;
+  }
+  const cursor = url.searchParams.get("cursor");
+  if (cursor !== null && (cursor.length === 0 || cursor.length > 200)) throw new HttpError("invalid_cursor", 400);
+  return { limit, cursor };
+}
+
 function parseContentLength(req) {
   const header = req.headers["content-length"];
   if (header === undefined) return undefined;
@@ -104,6 +133,18 @@ function routeLabel(pathname) {
   if (pathname === "/health") return "/health";
   if (pathname === "/status") return "/status";
   if (pathname.startsWith("/v1/sync/")) return "/v1/sync/:doc";
+  if (pathname.startsWith("/v1/vault/")) return "/v1/vault/:provider";
+  if (pathname === "/v1/library/playlists") return "/v1/library/playlists";
+  if (pathname.startsWith("/v1/library/playlists/")) return "/v1/library/playlists/:id";
+  if (pathname === "/v1/library/soundcloud/likes") return "/v1/library/soundcloud/likes";
+  if (pathname === "/v1/library/soundcloud/playlists") return "/v1/library/soundcloud/playlists";
+  if (pathname === "/v1/library/liked") return "/v1/library/liked";
+  if (pathname === "/v1/library/albums") return "/v1/library/albums";
+  if (pathname === "/v1/library/artists") return "/v1/library/artists";
+  if (pathname === "/v1/search") return "/v1/search";
+  if (pathname.startsWith("/v1/artist/")) return "/v1/artist/:id";
+  if (pathname.startsWith("/v1/album/")) return "/v1/album/:id";
+  if (pathname === "/v1/home") return "/v1/home";
   if (pathname === "/v1/resolve") return "/v1/resolve";
   if (pathname === "/v1/warm") return "/v1/warm";
   if (pathname === "/v1/match") return "/v1/match";
@@ -117,9 +158,9 @@ function routeLabel(pathname) {
 function corsHeaders(config, origin) {
   const headers = {
     Vary: "Origin",
-    "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "authorization, content-type, range, if-none-match, x-edge-token",
-    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag",
+    "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges, ETag, Retry-After",
     "Access-Control-Max-Age": "86400",
   };
   if (typeof origin === "string" && config.allowedOrigins.includes(origin)) {
@@ -132,6 +173,7 @@ export async function createEdgeServer(config, {
   logger = createLogger({ level: config.logLevel }),
   now = Date.now,
   spawn,
+  fetch: fetchImpl = globalThis.fetch,
 } = {}) {
   const cache = new CacheStore({ dir: config.dataDir, maxBytes: config.cacheMaxBytes, now });
   await cache.init();
@@ -146,6 +188,23 @@ export async function createEdgeServer(config, {
   const resolve = new ResolveService({ cache, config, logger, spawn });
   const matcher = new MatchService({ config, logger, spawn });
   const media = new MediaService({ cache, uploads, config, logger });
+  const vault = new Vault({ dir: config.dataDir, key: config.vaultKey, now });
+  const spotify = new SpotifyClient({
+    vault,
+    fetch: fetchImpl,
+    now,
+    logger,
+    cacheTtlMs: config.spotifyCacheTtlMs,
+    timeoutMs: config.libraryTimeoutMs,
+  });
+  const soundcloud = new SoundCloudClient({
+    fetch: fetchImpl,
+    now,
+    logger,
+    cacheTtlMs: config.spotifyCacheTtlMs,
+    timeoutMs: config.libraryTimeoutMs,
+  });
+  const library = new LibraryService({ vault, spotify, soundcloud, sync, config, logger, now });
   const startedAt = now();
   let closing = false;
 
@@ -156,14 +215,25 @@ export async function createEdgeServer(config, {
     res.on("finish", () => {
       logger.info("http", { method: req.method, route, status: res.statusCode, ms: now() - started });
     });
-    handle(req, res, { config, cache, uploads, sync, resolve, matcher, media, live, logger, now, startedAt })
+    handle(req, res, {
+      config, cache, uploads, sync, resolve, matcher, media, live, logger, now, startedAt,
+      vault, spotify, soundcloud, library,
+    })
       .catch((error) => {
         const status = Number.isSafeInteger(error?.status) ? error.status : 500;
         const code = typeof error?.code === "string" ? error.code : "internal";
         if (status >= 500) logger.error("request_failed", { code, route });
         if (!res.headersSent) {
           const origin = req.headers.origin;
-          json(res, status, { v: 1, error: status >= 500 ? "internal" : code }, corsHeaders(config, origin));
+          const headers = corsHeaders(config, origin);
+          if (Number.isSafeInteger(error?.retryAfter) && error.retryAfter > 0) {
+            headers["Retry-After"] = String(error.retryAfter);
+          }
+          // A missing vault key is a configuration state the phone can act on,
+          // so it keeps its code even though the status is 503. Other 5xx
+          // answers stay opaque.
+          const safe = status < 500 || code === "vault_not_configured";
+          json(res, status, { v: 1, error: safe ? code : "internal" }, headers);
         } else {
           res.destroy();
         }
@@ -208,6 +278,10 @@ export async function createEdgeServer(config, {
     matcher,
     media,
     live,
+    vault,
+    spotify,
+    soundcloud,
+    library,
     logger,
     close,
     async listen({ port = config.port, host = config.host } = {}) {
@@ -232,7 +306,7 @@ function safePath(raw) {
 }
 
 async function handle(req, res, services) {
-  const { config, cache, uploads, sync, resolve, matcher, media, live, now, startedAt } = services;
+  const { config, cache, uploads, sync, resolve, matcher, media, live, now, startedAt, vault, library } = services;
   let url;
   try {
     url = new URL(req.url, "http://localhost");
@@ -281,6 +355,102 @@ async function handle(req, res, services) {
       return "/v1/sync/:doc";
     }
     throw new HttpError("method_not_allowed", 405);
+  }
+
+  if (pathname.startsWith("/v1/vault/")) {
+    const provider = pathname.slice("/v1/vault/".length);
+    if (provider !== "spotify" && provider !== "soundcloud") throw new HttpError("not_found", 404);
+    if (req.method !== "PUT" && req.method !== "DELETE") throw new HttpError("method_not_allowed", 405);
+    // Only the computer may write a sign-in. A phone can read the library but
+    // never install or remove a credential.
+    const claims = authenticate(req, url, { scope: "sync", role: "computer" });
+    if (!vault.enabled) throw new HttpError("vault_not_configured", 503);
+    if (req.method === "PUT") {
+      const body = await readJson(req, 16 * 1024);
+      if (provider === "spotify") await vault.putSpotify(claims.sub, body);
+      else await vault.putSoundcloud(claims.sub, body);
+      json(res, 200, { v: 1, provider }, cors);
+      return "/v1/vault/:provider";
+    }
+    if (provider === "spotify") await vault.deleteSpotify(claims.sub);
+    else await vault.deleteSoundcloud(claims.sub);
+    json(res, 200, { v: 1, provider, deleted: true }, cors);
+    return "/v1/vault/:provider";
+  }
+
+  if (pathname.startsWith("/v1/library/")) {
+    if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError("method_not_allowed", 405);
+    const claims = authenticate(req, url, { scope: "sync", role: "phone" });
+    const rest = pathname.slice("/v1/library/".length);
+    if (rest === "playlists") {
+      const page = pageQuery(url);
+      json(res, 200, await library.playlists(claims.sub, page), cors);
+      return "/v1/library/playlists";
+    }
+    if (rest.startsWith("playlists/")) {
+      const id = routeId(rest.slice("playlists/".length));
+      const page = pageQuery(url);
+      json(res, 200, await library.playlist(claims.sub, id, page), cors);
+      return "/v1/library/playlists/:id";
+    }
+    if (rest === "soundcloud/likes") {
+      const page = pageQuery(url);
+      json(res, 200, await library.soundcloudLikes(claims.sub, page), cors);
+      return "/v1/library/soundcloud/likes";
+    }
+    if (rest === "soundcloud/playlists") {
+      const page = pageQuery(url);
+      json(res, 200, await library.soundcloudPlaylists(claims.sub, page), cors);
+      return "/v1/library/soundcloud/playlists";
+    }
+    if (rest === "liked") {
+      const page = pageQuery(url);
+      json(res, 200, await library.liked(claims.sub, page), cors);
+      return "/v1/library/liked";
+    }
+    if (rest === "albums") {
+      const page = pageQuery(url);
+      json(res, 200, await library.albums(claims.sub, page), cors);
+      return "/v1/library/albums";
+    }
+    if (rest === "artists") {
+      const page = pageQuery(url);
+      json(res, 200, await library.artists(claims.sub, page), cors);
+      return "/v1/library/artists";
+    }
+    throw new HttpError("not_found", 404);
+  }
+
+  if (pathname === "/v1/search") {
+    if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError("method_not_allowed", 405);
+    const claims = authenticate(req, url, { scope: "sync", role: "phone" });
+    const page = pageQuery(url, { defaultLimit: 10 });
+    json(res, 200, await library.search(claims.sub, url.searchParams.get("q") ?? "", page), cors);
+    return "/v1/search";
+  }
+
+  if (pathname.startsWith("/v1/artist/")) {
+    if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError("method_not_allowed", 405);
+    const claims = authenticate(req, url, { scope: "sync", role: "phone" });
+    const id = routeId(pathname.slice("/v1/artist/".length));
+    json(res, 200, await library.artist(claims.sub, id), cors);
+    return "/v1/artist/:id";
+  }
+
+  if (pathname.startsWith("/v1/album/")) {
+    if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError("method_not_allowed", 405);
+    const claims = authenticate(req, url, { scope: "sync", role: "phone" });
+    const id = routeId(pathname.slice("/v1/album/".length));
+    const page = pageQuery(url);
+    json(res, 200, await library.album(claims.sub, id, page), cors);
+    return "/v1/album/:id";
+  }
+
+  if (pathname === "/v1/home") {
+    if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError("method_not_allowed", 405);
+    const claims = authenticate(req, url, { scope: "sync", role: "phone" });
+    json(res, 200, await library.home(claims.sub), cors);
+    return "/v1/home";
   }
 
   if (pathname === "/v1/resolve" && req.method === "POST") {

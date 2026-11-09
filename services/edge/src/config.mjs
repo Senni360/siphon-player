@@ -29,7 +29,14 @@ export const DEFAULTS = Object.freeze({
   allowedOrigins: "https://encore.senni.dev,http://localhost:5173,http://127.0.0.1:5173",
   ytdlpBin: "yt-dlp",
   ffmpegBin: "ffmpeg",
+  spotifyCacheTtlMs: 60_000,
+  spotifyHomeCacheTtlMs: 10 * 60_000,
+  spotifySearchTtlMs: 2 * 60_000,
+  libraryTimeoutMs: 15_000,
+  homeArtistLimit: 20,
 });
+
+const VAULT_KEY = /^[0-9a-fA-F]{64}$/;
 
 export class ConfigError extends Error {
   constructor(message) {
@@ -62,6 +69,10 @@ export function loadConfig(env = process.env) {
   const secret = env.EDGE_TOKEN_SECRET;
   if (typeof secret !== "string" || secret.length < MIN_SECRET_LENGTH) {
     throw new ConfigError(`EDGE_TOKEN_SECRET is required and must be at least ${MIN_SECRET_LENGTH} characters`);
+  }
+  const vaultKey = env.EDGE_VAULT_KEY;
+  if (vaultKey !== undefined && vaultKey !== "" && !VAULT_KEY.test(vaultKey)) {
+    throw new ConfigError("EDGE_VAULT_KEY must be 64 hexadecimal characters");
   }
   const allowedOrigins = list(env.EDGE_ALLOWED_ORIGINS ?? DEFAULTS.allowedOrigins);
   if (allowedOrigins.length === 0) {
@@ -144,6 +155,32 @@ export function loadConfig(env = process.env) {
     maxJsonBytes: bytes(env.EDGE_MAX_JSON_BYTES, DEFAULTS.maxJsonBytes, { name: "EDGE_MAX_JSON_BYTES" }),
     ytdlpBin: env.EDGE_YTDLP_BIN || DEFAULTS.ytdlpBin,
     ffmpegBin: env.EDGE_FFMPEG_BIN || DEFAULTS.ffmpegBin,
+    vaultKey: vaultKey === undefined || vaultKey === "" ? null : vaultKey.toLowerCase(),
+    spotifyCacheTtlMs: integer(env.EDGE_SPOTIFY_CACHE_TTL_MS, DEFAULTS.spotifyCacheTtlMs, {
+      min: 0,
+      max: 60 * 60_000,
+      name: "EDGE_SPOTIFY_CACHE_TTL_MS",
+    }),
+    spotifyHomeCacheTtlMs: integer(env.EDGE_SPOTIFY_HOME_CACHE_TTL_MS, DEFAULTS.spotifyHomeCacheTtlMs, {
+      min: 0,
+      max: 24 * 60 * 60_000,
+      name: "EDGE_SPOTIFY_HOME_CACHE_TTL_MS",
+    }),
+    spotifySearchTtlMs: integer(env.EDGE_SPOTIFY_SEARCH_TTL_MS, DEFAULTS.spotifySearchTtlMs, {
+      min: 0,
+      max: 60 * 60_000,
+      name: "EDGE_SPOTIFY_SEARCH_TTL_MS",
+    }),
+    libraryTimeoutMs: integer(env.EDGE_LIBRARY_TIMEOUT_MS, DEFAULTS.libraryTimeoutMs, {
+      min: 1000,
+      max: 120_000,
+      name: "EDGE_LIBRARY_TIMEOUT_MS",
+    }),
+    homeArtistLimit: integer(env.EDGE_HOME_ARTIST_LIMIT, DEFAULTS.homeArtistLimit, {
+      min: 1,
+      max: 50,
+      name: "EDGE_HOME_ARTIST_LIMIT",
+    }),
     logLevel: env.EDGE_LOG_LEVEL ?? "info",
   });
 }

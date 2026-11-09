@@ -13,7 +13,7 @@ export async function tempDir(prefix = "encore-edge-test-") {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
 }
 
-export async function startEdge({ env = {}, spawn } = {}) {
+export async function startEdge({ env = {}, spawn, fetch: fetchImpl } = {}) {
   const dir = await tempDir();
   const config = loadConfig({
     EDGE_TOKEN_SECRET: SECRET,
@@ -31,7 +31,7 @@ export async function startEdge({ env = {}, spawn } = {}) {
   });
   const logs = [];
   const logger = createLogger({ level: "debug", sink: { log: (line) => logs.push(line) } });
-  const edge = await createEdgeServer(config, { logger, spawn });
+  const edge = await createEdgeServer(config, { logger, spawn, fetch: fetchImpl });
   const address = await edge.listen({ port: 0, host: "127.0.0.1" });
   const base = `http://127.0.0.1:${address.port}`;
   return {

@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node src/index.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "node --check src/index.mjs && node --check src/server.mjs && node --check src/live.mjs && node --check src/sync.mjs && node --check src/media.mjs && node --check src/resolve.mjs && node --check src/matcher.mjs && node --check src/search.mjs && node --check src/cache.mjs && node --check src/uploads.mjs"
+    "check": "node --check src/index.mjs && node --check src/server.mjs && node --check src/live.mjs && node --check src/sync.mjs && node --check src/media.mjs && node --check src/resolve.mjs && node --check src/matcher.mjs && node --check src/search.mjs && node --check src/cache.mjs && node --check src/uploads.mjs && node --check src/vault.mjs && node --check src/spotify.mjs && node --check src/soundcloud.mjs && node --check src/library.mjs && node --check src/ttlcache.mjs"
   },
   "dependencies": {
     "ws": "^8.22.1"
