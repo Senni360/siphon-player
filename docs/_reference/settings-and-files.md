@@ -293,7 +293,7 @@ saved again only when Spotify has confirmed every change in it. This cache
 contains metadata only and can be deleted at any time.
 
 Home's Recently played, Your top artists, Top tracks, Made for you, Your top
-mixes, New releases and Your podcasts shelves are stored the same way under `home/`. They are shown when
+mixes and New releases shelves are stored the same way under `home/`. They are shown when
 the account is verified and replaced shelf by shelf as Spotify answers. A
 shelf Spotify turns away keeps what it showed, and Home is read again once
 the network is back. Each shelf is saved as soon as its new answer arrives;
@@ -480,10 +480,11 @@ main fields are:
 
 | Field | Default | Meaning |
 | --- | --- | --- |
-| `device_name` | `Siphon` | Name on Spotify Connect |
+| `device_name` | `Encore` | Name on Spotify Connect |
 | `bitrate` | `320` | 96, 160, or 320 kbps |
 | `normalisation` | `false` | Volume normalisation |
 | `autoplay` | `true` | Keep playing similar music at the end |
+| `beat_key_after_secs` | `10` | Seconds of a SoundCloud or YouTube instrumental before its BPM and key are worked out; `null` turns it off |
 | `group_sharing` | none | Whether the group sees what you play. Until you answer, nothing is shared |
 | `group_current` | none | The group being looked at, by its id |
 | `discord_presence` | `true` | Whether Discord shows what plays here, while it is open |
@@ -491,9 +492,14 @@ main fields are:
 | `gapless` | `true` | Gapless playback |
 | `audio_device` | `null` | The output local playback uses, by the id of a device **Audio output** in the device picker lists: PipeWire's or PulseAudio's node name or an ALSA PCM on Linux, the WASAPI endpoint id on Windows, the CoreAudio UID on macOS. `null` is the system default. A device that is not there plays through the default. A name saved by 0.13.3 or earlier opens the output that still has it and is replaced by its id once music plays there; any other name plays through the default and is kept until another choice. The `audio_backend` older versions saved is ignored and no longer written |
 | `audio_cache_mb` | `1024` | On-disk audio cache budget |
+| `audio_buffer_ms` | by platform | Windows: the built-in player's output buffer, 50, 100 or 200 ms |
 | `local_files_folder` | `null` | Folder, with its subfolders, that a playlist's local files play from |
+| `download_folder` | `null` | Folder new downloads are saved in; `null` uses the helper's `Music\Siphon` |
+| `download_format` | `null` | `mp3`, `m4a`, `opus`, `flac` or `wav`; `null` uses the helper's MP3 |
+| `download_quality` | `null` | For lossy formats: `320`, `256`, `192` or `128` kbps; `null` uses 320 |
+| `download_tray` | `true` | Offer each finished download to the Siphon drag tray |
 | `theme` | `system` | Follow the system appearance by default; explicit `dark` and `light` choices remain available |
-| `language` | `system` | Since 0.10.0: the interface language. `system` follows the operating system's preferred languages and falls back to English; a tag such as `es`, `de-DE`, `pt-BR` or `zh-Hant` selects that language. An unknown tag follows the system |
+| `language` | `system` | The interface language. `system` follows the operating system's preferred languages and falls back to English; a tag such as `es`, `de-DE`, `pt-BR` or `zh-Hant` selects that language. An unknown tag follows the system. Settings has no language picker, so this is edited here or previewed with `--demo-language` |
 | `custom_theme` | `null` | Selected JSON filename from the `themes` folder |
 | `custom_theme_cache` | absent | Last accepted custom palette; preserves appearance if its file is missing or invalid |
 | `system_theme_cache` | absent | Last accepted Omarchy palette for Follow system; retained across restarts |
@@ -648,25 +654,24 @@ directory; the ordinary demo does not scan your real themes folder.
 
 ## Home shelves
 
-Since 0.8.0, you can hide **Made for you** and **Recommended for you**
-from Home independently. Quit Siphon before editing `settings.json`, then
-restart it. Add this field to hide both:
+Since 0.8.0, you can hide **Made for you** from Home. Quit Siphon before
+editing `settings.json`, then restart it. Add this field:
 
 ```json
 "home": {
-  "made_for_you": { "visible": false },
-  "recommendations": { "visible": false }
+  "made_for_you": { "visible": false }
 }
 ```
 
-Set either `visible` value to `true` to show that shelf again. Omitted
-preferences keep both shelves visible. **Your top mixes** comes from the same
-personalized read as Made for you, so `made_for_you` hides it too. Other Home
-sections keep their normal order and contents. This changes what is displayed; hidden shelves still
-refresh in the background.
+Set it back to `true` to show the shelf again. Omitted preferences keep it
+visible. **Your top mixes** comes from the same personalized read, so
+`made_for_you` hides it too. Other Home sections keep their normal order and
+contents. This changes what is displayed; the hidden shelf still refreshes in
+the background.
 
-**Recommended for you** is seeded with your top songs. Until Spotify has top
-songs for your account, which takes some listening, Home leaves the shelf out.
+The older `recommendations` field is still read, but it hides no shelf: Home
+has no Recommended for you section any more. Setting it to `false` only keeps
+Spotify's suggestions out of what builds For you.
 
 ## Custom themes
 

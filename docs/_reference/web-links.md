@@ -51,7 +51,7 @@ Only a normal YouTube video link causes a request of its own: the video's
 address goes to YouTube's public oEmbed endpoint, without an account, for its
 title and channel. If no answer arrives within 1.2 seconds, the link opens in
 the browser. This one request runs before settings load, so it follows the
-system proxy rather than **Settings > Proxy**. Other links are decided from the
+system proxy rather than **Settings > Network**. Other links are decided from the
 address alone, and Encore does not record the links it hands on.
 
 ## Registry

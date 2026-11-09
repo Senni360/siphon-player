@@ -15,8 +15,8 @@ a lossless indicator or offer an unsupported quality selector.
 ## Setup
 
 1. Sign in to Spotify in Siphon. Spotify Premium is required.
-2. Open **Settings → Spotify Soloist**, then **Get your Soloist key from
-   Spotify**. Follow Spotify's instructions to generate a personal Soloist
+2. Open **Settings → Playback**, under **Spotify Soloist**, then **Get your
+   Soloist key from Spotify**. Follow Spotify's instructions to generate a personal Soloist
    key. This is separate from the Client ID of your Web API app.
 3. Paste the key and choose **Download and enable Soloist**. Siphon saves
    the key in the system credential store and downloads Spotify's build for
