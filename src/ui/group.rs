@@ -2321,7 +2321,7 @@ fn identity(app: &App, ui: &mut Ui, me: &Profile, actions: &mut Vec<Action>) {
             ui,
             gettext(
                 locale,
-                "Leaving revokes your secret. Your shares stay, as Former member",
+                "You can come back with an invite code. What you shared stays.",
             ),
             theme::regular(12.5),
             palette.dim,

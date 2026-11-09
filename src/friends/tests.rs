@@ -227,6 +227,22 @@ fn optimistic_state_does_not_accept_stale_events_after_leave() {
 }
 
 #[test]
+fn leaving_a_group_keeps_the_account_on_screen() {
+    let post: Post = serde_json::from_value(post_json()).unwrap();
+    let mut model = Model::default();
+    model.profile = Some(Profile {
+        user_id: "a".into(),
+        display_name: "A".into(),
+    });
+    model.posts.push(post);
+    assert!(model.begin(Action::LeaveGroup).is_some());
+    assert!(
+        model.profile.is_some(),
+        "leaving one group is not signing out"
+    );
+}
+
+#[test]
 fn refresh_errors_preserve_feed_and_back_off_while_hidden_never_polls() {
     let mut model = Model::default();
     model.profile = Some(Profile {

@@ -332,6 +332,7 @@ impl Client {
                 400 | 413 | 415 => {
                     "Check the name, link and note. The service rejected this request."
                 }
+                502 => "Spotify isn't answering right now. Try again in a moment.",
                 _ => "Friends is unavailable. Try again later.",
             }
             .into());
@@ -520,6 +521,7 @@ impl Client {
         )
         .await
     }
+    #[cfg(test)]
     pub async fn leave(&self, id: &Identity) -> Result<(), String> {
         let _: serde_json::Value = self
             .request(Method::DELETE, "/me", Some(id), None, None)

@@ -19,6 +19,9 @@ const LOVED_FROM: u8 = 70;
 /// How far back in the feed Home looks for shares to lead with.
 const PICK_FROM: usize = 10;
 
+/// The group everyone started in, for a request that names no other.
+const FIRST_GROUP: &str = "00000000-0000-4000-8000-000000000001";
+
 #[derive(Clone)]
 pub enum Action {
     Open,
@@ -263,10 +266,7 @@ impl Model {
 
     fn request(&mut self, action: Action, pending: Option<String>) -> Request {
         let generation = self.generation.wrapping_add(1);
-        if matches!(
-            action,
-            Action::Leave | Action::LeaveGroup | Action::Join { .. }
-        ) {
+        if matches!(action, Action::Leave | Action::Join { .. }) {
             *self = Self {
                 generation,
                 restored: true,
@@ -864,21 +864,17 @@ impl Runtime {
                 Update::Changed
             }
             Action::LeaveGroup => {
-                client.leave(identity).await.map_err(|_| {
-                    "Leaving the group could not be confirmed. Retry your saved identity, or forget this device.".to_owned()
-                })?;
-                self.identity = None;
+                // Only this group: the account, its other groups and its
+                // phones stay, and an invite code brings it back.
+                let group =
+                    super::account::current_group().unwrap_or_else(|| FIRST_GROUP.to_owned());
+                client
+                    .apply(identity, super::account::Op::LeaveGroup(group))
+                    .await?;
                 self.cursor = None;
-                credentials.invalidate(Slot::Friends);
-                credentials
-                    .lease(Slot::Friends)
-                    .clear_secret(false)
-                    .await
-                    .map_err(|_| {
-                        "Left the group, but credential removal failed. Forget this device again."
-                            .to_owned()
-                    })?;
-                Update::Left
+                let account = client.account(identity).await?;
+                super::account::set_current_group(account.groups.first().map(|g| g.id.clone()));
+                Update::Account(Box::new(account))
             }
             Action::Leave
             | Action::Join { .. }
