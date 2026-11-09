@@ -60,12 +60,72 @@ pub struct ForYou {
 /// Whether a track is a beat (an instrumental made for others to rap or sing
 /// on) rather than a song. Beats have a place of their own on Home.
 ///
-/// The reading lives in [`crate::beats::is_beat`], so every place that decides
-/// a beat uses one strict rule: a beat word, a producer's channel or a beat's
+/// The reading lives in [`crate::beats::is_beat`], so every recommendation
+/// uses one strict rule: a beat word, a producer's channel or a beat's
 /// genre, and a length that fits a single beat. A YouTube upload that says
 /// none of that is not a beat.
 pub fn is_beat(track: &Track) -> bool {
     crate::beats::is_beat(track)
+}
+
+/// Whether an upload should get a beat's treatment: its name tidied and its
+/// tempo and key read. Looser than [`is_beat`], since producers often give a
+/// beat a plain name: on YouTube, an upload counts unless it says it's a
+/// song's video or audio. Recommendations use the strict [`is_beat`].
+pub fn reads_as_beat(track: &Track) -> bool {
+    let title = track.name.to_lowercase();
+    let words: Vec<&str> = title
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let said = [
+        "type beat",
+        "typebeat",
+        "instrumental",
+        "free for profit",
+        "freestyle beat",
+    ]
+    .iter()
+    .any(|phrase| title.contains(phrase))
+        || words
+            .iter()
+            .any(|word| matches!(*word, "beat" | "beats" | "bpm"))
+        || title.trim_start().starts_with("[free]")
+        || title.trim_start().starts_with("(free)");
+    if said {
+        return true;
+    }
+    let by_producer = track.artists.iter().any(|artist| {
+        let name = artist.name.to_lowercase();
+        name.split(|c: char| !c.is_alphanumeric())
+            .any(|word| matches!(word, "beats" | "beatz" | "instrumentals"))
+            || name.ends_with("beats")
+    });
+    let genre = crate::stats::soundcloud_genre(&track.uri).is_some_and(|genre| {
+        let genre = genre.to_lowercase();
+        genre.contains("beat") || genre.contains("instrumental")
+    });
+    if by_producer || genre {
+        return true;
+    }
+    if crate::youtube::is_track_uri(&track.uri) {
+        let song = [
+            "official video",
+            "official audio",
+            "music video",
+            "official visualizer",
+            "visualizer",
+            "lyric",
+            "(audio)",
+            "[audio]",
+            "live at",
+            "live from",
+        ]
+        .iter()
+        .any(|marker| title.contains(marker));
+        return !song;
+    }
+    false
 }
 
 /// Whether a track may be recommended on Home at all. YouTube is only for

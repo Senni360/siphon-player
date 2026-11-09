@@ -14906,7 +14906,7 @@ impl App {
 
     /// Tells the beat reading which track is an instrumental worth hearing:
     /// only SoundCloud and YouTube tracks, which play through Encore's own
-    /// engine, and only ones `crate::for_you::is_beat` calls a beat. Spotify
+    /// engine, and only ones `crate::for_you::reads_as_beat` calls a beat. Spotify
     /// audio, podcasts and ordinary songs are never armed, so the collector
     /// never buffers them at all; see `crate::beat_analysis`.
     ///
@@ -14942,7 +14942,7 @@ impl App {
                     .flatten()
             })
             .unwrap_or_else(|| crate::history::played_track(&now));
-        if crate::for_you::is_beat(&track) {
+        if crate::for_you::reads_as_beat(&track) {
             self.beats.arm(&now.uri);
         }
     }

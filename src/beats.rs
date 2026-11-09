@@ -417,7 +417,7 @@ pub fn read(title: &str, description: Option<&str>, channel: Option<&str>) -> Be
 /// SoundCloud, if it is one. The uri and the artists stay: the producer
 /// remains who made it, and nothing that matches by uri or title is moved.
 pub fn apply(track: &mut Track, description: Option<&str>) {
-    if !is_beat(track) {
+    if !crate::for_you::reads_as_beat(track) {
         return;
     }
     let channel = track

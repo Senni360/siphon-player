@@ -105,7 +105,7 @@ pub fn looks_messy(title: &str) -> bool {
 pub fn apply(track: &mut Track) {
     // Beats read their own names here instead (`crate::beats`): their titles
     // pack a whole description in, not just another artist.
-    if crate::for_you::is_beat(track) {
+    if crate::for_you::reads_as_beat(track) {
         return;
     }
     let reading = {
