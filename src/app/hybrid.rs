@@ -23,6 +23,25 @@ struct PendingStart {
     manual_started: bool,
 }
 
+/// A context the app already holds part of. `complete` is false when only a
+/// page prefix is in memory; `from_start` says whether that prefix begins at
+/// the context's first row, so a chosen position still means the same row.
+struct LoadedHybridContext {
+    context: Context,
+    complete: bool,
+    from_start: bool,
+}
+
+impl LoadedHybridContext {
+    fn complete(context: Context) -> Self {
+        Self {
+            context,
+            complete: true,
+            from_start: true,
+        }
+    }
+}
+
 /// A not-yet-resolved context is saved as intent, never as a truncated list.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PendingHybridSnapshot {
@@ -542,71 +561,120 @@ impl App {
         let context = if !request.uris.is_empty() {
             let metadata: HashMap<_, _> = loaded_context
                 .as_ref()
+                .map(|loaded| &loaded.context)
                 .into_iter()
-                .flat_map(|c| &c.tracks)
+                .flat_map(|context| &context.tracks)
                 .map(|t| (t.uri.as_str(), t))
                 .collect();
-            Some(Context {
-                uri: context_uri.clone(),
-                name: self.hybrid_context_name(&context_uri),
-                tracks: request
-                    .uris
-                    .iter()
-                    .map(|uri| {
-                        metadata
-                            .get(uri.as_str())
-                            .map_or_else(|| self.hybrid_track(uri, None), |track| (*track).clone())
-                    })
-                    .collect(),
-            })
+            Some((
+                Context {
+                    uri: context_uri.clone(),
+                    name: self.hybrid_context_name(&context_uri),
+                    tracks: request
+                        .uris
+                        .iter()
+                        .map(|uri| {
+                            metadata.get(uri.as_str()).map_or_else(
+                                || self.hybrid_track(uri, None),
+                                |track| (*track).clone(),
+                            )
+                        })
+                        .collect(),
+                },
+                true,
+                true,
+            ))
         } else {
-            loaded_context
+            loaded_context.map(|loaded| (loaded.context, loaded.complete, loaded.from_start))
         };
-        if let Some(context) = context {
-            self.start_hybrid_context(context, &request, shuffle, repeat);
-        } else {
-            // Show the clicked row immediately while the complete context is
-            // resolved. No prefix is sent to an engine as the whole playlist.
-            if let Some(uri) = request.offset_uri.as_ref() {
-                let track = self.hybrid_track(uri, None);
-                self.hybrid.queue.start(
-                    Context {
-                        uri: context_uri.clone(),
-                        name: self.hybrid_context_name(&context_uri),
-                        tracks: vec![track],
-                    },
-                    Some(0),
-                    shuffle,
-                    repeat_to_queue(repeat),
-                );
+        if let Some((context, complete, from_start)) = context {
+            // A page loaded from the middle does not begin the context, so
+            // only a prefix that starts at the top may be used as it is. A
+            // clicked row that the prefix holds can still start from there.
+            let start_known = complete
+                || from_start
+                || (request.offset_position.is_none()
+                    && request
+                        .offset_uri
+                        .as_deref()
+                        .is_some_and(|uri| context.tracks.iter().any(|track| track.uri == uri)));
+            if start_known {
+                self.start_hybrid_context(context, &request, shuffle, repeat);
+                if !complete {
+                    // The rest resolves behind this prefix: the playing
+                    // occurrence and any manual rows stay exactly as they
+                    // are when the complete context arrives.
+                    let generation = self.hybrid.plan_generation;
+                    self.hybrid.pending = Some(PendingStart {
+                        generation,
+                        request,
+                        shuffle,
+                        repeat,
+                        play: true,
+                        navigation: Vec::new(),
+                        context_navigation: Vec::new(),
+                        resolving: true,
+                        manual_started: true,
+                    });
+                    self.backend.send(Command::Hybrid(HybridCommand::Resolve {
+                        generation,
+                        uri: context_uri,
+                    }));
+                }
+                return true;
             }
-            self.hybrid.state = LocalState {
-                loading: true,
-                playback: Playback::Playing,
-                position_ms: request.position_ms,
-                ..LocalState::default()
-            };
-            self.hybrid.loaded = false;
-            self.hybrid.tag = None;
-            let generation = self.hybrid.plan_generation;
-            self.hybrid.pending = Some(PendingStart {
-                generation,
-                request,
-                shuffle,
-                repeat,
-                play: true,
-                navigation: Vec::new(),
-                context_navigation: Vec::new(),
-                resolving: true,
-                manual_started: false,
-            });
-            self.backend.send(Command::Hybrid(HybridCommand::Resolve {
-                generation,
-                uri: context_uri,
-            }));
-            self.project_hybrid();
         }
+        self.start_hybrid_unresolved(request, context_uri, shuffle, repeat);
         true
+    }
+
+    /// Shows the clicked row while the complete context is resolved. No
+    /// prefix is sent to an engine as the whole playlist.
+    fn start_hybrid_unresolved(
+        &mut self,
+        request: PlayRequest,
+        context_uri: String,
+        shuffle: bool,
+        repeat: RepeatMode,
+    ) {
+        if let Some(uri) = request.offset_uri.as_ref() {
+            let track = self.hybrid_track(uri, None);
+            self.hybrid.queue.start(
+                Context {
+                    uri: context_uri.clone(),
+                    name: self.hybrid_context_name(&context_uri),
+                    tracks: vec![track],
+                },
+                Some(0),
+                shuffle,
+                repeat_to_queue(repeat),
+            );
+        }
+        self.hybrid.state = LocalState {
+            loading: true,
+            playback: Playback::Playing,
+            position_ms: request.position_ms,
+            ..LocalState::default()
+        };
+        self.hybrid.loaded = false;
+        self.hybrid.tag = None;
+        let generation = self.hybrid.plan_generation;
+        self.hybrid.pending = Some(PendingStart {
+            generation,
+            request,
+            shuffle,
+            repeat,
+            play: true,
+            navigation: Vec::new(),
+            context_navigation: Vec::new(),
+            resolving: true,
+            manual_started: false,
+        });
+        self.backend.send(Command::Hybrid(HybridCommand::Resolve {
+            generation,
+            uri: context_uri,
+        }));
+        self.project_hybrid();
     }
 
     #[cfg(test)]
@@ -834,9 +902,9 @@ impl App {
         }
     }
 
-    fn loaded_hybrid_context(&self, uri: &str) -> Option<Context> {
+    fn loaded_hybrid_context(&self, uri: &str) -> Option<LoadedHybridContext> {
         if uri == crate::shared_songs::LIBRARY {
-            return Some(Context {
+            return Some(LoadedHybridContext::complete(Context {
                 uri: uri.into(),
                 name: gettext(self.locale, "Shared songs").into_owned(),
                 tracks: self
@@ -845,29 +913,31 @@ impl App {
                     .iter()
                     .map(crate::shared_songs::SharedSong::to_track)
                     .collect(),
-            });
+            }));
         }
         if uri == "youtube:likes" {
-            return Some(Context {
+            return Some(LoadedHybridContext::complete(Context {
                 uri: uri.into(),
                 name: "YouTube Likes".into(),
                 tracks: self.youtube_likes()?.to_vec(),
-            });
+            }));
         }
         if self.own_soundcloud_likes_context(uri) {
             return (self.soundcloud_library.snapshot.likes_loaded
                 && self.soundcloud_library.snapshot.next_likes.is_none())
-            .then(|| Context {
-                uri: uri.into(),
-                name: gettext(self.locale, "SoundCloud Likes").into_owned(),
-                tracks: self.soundcloud_library.snapshot.likes.clone(),
+            .then(|| {
+                LoadedHybridContext::complete(Context {
+                    uri: uri.into(),
+                    name: gettext(self.locale, "SoundCloud Likes").into_owned(),
+                    tracks: self.soundcloud_library.snapshot.likes.clone(),
+                })
             });
         }
         if uri.starts_with("spotify:")
             && uri.ends_with(":collection")
             && self.library.liked.is_complete()
         {
-            return Some(Context {
+            return Some(LoadedHybridContext::complete(Context {
                 uri: uri.into(),
                 name: gettext(self.locale, "Liked Songs").into_owned(),
                 tracks: self
@@ -877,34 +947,32 @@ impl App {
                     .iter()
                     .map(|saved| saved.track.clone())
                     .collect(),
-            });
+            }));
         }
         if let Some(id) = uri.strip_prefix(crate::mixed_playlists::PLAYLIST_PREFIX) {
             let playlist = self.mixed_playlists.get(id)?;
-            return Some(Context {
+            return Some(LoadedHybridContext::complete(Context {
                 uri: uri.into(),
                 name: playlist.name.clone(),
                 tracks: playlist.to_tracks(),
-            });
+            }));
         }
         if crate::youtube::is_external(uri) {
             let track = self.hybrid_cached_track(uri)?;
-            return Some(Context {
+            return Some(LoadedHybridContext::complete(Context {
                 uri: uri.into(),
                 name: track.name.clone(),
                 tracks: vec![track],
-            });
+            }));
         }
         if let Some(id) = uri.strip_prefix("spotify:playlist:") {
             let page = self.playlist_pages.get(id)?;
-            if page.items.base_offset != 0
-                || page
+            let from_start = page.items.base_offset == 0;
+            let complete = from_start
+                && page
                     .items
                     .total
-                    .is_none_or(|n| n as usize != page.items.items.len())
-            {
-                return None;
-            }
+                    .is_some_and(|n| n as usize == page.items.items.len());
             let mut tracks: Vec<_> = page
                 .items
                 .items
@@ -917,47 +985,60 @@ impl App {
                     },
                 })
                 .collect();
-            if let Some(overlay) = self.playlist_overlay.get(id) {
+            let overlay = self.playlist_overlay.get(id);
+            if tracks.is_empty() && overlay.is_none() {
+                return None;
+            }
+            if let Some(overlay) = overlay {
                 tracks = crate::playlist_overlay::merge(&tracks, overlay)
                     .into_iter()
                     .map(|r| r.to_track())
                     .collect();
             }
-            return Some(Context {
-                uri: uri.into(),
-                name: page.playlist.get().map_or_else(
-                    || gettext(self.locale, "Playlist").into_owned(),
-                    |p| p.name.clone(),
-                ),
-                tracks,
+            return Some(LoadedHybridContext {
+                context: Context {
+                    uri: uri.into(),
+                    name: page.playlist.get().map_or_else(
+                        || gettext(self.locale, "Playlist").into_owned(),
+                        |p| p.name.clone(),
+                    ),
+                    tracks,
+                },
+                complete,
+                from_start,
             });
         }
         if let Some(id) = uri.strip_prefix("spotify:album:") {
             let page = self.album_pages.get(id)?;
-            if page.tracks.base_offset != 0
-                || page
+            let from_start = page.tracks.base_offset == 0;
+            let complete = from_start
+                && page
                     .tracks
                     .total
-                    .is_none_or(|n| n as usize != page.tracks.items.len())
-            {
+                    .is_some_and(|n| n as usize == page.tracks.items.len());
+            if page.tracks.items.is_empty() {
                 return None;
             }
-            return Some(Context {
-                uri: uri.into(),
-                name: page.album.get().map_or_else(
-                    || gettext(self.locale, "Album").into_owned(),
-                    |a| a.name.clone(),
-                ),
-                tracks: page.tracks.items.clone(),
+            return Some(LoadedHybridContext {
+                context: Context {
+                    uri: uri.into(),
+                    name: page.album.get().map_or_else(
+                        || gettext(self.locale, "Album").into_owned(),
+                        |a| a.name.clone(),
+                    ),
+                    tracks: page.tracks.items.clone(),
+                },
+                complete,
+                from_start,
             });
         }
         if uri.starts_with("spotify:track:") {
             let track = self.hybrid_track(uri, None);
-            return Some(Context {
+            return Some(LoadedHybridContext::complete(Context {
                 uri: uri.into(),
                 name: track.name.clone(),
                 tracks: vec![track],
-            });
+            }));
         }
         None
     }
@@ -1165,6 +1246,8 @@ impl App {
                 })
             } else if let Some(uri) = self.playing_context_uri() {
                 self.loaded_hybrid_context(&uri)
+                    .filter(|loaded| loaded.complete)
+                    .map(|loaded| loaded.context)
             } else {
                 Some(Context {
                     uri: String::new(),

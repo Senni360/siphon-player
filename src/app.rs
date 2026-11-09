@@ -1508,6 +1508,11 @@ impl App {
         app.restore_hybrid(session.hybrid.clone());
         app.restore_hybrid_start(session.hybrid_start.clone());
         if let Some(folder) = app.settings.local_files_folder() {
+            // The saved index is right before the window draws, and the walk
+            // behind it only probes files that changed.
+            app.local_files = crate::local_files::Cache::load(&app.dirs.local_files_cache_file())
+                .filter(|cache| cache.folder.as_deref() == Some(folder.as_path()))
+                .map(|cache| (folder.clone(), std::sync::Arc::new(cache.uris())));
             app.backend.send(Command::ScanLocalFiles(folder));
         }
         // What was played here is on disk and needs nothing from the
@@ -10618,6 +10623,14 @@ impl App {
     }
 
     fn start_play(&mut self, request: PlayRequest, shuffle_first: bool) {
+        crate::player::note_play_clicked();
+        log::debug!(
+            "Playback timing: click target={:?} context={} tracks={} offset={:?}",
+            self.target(),
+            request.context_uri.as_deref().unwrap_or_default(),
+            request.uris.len(),
+            request.offset_uri
+        );
         if self.try_hybrid_start(request.clone(), shuffle_first, None) {
             return;
         }
@@ -10649,6 +10662,10 @@ impl App {
             } else if let Some(id) = context.strip_prefix("spotify:playlist:") {
                 (request.offset_uri, request.offset_position) = self.playlist_start(id);
             }
+        }
+        if let Some(offset) = &mut request.offset_uri {
+            // A local row must name the file the player loaded, exactly.
+            *offset = normalized_offset_uri(offset);
         }
         let mut keys: Vec<String> = Vec::new();
         if let Some(context) = &request.context_uri {
@@ -12057,14 +12074,14 @@ impl App {
             .or_else(|| self.local_art(item.uri()))
     }
 
-    /// Whether `item` can start playback here: a local file only when the
-    /// local files folder holds it.
+    /// Whether `item` can start playback here. A local file is offered
+    /// whenever a local files folder is set; the folder scan only decides
+    /// whether its file can be found, and a missing one is reported as
+    /// unavailable when it plays.
     pub fn row_playable(&self, item: &PlayableItem) -> bool {
         crate::ui::widgets::row_playable(item)
-            || self
-                .local_files
-                .as_ref()
-                .is_some_and(|(_, uris)| uris.contains_key(&local_file_key(item.uri())))
+            || (item.uri().starts_with(LOCAL_URI_PREFIX)
+                && self.settings.local_files_folder().is_some())
     }
 
     /// The picked rows to remove one by one, when the removal includes a
@@ -15552,6 +15569,18 @@ pub(crate) fn local_file_key(uri: &str) -> String {
         .unwrap_or_default()
 }
 
+/// The URI a load's offset should name: a local file is matched by librespot
+/// as the canonical string, so a playlist's spelling must become that first.
+fn normalized_offset_uri(uri: &str) -> String {
+    if uri.starts_with(LOCAL_URI_PREFIX) {
+        let key = local_file_key(uri);
+        if !key.is_empty() {
+            return key;
+        }
+    }
+    uri.to_string()
+}
+
 /// Whether a day has passed since the banner last appeared. A missing,
 /// unreadable or future time (a clock set back) does not hold it back.
 fn slow_banner_due(last: Option<&str>, now: jiff::Timestamp) -> bool {
@@ -15796,7 +15825,7 @@ fn local_load(request: &PlayRequest, shuffle: bool) -> LoadSpec {
     LoadSpec {
         context_uri: request.context_uri.clone(),
         uris: request.uris.clone(),
-        offset_uri: request.offset_uri.clone(),
+        offset_uri: request.offset_uri.as_deref().map(normalized_offset_uri),
         offset_index: request.offset_position,
         position_ms: request.position_ms,
         play: true,
@@ -20114,6 +20143,27 @@ mod tests {
         // picked to match.
         let request = PlayRequest::context("spotify:playlist:x").starting_at_uri("spotify:track:a");
         assert_eq!(local_load(&request, true).shuffle, Some(true));
+    }
+
+    /// A local row's offset must name the URI the player loaded, or Spirc
+    /// silently starts the context's first row instead.
+    #[test]
+    fn a_local_offset_is_written_as_the_player_keys_it() {
+        // librespot reads the duration back as a number, so a padded playlist
+        // URI is not the string its own loader produced.
+        let raw = "spotify:local:The+Artist:An+Album:A+Song:0215";
+        let key = local_file_key(raw);
+        assert_eq!(key, "spotify:local:The+Artist:An+Album:A+Song:215");
+        let request = PlayRequest::context("spotify:playlist:mix").starting_at_uri(raw);
+        let load = local_load(&request, false);
+        assert_eq!(load.offset_uri.as_deref(), Some(key.as_str()));
+        // Other URIs are left exactly as they were.
+        let request =
+            PlayRequest::context("spotify:playlist:mix").starting_at_uri("spotify:track:a");
+        assert_eq!(
+            local_load(&request, false).offset_uri.as_deref(),
+            Some("spotify:track:a")
+        );
     }
 
     fn queued_song(uri: &str) -> crate::api::models::PlayableItem {
@@ -30557,18 +30607,39 @@ mod tests {
         })
     }
 
-    /// A playlist's local file plays when the folder holds it, keyed as the
-    /// player keys it, and only once the folder was read (#3).
+    /// A playlist's local row is offered as soon as a local files folder is
+    /// set; finding its file only decides what plays. Queueing still needs
+    /// the folder's mapping, because the engine queues local files itself.
     #[test]
-    fn local_files_play_when_the_folder_holds_them() {
+    fn local_rows_play_with_a_folder_and_queue_only_when_held() {
         let mut app = headless_app();
         app.backend.set_offline(true);
         let held = local_track("spotify:local:The+Artist:An+Album:A+Song:215");
         let spelled = local_track("spotify:local:The%20Artist:An%20Album:A%20Song:215");
         let missing = local_track("spotify:local:Someone:Else:Song:100");
         assert!(!app.row_playable(&held));
-        let folder = std::path::PathBuf::from("/music");
         app.settings.local_files_folder = Some("/music".into());
+        // No scan has answered yet, and the row already starts.
+        assert!(app.row_playable(&held));
+        assert!(app.row_playable(&spelled));
+        assert!(app.row_playable(&missing));
+        // Spotify's own songs are untouched.
+        assert!(app.row_playable(&PlayableItem::Track(Track {
+            uri: "spotify:track:abc".into(),
+            ..Default::default()
+        })));
+
+        // Queueing a local file still needs the file, keyed as the player
+        // keys it.
+        app.local_ready = true;
+        app.local.connected = true;
+        app.local.playback = Playback::Playing;
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:abc".into(),
+            ..Default::default()
+        });
+        assert!(!app.can_queue(held.uri()));
+        let folder = std::path::PathBuf::from("/music");
         let uris = Arc::new(HashMap::from([(
             local_file_key("spotify:local:The+Artist:An+Album:A+Song:215"),
             std::path::PathBuf::from("/music/A Song.mp3"),
@@ -30580,15 +30651,9 @@ mod tests {
         }]);
         assert!(app.local_files.is_none());
         app.handle_backend_events(vec![Event::LocalFiles { folder, uris }]);
-        assert!(app.row_playable(&held));
-        // The player matches the parts as the file's tags spell them.
-        assert!(!app.row_playable(&spelled));
-        assert!(!app.row_playable(&missing));
-        // Spotify's own songs are untouched.
-        assert!(app.row_playable(&PlayableItem::Track(Track {
-            uri: "spotify:track:abc".into(),
-            ..Default::default()
-        })));
+        assert!(app.can_queue(held.uri()));
+        assert!(!app.can_queue(spelled.uri()));
+        assert!(!app.can_queue(missing.uri()));
     }
 
     /// A local file's cover comes from the file it plays from, on its row
@@ -36564,6 +36629,124 @@ mod tests {
         ));
         app.handle_hybrid_event(old, crate::player::HybridEvent::EndOfTrack);
         assert!(!app.hybrid_owned());
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn hybrid_starts_from_a_loaded_playlist_prefix_and_resolves_the_rest_behind_it() {
+        let mut app = hybrid_fixture();
+        let ctx = egui::Context::default();
+        let tracks: Vec<Track> = ["spotify:track:1", "spotify:track:2", "spotify:track:3"]
+            .iter()
+            .map(|uri| Track {
+                uri: (*uri).into(),
+                name: (*uri).into(),
+                duration_ms: 120_000,
+                ..Track::default()
+            })
+            .collect();
+        for track in &tracks {
+            app.track_cache.insert(track.uri.clone(), track.clone());
+        }
+        app.playlist_pages.insert(
+            "mix".into(),
+            PlaylistPage {
+                playlist: Loadable::Loaded(Playlist {
+                    id: "mix".into(),
+                    name: "Mix".into(),
+                    ..Playlist::default()
+                }),
+                items: crate::model::PagedList {
+                    items: tracks
+                        .iter()
+                        .cloned()
+                        .map(|track| PlaylistItem {
+                            item: Some(PlayableItem::Track(track)),
+                            ..PlaylistItem::default()
+                        })
+                        .collect(),
+                    total: Some(10),
+                    loaded_once: true,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        );
+        // A local insertion makes this a mixed playlist, so its playback is
+        // app-owned, and the prefix is all the app holds so far.
+        let local = Track {
+            uri: "soundcloud:track:55".into(),
+            name: "Local addition".into(),
+            duration_ms: 100_000,
+            ..Track::default()
+        };
+        app.playlist_overlay
+            .get_mut("mix")
+            .insert(&tracks, 1, &local);
+
+        app.play_request(
+            PlayRequest::context("spotify:playlist:mix").starting_at_uri("spotify:track:2"),
+            false,
+        );
+        assert!(app.hybrid_owned());
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:2"));
+        let commands = app.backend.take_hybrid_commands();
+        let generation = commands
+            .iter()
+            .find_map(|command| match command {
+                crate::backend::HybridCommand::Load { track, .. } => {
+                    assert_eq!(track.uri, "spotify:track:2");
+                    None
+                }
+                crate::backend::HybridCommand::Resolve { generation, uri } => {
+                    assert_eq!(uri, "spotify:playlist:mix");
+                    Some(*generation)
+                }
+                _ => None,
+            })
+            .expect("the rest of the playlist resolves behind the prefix");
+
+        let full: Vec<Track> = (1..=5)
+            .map(|id| Track {
+                uri: format!("spotify:track:{id}"),
+                name: format!("track {id}"),
+                duration_ms: 120_000,
+                ..Track::default()
+            })
+            .collect();
+        // The child confirms its first sound while the rest resolves.
+        let tag = app.hybrid_tag().unwrap();
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::State(Box::new(LocalState {
+                playback: Playback::Playing,
+                track: Some(crate::player::LocalTrack {
+                    uri: "spotify:track:2".into(),
+                    ..Default::default()
+                }),
+                ..LocalState::default()
+            })),
+        );
+        app.handle_hybrid_context(
+            generation,
+            Ok(crate::hybrid_queue::Context {
+                uri: "spotify:playlist:mix".into(),
+                name: "Mix".into(),
+                tracks: full,
+            }),
+        );
+        // The playing occurrence survives the answer; only what follows it
+        // is replaced with the complete context.
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:2"));
+        assert!(!app.now_playing().unwrap().loading);
+        app.backend.take_hybrid_commands();
+        app.apply(Action::Next, &ctx);
+        let next = app.backend.take_hybrid_commands();
+        assert!(matches!(
+            next.first(),
+            Some(crate::backend::HybridCommand::Load { track, .. })
+                if track.uri == "spotify:track:3"
+        ));
         app.backend.shutdown();
     }
 

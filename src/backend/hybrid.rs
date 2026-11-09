@@ -382,6 +382,10 @@ impl Worker {
                 position_ms,
                 play,
             } => {
+                log::debug!(
+                    "Playback timing: backend received hybrid Load after {} ms",
+                    crate::player::clicked_ago_ms()
+                );
                 self.hybrid.preload_uri = None;
                 self.hybrid.new_owner_intent();
                 self.hybrid.owned = true;

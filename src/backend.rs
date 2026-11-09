@@ -48,11 +48,17 @@ const RADIO_TIMEOUT: Duration = Duration::from_secs(20);
 /// The songs in `folder` and its subfolders by the `spotify:local:` URIs
 /// they play for, found exactly as the player finds them, so the songs a
 /// playlist lists that will play are the ones shown as playable, and each
-/// one's file can be read for its cover and lyrics.
-fn local_file_uris(
-    folder: &std::path::Path,
-) -> std::collections::HashMap<String, std::path::PathBuf> {
-    crate::local_files::scan(folder)
+/// one's file can be read for its cover and lyrics. A saved index lets an
+/// unchanged folder skip the expensive tag probe for every file.
+fn local_file_uris(folder: &std::path::Path, cache: &std::path::Path) -> crate::local_files::Scan {
+    let cached = crate::local_files::Cache::load(cache);
+    let scan = crate::local_files::scan_with(folder, cached.as_ref());
+    if let Ok(bytes) = scan.cache.encode()
+        && let Err(error) = fastframe_file::write(cache, bytes)
+    {
+        log::warn!("Unable to save the local files index: {error}");
+    }
+    scan
 }
 /// Newest episodes read from each saved podcast for Home's podcast shelf.
 const HOME_EPISODES_PER_SHOW: u32 = 5;
@@ -3200,16 +3206,18 @@ impl Worker {
                 Command::ScanLocalFiles(folder) => {
                     let events = self.events.clone();
                     let waker = self.waker.clone();
+                    let cache = self.dirs.local_files_cache_file();
                     tokio::spawn(async move {
                         let scanned = folder.clone();
-                        let Ok(uris) =
-                            tokio::task::spawn_blocking(move || local_file_uris(&scanned)).await
+                        let Ok(scan) =
+                            tokio::task::spawn_blocking(move || local_file_uris(&scanned, &cache))
+                                .await
                         else {
                             return;
                         };
                         let _ = events.send(Event::LocalFiles {
                             folder,
-                            uris: Arc::new(uris),
+                            uris: Arc::new(scan.uris),
                         });
                         waker.wake();
                     });
@@ -3314,6 +3322,12 @@ impl Worker {
                 }
                 Command::ApplyProxy { request, config } => self.change_proxy(request, config, None),
                 Command::Player(command) => {
+                    if matches!(&command, PlayerCommand::Load(_)) {
+                        log::debug!(
+                            "Playback timing: backend received Load after {} ms",
+                            crate::player::clicked_ago_ms()
+                        );
+                    }
                     if (self.hybrid.owned || self.hybrid.releasing)
                         && let PlayerCommand::Load(spec) = &command
                         && let Err(error) = spec.validate()

@@ -308,6 +308,12 @@ impl AppDirs {
         self.cache.join("audio")
     }
 
+    /// The local files folder's index, so rows are playable on the first
+    /// frame and a walk only probes files that changed.
+    pub fn local_files_cache_file(&self) -> PathBuf {
+        self.cache.join("local-files.json")
+    }
+
     pub fn art_cache_dir(&self) -> PathBuf {
         self.cache.join("art")
     }

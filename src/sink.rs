@@ -207,13 +207,31 @@ impl AudioControl {
     /// Fades and discards the current output before a user-requested track
     /// change. Repeated skips share the same handoff.
     pub fn interrupt(&self) {
+        self.interrupt_after(INTERRUPT_FADE * 2);
+    }
+
+    /// A Load waits only one buffer period: the load itself is still ahead
+    /// and there is nothing yet to cross-fade with.
+    pub(crate) fn interrupt_for_load(&self) {
+        self.interrupt_after(Duration::ZERO);
+    }
+
+    fn interrupt_after(&self, extra: Duration) {
         let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
         if !self.external_active.load(Ordering::SeqCst) {
-            self.interrupt_output();
+            self.interrupt_output_for(
+                Duration::from_millis(u64::from(self.buffer_ms)).saturating_add(extra),
+            );
         }
     }
 
-    fn interrupt_output(&self) {
+    pub(crate) fn interrupt_output(&self) {
+        self.interrupt_output_for(
+            Duration::from_millis(u64::from(self.buffer_ms)).saturating_add(INTERRUPT_FADE * 2),
+        );
+    }
+
+    fn interrupt_output_for(&self, wait: Duration) {
         if self.waiting_for_track.swap(true, Ordering::SeqCst) {
             return;
         }
@@ -223,8 +241,6 @@ impl AudioControl {
         };
         if let (Some(sink), Some(envelope)) = (&sink, &envelope) {
             envelope.fade_out();
-            let wait =
-                Duration::from_millis(u64::from(self.buffer_ms)).saturating_add(INTERRUPT_FADE * 2);
             let deadline = Instant::now() + wait;
             while !envelope.silent() && Instant::now() < deadline {
                 thread::sleep(Duration::from_millis(1));

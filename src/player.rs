@@ -370,6 +370,23 @@ pub enum HybridEvent {
 
 pub type Notify = Arc<dyn Fn(EngineEvent) + Send + Sync>;
 
+/// When the listener last pressed play, so each stage can report how far it
+/// got from that click without threading a timestamp through every command.
+static PLAY_CLICKED_AT: Mutex<Option<Instant>> = Mutex::new(None);
+
+pub(crate) fn note_play_clicked() {
+    *PLAY_CLICKED_AT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Instant::now());
+}
+
+pub(crate) fn clicked_ago_ms() -> u128 {
+    PLAY_CLICKED_AT
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .map_or(0, |at| at.elapsed().as_millis())
+}
+
 /// The parts of an engine that outlive its session (#268). librespot's
 /// player keeps playing what it has already fetched when the session drops;
 /// handed to the next engine, the song carries on through the reconnect
@@ -809,8 +826,19 @@ impl Engine {
             &self.state.lock().unwrap_or_else(|p| p.into_inner()),
             &command,
         );
+        let load_started = matches!(&command, PlayerCommand::Load(_)).then(Instant::now);
+        if load_started.is_some() {
+            log::debug!(
+                "Playback timing: engine load command start after {} ms",
+                clicked_ago_ms()
+            );
+        }
         if interrupts_audio {
-            self.audio.interrupt();
+            if matches!(&command, PlayerCommand::Load(_)) {
+                self.audio.interrupt_for_load();
+            } else {
+                self.audio.interrupt();
+            }
         }
         let spotify_load = matches!(command, PlayerCommand::Load(_));
         let was_inhibited = self.audio.spotify_inhibited();
@@ -821,6 +849,13 @@ impl Engine {
             self.audio.inhibit_spotify(false);
         }
         let result = self.send_command(command);
+        if let Some(started) = load_started {
+            log::debug!(
+                "Playback timing: engine load command sent in {} ms (click {} ms)",
+                started.elapsed().as_millis(),
+                clicked_ago_ms()
+            );
+        }
         if spotify_load && result.is_err() && was_inhibited {
             self.audio.inhibit_spotify(true);
         }
@@ -858,40 +893,29 @@ impl Engine {
             == Some(self.device_id.as_str());
         disconnect_for_handoff(
             active,
+            self.audio.spotify_inhibited(),
             |pause| self.spirc.disconnect(pause).map_err(Into::into),
             self.player.get_player_event_channel(),
             Duration::from_millis(500),
         )
         .await;
-        self.stop_decoder().await?;
+        self.stop_decoder();
         log::debug!("Playback handoff: decoder stopped; Spotify output inhibited");
         Ok(())
     }
 
-    async fn stop_decoder(&self) -> Result<()> {
+    fn stop_decoder(&self) {
         self.cancel_hybrid_events();
+        // A switch discards the queued audio instead of playing it out. The
+        // decoder stops on the player's ordered command channel, ahead of the
+        // load that replaces it, so nothing waits for a drain or an echo.
+        self.audio.interrupt_output();
         self.player.stop();
-        // Player processes commands in order. Subscribing after Stop and
-        // requesting an unchanged volume echo is a barrier even when the
-        // decoder was already stopped, which emits no Stopped event.
-        let mut events = self.player.get_player_event_channel();
-        let volume = self.state.lock().unwrap_or_else(|p| p.into_inner()).volume;
-        self.player.emit_volume_changed_event(volume);
-        tokio::time::timeout(Duration::from_secs(3), async {
-            while let Some(event) = events.recv().await {
-                if matches!(event, PlayerEvent::VolumeChanged { .. }) {
-                    return Ok(());
-                }
-            }
-            anyhow::bail!("Spotify's decoder stopped responding")
-        })
-        .await
-        .context("Spotify did not acknowledge stopping")?
     }
 
     /// Explicit single-item list: Spirc has no context to resolve or autoplay.
-    /// Stop acknowledgement also drains the previous play request before the
-    /// tagged observer subscribes, including an A, B, A sequence.
+    /// The ordered Stop before this load replaces any previous child, and the
+    /// observer subscribes only after it, so an A, B, A sequence stays apart.
     pub async fn hybrid_load(
         &self,
         tag: PlaybackTag,
@@ -910,7 +934,17 @@ impl Engine {
             "Spotify playback: loading hybrid child generation={}",
             tag.generation
         );
+        log::debug!(
+            "Playback timing: engine hybrid load start after {} ms",
+            clicked_ago_ms()
+        );
+        let started = Instant::now();
         self.player.load(track, spec.play, spec.position_ms);
+        log::debug!(
+            "Playback timing: engine hybrid load sent in {} ms (click {} ms)",
+            started.elapsed().as_millis(),
+            clicked_ago_ms()
+        );
         let task = tokio::spawn(run_hybrid_events(events, expected, tag, notify));
         *self.hybrid_events.lock().unwrap_or_else(|p| p.into_inner()) = Some(task.abort_handle());
         Ok(())
@@ -992,10 +1026,10 @@ impl Engine {
 }
 
 /// The output gate is already closed. Connect's ack is best effort because
-/// the pinned fork emits it only after network notification succeeds. The
-/// decoder barrier in stop_for_handoff remains mandatory for ordered loads.
+/// the pinned fork emits it only after network notification succeeds.
 async fn disconnect_for_handoff(
     active: bool,
+    output_closed: bool,
     disconnect: impl FnOnce(bool) -> Result<()>,
     mut events: tokio::sync::mpsc::UnboundedReceiver<PlayerEvent>,
     wait: Duration,
@@ -1009,6 +1043,12 @@ async fn disconnect_for_handoff(
     // asking Spirc to pause then would pause that replacement instead.
     if let Err(error) = disconnect(false) {
         log::warn!("Playback handoff: Connect disconnect unavailable ({error}); output inhibited");
+        return;
+    }
+    if output_closed {
+        // Nothing the disconnect says can reach the speakers, so the next
+        // owner need not wait for its network round trip.
+        log::debug!("Playback handoff: output gate closed; not waiting for Connect's ack");
         return;
     }
     let acknowledged = tokio::time::timeout(wait, async {
@@ -1208,7 +1248,10 @@ async fn run_events(
         match &event {
             PlayerEvent::Playing {
                 play_request_id, ..
-            } => log::info!("Spotify decoder: playing request={play_request_id}"),
+            } => {
+                log::info!("Spotify decoder: playing request={play_request_id}");
+                log::debug!("Playback timing: first sound after {} ms", clicked_ago_ms());
+            }
             PlayerEvent::Loading {
                 play_request_id, ..
             } => log::debug!("Spotify decoder: loading request={play_request_id}"),
@@ -1318,6 +1361,12 @@ async fn run_hybrid_events(
         if let Some(event) = completion {
             notify(EngineEvent::Hybrid { tag, event });
             break;
+        }
+        if matches!(event, PlayerEvent::Playing { .. }) {
+            log::debug!(
+                "Playback timing: first sound after {} ms (mixed)",
+                clicked_ago_ms()
+            );
         }
         if apply_event(&mut state, event) {
             notify(EngineEvent::Hybrid {
@@ -1645,6 +1694,7 @@ mod tests {
         let mut disconnect_task = None;
         disconnect_for_handoff(
             true,
+            false,
             |pause| {
                 // Model Spirc blocked on an earlier network request. Its
                 // Disconnect reaches handle_pause only after the next Load.
@@ -1678,6 +1728,7 @@ mod tests {
         let (_sender, events) = tokio::sync::mpsc::unbounded_channel();
         disconnect_for_handoff(
             false,
+            false,
             |_| panic!("inactive Connect must not receive Disconnect"),
             events,
             Duration::from_millis(10),
@@ -1693,6 +1744,7 @@ mod tests {
             Duration::from_secs(1),
             disconnect_for_handoff(
                 true,
+                false,
                 |_| {
                     disconnected = true;
                     Ok(())
@@ -1707,10 +1759,33 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_closed_output_does_not_wait_for_connects_ack() {
+        let (_sender, events) = tokio::sync::mpsc::unbounded_channel();
+        let mut disconnected = false;
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            disconnect_for_handoff(
+                true,
+                true,
+                |_| {
+                    disconnected = true;
+                    Ok(())
+                },
+                events,
+                Duration::from_secs(30),
+            ),
+        )
+        .await
+        .expect("a closed output must not wait for Connect's network ack");
+        assert!(disconnected);
+    }
+
+    #[tokio::test]
     async fn handoff_accepts_disconnect_ack_without_waiting_for_channel_close() {
         let (sender, events) = tokio::sync::mpsc::unbounded_channel();
         disconnect_for_handoff(
             true,
+            false,
             |_| {
                 sender
                     .send(PlayerEvent::SessionDisconnected {
