@@ -60,14 +60,11 @@ loaded, it requests playlist position zero. A page loaded from the middle
 never becomes the beginning. This keeps the full Spotify playlist context;
 the app does not replace it with a shortened list of loaded songs. A request
 waiting for local playback to reconnect keeps the song chosen at the click.
-In a mixed playlist, a clicked row already in the loaded prefix starts from
-that prefix at once, and the complete context is attached behind it when it
-arrives, without restarting the song.
 
 Sorted and filtered views omit unavailable songs, and local files the local
 files folder does not hold, from their playback requests. A local row is
-offered as playable whenever a local files folder is set; the scan only
-decides whether its file is found, and a missing one is reported as
+offered as playable while the folder hasn't been read yet; once it has, only
+files it holds are. A file that has gone missing since is reported as
 unavailable when it starts. The displayed rows keep their positions, and selecting a
 repeated song starts that occurrence. In a playlist's original order, a song
 that appears more than once among the loaded rows starts at the chosen copy's

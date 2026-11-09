@@ -587,42 +587,11 @@ impl App {
         } else {
             loaded_context.map(|loaded| (loaded.context, loaded.complete, loaded.from_start))
         };
-        if let Some((context, complete, from_start)) = context {
-            // A page loaded from the middle does not begin the context, so
-            // only a prefix that starts at the top may be used as it is. A
-            // clicked row that the prefix holds can still start from there.
-            let start_known = complete
-                || from_start
-                || (request.offset_position.is_none()
-                    && request
-                        .offset_uri
-                        .as_deref()
-                        .is_some_and(|uri| context.tracks.iter().any(|track| track.uri == uri)));
-            if start_known {
-                self.start_hybrid_context(context, &request, shuffle, repeat);
-                if !complete {
-                    // The rest resolves behind this prefix: the playing
-                    // occurrence and any manual rows stay exactly as they
-                    // are when the complete context arrives.
-                    let generation = self.hybrid.plan_generation;
-                    self.hybrid.pending = Some(PendingStart {
-                        generation,
-                        request,
-                        shuffle,
-                        repeat,
-                        play: true,
-                        navigation: Vec::new(),
-                        context_navigation: Vec::new(),
-                        resolving: true,
-                        manual_started: true,
-                    });
-                    self.backend.send(Command::Hybrid(HybridCommand::Resolve {
-                        generation,
-                        uri: context_uri,
-                    }));
-                }
-                return true;
-            }
+        // Only a complete context starts at once. Starting from a loaded page
+        // and attaching the rest later left a queue that couldn't be saved.
+        if let Some((context, true, _)) = context {
+            self.start_hybrid_context(context, &request, shuffle, repeat);
+            return true;
         }
         self.start_hybrid_unresolved(request, context_uri, shuffle, repeat);
         true
@@ -1351,7 +1320,10 @@ impl App {
         if let Some(pending) = &mut self.hybrid.pending {
             pending.request.position_ms = position_ms;
         }
-        self.stats_finish_listening();
+        // A restart is the same listen going on, so it mustn't be logged twice.
+        if !matches!(transition, Transition::Restart(_)) {
+            self.stats_finish_listening();
+        }
         self.listening = None;
         self.played_row = None;
         if let Some(controls) = &mut self.media_controls {

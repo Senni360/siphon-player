@@ -12081,7 +12081,8 @@ impl App {
     pub fn row_playable(&self, item: &PlayableItem) -> bool {
         crate::ui::widgets::row_playable(item)
             || (item.uri().starts_with(LOCAL_URI_PREFIX)
-                && self.settings.local_files_folder().is_some())
+                && self.settings.local_files_folder().is_some()
+                && (self.local_files.is_none() || self.local_file(item.uri()).is_some()))
     }
 
     /// The picked rows to remove one by one, when the removal includes a
@@ -36629,124 +36630,6 @@ mod tests {
         ));
         app.handle_hybrid_event(old, crate::player::HybridEvent::EndOfTrack);
         assert!(!app.hybrid_owned());
-        app.backend.shutdown();
-    }
-
-    #[test]
-    fn hybrid_starts_from_a_loaded_playlist_prefix_and_resolves_the_rest_behind_it() {
-        let mut app = hybrid_fixture();
-        let ctx = egui::Context::default();
-        let tracks: Vec<Track> = ["spotify:track:1", "spotify:track:2", "spotify:track:3"]
-            .iter()
-            .map(|uri| Track {
-                uri: (*uri).into(),
-                name: (*uri).into(),
-                duration_ms: 120_000,
-                ..Track::default()
-            })
-            .collect();
-        for track in &tracks {
-            app.track_cache.insert(track.uri.clone(), track.clone());
-        }
-        app.playlist_pages.insert(
-            "mix".into(),
-            PlaylistPage {
-                playlist: Loadable::Loaded(Playlist {
-                    id: "mix".into(),
-                    name: "Mix".into(),
-                    ..Playlist::default()
-                }),
-                items: crate::model::PagedList {
-                    items: tracks
-                        .iter()
-                        .cloned()
-                        .map(|track| PlaylistItem {
-                            item: Some(PlayableItem::Track(track)),
-                            ..PlaylistItem::default()
-                        })
-                        .collect(),
-                    total: Some(10),
-                    loaded_once: true,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-        );
-        // A local insertion makes this a mixed playlist, so its playback is
-        // app-owned, and the prefix is all the app holds so far.
-        let local = Track {
-            uri: "soundcloud:track:55".into(),
-            name: "Local addition".into(),
-            duration_ms: 100_000,
-            ..Track::default()
-        };
-        app.playlist_overlay
-            .get_mut("mix")
-            .insert(&tracks, 1, &local);
-
-        app.play_request(
-            PlayRequest::context("spotify:playlist:mix").starting_at_uri("spotify:track:2"),
-            false,
-        );
-        assert!(app.hybrid_owned());
-        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:2"));
-        let commands = app.backend.take_hybrid_commands();
-        let generation = commands
-            .iter()
-            .find_map(|command| match command {
-                crate::backend::HybridCommand::Load { track, .. } => {
-                    assert_eq!(track.uri, "spotify:track:2");
-                    None
-                }
-                crate::backend::HybridCommand::Resolve { generation, uri } => {
-                    assert_eq!(uri, "spotify:playlist:mix");
-                    Some(*generation)
-                }
-                _ => None,
-            })
-            .expect("the rest of the playlist resolves behind the prefix");
-
-        let full: Vec<Track> = (1..=5)
-            .map(|id| Track {
-                uri: format!("spotify:track:{id}"),
-                name: format!("track {id}"),
-                duration_ms: 120_000,
-                ..Track::default()
-            })
-            .collect();
-        // The child confirms its first sound while the rest resolves.
-        let tag = app.hybrid_tag().unwrap();
-        app.handle_hybrid_event(
-            tag,
-            crate::player::HybridEvent::State(Box::new(LocalState {
-                playback: Playback::Playing,
-                track: Some(crate::player::LocalTrack {
-                    uri: "spotify:track:2".into(),
-                    ..Default::default()
-                }),
-                ..LocalState::default()
-            })),
-        );
-        app.handle_hybrid_context(
-            generation,
-            Ok(crate::hybrid_queue::Context {
-                uri: "spotify:playlist:mix".into(),
-                name: "Mix".into(),
-                tracks: full,
-            }),
-        );
-        // The playing occurrence survives the answer; only what follows it
-        // is replaced with the complete context.
-        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:2"));
-        assert!(!app.now_playing().unwrap().loading);
-        app.backend.take_hybrid_commands();
-        app.apply(Action::Next, &ctx);
-        let next = app.backend.take_hybrid_commands();
-        assert!(matches!(
-            next.first(),
-            Some(crate::backend::HybridCommand::Load { track, .. })
-                if track.uri == "spotify:track:3"
-        ));
         app.backend.shutdown();
     }
 
