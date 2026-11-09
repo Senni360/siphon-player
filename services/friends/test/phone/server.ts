@@ -13,7 +13,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TestSocket } from './websocket.js';
@@ -122,14 +122,27 @@ const CONTENT: Record<string, string> = {
 };
 
 // The same shell caching as src/web.ts: versioned asset URLs may be kept for
-// good, while the page and manifest revalidate on every open.
+// good, while the page and manifest revalidate on every open. The app and its
+// modules share one build version, stamped into each relative import.
 const hashOf = (body: Buffer | string): string => createHash('sha256').update(body).digest('hex').slice(0, 12);
 const bytesOf = (name: string): Buffer => readFileSync(join(WEB, name));
-const versionOf = (path: string): string => hashOf(bytesOf(path.slice(1)));
+const JS_FILES = readdirSync(join(WEB, 'js'), { recursive: true, encoding: 'utf8' })
+  .filter(name => name.endsWith('.js'))
+  .map(name => name.replaceAll('\\', '/'))
+  .sort()
+  .map(name => `js/${name}`);
+const MODULES = new Set(JS_FILES);
+let build: string | null = null;
+const buildVersion = (): string => (build ??= hashOf([bytesOf('app.js'), ...JS_FILES.map(name => bytesOf(name))].map(body => body.toString('utf8')).join('\n')));
+const versionOf = (path: string): string => (path === '/app.js' || MODULES.has(path.slice(1)) ? buildVersion() : hashOf(bytesOf(path.slice(1))));
 const asset = (path: string): string => {
   if (path === '/manifest.webmanifest') return `${path}?v=${hashOf(bytesOf('manifest.webmanifest'))}`;
   return `${path}?v=${versionOf(path)}`;
 };
+const MODULE_IMPORT = /(\bfrom\s*|\bimport\s*)(['"])(\.{1,2}\/[^'"]+?\.js)\2/g;
+const scriptBody = (name: string): Buffer => Buffer.from(bytesOf(name).toString('utf8').replace(MODULE_IMPORT,
+  (_match: string, lead: string, quote: string, specifier: string) => `${lead}${quote}${specifier}?v=${buildVersion()}${quote}`));
+const bodyFor = (name: string): Buffer => (name === 'app.js' || MODULES.has(name) ? scriptBody(name) : bytesOf(name));
 function versionedIndex(): Buffer {
   const source = readFileSync(join(WEB, 'index.html'), 'utf8');
   return Buffer.from(source
@@ -139,8 +152,8 @@ function versionedIndex(): Buffer {
     .replaceAll('href="/icon.svg"', `href="${asset('/icon.svg')}"`)
     .replaceAll('href="/icon-180.png"', `href="${asset('/icon-180.png')}"`));
 }
-const shellUrls = (): string[] => ['/', asset('/app.css'), asset('/app.js'), asset('/manifest.webmanifest'),
-  asset('/icon.svg'), asset('/icon-180.png'), asset('/icon-192.png'), asset('/icon-512.png')];
+const shellUrls = (): string[] => ['/', asset('/app.css'), asset('/app.js'), ...JS_FILES.map(name => asset(`/${name}`)),
+  asset('/manifest.webmanifest'), asset('/icon.svg'), asset('/icon-180.png'), asset('/icon-192.png'), asset('/icon-512.png')];
 function serviceWorker(): Buffer {
   const urls = shellUrls();
   return Buffer.from(readFileSync(join(WEB, 'sw.js'), 'utf8')
@@ -551,14 +564,17 @@ export class PhoneServer {
 
   private serveStatic(request: IncomingMessage, response: ServerResponse, url: URL): void {
     const pathname = url.pathname;
+    const name = pathname.slice(1);
     const worker = pathname === '/sw.js';
-    const type = worker ? 'text/javascript; charset=utf-8'
+    const script = name === 'app.js' || MODULES.has(name);
+    const type = worker || script ? 'text/javascript; charset=utf-8'
       : CONTENT[pathname] ?? (/^\/icon-\d+\.png$/.test(pathname) ? 'image/png' : 'text/html; charset=utf-8');
     const body = worker ? serviceWorker()
-      : CONTENT[pathname] || /^\/icon-\d+\.png$/.test(pathname) ? bytesOf(pathname.slice(1)) : versionedIndex();
+      : script ? bodyFor(name)
+      : CONTENT[pathname] || /^\/icon-\d+\.png$/.test(pathname) ? bytesOf(name) : versionedIndex();
     const immutable = !worker && pathname !== '/manifest.webmanifest'
       && !type.startsWith('text/html')
-      && url.searchParams.get('v') === hashOf(body);
+      && url.searchParams.get('v') === (script ? buildVersion() : hashOf(body));
     const etag = `"${hashOf(body)}"`;
     const headers = {
       ...HEADERS,

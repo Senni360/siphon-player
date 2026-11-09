@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 // Encore on a phone, at its own address. The page itself is public: it shows
 // nothing until a phone is linked, and every call that touches an account still
@@ -27,9 +27,42 @@ function file(name: string): Buffer {
   return found;
 }
 
+// Every native module under js/ is part of the shell. Reading the directory
+// keeps this list in step with the files: a new module is served, versioned and
+// precached without another edit here.
+const JS_FILES = readdirSync(new URL('../assets/web/js', import.meta.url), { recursive: true, encoding: 'utf8' })
+  .filter(name => name.endsWith('.js'))
+  .map(name => name.replaceAll('\\', '/'))
+  .sort()
+  .map(name => `js/${name}`);
+const MODULES = new Set(JS_FILES);
+
 /** A stable, short name for a piece of shell content. */
 const hashOf = (body: string | Buffer): string => createHash('sha256').update(body).digest('hex').slice(0, 12);
-const versionOf = (name: string): string => hashOf(file(name));
+
+// The app and every module it imports share one version, because each module's
+// imports name that version: a change anywhere is a new URL everywhere, never
+// old bytes under a URL a browser kept for good.
+let build: string | null = null;
+function buildVersion(): string {
+  if (!build) build = hashOf([file('app.js'), ...JS_FILES.map(name => file(name))].map(body => body.toString('utf8')).join('\n'));
+  return build;
+}
+
+const versionOf = (name: string): string => (name === 'app.js' || MODULES.has(name) ? buildVersion() : hashOf(file(name)));
+
+/**
+ * Module sources name each other without a version. Stamp this build's version
+ * into every relative import, so the browser asks for an immutable URL.
+ */
+const MODULE_IMPORT = /(\bfrom\s*|\bimport\s*)(['"])(\.{1,2}\/[^'"]+?\.js)\2/g;
+function stamped(name: string): string {
+  return file(name).toString('utf8').replace(MODULE_IMPORT,
+    (_match: string, lead: string, quote: string, specifier: string) => `${lead}${quote}${specifier}?v=${buildVersion()}${quote}`);
+}
+
+/** What a browser receives: module sources have their imports versioned. */
+const bodyOf = (name: string): string | Buffer => (name === 'app.js' || MODULES.has(name) ? stamped(name) : file(name));
 
 /**
  * A shell URL a browser may keep for good: its version changes whenever the
@@ -60,8 +93,8 @@ function manifest(): string {
 
 /** Everything an offline open needs, at this build's URLs. */
 function shell(): string[] {
-  return ['/', asset('/app.css'), asset('/app.js'), asset('/manifest.webmanifest'),
-    asset('/icon.svg'), asset('/icon-180.png'), asset('/icon-192.png'), asset('/icon-512.png')];
+  return ['/', asset('/app.css'), asset('/app.js'), ...JS_FILES.map(name => asset(`/${name}`)),
+    asset('/manifest.webmanifest'), asset('/icon.svg'), asset('/icon-180.png'), asset('/icon-192.png'), asset('/icon-512.png')];
 }
 
 /** The worker itself, with this build's version and shell baked in. */
@@ -111,10 +144,10 @@ export function webAnswer(method: string, url: string, ifNoneMatch?: string): We
   // The app routes its own screens, and Spotify returns to /callback.
   if (path === '/sw.js') return answer(serviceWorker(), 'text/javascript; charset=utf-8', REVALIDATE, ifNoneMatch);
   if (path === '/manifest.webmanifest') return answer(manifest(), 'application/manifest+json', REVALIDATE, ifNoneMatch);
-  const type = CONTENT[path];
+  const type = CONTENT[path] ?? (MODULES.has(path.slice(1)) ? 'text/javascript; charset=utf-8' : undefined);
   if (type) {
     const immutable = parsed.searchParams.get('v') === versionOf(path.slice(1));
-    return answer(file(path.slice(1)), type, immutable ? IMMUTABLE : REVALIDATE, ifNoneMatch);
+    return answer(bodyOf(path.slice(1)), type, immutable ? IMMUTABLE : REVALIDATE, ifNoneMatch);
   }
   return answer(html(), 'text/html; charset=utf-8', REVALIDATE, ifNoneMatch);
 }
