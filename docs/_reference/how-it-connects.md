@@ -566,18 +566,11 @@ playing it plays the songs on screen without them, as a filtered playlist
 does, so Shuffle and Repeat follow the shown songs. Hiding needs local
 playback; without it the menu entry is not offered.
 
-## Podcasts on Home
+## Podcasts
 
-Since 0.10.0, Home's **Your podcasts** shelf reads the first page of
-saved shows, the same request the library's Podcasts shelf makes, if it has
-not been read yet. It then asks for the five newest episodes of each of the
-eight most recently saved shows, all at once within the Web API session's
-concurrency limit, through the normal personal/shared app routing. Spotify includes each episode's resume point in
-those answers. Play uses that position so an in-progress episode continues
-rather than starting over. Shows known to be audiobooks are not asked for. These requests
-run when Home refreshes: on opening Home, at most once every ten minutes, and
-on a manual refresh. A rate limit, exhausted quota or expired sign-in stops the
-remaining shows for that refresh; the shelf keeps what it showed before.
+Podcasts and audiobooks are not in the library and have no shelf on Home.
+Spotify's podcast search results still open their show page, and episodes play
+and continue from Spotify's saved position.
 
 ## Album queueing
 
@@ -861,7 +854,7 @@ connector. The change adds no destination or background polling.
 
 ## Proxy
 
-Since 0.9.0, Settings → Proxy has four modes:
+Since 0.9.0, **Settings → Network** has four proxy modes:
 
 - **Off**: a direct connection. Environment proxy variables are ignored.
 - **System**: `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`, and on macOS and
@@ -934,11 +927,13 @@ reveal only the songs asked about. Neither service gets plays from Encore, so it
 recommendations on its own site aren't changed by listening here, only by likes and
 follows on a connected account.
 
-Home recommends only music from YouTube. For each video it would show, from a mix's
+Home recommends only beats from YouTube. For each video it would show, from a mix's
 seed or a followed channel's feed, it asks YouTube's player endpoint
 (`www.youtube.com/youtubei/v1/player`, without a sign-in) which category the uploader
-filed it under, and keeps those filed under Music. Each answer is remembered until
-Encore closes. A video YouTube gives no answer about is left out.
+filed it under, and keeps those filed under Music. The upload must also read as a
+beat: a beat word, a producer's channel or a beat's genre in its title or channel,
+and a length between 45 seconds and 10 minutes when YouTube gives one. Each answer
+is remembered until Encore closes. A video YouTube gives no answer about is left out.
 
 Home's new albums, EPs and singles come from up to 64 of the artists you play and
 like most, shared out among the sources by how much of your listening each gets, so

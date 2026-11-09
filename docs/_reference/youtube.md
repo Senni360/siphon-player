@@ -13,6 +13,11 @@ account is connected (below). **New uploads** in the sidebar lists what the chan
 uploaded, read from YouTube's public feed of each channel
 (`youtube.com/feeds/videos.xml`). There is no page of recommendations.
 
+YouTube takes part in Home through beats only. An upload appears in For you,
+More for you or Beats for you only when its title, channel or genre says it is a
+beat and its length fits one; music videos, concerts, sets and ordinary songs
+stay out. A video YouTube files outside its Music category is left out too.
+
 ## Connecting a YouTube account
 
 Connecting is optional, and takes the listener's own Google Cloud project: the

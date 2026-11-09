@@ -240,7 +240,7 @@ The Web API and librespot do not provide these features:
   computers or phones are not shared either: Spotify keeps only their names.
 - **Audiobooks.** librespot does not play them. Spotify lists some
   audiobooks among saved shows; since 0.10.0, Siphon asks the
-  librespot session which ones and leaves them out of the Podcasts shelf.
+  librespot session which ones and does not read their episodes.
 - **Offline listening and downloads.** Spotify's DRM and the project's scope
   rule out exporting Spotify audio. This personal fork's Windows
   [Download action](/downloads/) delegates SoundCloud permalinks or independently
