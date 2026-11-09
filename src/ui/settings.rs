@@ -2712,7 +2712,7 @@ mod tests {
     fn equalizer_preset_controls_save_and_delete_by_name() {
         use crate::model::Action;
         use egui::accesskit::{Action as AccessibleAction, ActionRequest, TreeId};
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-eq-presets-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

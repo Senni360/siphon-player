@@ -19394,7 +19394,7 @@ mod tests {
     /// window opens at its default size. The position is kept.
     #[test]
     fn a_saved_window_below_its_minimum_opens_at_the_default_size() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-undersized-window-test-{}",
             std::process::id()
         ));
@@ -19548,7 +19548,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "UI thread")]
     fn a_save_that_waits_for_the_disk_is_refused_on_the_ui_thread() {
-        let dir = std::env::temp_dir().join(format!(
+        let dir = crate::test_dirs::temp_dir().join(format!(
             "spotifast-ui-thread-save-{:016x}",
             rand::random::<u64>()
         ));
@@ -23849,8 +23849,8 @@ mod tests {
     }
 
     pub(super) fn test_app(name: &str) -> App {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-{name}-test-{}", std::process::id()));
+        let root = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-{name}-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let mut app = App::new(
             &Waker::default(),
@@ -25800,7 +25800,7 @@ mod tests {
     /// Closing and reopening restores queue rows and their manual split.
     #[test]
     fn the_queue_comes_back_after_a_restart() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-queue-restart-test-{}",
             std::process::id()
         ));
@@ -27267,7 +27267,7 @@ mod tests {
         // Each fixture loads session.json on construction. Sharing a root
         // lets a parallel test's save become this app's resume song, queue
         // or shuffle state, including in tests that never save themselves.
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-headless-test-{}-{:016x}",
             std::process::id(),
             rand::random::<u64>()
@@ -32381,8 +32381,8 @@ mod tests {
         app.remote = None;
         app.selected_device = None;
         app.plays = crate::history::History::default();
-        let state_dir =
-            std::env::temp_dir().join(format!("spotifast-repeat-history-{}", std::process::id()));
+        let state_dir = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-repeat-history-{}", std::process::id()));
         app.dirs.state = state_dir.clone();
         for sequence in [1, 2] {
             app.handle_local(LocalState {
@@ -34177,7 +34177,7 @@ mod tests {
         use std::time::{Duration, Instant};
         const CHILD: &str = "SPOTIFAST_SEARCH_PRIVATE_BUS";
         if std::env::var_os(CHILD).is_none() {
-            let root = std::env::temp_dir().join(format!(
+            let root = crate::test_dirs::temp_dir().join(format!(
                 "spotifast-search-bus-{:016x}",
                 rand::random::<u64>()
             ));
@@ -34486,7 +34486,7 @@ mod tests {
     /// supplied it; edit grants wait for a fresh session answer.
     #[test]
     fn the_last_playlist_tree_stays_visible_for_its_account() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-rootlist-restart-test-{}",
             std::process::id()
         ));
@@ -35441,7 +35441,7 @@ mod tests {
         use crate::player::HybridEvent;
         let mut app = hybrid_fixture();
         app.plays = crate::history::History::default();
-        let state_dir = std::env::temp_dir().join(format!(
+        let state_dir = crate::test_dirs::temp_dir().join(format!(
             "spotifast-review-hybrid-history-{}",
             std::process::id()
         ));

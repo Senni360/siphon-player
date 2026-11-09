@@ -486,7 +486,7 @@ mod tests {
 
     impl TestDirectory {
         fn new() -> Self {
-            let directory = std::env::temp_dir().join(format!(
+            let directory = crate::test_dirs::temp_dir().join(format!(
                 "siphon-loudness-{}-{:016x}",
                 std::process::id(),
                 rand::random::<u64>()

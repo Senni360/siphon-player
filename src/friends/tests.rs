@@ -303,7 +303,7 @@ async fn leave_cancels_a_stalled_join_and_revokes_the_saved_identity() {
     use crate::paths::AppDirs;
     use std::time::Duration;
 
-    let root = std::env::temp_dir().join(format!(
+    let root = crate::test_dirs::temp_dir().join(format!(
         "siphon-friends-cancel-{}-{}",
         std::process::id(),
         rand::random::<u64>()
@@ -391,7 +391,7 @@ async fn joining_stops_before_network_when_previous_identity_cannot_be_revoked()
     use crate::paths::AppDirs;
     use std::time::Duration;
 
-    let root = std::env::temp_dir().join(format!(
+    let root = crate::test_dirs::temp_dir().join(format!(
         "siphon-friends-revoke-{}-{}",
         std::process::id(),
         rand::random::<u64>()

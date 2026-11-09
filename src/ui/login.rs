@@ -740,7 +740,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         theme::install(&ctx);
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-proxy-short-login-{}",
             std::process::id()
         ));

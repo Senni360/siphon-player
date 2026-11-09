@@ -8170,7 +8170,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn cached_local_track_labels_are_normalized_on_restore() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-local-labels-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8242,7 +8242,7 @@ mod playlist_cache_tests {
 
     #[test]
     fn incremental_checkpoints_append_only_new_rows_and_recover_from_failed_publication() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-incremental-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8320,7 +8320,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn incremental_cache_replaces_changed_snapshot_and_keeps_legacy_reader() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-migration-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8392,7 +8392,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn reopening_a_cache_removes_rows_left_by_an_interrupted_replacement() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-orphan-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8458,7 +8458,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn the_file_reader_accepts_legacy_caches_and_ignores_unknown_fields() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-legacy-read-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8482,7 +8482,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn the_file_reader_rejects_missing_corrupt_and_trailing_data() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-invalid-read-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8508,7 +8508,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn a_new_checkpoint_atomically_replaces_the_previous_one() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8537,7 +8537,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn streaming_preserves_the_cache_bytes_and_duplicate_unavailable_rows() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-stream-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -8590,7 +8590,7 @@ mod playlist_cache_tests {
 
     #[tokio::test]
     async fn failed_checkpoint_keeps_existing_data_and_cleans_only_its_temporary_file() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-playlist-cache-failure-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()
@@ -9760,8 +9760,8 @@ mod authorization_tests {
             .enable_all()
             .build()
             .unwrap();
-        let root =
-            std::env::temp_dir().join(format!("spotifast-auth-{name}-{}", std::process::id()));
+        let root = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-auth-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         let dirs = AppDirs {
             config: root.join("config"),

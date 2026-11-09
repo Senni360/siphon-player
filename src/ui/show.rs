@@ -485,7 +485,7 @@ mod tests {
     use super::*;
 
     fn test_app() -> App {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-show-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()

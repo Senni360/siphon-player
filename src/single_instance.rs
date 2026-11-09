@@ -717,7 +717,7 @@ mod tests {
         // test isolated with a short process/counter identity instead.
         static NEXT_SLOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
         let id = NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("si-{:x}-{id:x}", std::process::id()));
+        let dir = crate::test_dirs::temp_dir().join(format!("si-{:x}-{id:x}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         (fastframe_instance::Slot::at(&dir, NAME), dir)
     }

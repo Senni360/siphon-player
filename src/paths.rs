@@ -415,7 +415,7 @@ mod tests {
 
     #[test]
     fn discovery_copies_and_syncs_off_the_drawing_thread_and_propagates_failures() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "siphon-startup-worker-{:016x}",
             rand::random::<u64>()
         ));

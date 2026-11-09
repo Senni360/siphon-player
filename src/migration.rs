@@ -164,7 +164,7 @@ mod tests {
     struct Scratch(PathBuf);
     impl Scratch {
         fn new() -> Self {
-            Self(std::env::temp_dir().join(format!(
+            Self(crate::test_dirs::temp_dir().join(format!(
                 "siphon-migration-test-{:016x}",
                 rand::random::<u64>()
             )))

@@ -48,7 +48,7 @@ mod tests {
     use crate::api::models::{Image, Playlist};
 
     fn root(name: &str) -> std::path::PathBuf {
-        std::env::temp_dir().join(format!(
+        crate::test_dirs::temp_dir().join(format!(
             "spotifast-account-cache-{name}-{}-{:?}",
             std::process::id(),
             std::thread::current().id()

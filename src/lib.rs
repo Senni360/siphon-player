@@ -78,6 +78,8 @@ pub mod sonos;
 pub mod soundcloud;
 pub mod stats;
 pub mod system_fonts;
+#[cfg(test)]
+mod test_dirs;
 pub mod theme;
 pub mod thumbbar;
 pub mod ui;

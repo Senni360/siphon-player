@@ -240,7 +240,8 @@ mod tests {
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&data.to_le_bytes());
         wav.resize(wav.len() + data as usize, 0);
-        let path = std::env::temp_dir().join(format!("encore-bounce-{}.wav", std::process::id()));
+        let path =
+            crate::test_dirs::temp_dir().join(format!("encore-bounce-{}.wav", std::process::id()));
         std::fs::write(&path, wav).unwrap();
         let info = inspect(&path);
         let _ = std::fs::remove_file(&path);

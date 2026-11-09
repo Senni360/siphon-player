@@ -175,7 +175,8 @@ mod tests {
 
     #[test]
     fn the_copy_is_whole_and_runs_as_portable() {
-        let root = std::env::temp_dir().join(format!("encore-install-{}", std::process::id()));
+        let root =
+            crate::test_dirs::temp_dir().join(format!("encore-install-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let exe = root.join("download.exe");

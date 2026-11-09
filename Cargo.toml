@@ -253,6 +253,12 @@ codegen-units = 1
 strip = true
 panic = "abort"
 
+# Line numbers only, enough for backtraces and panics. Full debug info made
+# each test build of the library about 1.5 GB, and every feature combination
+# keeps its own copy in target/debug.
+[profile.dev]
+debug = "line-tables-only"
+
 # Audio decoding and immediate-mode layout are too slow at opt-level 0 to
 # audition the app in development. Keep every dependency optimized while the
 # application crate itself stays incremental.

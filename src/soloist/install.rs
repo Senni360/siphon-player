@@ -360,7 +360,7 @@ mod tests {
         );
     }
     fn scratch() -> PathBuf {
-        std::env::temp_dir().join(format!("soloist-archive-test-{}", rand::random::<u64>()))
+        crate::test_dirs::temp_dir().join(format!("soloist-archive-test-{}", rand::random::<u64>()))
     }
     #[tokio::test]
     async fn installation_identity_survives_restart_and_differs_between_computers() {

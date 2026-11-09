@@ -905,7 +905,8 @@ mod tests {
     }
 
     fn temp(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("siphon-stats-{name}-{}", std::process::id()));
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("siphon-stats-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }

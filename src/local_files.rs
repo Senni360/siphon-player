@@ -131,7 +131,7 @@ mod tests {
     use super::*;
 
     fn folder() -> PathBuf {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-scan-test-{:016x}",
             rand::random::<u64>()
         ));

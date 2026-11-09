@@ -1289,7 +1289,8 @@ mod tests {
     /// rather than dropped as unreadable and replaced with the defaults.
     #[test]
     fn a_settings_file_saved_with_a_byte_order_mark_keeps_its_preferences() {
-        let dir = std::env::temp_dir().join(format!("spotifast-bom-{}", std::process::id()));
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("spotifast-bom-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("settings.json");
         std::fs::write(
@@ -1620,7 +1621,8 @@ mod tests {
 
     #[test]
     fn a_legacy_socks_url_becomes_socks_mode() {
-        let dir = std::env::temp_dir().join(format!("spotifast-proxy-{}", std::process::id()));
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("spotifast-proxy-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("settings.json");
         std::fs::write(
@@ -1961,7 +1963,7 @@ mod session_tests {
 
     #[test]
     fn a_new_session_atomically_replaces_the_previous_one() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-session-test-{}-{:?}",
             std::process::id(),
             std::thread::current().id()

@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn clicking_a_repeated_preview_track_starts_that_occurrence() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-prerelease-occurrence-{}",
             std::process::id()
         ));

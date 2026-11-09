@@ -223,8 +223,8 @@ mod tests {
 
     #[tokio::test]
     async fn legacy_match_cleanup_leaves_other_caches_alone() {
-        let dir =
-            std::env::temp_dir().join(format!("siphon-isrc-migration-{}", rand::random::<u64>()));
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("siphon-isrc-migration-{}", rand::random::<u64>()));
         let old = dir.join("isrc-matches-v1");
         tokio::fs::create_dir_all(&old).await.unwrap();
         tokio::fs::write(old.join("fixture.json"), b"invented old mapping")

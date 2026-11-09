@@ -699,7 +699,8 @@ mod tests {
             ..token.clone()
         };
         assert!(expired.needs_refresh());
-        let dir = std::env::temp_dir().join(format!("spotifast-token-{}", std::process::id()));
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("spotifast-token-{}", std::process::id()));
         let path = dir.join("token.json");
         token.save(&path).unwrap();
         assert!(StoredToken::load(&path) == Some(token));

@@ -385,8 +385,8 @@ mod tests {
     /// the field's, and the shortcuts on them wait until it lets go.
     #[test]
     fn a_focused_text_field_keeps_the_arrow_keys_it_edits_with() {
-        let root =
-            std::env::temp_dir().join(format!("spotifast-text-arrows-test-{}", std::process::id()));
+        let root = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-text-arrows-test-{}", std::process::id()));
         let dirs = AppDirs {
             config: root.join("config"),
             state: root.join("state"),
@@ -622,7 +622,7 @@ mod tests {
 
     #[test]
     fn b_toggles_the_playing_song_in_liked_songs() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-like-shortcut-test-{}",
             std::process::id()
         ));
@@ -724,7 +724,7 @@ mod tests {
     /// first.
     #[test]
     fn a_shift_shortcut_is_not_taken_by_the_plain_one_it_extends() {
-        let root = std::env::temp_dir().join(format!(
+        let root = crate::test_dirs::temp_dir().join(format!(
             "spotifast-shift-shortcut-test-{}",
             std::process::id()
         ));

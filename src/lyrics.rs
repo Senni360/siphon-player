@@ -910,8 +910,8 @@ mod tests {
     #[tokio::test]
     async fn a_legacy_negative_cache_does_not_hide_new_lyrics() {
         use serde_json::json;
-        let dir =
-            std::env::temp_dir().join(format!("siphon-lyrics-negative-{}", rand::random::<u64>()));
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("siphon-lyrics-negative-{}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
         let query = Query {
             title: "Song".into(),

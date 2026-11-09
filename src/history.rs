@@ -338,8 +338,8 @@ mod tests {
     /// second save over it reads back the newer history.
     #[test]
     fn a_saved_history_reads_back_whole() {
-        let dir =
-            std::env::temp_dir().join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
         let path = dir.join("history.json");
         let at: jiff::Timestamp = "2026-09-01T09:00:00Z".parse().unwrap();
         let files = Writer::new();
@@ -370,8 +370,8 @@ mod tests {
     /// still has them rather than losing the song just recorded.
     #[test]
     fn a_failed_save_keeps_the_history_to_write() {
-        let dir =
-            std::env::temp_dir().join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
         // A file where the history's folder should be: nothing can be
         // written under it.
@@ -404,8 +404,8 @@ mod tests {
     #[test]
     fn the_history_is_kept_from_other_accounts() {
         use std::os::unix::fs::PermissionsExt;
-        let dir =
-            std::env::temp_dir().join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("spotifast-history-{:016x}", rand::random::<u64>()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("history.json");
         std::fs::write(&path, "[]").unwrap();
