@@ -6,6 +6,8 @@ export interface Device {
   hash: string;
   name: string;
   created_at: number;
+  /** How the device joined. A linked phone can never act as a computer. */
+  kind?: 'phone';
   /** When this device was last used. When the account holds too many, the
    *  least recently seen is the one that goes, so a used device survives. */
   seen?: number;

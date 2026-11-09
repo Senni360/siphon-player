@@ -8,6 +8,9 @@
 
 import { randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
+
+const MAX_SOCKETS_PER_USER = 12;
+const MAX_SOCKETS = 200;
 import { verifyToken } from "./tokens.mjs";
 
 export const MESSAGE_TYPES = Object.freeze([
@@ -144,6 +147,11 @@ export class LiveHub {
       claims = verifyToken(this.#token(req, url), this.#config.tokenSecret, { scope: "live" });
     } catch {
       rejectUpgrade(socket, 401, "Unauthorized");
+      return;
+    }
+    const mine = [...this.#connections].filter((conn) => conn.sub === claims.sub).length;
+    if (mine >= MAX_SOCKETS_PER_USER || this.#connections.size >= MAX_SOCKETS) {
+      rejectUpgrade(socket, 429, "Too Many Requests");
       return;
     }
     const sinceParam = url.searchParams.get("since");

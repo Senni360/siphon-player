@@ -305,7 +305,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         const secret = randomBytes(32).toString('hex');
         const name = await change(storage, s => {
           const account = s.users.find(u => u.user_id === link.user_id) ?? fail(404, 'That account is gone');
-          account.devices = keepDevices([...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock() }]);
+          account.devices = keepDevices([...account.devices ?? [], { id: randomUUID(), hash: hash(secret), name: device, created_at: clock(), kind: 'phone' }]);
           return account.display_name;
         }, signal);
         roster = null;
@@ -336,6 +336,11 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         const input = await body(request, signal, 1024);
         const role = input.role as EdgeRole;
         if (!EDGE_ROLES.includes(role)) return fail(400, 'Invalid role');
+        // The server behind this holds audio and sign-ins: only people in a group
+        // get there, not everyone with a Spotify account.
+        if (!withGroups(state).some(group => memberOf(group, user.user_id))) return fail(403, 'Join a group first');
+        const device = (user.devices ?? []).find(item => item.hash === secret_hash);
+        if (role === 'computer' && device?.kind === 'phone') return fail(403, 'A phone cannot act as a computer');
         const now = clock();
         const mint = (scope: 'live' | 'media' | 'sync') => mintEdgeToken({ sub: user.user_id, role, scope, ttlSeconds: EDGE_TOKEN_TTL_SECONDS }, edgeSecret, now);
         return json({ url: EDGE_URL, live: mint('live'), media: mint('media'), sync: mint('sync') });

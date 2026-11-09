@@ -72,15 +72,17 @@ export class UploadStore {
   #dir;
   #userMaxBytes;
   #fileMaxBytes;
+  #diskFloorBytes;
   #now;
   #entries = new Map();
   #usage = new Map();
   #queue = new KeyedQueue();
 
-  constructor({ dir, userMaxBytes = 5 * 1024 ** 3, fileMaxBytes = 512 * 1024 ** 2, now = Date.now }) {
+  constructor({ dir, userMaxBytes = 5 * 1024 ** 3, fileMaxBytes = 512 * 1024 ** 2, diskFloorBytes = 4 * 1024 ** 3, now = Date.now }) {
     this.#dir = path.join(dir, "uploads");
     this.#userMaxBytes = userMaxBytes;
     this.#fileMaxBytes = fileMaxBytes;
+    this.#diskFloorBytes = diskFloorBytes;
     this.#now = now;
   }
 
@@ -130,6 +132,16 @@ export class UploadStore {
     return this;
   }
 
+  /** Keeps uploads from ever starving what else runs on this machine. */
+  async #diskIsLow(incoming) {
+    try {
+      const disk = await fs.statfs(this.#dir);
+      return Number(disk.bavail) * Number(disk.bsize) - incoming < this.#diskFloorBytes;
+    } catch {
+      return false;
+    }
+  }
+
   async #cleanTemp(now) {
     const tmp = path.join(this.#dir, ".tmp");
     const files = await fs.readdir(tmp).catch(() => []);
@@ -160,6 +172,7 @@ export class UploadStore {
 
   async #store(sub, key, req, { contentLength } = {}) {
     if (!UPLOAD_KEY.test(key)) throw new UploadError("invalid_key", 400);
+    if (await this.#diskIsLow(0)) throw new UploadError("disk_full", 507);
     const owner = ownerPrefix(sub);
     const identity = UploadStore.keyFor(sub, key);
     const existing = this.#entries.get(identity);

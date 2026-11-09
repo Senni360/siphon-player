@@ -88,3 +88,22 @@ test('edge tokens are rate limited per account', async () => {
   assert.equal(limited.status, 429);
   assert.equal(limited.body.error, 'Too many requests');
 });
+
+test('only people in a group get a way to the edge', async () => {
+  const { call, join } = fixture();
+  const { secret } = await join();
+  assert.equal((await call('/edge/token', 'POST', { role: 'phone' }, secret)).status, 200);
+  assert.equal((await call('/groups/00000000-0000-4000-8000-000000000001/leave', 'POST', {}, secret)).status, 200);
+  assert.equal((await call('/edge/token', 'POST', { role: 'phone' }, secret)).status, 403);
+});
+
+test('a linked phone cannot ask to be a computer', async () => {
+  const { call, join } = fixture();
+  const { secret } = await join();
+  const started = await call('/link/start', 'POST', {}, secret);
+  const claim = await call('/link/claim', 'POST', { code: (started.body as { code: string }).code, device: 'Phone' });
+  const phone = (claim.body as { secret: string }).secret;
+  assert.equal((await call('/edge/token', 'POST', { role: 'computer' }, phone)).status, 403);
+  assert.equal((await call('/edge/token', 'POST', { role: 'phone' }, phone)).status, 200);
+  assert.equal((await call('/edge/token', 'POST', { role: 'computer' }, secret)).status, 200);
+});

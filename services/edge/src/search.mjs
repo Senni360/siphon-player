@@ -7,6 +7,8 @@ import { runProcess } from "./proc.mjs";
 
 const MAX_QUERY = 300;
 const MEMO_LIMIT = 500;
+const MAX_SEARCHES = 1;
+const MAX_WAITING_SEARCHES = 8;
 
 export class MatchError extends Error {
   constructor(code, status = 400) {
@@ -115,6 +117,8 @@ export class MatchService {
   #logger;
   #spawn;
   #memo = new Map();
+  #running = 0;
+  #waiting = [];
 
   constructor({ config, logger, spawn }) {
     this.#config = config;
@@ -122,7 +126,26 @@ export class MatchService {
     this.#spawn = spawn;
   }
 
+  /** One search at a time on this small machine, with a short line behind it. */
+  async #turn(work) {
+    if (this.#running >= MAX_SEARCHES) {
+      if (this.#waiting.length >= MAX_WAITING_SEARCHES) throw new MatchError("busy", 429);
+      await new Promise((resolve) => this.#waiting.push(resolve));
+    }
+    this.#running += 1;
+    try {
+      return await work();
+    } finally {
+      this.#running -= 1;
+      this.#waiting.shift()?.();
+    }
+  }
+
   async #search(url) {
+    return this.#turn(() => this.#runSearch(url));
+  }
+
+  async #runSearch(url) {
     const { stdout } = await runProcess(this.#config.ytdlpBin, buildSearchArgs(url), {
       timeoutMs: this.#config.searchTimeoutMs,
       spawn: this.#spawn,
