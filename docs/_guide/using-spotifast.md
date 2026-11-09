@@ -700,8 +700,7 @@ does not take over HTTP or HTTPS associations.
 
 ## Playlist covers
 
-**In development, not included in 0.8.0:** open a playlist you own and choose
-**Edit details → Change cover**. Select a
+Open a playlist you own and choose **Edit details → Change cover**. Select a
 JPEG or PNG, check the preview, then choose **Upload cover**. Cancelling the
 picker leaves your previous selection intact. An upload error keeps the
 preview so you can try again. Uploading the cover is separate from **Save**,
