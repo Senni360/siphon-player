@@ -46,18 +46,33 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
     // Home never scrolls sideways: its rows hold what fits.
     widgets::fit_shelves(ui.ctx(), true);
     use super::rise;
-    let picks = app
-        .for_you
-        .get()
-        .map_or_else(Vec::new, |shown| shown.picks.clone());
-    let projects = app
-        .for_you
-        .get()
-        .map_or_else(Vec::new, |shown| shown.projects.clone());
-    let beats = app
-        .for_you
-        .get()
-        .map_or_else(Vec::new, |shown| shown.beats.clone());
+    // YouTube is only for beats here, so a YouTube upload that is not a beat
+    // never reaches More for you or the featured card, whatever the backend
+    // answered.
+    let picks = app.for_you.get().map_or_else(Vec::new, |shown| {
+        shown
+            .picks
+            .iter()
+            .filter(|pick| crate::for_you::allowed_on_home(&pick.track))
+            .cloned()
+            .collect()
+    });
+    let projects = app.for_you.get().map_or_else(Vec::new, |shown| {
+        shown
+            .projects
+            .iter()
+            .filter(|project| crate::for_you::project_allowed_on_home(project))
+            .cloned()
+            .collect()
+    });
+    let beats = app.for_you.get().map_or_else(Vec::new, |shown| {
+        shown
+            .beats
+            .iter()
+            .filter(|pick| crate::beats::is_beat(&pick.track))
+            .cloned()
+            .collect()
+    });
     // The new uploads of artists followed on Spotify are among the new releases,
     // so they are looked for here, and asked about again once they've arrived.
     app.ask_artist_news();

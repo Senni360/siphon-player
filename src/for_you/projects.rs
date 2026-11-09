@@ -463,7 +463,15 @@ async fn look_up(reads: &Reads, artist: &ArtistRef) -> Option<Vec<Project>> {
                 .ok()?
                 .tracks;
             let songs = crate::youtube::music::keep_music(http, uploads).await;
-            Some(songs.into_iter().filter_map(from_song).collect())
+            // YouTube is only for beats here, so a channel's ordinary songs
+            // never reach Home's releases.
+            Some(
+                songs
+                    .into_iter()
+                    .filter(super::is_beat)
+                    .filter_map(from_song)
+                    .collect(),
+            )
         }
     }
 }

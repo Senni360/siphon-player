@@ -60,64 +60,19 @@ pub struct ForYou {
 /// Whether a track is a beat (an instrumental made for others to rap or sing
 /// on) rather than a song. Beats have a place of their own on Home.
 ///
-/// Producers say so in the title: "type beat", "instrumental", "[FREE]",
-/// "free for profit", a tempo. On YouTube, where the songs people play are
-/// mostly on Spotify or SoundCloud too, an upload is a beat unless it says
-/// it's a song's video or audio.
+/// The reading lives in [`crate::beats::is_beat`], so every place that decides
+/// a beat uses one strict rule: a beat word, a producer's channel or a beat's
+/// genre, and a length that fits a single beat. A YouTube upload that says
+/// none of that is not a beat.
 pub fn is_beat(track: &Track) -> bool {
-    let title = track.name.to_lowercase();
-    let words: Vec<&str> = title
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .collect();
-    let said = [
-        "type beat",
-        "typebeat",
-        "instrumental",
-        "free for profit",
-        "freestyle beat",
-    ]
-    .iter()
-    .any(|phrase| title.contains(phrase))
-        || words
-            .iter()
-            .any(|word| matches!(*word, "beat" | "beats" | "bpm"))
-        || title.trim_start().starts_with("[free]")
-        || title.trim_start().starts_with("(free)");
-    if said {
-        return true;
-    }
-    let by_producer = track.artists.iter().any(|artist| {
-        let name = artist.name.to_lowercase();
-        name.split(|c: char| !c.is_alphanumeric())
-            .any(|word| matches!(word, "beats" | "beatz" | "instrumentals"))
-            || name.ends_with("beats")
-    });
-    let genre = crate::stats::soundcloud_genre(&track.uri).is_some_and(|genre| {
-        let genre = genre.to_lowercase();
-        genre.contains("beat") || genre.contains("instrumental")
-    });
-    if by_producer || genre {
-        return true;
-    }
-    if crate::youtube::is_track_uri(&track.uri) {
-        let song = [
-            "official video",
-            "official audio",
-            "music video",
-            "official visualizer",
-            "visualizer",
-            "lyric",
-            "(audio)",
-            "[audio]",
-            "live at",
-            "live from",
-        ]
-        .iter()
-        .any(|marker| title.contains(marker));
-        return !song;
-    }
-    false
+    crate::beats::is_beat(track)
+}
+
+/// Whether a track may be recommended on Home at all. YouTube is only for
+/// finding beats here, so a YouTube upload has to be one; every other source
+/// passes and is split into beats and songs later.
+pub fn allowed_on_home(track: &Track) -> bool {
+    !crate::youtube::is_track_uri(&track.uri) || is_beat(track)
 }
 
 /// What asking Spotify about an artist takes: the playback session, and the
@@ -271,6 +226,45 @@ fn score(candidate: &Candidate, taste: &Taste) -> f64 {
         value *= 0.3;
     }
     value
+}
+
+/// The candidates Home may show, apart into beats and songs. A YouTube upload
+/// that is not a beat never enters either list, so it can fill neither the
+/// featured card nor More for you.
+fn split_candidates(candidates: Vec<Candidate>) -> (Vec<Candidate>, Vec<Candidate>) {
+    candidates
+        .into_iter()
+        .filter(|candidate| allowed_on_home(&candidate.track))
+        .partition(|candidate| is_beat(&candidate.track))
+}
+
+/// Whether a project is a beat, read from its song or its name.
+fn project_is_beat(project: &Project) -> bool {
+    match &project.track {
+        Some(track) => is_beat(track),
+        None => is_beat(&Track {
+            uri: project.uri.clone(),
+            name: project.name.clone(),
+            artists: project.artists.clone(),
+            ..Default::default()
+        }),
+    }
+}
+
+/// Whether a project may be recommended on Home at all. The same YouTube rule
+/// as [`allowed_on_home`], applied to a release that is a song on its own.
+pub fn project_allowed_on_home(project: &Project) -> bool {
+    !crate::youtube::is_track_uri(&project.uri)
+        || project.track.as_ref().is_some_and(allowed_on_home)
+}
+
+/// The ranked projects Home may show, apart into beats and songs. A YouTube
+/// project that is not a beat is left out entirely.
+fn split_projects(projects: Vec<Project>) -> (Vec<Project>, Vec<Project>) {
+    projects
+        .into_iter()
+        .filter(project_allowed_on_home)
+        .partition(project_is_beat)
 }
 
 /// The page's order: the best first, no artist repeating too much, and each source
@@ -521,8 +515,10 @@ pub async fn gather(
         && !request.channels.is_empty()
         && let Ok(uploads) = browse::feed(http.clone(), request.channels).await
     {
-        // Channels are followed for all sorts of things; Home is for music.
+        // Channels are followed for all sorts of things; Home is for music,
+        // and YouTube here is only for beats.
         let uploads = crate::youtube::music::keep_music(&http, uploads.tracks).await;
+        let uploads: Vec<Track> = uploads.into_iter().filter(allowed_on_home).collect();
         candidates.extend(candidates_from(
             uploads.clone(),
             1.2,
@@ -551,21 +547,10 @@ pub async fn gather(
                 followed: false,
             }),
     );
-    // Beats and songs are ranked apart, so neither crowds the other out.
-    let (beat_candidates, song_candidates): (Vec<Candidate>, Vec<Candidate>) = candidates
-        .into_iter()
-        .partition(|candidate| is_beat(&candidate.track));
-    let (new_beats, projects): (Vec<Project>, Vec<Project>) = projects::rank(offers, &fans, now)
-        .into_iter()
-        .partition(|project| match &project.track {
-            Some(track) => is_beat(track),
-            None => is_beat(&Track {
-                uri: project.uri.clone(),
-                name: project.name.clone(),
-                artists: project.artists.clone(),
-                ..Default::default()
-            }),
-        });
+    // Beats and songs are ranked apart, so neither crowds the other out, and
+    // a YouTube upload that is not a beat appears in neither.
+    let (beat_candidates, song_candidates) = split_candidates(candidates);
+    let (new_beats, projects) = split_projects(projects::rank(offers, &fans, now));
     let mut beats: Vec<Pick> = new_beats
         .into_iter()
         // A beat put out as a set has no one song to play, so it stays out.
@@ -698,12 +683,171 @@ mod tests {
         let genre = upload("soundcloud:track:9200004", "Smoked", "Rama Low");
         crate::stats::note_soundcloud_genre(&genre.uri, "Hip Hop Beats");
         assert!(is_beat(&genre));
-        // A YouTube upload that says neither is the listener's beat to hear.
-        assert!(is_beat(&upload(
+        // A YouTube upload that says neither is not a beat: Home would rather
+        // miss a beat than recommend a song.
+        assert!(!is_beat(&upload(
             "youtube:video:aB9_-012xyz",
             "Late Night Loop",
             "Fixture Producer"
         )));
+    }
+
+    fn upload(uri: &str, name: &str, artist: &str, duration_ms: u32) -> Track {
+        Track {
+            uri: uri.into(),
+            name: name.into(),
+            artists: vec![ArtistRef {
+                name: artist.into(),
+                ..Default::default()
+            }],
+            duration_ms,
+            ..Default::default()
+        }
+    }
+
+    /// Every YouTube upload that enters Home has to be a beat, so neither More
+    /// for you nor the featured card can show a song or a concert. Other
+    /// sources still split into beats and songs.
+    #[test]
+    fn home_takes_only_beats_from_youtube() {
+        let candidate = |track: Track| Candidate {
+            track,
+            strength: 1.0,
+            reason: "why".into(),
+        };
+        let (beats, songs) = split_candidates(vec![
+            candidate(upload(
+                "youtube:video:aB9_-012xyz",
+                "[FREE] Rod Wave Type Beat \"Nostalgia\"",
+                "Ayohighflyer",
+                186_000,
+            )),
+            candidate(upload(
+                "youtube:video:bB9_-012xyz",
+                "Kehlani - Folded [Official Music Video]",
+                "Kehlani",
+                195_000,
+            )),
+            candidate(upload(
+                "youtube:video:cB9_-012xyz",
+                "Tiny Desk Concert: Full Set",
+                "NPR Music",
+                1_500_000,
+            )),
+            candidate(upload(
+                "youtube:video:dB9_-012xyz",
+                "How To Make A Travis Scott Type Beat",
+                "shonci",
+                420_000,
+            )),
+            candidate(upload(
+                "youtube:video:eB9_-012xyz",
+                "Late Night Loop",
+                "Fixture Producer",
+                180_000,
+            )),
+            candidate(upload(
+                "youtube:video:fB9_-012xyz",
+                "Type Beat Preview",
+                "someone",
+                25_000,
+            )),
+            candidate(upload(
+                "soundcloud:track:1",
+                "Midnight City",
+                "M83",
+                200_000,
+            )),
+            candidate(upload(
+                "soundcloud:track:2",
+                "Dark Trap Type Beat",
+                "Rama Low",
+                170_000,
+            )),
+            candidate(upload(
+                "spotify:track:3",
+                "Blinding Lights",
+                "The Weeknd",
+                200_000,
+            )),
+        ]);
+        let uris = |list: &[Candidate]| -> Vec<String> {
+            list.iter().map(|each| each.track.uri.clone()).collect()
+        };
+        assert_eq!(
+            uris(&beats),
+            [
+                "youtube:video:aB9_-012xyz".to_owned(),
+                "soundcloud:track:2".to_owned()
+            ]
+        );
+        assert_eq!(
+            uris(&songs),
+            [
+                "soundcloud:track:1".to_owned(),
+                "spotify:track:3".to_owned()
+            ],
+            "no YouTube video reaches the songs, only SoundCloud and Spotify"
+        );
+    }
+
+    /// The featured card and New releases draw from projects, so a YouTube
+    /// single has to be a beat there too.
+    #[test]
+    fn home_takes_only_beats_from_youtube_projects() {
+        let project = |uri: &str, name: &str, artist: &str, duration_ms: u32| Project {
+            uri: uri.into(),
+            name: name.into(),
+            artists: vec![ArtistRef {
+                name: artist.into(),
+                ..Default::default()
+            }],
+            images: Vec::new(),
+            kind: Kind::Single,
+            released: "2026-01-01".into(),
+            songs: Some(1),
+            track: Some(upload(uri, name, artist, duration_ms)),
+            reason: String::new(),
+        };
+        let (beats, releases) = split_projects(vec![
+            project(
+                "youtube:video:aB9_-012xyz",
+                "Free Trap Type Beat",
+                "STORM",
+                180_000,
+            ),
+            project(
+                "youtube:video:bB9_-012xyz",
+                "Some Artist - Official Music Video",
+                "Some Artist",
+                210_000,
+            ),
+            project(
+                "youtube:video:cB9_-012xyz",
+                "Live at the Festival",
+                "Some Artist",
+                2_400_000,
+            ),
+            project("soundcloud:track:1", "Midnight City", "M83", 200_000),
+            project(
+                "soundcloud:track:2",
+                "Dark Drill Type Beat",
+                "Rama Low",
+                160_000,
+            ),
+        ]);
+        let uris = |list: &[Project]| -> Vec<String> {
+            list.iter().map(|each| each.uri.clone()).collect()
+        };
+        assert_eq!(
+            uris(&beats),
+            ["youtube:video:aB9_-012xyz", "soundcloud:track:2"]
+        );
+        assert_eq!(
+            uris(&releases),
+            ["soundcloud:track:1"],
+            "a YouTube song or concert fills neither the featured card nor New releases"
+        );
     }
 
     #[test]

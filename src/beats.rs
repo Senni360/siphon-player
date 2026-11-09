@@ -10,10 +10,200 @@
 //! Pure string handling only, so a beat's name never waits on the network.
 //! Where a beat is drawn, `for_line` and `tempo_key` turn the reading into
 //! what the interface shows.
+//!
+//! It also decides whether an upload is a beat at all. YouTube has no such
+//! label, and Home must not fill with concerts, songs and tutorials: only a
+//! title that plainly says a beat, a producer's channel, or a beat's genre
+//! makes one.
 
 use serde::{Deserialize, Serialize};
 
 use crate::api::models::Track;
+
+/// The shortest upload that can be a beat; anything shorter is a Short, a
+/// preview or a trailer, not a beat.
+pub const SHORTEST_BEAT_MS: u32 = 45_000;
+/// The longest upload that can be a beat; beyond it is a mix, a set or a
+/// compilation, not one beat.
+pub const LONGEST_BEAT_MS: u32 = 10 * 60_000;
+
+/// The words that say an upload is something other than a beat: a concert or
+/// a song's video, a reaction, an interview, a tutorial, a mix, a compilation.
+/// These win over a beat word in the title, so "Type Beat Breakdown" and
+/// "Type Beat (Official Video)" never reach Home.
+const NOT_A_BEAT: &[&str] = &[
+    "official video",
+    "official music video",
+    "official audio",
+    "official visualizer",
+    "music video",
+    "lyric video",
+    "lyrics video",
+    "lyric",
+    "lyrics",
+    "visualizer",
+    "visualizers",
+    "visualiser",
+    "live at",
+    "live from",
+    "live session",
+    "tiny desk",
+    "concert",
+    "concerts",
+    "full set",
+    "full sets",
+    "festival",
+    "festivals",
+    "live performance",
+    "reaction",
+    "reactions",
+    "react",
+    "reacts",
+    "reacting",
+    "interview",
+    "interviews",
+    "podcast",
+    "podcasts",
+    "tutorial",
+    "tutorials",
+    "how to",
+    "how i",
+    "breakdown",
+    "breakdowns",
+    "lesson",
+    "lessons",
+    "masterclass",
+    "masterclasses",
+    "explained",
+    "review",
+    "reviews",
+    "beat saber",
+    "beatbox",
+    "beatboxing",
+    "beat it",
+    "beat the",
+    "beat of",
+    "beatles",
+    "metronome",
+    "metronomes",
+    "karaoke",
+    "cover",
+    "covers",
+    "mix",
+    "mixes",
+    "mixtape",
+    "mixtapes",
+    "compilation",
+    "compilations",
+    "full album",
+    "album stream",
+    "full tape",
+    "playlist",
+    "playlists",
+    "1 hour",
+    "one hour",
+];
+
+/// The words that say an upload is about making a beat, not one to listen to.
+/// They only reject a title that says nothing else, so "Cook Up Type Beat"
+/// stays a beat.
+const ABOUT_BEATS: &[&str] = &["cook up", "cookup"];
+
+/// Whether a track is a beat (an instrumental made for others to rap or sing
+/// on) rather than a song, a video or a set. Beats have a place of their own
+/// on Home, and YouTube is only for finding them.
+///
+/// A beat has to say so: a title naming a beat, a producer's channel, or a
+/// beat's genre. A length that is known must fit a single beat too. A
+/// YouTube upload that says nothing is left out, because Home would rather
+/// miss a beat than recommend a song or a concert.
+pub fn is_beat(track: &Track) -> bool {
+    if track.duration_ms > 0 && !(SHORTEST_BEAT_MS..=LONGEST_BEAT_MS).contains(&track.duration_ms) {
+        return false;
+    }
+    let title = spaced_words(&track.name);
+    if NOT_A_BEAT.iter().any(|said| holds(&title, said)) {
+        return false;
+    }
+    let plainly = says_beat(&track.name);
+    if !plainly && ABOUT_BEATS.iter().any(|said| holds(&title, said)) {
+        return false;
+    }
+    if plainly {
+        return true;
+    }
+    let channel = track
+        .artists
+        .first()
+        .map(|artist| artist.name.as_str())
+        .unwrap_or_default();
+    if named_by_producer(channel) {
+        return true;
+    }
+    crate::stats::soundcloud_genre(&track.uri).is_some_and(|genre| {
+        let genre = genre.to_lowercase();
+        genre.contains("beat") || genre.contains("instrumental")
+    })
+}
+
+/// Lower-cased words between single spaces, so a phrase is matched whole:
+/// `(Prod. X)` holds ` prod `, while `Product` does not.
+fn spaced_words(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push(' ');
+    for word in text.split(|c: char| !c.is_alphanumeric()) {
+        if !word.is_empty() {
+            out.extend(word.chars().flat_map(char::to_lowercase));
+            out.push(' ');
+        }
+    }
+    out
+}
+
+fn holds(haystack: &str, needle: &str) -> bool {
+    haystack.contains(&format!(" {needle} "))
+}
+
+/// Whether a title itself names a beat: a beat word, a producer credit, or a
+/// tempo or key.
+fn says_beat(title: &str) -> bool {
+    const BEAT_SAID: &[&str] = &[
+        "type beat",
+        "typebeat",
+        "type instrumental",
+        "freestyle beat",
+        "free beat",
+        "free for profit",
+        "instrumental",
+        "instrumentals",
+        "beat",
+        "beats",
+        "prod",
+        "prod by",
+        "produced by",
+    ];
+    let words = spaced_words(title);
+    BEAT_SAID.iter().any(|said| holds(&words, said))
+        || bpm_of(title).is_some()
+        || key_of(title).is_some()
+}
+
+/// Whether a channel's name is a producer's: "Sanche Beats", "Prod. Someone".
+/// "Beats by Dre" is not.
+fn named_by_producer(channel: &str) -> bool {
+    let name = spaced_words(channel);
+    let name = name.trim();
+    if name.is_empty() {
+        return false;
+    }
+    let mut parts = name.split(' ');
+    let first = parts.next().unwrap_or_default();
+    let last = parts.next_back().unwrap_or_default();
+    matches!(
+        last,
+        "beat" | "beats" | "beatz" | "instrumental" | "instrumentals"
+    ) || (first == "prod" && !last.is_empty())
+}
 
 /// How a beat's title was read.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -227,7 +417,7 @@ pub fn read(title: &str, description: Option<&str>, channel: Option<&str>) -> Be
 /// SoundCloud, if it is one. The uri and the artists stay: the producer
 /// remains who made it, and nothing that matches by uri or title is moved.
 pub fn apply(track: &mut Track, description: Option<&str>) {
-    if !crate::for_you::is_beat(track) {
+    if !is_beat(track) {
         return;
     }
     let channel = track
@@ -1003,8 +1193,8 @@ mod tests {
 
     #[test]
     fn a_plain_upload_title_reads_its_own_name() {
-        // Where `for_you::is_beat` never says beat none of this runs, and
-        // when it does, a plain title keeps its own name.
+        // Where `is_beat` never says beat none of this runs, and when it does,
+        // a plain title keeps its own name.
         let beat = read(
             "Night Loop (Instrumental) - extended arrangement",
             None,
@@ -1014,5 +1204,403 @@ mod tests {
         assert_eq!(beat.for_artists, Vec::<String>::new());
         assert_eq!(beat.style, None);
         assert_eq!(beat.secondary(), None);
+    }
+
+    /// Titles and lengths from YouTube as they really are: beats on one side,
+    /// and the songs, concerts, tutorials and sets that used to slip through on
+    /// the other. A beat has to say so, and a known length has to fit one beat.
+    #[test]
+    fn only_a_beat_reads_as_a_beat() {
+        struct Case {
+            title: &'static str,
+            channel: &'static str,
+            seconds: u32,
+            beat: bool,
+            why: &'static str,
+        }
+        let cases = [
+            // Beats, said by the title.
+            Case {
+                title: "[FREE] Rod Wave Type Beat \"Nostalgia\"",
+                channel: "Ayohighflyer",
+                seconds: 186,
+                beat: true,
+                why: "type beat",
+            },
+            Case {
+                title: "Drake x Future TYPE BEAT 2026",
+                channel: "STORM",
+                seconds: 201,
+                beat: true,
+                why: "type beat",
+            },
+            Case {
+                title: "Dark Trap Instrumental",
+                channel: "XarBeats",
+                seconds: 174,
+                beat: true,
+                why: "instrumental",
+            },
+            Case {
+                title: "[FREE FOR PROFIT] Soul Boom Bap x Chill Jazz Type Beat",
+                channel: "Rama Low",
+                seconds: 192,
+                beat: true,
+                why: "free for profit and type beat",
+            },
+            Case {
+                title: "Hard Freestyle Instrumental 140 BPM",
+                channel: "STORM",
+                seconds: 158,
+                beat: true,
+                why: "instrumental and tempo",
+            },
+            Case {
+                title: "sad piano beat in C minor key",
+                channel: "someone",
+                seconds: 165,
+                beat: true,
+                why: "beat and key",
+            },
+            Case {
+                title: "Midnight (prod. Someone)",
+                channel: "someone",
+                seconds: 180,
+                beat: true,
+                why: "prod.",
+            },
+            Case {
+                title: "Midnight [Prod by Someone]",
+                channel: "someone",
+                seconds: 181,
+                beat: true,
+                why: "prod by",
+            },
+            Case {
+                title: "Free Drill Beat",
+                channel: "someone",
+                seconds: 168,
+                beat: true,
+                why: "beat",
+            },
+            Case {
+                title: "Cook Up Type Beat",
+                channel: "someone",
+                seconds: 150,
+                beat: true,
+                why: "cook up is plainly a type beat",
+            },
+            Case {
+                title: "[FREE] Melodic Type Beat \"VIPER\" | Dark Type Beat",
+                channel: "VEEDY BEATS",
+                seconds: 210,
+                beat: true,
+                why: "type beat",
+            },
+            Case {
+                title: "Type Beat \"Churka\"",
+                channel: "someone",
+                seconds: 145,
+                beat: true,
+                why: "type beat",
+            },
+            Case {
+                title: "Boom Bap Instrumentals Vol. 2",
+                channel: "someone",
+                seconds: 200,
+                beat: true,
+                why: "instrumentals",
+            },
+            Case {
+                title: "Trap Beat 130 BPM C# minor",
+                channel: "someone",
+                seconds: 160,
+                beat: true,
+                why: "beat, tempo and key",
+            },
+            Case {
+                title: "Piano Beat 90bpm F#m",
+                channel: "someone",
+                seconds: 155,
+                beat: true,
+                why: "beat, compact tempo and key",
+            },
+            Case {
+                title: "Free Beat - \"Pressure\"",
+                channel: "someone",
+                seconds: 175,
+                beat: true,
+                why: "free beat",
+            },
+            Case {
+                title: "Jersey Club Instrumental",
+                channel: "someone",
+                seconds: 140,
+                beat: true,
+                why: "instrumental",
+            },
+            Case {
+                title: "Acoustic Guitar Type Beat \"On The Edge\"",
+                channel: "GAXILLIC",
+                seconds: 220,
+                beat: true,
+                why: "type beat",
+            },
+            // Beats, said by the producer's channel.
+            Case {
+                title: "Smoked",
+                channel: "Sanche Beats",
+                seconds: 190,
+                beat: true,
+                why: "a producer's channel",
+            },
+            Case {
+                title: "Night Loop",
+                channel: "Prod. Someone",
+                seconds: 170,
+                beat: true,
+                why: "a producer's channel",
+            },
+            Case {
+                title: "Afrobeat Groove",
+                channel: "Sanche Beats",
+                seconds: 200,
+                beat: true,
+                why: "a producer's channel",
+            },
+            // Songs and videos, which were the complaint.
+            Case {
+                title: "Kehlani - Folded [Official Music Video]",
+                channel: "Kehlani",
+                seconds: 195,
+                beat: false,
+                why: "official music video",
+            },
+            Case {
+                title: "Blinding Lights (Official Audio)",
+                channel: "The Weeknd",
+                seconds: 200,
+                beat: false,
+                why: "official audio",
+            },
+            Case {
+                title: "Song (Lyric Video)",
+                channel: "Label",
+                seconds: 210,
+                beat: false,
+                why: "lyric video",
+            },
+            Case {
+                title: "Song (Official Visualizer)",
+                channel: "Label",
+                seconds: 204,
+                beat: false,
+                why: "visualizer",
+            },
+            Case {
+                title: "Rick Astley - Never Gonna Give You Up",
+                channel: "Rick Astley",
+                seconds: 213,
+                beat: false,
+                why: "a plain song with no beat signal",
+            },
+            Case {
+                title: "Michael Jackson - Beat It",
+                channel: "Michael Jackson",
+                seconds: 258,
+                beat: false,
+                why: "a song with beat in its name",
+            },
+            Case {
+                title: "Beatbox cover",
+                channel: "someone",
+                seconds: 120,
+                beat: false,
+                why: "a beatbox performance",
+            },
+            // Concerts and sets.
+            Case {
+                title: "Tiny Desk Concert: Full Set",
+                channel: "NPR Music",
+                seconds: 1500,
+                beat: false,
+                why: "a concert",
+            },
+            Case {
+                title: "Live at Coachella 2026",
+                channel: "Festival",
+                seconds: 2400,
+                beat: false,
+                why: "live at a festival",
+            },
+            Case {
+                title: "Summer Festival Full Set",
+                channel: "DJ",
+                seconds: 3600,
+                beat: false,
+                why: "a festival set",
+            },
+            Case {
+                title: "Live from the studio - Type Beat session",
+                channel: "someone",
+                seconds: 600,
+                beat: false,
+                why: "live from a session",
+            },
+            // Everything about beats rather than a beat.
+            Case {
+                title: "Reacting to the hardest type beats",
+                channel: "Producer Reacts",
+                seconds: 600,
+                beat: false,
+                why: "a reaction",
+            },
+            Case {
+                title: "Interview: How I Made Type Beat \"X\"",
+                channel: "Studio",
+                seconds: 480,
+                beat: false,
+                why: "an interview",
+            },
+            Case {
+                title: "The Beat Podcast Episode 12",
+                channel: "Beat Podcast",
+                seconds: 3600,
+                beat: false,
+                why: "a podcast",
+            },
+            Case {
+                title: "How To Make A Travis Scott Type Beat",
+                channel: "shonci",
+                seconds: 420,
+                beat: false,
+                why: "a tutorial",
+            },
+            Case {
+                title: "FL Studio type beat tutorial",
+                channel: "someone",
+                seconds: 500,
+                beat: false,
+                why: "a tutorial",
+            },
+            Case {
+                title: "Type Beat Breakdown: Dark Trap",
+                channel: "someone",
+                seconds: 380,
+                beat: false,
+                why: "a breakdown",
+            },
+            Case {
+                title: "Cook Up",
+                channel: "someone",
+                seconds: 180,
+                beat: false,
+                why: "cook up with nothing else",
+            },
+            Case {
+                title: "Beat Saber - Free Songs",
+                channel: "someone",
+                seconds: 200,
+                beat: false,
+                why: "a game",
+            },
+            Case {
+                title: "Metronome 140 BPM beat",
+                channel: "someone",
+                seconds: 300,
+                beat: false,
+                why: "a metronome",
+            },
+            // Mixes, compilations and lengths that are not one beat.
+            Case {
+                title: "Type Beat Mix 2026 | 1 Hour",
+                channel: "someone",
+                seconds: 3600,
+                beat: false,
+                why: "a mix",
+            },
+            Case {
+                title: "Beat Compilation Vol. 3",
+                channel: "someone",
+                seconds: 1200,
+                beat: false,
+                why: "a compilation",
+            },
+            Case {
+                title: "Night Drive Mix (Live DJ Set)",
+                channel: "DJ",
+                seconds: 3000,
+                beat: false,
+                why: "a mix",
+            },
+            Case {
+                title: "Trap Type Beat 2026",
+                channel: "someone",
+                seconds: 900,
+                beat: false,
+                why: "longer than ten minutes",
+            },
+            Case {
+                title: "Type Beat Preview",
+                channel: "someone",
+                seconds: 25,
+                beat: false,
+                why: "shorter than 45 seconds",
+            },
+            Case {
+                title: "Quick Beat Sketch",
+                channel: "someone",
+                seconds: 40,
+                beat: false,
+                why: "shorter than 45 seconds",
+            },
+            // A YouTube upload that says nothing is not a beat.
+            Case {
+                title: "Late Night Loop",
+                channel: "Fixture Producer",
+                seconds: 180,
+                beat: false,
+                why: "no beat signal on YouTube",
+            },
+        ];
+        for case in cases {
+            let track = Track {
+                uri: "youtube:video:aB9_-012xyz".into(),
+                name: case.title.into(),
+                artists: vec![crate::api::models::ArtistRef {
+                    name: case.channel.into(),
+                    ..Default::default()
+                }],
+                duration_ms: case.seconds * 1000,
+                ..Default::default()
+            };
+            assert_eq!(
+                is_beat(&track),
+                case.beat,
+                "{} / {} / {}s: {}",
+                case.title,
+                case.channel,
+                case.seconds,
+                case.why
+            );
+        }
+    }
+
+    /// A length that is not known cannot rule a beat out; the title still has
+    /// to say it is one.
+    #[test]
+    fn an_unknown_length_is_decided_by_the_title() {
+        let beat = Track {
+            uri: "youtube:video:aB9_-012xyz".into(),
+            name: "Dark Trap Type Beat".into(),
+            ..Default::default()
+        };
+        assert!(is_beat(&beat));
+        let unknown = Track {
+            uri: "youtube:video:aB9_-012xyz".into(),
+            name: "Some upload".into(),
+            ..Default::default()
+        };
+        assert!(!is_beat(&unknown));
     }
 }
