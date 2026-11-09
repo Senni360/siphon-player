@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "tsx src/local.ts",
     "test": "tsx --test test/*.test.ts",
+    "test:phone-unit": "node --test \"test/phone-unit/*.test.js\"",
     "check": "tsc --noEmit",
     "test:phone": "playwright test --config test/phone/playwright.config.ts"
   },
