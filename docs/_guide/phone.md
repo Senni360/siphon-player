@@ -19,11 +19,12 @@ request it makes after that needs that phone's own secret.
 
 Your phone is then another device on your account, with the same groups. It shows
 your library, searches Spotify, SoundCloud and YouTube, opens artist pages, and plays
-on your computer. Encore on your computer has to be open, even if only in the tray.
+on your computer or on the phone itself. More than one phone, or another browser on
+the same phone, can be linked, each with its own code and its own sign-in.
 
-A linked phone appears in **Settings** under **Devices > Your phone**, where **Sign out** removes
-it without signing out anything else. If a phone is removed, opening it again says
-so and offers to link it once more.
+Linked phones and browsers are listed in **Settings** under **Devices > Your phone**,
+where **Sign out** removes one without signing out anything else. If a phone is
+removed, opening it again says so and offers to link it once more.
 
 To keep it like an app, install it. On an iPhone, press **Share**, then **Add to
 Home Screen**; Encore shows that once, and you can put the note away for good. On
@@ -40,17 +41,25 @@ phone. Nothing plays until the connection is back, and a new version shows a sma
 ## With the computer off
 
 Sign in to Spotify on your phone too, and your Spotify library still works with the
-computer off. The sound then stays in Spotify: whatever the Spotify app on the phone
-or another device is playing shows here, and its buttons work.
-
-This uses your own Spotify app, the same one as on your computer. In the Spotify
-developer dashboard, add this redirect address to it once:
+computer off. This uses your own Spotify app, the same one as on your computer. In
+the Spotify developer dashboard, add this redirect address to it once:
 `https://encore.senni.dev/callback`
+
+The page still plays the sound itself. Choose **This phone** under **Playing on**, and
+a Spotify song plays as the same song found on YouTube or SoundCloud. With a Spotify
+sign-in, the page can also work whatever your Spotify account is already playing on
+your other devices; it never opens Spotify to start a song.
 
 ## What it can't do
 
-- SoundCloud, YouTube and a Spotify song Encore finds elsewhere all need Encore on
-  your computer to find the audio. The phone plays everything on the page itself and
-  never opens another app: a song with no match says so, with **Skip** and **Play on
-  computer**.
-- The first time you open it, it can take up to 15 seconds to reach your computer.
+- SoundCloud, YouTube and the group come from Encore on your computer, so with it off
+  the page shows your Spotify library and your group. Playback itself keeps working:
+  the owner's always-on server finds and fetches the audio for a public SoundCloud
+  song, a YouTube video, or a Spotify song matched to one. Anything else asks your
+  computer. The phone plays everything on the page itself and never opens another
+  app: a song with no audio says so, with **Skip** and **Play on computer**.
+- A song that stops coming is tried again at the same place, never skipped: after
+  1, 2 and 4 seconds, then every 8 seconds, and after 10 seconds with no audio it
+  starts the same song again. Another song starts only when this one ends or you
+  choose one.
+- The first time you open it, it can take up to 20 seconds to reach your computer.

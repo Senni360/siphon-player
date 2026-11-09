@@ -115,11 +115,12 @@ app using that port, then choose **Try again**. Since 0.13.2, playback setup
 does the same with its port, 8898: if another app holds it, Settings shows the
 error, the browser stays closed, and a saved playback approval is kept.
 
-A phone can use this computer through `encore.senni.dev`, once linked with a code shown
-in the group panel. The code makes the phone another device of the same group account,
-with a secret of its own that can be signed out alone. Its commands then wait with the
-group service for this computer, which looks every fifteen seconds until a phone is
-watching. Answers (songs, names and pictures, and possibly private links in them) pass
+A phone can use this computer through `encore.senni.dev`, once linked with a one-time
+code from **Settings > Devices > Your phone**. The code makes that phone or browser
+another device of the same account, with a secret of its own that can be signed out
+alone. Each code works once, so more than one phone or browser can be linked, each
+with its own code. Its commands then wait with the group service for this computer,
+which looks every fifteen seconds until a phone is watching. Answers (songs, names and pictures, and possibly private links in them) pass
 through the same way and expire within a minute. No sign-in ever leaves this computer:
 the phone doesn't hold Spotify, SoundCloud or Google access. This connection only runs
 on a computer that has linked a phone.
@@ -137,11 +138,11 @@ public permalink, a Spotify track as the same song found by YouTube or SoundClou
 the download matcher (a saved match outranks a new search). Only public sources the
 edge accepts are sent, and a refusal, a timeout or a slow answer falls back to asking
 this computer as before. A YouTube song asks this computer first while it is online;
-without it the edge is tried, and the page's normal "can't play here" state follows if
-that fails too. The edge currently cannot produce YouTube audio, so those songs end up
-at this computer. Group links and anything else keep going through this computer. The
-phone also asks the edge to warm the next two songs ahead of time, instead of only
-looking up their addresses. None of this shows an error by itself: if neither side can
+without it the edge fetches the video's audio, so those songs play there too. A
+SoundCloud link carrying a private `s-` path or a query string is never sent to the
+edge. Group links and anything else keep going through this computer. The phone also
+asks the edge to warm the next two songs ahead of time, instead of only looking up
+their addresses. None of this shows an error by itself: if neither side can
 answer, the page takes its existing stuck state with a plain reason.
 
 While the phone's page is open, it also keeps a WebSocket open to the edge's `/v1/live`
@@ -178,7 +179,9 @@ song is looked up by artist, title and length on YouTube and SoundCloud with the
 download matcher, and the first match is remembered on disk, so a later play or
 download searches no more. The edge keeps its own saved matches and is preferred over
 a new search there. Without a match the page says so, with Skip and Play on computer:
-the phone never hands playback to another app or leaves the page.
+the phone never hands playback to another app or leaves the page. A failure the page
+can mend itself, such as a dropped address or a stall, is retried at the same place
+rather than skipped: after 1, 2 and 4 seconds, then every 8 seconds.
 
 An artist's page also reads what they have elsewhere, so it can list what Spotify
 doesn't have. It searches SoundCloud's and YouTube's public listings for the artist's
