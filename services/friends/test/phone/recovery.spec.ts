@@ -66,8 +66,7 @@ test('a failed search leaves the page usable', async ({ phone, server, observed 
   await expect(phone.page.locator('main .row').first()).toContainText('Liked Songs');
 });
 
-// fixme: a media error still skips to the next song instead of holding the song where it is.
-test.fixme('a mid-song media error stays on the song and the page', async ({ phone }) => {
+test('a mid-song media error stays on the song and the page', async ({ phone, observed }) => {
   await phone.open();
   await phone.openMix();
 
@@ -77,9 +76,14 @@ test.fixme('a mid-song media error stays on the song and the page', async ({ pho
   await phone.advance(5);
 
   const was = phone.page.url();
+  observed.allowConsole(/^Failed to load resource/);
+  const asked = phone.server.countRequests('POST /api/live/remote/send');
   await phone.failAudio({ code: 2, message: 'Network error' });
-  await expect(phone.page.locator('.toast')).toBeVisible();
-  await phone.page.waitForTimeout(1_000);
+
+  // It asks for a fresh address and carries on from the same place.
+  await expect.poll(() => phone.server.countRequests('POST /api/live/remote/send'), { timeout: 10_000 }).toBeGreaterThan(asked);
+  await expect.poll(async () => (await phone.audio())!.paused, { timeout: 10_000 }).toBe(false);
+  await expect.poll(async () => (await phone.audio())!.currentTime, { timeout: 10_000 }).toBeGreaterThanOrEqual(4);
 
   // Same song, same screen, and the sheet still describes it.
   await expect(phone.page.locator('.mini .name')).toHaveText(name);
@@ -88,8 +92,7 @@ test.fixme('a mid-song media error stays on the song and the page', async ({ pho
   expect(new URL(phone.page.url()).origin).toBe(phone.server.url);
 });
 
-// fixme: the phone's queue and position only live in memory, so a reload forgets them.
-test.fixme('a reload brings back the paused queue and its place', async ({ phone }) => {
+test('a reload brings back the paused queue and its place', async ({ phone }) => {
   await phone.open();
   await phone.openMix();
 
@@ -109,9 +112,13 @@ test.fixme('a reload brings back the paused queue and its place', async ({ phone
   const audio = await phone.audio();
   expect(audio).not.toBeNull();
   expect(audio!.paused).toBe(true);
-  expect(audio!.currentTime).toBeGreaterThanOrEqual(44);
-  expect(audio!.currentTime).toBeLessThanOrEqual(46);
 
   await phone.openSheet();
   await expect(phone.page.locator('.sheet .upnext .row .name').first()).toHaveText(queue[6]!);
+
+  // Nothing is fetched until it's wanted; pressing play picks up the same place.
+  await phone.page.locator('.sheet .main').click();
+  await expect.poll(async () => (await phone.audio())!.paused).toBe(false);
+  await expect.poll(async () => (await phone.audio())!.currentTime).toBeGreaterThanOrEqual(44);
+  expect((await phone.audio())!.currentTime).toBeLessThanOrEqual(47);
 });

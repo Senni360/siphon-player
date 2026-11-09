@@ -37,8 +37,7 @@ test('the lock screen can play, pause, skip, and not jump', async ({ phone }) =>
   await expect.poll(async () => (await phone.audio())!.paused).toBe(false);
 });
 
-// fixme: hereState() reports liked: false for this phone, so the heart empties again at once.
-test.fixme('the like stays filled while the phone plays', async ({ phone }) => {
+test('the like stays filled while the phone plays', async ({ phone }) => {
   await phone.open();
   await phone.openMix();
   await phone.playRow(0);
@@ -55,8 +54,7 @@ test.fixme('the like stays filled while the phone plays', async ({ phone }) => {
   await expect(heart).toHaveAttribute('aria-pressed', 'true');
 });
 
-// fixme: shuffle and repeat here only toast "isn't on this phone yet"; hereState() keeps both off.
-test.fixme('shuffle and repeat change what the player shows', async ({ phone }) => {
+test('shuffle and repeat change what the player shows', async ({ phone }) => {
   await phone.open();
   await phone.openMix();
   await phone.playRow(0);

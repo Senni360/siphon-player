@@ -6,9 +6,9 @@ test('opens a playlist and plays a song on this phone', async ({ phone, server }
 
   // Row 1 is a SoundCloud song: the mixed list plays it here, not through Spotify.
   const name = await phone.playRow(1);
+  await expect.poll(async () => (await phone.audio())?.src ?? '').toMatch(/^https:\/\//);
   const audio = await phone.audio();
   expect(audio).not.toBeNull();
-  expect(audio!.src).toMatch(/^https:\/\//);
   expect(audio!.paused).toBe(false);
   expect(audio!.ended).toBe(false);
   expect(audio!.error).toBeNull();
@@ -59,9 +59,8 @@ test('a 200-song playlist keeps going past the sixth song', async ({ phone }) =>
   const eighth = (await phone.row(7).locator('.name').innerText()).trim();
 
   await phone.playRow(6);
+  await expect.poll(async () => (await phone.audio())?.src ?? '').toContain(encodeURIComponent(seventhUri!));
   const audio = await phone.audio();
-  expect(audio!.src).toContain(encodeURIComponent(seventhUri!));
-
   // It carries on to the seventh, not back to the top.
   await phone.openSheet();
   await phone.page.locator('.sheet button[aria-label="Next"]').click();

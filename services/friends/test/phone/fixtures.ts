@@ -205,6 +205,7 @@ function makePhone(page: Page, server: PhoneServer, guard: NavigationGuard): Pho
       await row.locator('button.words').click();
       await expect(page.locator('.mini')).toBeVisible();
       await expect(page.locator('.mini .name')).toHaveText(name);
+      await expect.poll(async () => (await phone.audio())?.src ?? '', { timeout: 20_000 }).toMatch(/^https:/);
       await expect.poll(async () => (await phone.audio())?.paused, { timeout: 20_000 }).toBe(false);
       return name;
     },

@@ -526,11 +526,13 @@ async function loadHere(fresh = false) {
     if (found.hls && !audio.canPlayType('application/vnd.apple.mpegurl')) throw answered("this browser can't play it");
     // Already started by the tap, from this very address: leave it running.
     if (!audio.paused && !audio.ended && !audio.error && audio.src === found.url && audio.readyState > 0) return;
+    const at = here.place;
+    if (at > 0) audio.addEventListener('loadedmetadata', () => { audio.currentTime = at / 1000; }, { once: true });
     audio.src = found.url;
     here.playingUri = song.uri;
     here.pending = true;
-    const at = here.place;
-    if (at > 0) audio.addEventListener('loadedmetadata', () => { audio.currentTime = at / 1000; }, { once: true });
+    // Paused while the address was on its way: it stays paused, and ready.
+    if (here.pausedByUser) { here.pending = false; refreshPlayer(); saveHere(); return; }
     await audio.play();
   } catch (error) {
     if (here.seq !== mine || !here.active) return;
