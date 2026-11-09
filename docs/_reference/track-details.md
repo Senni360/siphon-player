@@ -97,4 +97,4 @@ Public asset verification establishes the operation's provenance, not that
 an authenticated response succeeded. Parser, strict-match, cache,
 cancellation and account-change tests use deterministic fixtures. A real
 Spotify session and a private SoundCloud track still require local account
-validation. The future Credits control belongs to the native frontend work.
+validation. The row's Credits tool uses this.

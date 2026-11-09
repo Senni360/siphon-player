@@ -43,21 +43,21 @@ section's context menu. Spotify remains connected independently.
 
 ## Search and browsing
 
-Use the same search field for both services. **All**, **Spotify** and
-**SoundCloud** chips beside the content filters select a source without changing
-the query. Ctrl+Shift+S (Cmd+Shift+S on macOS) cycles the source while Search is
-open. Songs, Artists and Playlists apply to SoundCloud; selecting SoundCloud
-from an unsupported filter returns to All. Wide windows put the two services
-beside each other, and narrow windows stack them.
+Use the same search field for every service. **All**, **Spotify**,
+**SoundCloud** and **YouTube** chips beside the content filters select a source
+without changing the query. Ctrl+Shift+S (Cmd+Shift+S on macOS) cycles the
+source while Search is open. Songs, Artists and Playlists apply to SoundCloud;
+selecting a filter the source does not have returns to All. Wide windows put
+Spotify and SoundCloud beside each other with YouTube below, and narrow windows
+stack them.
 
-SoundCloud songs use the ordinary track rows, menus and drag operations. A
-small **SC** badge identifies them in search, the queue and the player bar.
-It follows the light or dark palette and has a SoundCloud screen-reader label.
-Spotify songs do not have a source badge. Playing a SoundCloud search result
-uses the loaded SoundCloud songs as its context. Spotify search keeps its
-existing single-song context.
+SoundCloud songs use the ordinary track rows, menus and drag operations. Their
+titles are orange, and no source badge marks them; Spotify's titles are green
+and YouTube's red. Playing a SoundCloud search result uses the loaded
+SoundCloud songs as its context. Spotify search keeps its existing single-song
+context.
 When SoundCloud identifies a preview, **Preview only** appears beside the
-source badge in rows, the queue and the player bar. Rows retain the full
+artist in rows, the queue and the player bar. Rows retain the full
 catalogue duration; the player bar uses the available stream's duration once
 playback loads. Preview availability is kept in local playlist snapshots.
 
@@ -93,7 +93,7 @@ matching single-track local additions. There is no add-undo command; remove
 unwanted rows with the ordinary playlist row menu.
 
 SoundCloud rows in a Spotify playlist are local insertions. Spotify and other
-devices do not see them. The existing **SC** badge's tooltip explains this.
+devices do not see them; the title's orange colour says so here.
 Local mixed playlists also stay on this computer. Both use hybrid playback,
 including shuffle, across the complete combined list.
 Create a local mixed playlist from the library's **+** menu. Enter a name to
@@ -117,7 +117,7 @@ outside the repository. Library captures use `--demo-page soundcloud-likes`;
 the default demo stays disconnected. Use `--demo-show soundcloud-profile`
 to show a connected public library on another page, or
 add `--demo-show soundcloud-session,soundcloud-playing,light` for a session
-heart beside the source badge, or `soundcloud-connect` / `soundcloud-token`
+heart beside the title, or `soundcloud-connect` / `soundcloud-token`
 for the connection dialog. Replace `light` with `dark` for the other palette.
 
 ## How requests reach SoundCloud
