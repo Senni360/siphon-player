@@ -310,9 +310,14 @@ impl Worker {
                 let found = match known {
                     Some(found) => found,
                     None => {
-                        let found = same_song(&wanted, &catalogue, soundcloud.as_ref())
-                            .await
-                            .ok_or("This song isn't on YouTube or SoundCloud.")?;
+                        let found = crate::downloads::matching::Searcher::new(
+                            catalogue.clone(),
+                            soundcloud.clone(),
+                        )
+                        .same_song(&wanted)
+                        .await
+                        .map(|found| found.uri)
+                        .ok_or("This song isn't on YouTube or SoundCloud.")?;
                         if let Ok(mut held) = matches.lock() {
                             held.insert(uri.clone(), found.clone());
                         }
@@ -458,53 +463,4 @@ impl Worker {
             })
         }
     }
-}
-
-/// The same song as a Spotify one, on YouTube or SoundCloud: the best that passes the
-/// download matcher, which wants the title, the artist and the length within seconds,
-/// and turns down remixes, live takes and covers. None rather than a near miss.
-async fn same_song(
-    wanted: &Track,
-    catalogue: &crate::youtube::Catalogue,
-    soundcloud: Option<&crate::soundcloud::api::Client>,
-) -> Option<String> {
-    use crate::downloads::matching::{Candidate, score};
-    let query = format!("{} - {}", wanted.artist_names(), wanted.name);
-    let video = crate::youtube::browse::videos_for(&catalogue.resolver, &query);
-    let sound = async {
-        match soundcloud {
-            Some(client) => client
-                .search_tracks(&query, 15, 0)
-                .await
-                .map(|page| {
-                    page.collection
-                        .iter()
-                        .filter(|track| !track.to_track(None).preview_only)
-                        .map(|track| track.to_track(None))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default(),
-            None => Vec::new(),
-        }
-    };
-    let (videos, sounds) = tokio::join!(video, sound);
-    let candidate = |track: &Track| Candidate {
-        url: track.uri.clone(),
-        title: track.name.clone(),
-        uploader: track
-            .artists
-            .first()
-            .map(|artist| artist.name.clone())
-            .unwrap_or_default(),
-        duration: (track.duration_ms > 0).then(|| f64::from(track.duration_ms) / 1000.0),
-        live: false,
-    };
-    videos
-        .unwrap_or_default()
-        .iter()
-        .chain(sounds.iter())
-        .map(candidate)
-        .filter_map(|found| score(wanted, &found).map(|score| (found.url, score)))
-        .max_by(|(_, left), (_, right)| left.total_cmp(right))
-        .map(|(uri, _)| uri)
 }

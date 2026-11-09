@@ -48,51 +48,6 @@ impl<R: AsyncRead + Unpin, W: AsyncWrite + Unpin> Session<R, W> {
         }
     }
 
-    async fn spotify_match(&mut self, track: &crate::api::models::Track) -> Result<String, String> {
-        if track.name.trim().is_empty() || track.duration_ms == 0 || track.artists.is_empty() {
-            return Err(format!(
-                "No confident YouTube match for {}: track details are incomplete.",
-                track.name
-            ));
-        }
-        let result = self
-            .request(json!({
-                "type": "probe", "url": matching::search_url(track), "flatPlaylist": true,
-            }))
-            .await?;
-        let mut candidates = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-        for entry in result["entries"].as_array().into_iter().flatten().take(5) {
-            let Some(url) = entry["url"].as_str().and_then(matching::youtube_url) else {
-                continue;
-            };
-            if !seen.insert(url.clone()) {
-                continue;
-            }
-            // Flat search results do not carry uploader metadata in protocol
-            // 1. Probe the first five to verify artist, duration and live status.
-            if let Ok(info) = self.request(json!({"type": "probe", "url": url})).await
-                && let Some(candidate) = matching::Candidate::from_probe(&info)
-            {
-                candidates.push(candidate);
-            }
-            if self.broken {
-                return Err(
-                    "The Siphon helper connection closed while matching the track. Try again."
-                        .into(),
-                );
-            }
-        }
-        matching::best_match(track, &candidates)
-            .map(|candidate| candidate.url.clone())
-            .ok_or_else(|| {
-                format!(
-                    "No confident YouTube match for {}. Nothing was downloaded.",
-                    track.name
-                )
-            })
-    }
-
     async fn download(
         &mut self,
         job: &str,
@@ -200,8 +155,13 @@ fn download_request(job: &str, source: &Source, url: &str) -> Value {
     // MP3 320, Music/Siphon, leading-silence trim, metadata, cover and BPM/key.
     // The helper does not read chrome.storage.sync or accept tag overrides.
     let all = matches!(source, Source::SoundCloud { all: true, .. });
+    let kind = if crate::soundcloud::permalink(Some(url)).is_some() {
+        "soundcloud"
+    } else {
+        "youtube"
+    };
     json!({"type": "download", "jobId": job, "url": url,
-        "source": if matches!(source, Source::SoundCloud { .. }) { "soundcloud" } else { "youtube" },
+        "source": kind,
         "options": if all { json!({"playlist": "all"}) } else { json!({}) }})
 }
 
@@ -243,6 +203,7 @@ fn command(helper: &discovery::Helper) -> tokio::process::Command {
 pub(crate) async fn run(
     id: u64,
     sources: Vec<Source>,
+    searcher: matching::Searcher,
     mut cancel: watch::Receiver<bool>,
     emit: impl Fn(Event),
 ) -> Result<Summary, String> {
@@ -284,7 +245,7 @@ pub(crate) async fn run(
     let outcome = tokio::select! {
         biased;
         _ = cancel.changed() => { summary.cancelled = true; Ok(()) },
-        result = run_sources(&mut session, id, sources, &mut job, &mut summary, &emit) => result,
+        result = run_sources(&mut session, id, sources, &searcher, &mut job, &mut summary, &emit) => result,
     };
     if *cancel.borrow() {
         session.cancel(&job).await;
@@ -305,6 +266,7 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     session: &mut Session<R, W>,
     id: u64,
     sources: Vec<Source>,
+    searcher: &matching::Searcher,
     job: &mut String,
     summary: &mut Summary,
     emit: &impl Fn(Event),
@@ -335,7 +297,16 @@ async fn run_sources<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         progress_event(progress.clone());
         let url = match &source {
             Source::SoundCloud { url, .. } | Source::YouTube { url, .. } => Ok(url.clone()),
-            Source::Spotify(track) => session.spotify_match(track).await,
+            Source::Spotify(track) => searcher
+                .same_song(track)
+                .await
+                .map(|found| found.source)
+                .ok_or_else(|| {
+                    format!(
+                        "No confident match for {}. Nothing was downloaded.",
+                        track.name
+                    )
+                }),
         };
         let result = match url {
             Ok(url) => {
@@ -454,6 +425,7 @@ mod tests {
             &mut session,
             1,
             vec![source],
+            &matching::Searcher::no_network(),
             &mut job,
             &mut summary,
             &|event| events.lock().unwrap().push(event),
@@ -464,64 +436,6 @@ mod tests {
         assert!(summary.last_file.unwrap().contains("120 BPM"));
         assert!(events.lock().unwrap().iter().any(|event| matches!(event,
             Event::Progress {progress, ..} if progress.stage == "analyzing" && progress.fraction.is_none())));
-        server.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn uncertain_spotify_match_never_sends_a_download() {
-        use crate::api::models::{ArtistRef, Track};
-        let (client, host) = tokio::io::duplex(4096);
-        let (reader, writer) = tokio::io::split(client);
-        let mut session = Session {
-            reader,
-            writer,
-            serial: 0,
-            broken: false,
-        };
-        let server = tokio::spawn(async move {
-            let (mut reader, mut writer) = tokio::io::split(host);
-            let request = framing::read(&mut reader).await.unwrap();
-            assert_eq!(request["type"], "probe");
-            assert_eq!(request["flatPlaylist"], true);
-            assert!(
-                request["url"]
-                    .as_str()
-                    .unwrap()
-                    .contains("Artist%20-%20Song")
-            );
-            framing::write(
-                &mut writer,
-                &json!({"type": "result", "id": request["id"], "ok": true,
-                "data": {"entries": [{"url": "https://www.youtube.com/watch?v=abcdefghijk"}]}}),
-            )
-            .await
-            .unwrap();
-            let request = framing::read(&mut reader).await.unwrap();
-            assert_eq!(request["type"], "probe");
-            framing::write(&mut writer, &json!({"type": "result", "id": request["id"], "ok": true,
-                "data": {"url": "https://www.youtube.com/watch?v=abcdefghijk", "title": "Song (Cover)",
-                    "uploader": "Artist", "duration": 200}})).await.unwrap();
-            // Dropping the client below is the only further traffic: an
-            // uncertain candidate must never be submitted as a download.
-            assert!(framing::read(&mut reader).await.is_err());
-        });
-        let track = Track {
-            name: "Song".into(),
-            duration_ms: 200_000,
-            artists: vec![ArtistRef {
-                name: "Artist".into(),
-                ..Default::default()
-            }],
-            ..Default::default()
-        };
-        assert!(
-            session
-                .spotify_match(&track)
-                .await
-                .unwrap_err()
-                .contains("No confident YouTube match")
-        );
-        drop(session);
         server.await.unwrap();
     }
 
@@ -640,10 +554,21 @@ mod tests {
         assert_eq!(hello["ffmpeg"]["found"], true);
         let url = match &source {
             Source::SoundCloud { url, .. } | Source::YouTube { url, .. } => url.clone(),
-            Source::Spotify(track) => session
-                .spotify_match(track)
-                .await
-                .expect("confident YouTube match"),
+            Source::Spotify(track) => {
+                let searcher = matching::Searcher::new(
+                    crate::youtube::Catalogue {
+                        resolver: Default::default(),
+                        cache: root.join("youtube-metadata"),
+                        links: std::sync::Arc::new(crate::youtube::Links::default()),
+                    },
+                    None,
+                );
+                searcher
+                    .same_song(track)
+                    .await
+                    .map(|found| found.source)
+                    .expect("confident match")
+            }
         };
         let mut request = download_request("player-smoke", &source, &url);
         request["options"]["outputDir"] = root.to_string_lossy().as_ref().into();

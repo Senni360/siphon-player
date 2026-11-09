@@ -64,6 +64,10 @@ impl Worker {
         }
         let (cancel, mut cancelled) = watch::channel(false);
         self.download_jobs.cancels.insert(id, cancel);
+        let searcher = crate::downloads::matching::Searcher::new(
+            self.youtube_catalogue(),
+            self.soundcloud_client(),
+        );
         let reader = CollectionReader {
             api: self.api.clone(),
             made_for_you: self.made_for_you.clone(),
@@ -94,7 +98,7 @@ impl Worker {
                 }),
                 Some(Err(error)) => Err(error),
                 Some(Ok(sources)) => {
-                    downloads::run(id, sources, cancelled, |event| {
+                    downloads::run(id, sources, searcher, cancelled, |event| {
                         let _ = events.send(Event::Download(event));
                         waker.wake();
                     })

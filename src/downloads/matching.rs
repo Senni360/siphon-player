@@ -2,12 +2,11 @@
 
 use std::collections::BTreeSet;
 
-use serde_json::Value;
-
 use crate::api::models::Track;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Candidate {
+    /// The public URL the Siphon helper downloads from.
     pub url: String,
     pub title: String,
     pub uploader: String,
@@ -15,21 +14,121 @@ pub(crate) struct Candidate {
     pub live: bool,
 }
 
-impl Candidate {
-    pub fn from_probe(value: &Value) -> Option<Self> {
-        let url = value["webpageUrl"]
-            .as_str()
-            .or_else(|| value["url"].as_str())?;
-        Some(Self {
-            url: youtube_url(url)?,
-            title: value["title"].as_str()?.into(),
-            uploader: value["uploader"].as_str().unwrap_or("").into(),
-            duration: value["duration"].as_f64(),
-            live: value["isLive"].as_bool().unwrap_or(false),
-        })
+/// The same song as a Spotify one: what the player calls it and where the
+/// download helper fetches it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Match {
+    /// The URI the phone plays: a YouTube link or a `soundcloud:track:` URI.
+    pub uri: String,
+    /// A public URL the Siphon helper accepts for downloading.
+    pub source: String,
+}
+
+/// Both places that resolve a Spotify song share this one search: the phone's
+/// player and the download queue. Prefer the listing's own title, uploader and
+/// length; never fetch each candidate separately.
+#[derive(Clone)]
+pub(crate) struct Searcher {
+    catalogue: crate::youtube::Catalogue,
+    soundcloud: Option<crate::soundcloud::api::Client>,
+}
+
+impl Searcher {
+    pub fn new(
+        catalogue: crate::youtube::Catalogue,
+        soundcloud: Option<crate::soundcloud::api::Client>,
+    ) -> Self {
+        Self {
+            catalogue,
+            soundcloud,
+        }
+    }
+
+    /// One search on YouTube and SoundCloud; the best listing entry that
+    /// passes [`score`] wins. None rather than a near miss.
+    pub async fn same_song(&self, wanted: &Track) -> Option<Match> {
+        let query = format!("{} - {}", wanted.artist_names(), wanted.name);
+        let video = crate::youtube::browse::videos_for(&self.catalogue.resolver, &query);
+        let sound = async {
+            match &self.soundcloud {
+                Some(client) => client
+                    .search_tracks(&query, 15, 0)
+                    .await
+                    .map(|page| {
+                        page.collection
+                            .iter()
+                            .filter(|track| !track.to_track(None).preview_only)
+                            .map(|track| track.to_track(None))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default(),
+                None => Vec::new(),
+            }
+        };
+        let (videos, sounds) = tokio::join!(video, sound);
+        pick(wanted, &videos.unwrap_or_default(), &sounds)
+    }
+
+    #[cfg(test)]
+    pub fn no_network() -> Self {
+        Self {
+            catalogue: crate::youtube::Catalogue {
+                resolver: Default::default(),
+                cache: std::path::PathBuf::new(),
+                links: std::sync::Arc::new(crate::youtube::Links::default()),
+            },
+            soundcloud: None,
+        }
     }
 }
 
+/// The best of the listing entries both sources returned. SoundCloud entries
+/// need their public permalink, which is what the download helper fetches.
+pub(crate) fn pick(wanted: &Track, videos: &[Track], sounds: &[Track]) -> Option<Match> {
+    let mut best: Option<(f64, Match)> = None;
+    for track in videos.iter().chain(sounds) {
+        let Some(candidate) = candidate(track) else {
+            continue;
+        };
+        let Some(found) = score(wanted, &candidate) else {
+            continue;
+        };
+        if best.as_ref().is_none_or(|(best, _)| found > *best) {
+            best = Some((
+                found,
+                Match {
+                    uri: track.uri.clone(),
+                    source: candidate.url,
+                },
+            ));
+        }
+    }
+    best.map(|(_, found)| found)
+}
+
+/// A listing entry as the scorer sees it. Its `url` is the download source.
+fn candidate(track: &Track) -> Option<Candidate> {
+    let url = if crate::youtube::is_track_uri(&track.uri) {
+        crate::youtube::permalink(&track.uri)?
+    } else if crate::soundcloud::is_track_uri(&track.uri) {
+        crate::soundcloud::permalink(track.external_urls.spotify.as_deref())?.to_owned()
+    } else {
+        return None;
+    };
+    Some(Candidate {
+        url,
+        title: track.name.clone(),
+        uploader: track
+            .artists
+            .first()
+            .map(|artist| artist.name.clone())
+            .unwrap_or_default(),
+        duration: (track.duration_ms > 0).then(|| f64::from(track.duration_ms) / 1000.0),
+        live: false,
+    })
+}
+
+#[cfg(test)]
 pub(super) fn youtube_url(text: &str) -> Option<String> {
     let url = reqwest::Url::parse(text).ok()?;
     if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
@@ -52,16 +151,6 @@ pub(super) fn youtube_url(text: &str) -> Option<String> {
         return None;
     }
     Some(format!("https://www.youtube.com/watch?v={id}"))
-}
-
-pub(super) fn search_url(track: &Track) -> String {
-    let query = format!("{} - {}", track.artist_names(), track.name);
-    // The helper rejects ytsearch pseudo-URLs. yt-dlp's search-results
-    // extractor accepts this real HTTP URL through the existing probe API.
-    format!(
-        "https://www.youtube.com/results?search_query={}",
-        urlencoding::encode(&query)
-    )
 }
 
 fn words(text: &str) -> BTreeSet<String> {
@@ -142,6 +231,7 @@ pub(crate) fn score(track: &Track, candidate: &Candidate) -> Option<f64> {
     Some(0.5 * precision + 0.35 * coverage(&artists, &actual) + 0.15 * (1.0 - difference / 3.0))
 }
 
+#[cfg(test)]
 pub(crate) fn best_match<'a>(track: &Track, candidates: &'a [Candidate]) -> Option<&'a Candidate> {
     candidates
         .iter()
@@ -228,8 +318,7 @@ mod tests {
     }
 
     #[test]
-    fn search_is_an_encoded_http_url_and_download_urls_are_canonical_youtube_only() {
-        assert!(search_url(&track()).ends_with("Aurora%20-%20Northern%20Lights"));
+    fn download_urls_are_canonical_youtube_only() {
         assert_eq!(
             youtube_url("https://youtu.be/abcdefghijk?t=4").unwrap(),
             "https://www.youtube.com/watch?v=abcdefghijk"
@@ -243,6 +332,64 @@ mod tests {
         ] {
             assert!(youtube_url(url).is_none());
         }
+    }
+
+    #[test]
+    fn one_search_picks_from_youtube_and_soundcloud_listings() {
+        use crate::api::models::ExternalUrls;
+        let listing = |uri: &str, name: &str, channel: &str, duration_ms: u32| Track {
+            uri: uri.into(),
+            name: name.into(),
+            artists: vec![ArtistRef {
+                name: channel.into(),
+                ..Default::default()
+            }],
+            duration_ms,
+            ..Default::default()
+        };
+        let mut soundcloud = listing("soundcloud:track:12", "Northern Lights", "Aurora", 200_000);
+        soundcloud.external_urls = ExternalUrls {
+            spotify: Some("https://soundcloud.com/aurora/northern-lights".into()),
+        };
+        // A cover on YouTube loses to the real recording on SoundCloud, and
+        // the pick carries the permalink the download helper needs.
+        let found = pick(
+            &track(),
+            &[listing(
+                "youtube:video:abcdefghijk",
+                "Northern Lights (Cover)",
+                "Aurora",
+                200_000,
+            )],
+            &[soundcloud.clone()],
+        )
+        .unwrap();
+        assert_eq!(found.uri, "soundcloud:track:12");
+        assert_eq!(
+            found.source,
+            "https://soundcloud.com/aurora/northern-lights"
+        );
+        // A private or unresolved SoundCloud entry has no download source,
+        // so the canonical YouTube listing wins instead.
+        soundcloud.external_urls.spotify = None;
+        let found = pick(
+            &track(),
+            &[listing(
+                "youtube:video:abcdefghijk",
+                "Aurora - Northern Lights",
+                "Aurora",
+                200_000,
+            )],
+            &[soundcloud],
+        )
+        .unwrap();
+        assert_eq!(found.uri, "youtube:video:abcdefghijk");
+        assert_eq!(
+            found.source,
+            "https://www.youtube.com/watch?v=abcdefghijk"
+        );
+        // No qualifying listing means no match at all.
+        assert!(pick(&track(), &[], &[]).is_none());
     }
 
     /// The phone's Spotify songs are found this way on real YouTube:
