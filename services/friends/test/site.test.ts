@@ -28,7 +28,10 @@ test('anything else in a party link goes nowhere near the page', () => {
 test('the service keeps its own routes', () => {
   assert.equal(sitePage('GET', '/api/posts'), null);
   assert.equal(sitePage('GET', '/privacy')?.status, 200);
-  assert.match(sitePage('GET', '/privacy')!.html, /Your Google account/);
+  const privacy = sitePage('GET', '/privacy')!.html;
+  assert.match(privacy, /Your Google account/);
+  assert.match(privacy, /edge\.encore\.senni\.dev/);
+  assert.match(privacy, /stored there encrypted/);
   assert.match(sitePage('GET', '/')!.html, /href="\/privacy"/);
   assert.equal(sitePage('GET', '/api'), null);
   assert.equal(sitePage('POST', '/'), null);
