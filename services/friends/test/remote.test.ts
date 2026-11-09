@@ -1,9 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
 import { createService } from '../src/service.js';
 import { MemoryStorage } from '../src/storage.js';
-import { codeMatches, gateCookie, normalized, passedGate, webAnswer } from '../src/web.js';
 
 const invite = 'a-long-test-invite';
 const ID = '11111111-1111-4111-8111-111111111111';
@@ -87,6 +85,15 @@ test('a link code works once, for a while, and a wrong one gets nothing', async 
   const second = (await call('/link/start', 'POST', {}, computer.secret)).body.code;
   advance(301_000);
   assert.equal((await call('/link/claim', 'POST', { code: second })).status, 404, 'ran out');
+});
+
+test('a link code cannot be guessed: twenty tries an hour per address', async () => {
+  const { call } = fixture();
+  for (let tryNumber = 1; tryNumber <= 20; tryNumber++) {
+    assert.equal((await call('/link/claim', 'POST', { code: 'AAAAAAAA' })).status, 404, `try ${tryNumber}`);
+  }
+  assert.equal((await call('/link/claim', 'POST', { code: 'AAAAAAAA' })).status, 429, 'the twenty-first is refused');
+  assert.equal((await call('/link/claim', 'POST', { code: 'AAAAAAAA' }, undefined, 'b')).status, 404, 'another address has its own tries');
 });
 
 test('commands reach the computer once and its answers reach the phone', async () => {
@@ -230,82 +237,4 @@ test('a command that is not a command is refused', async () => {
   const { secret } = await join('Senni');
   assert.equal((await call('/live/remote/send', 'POST', { id: 'nope', kind: 'next' }, secret)).status, 400);
   assert.equal((await call('/live/remote/send', 'POST', { id: ID, kind: 'Bad Kind!' }, secret)).status, 400);
-});
-
-const code = 'test words';
-const limits = (allowed = true) => ({ limit: async () => allowed });
-const nothing = async () => ({});
-
-test('the code forgives case and spaces, and nothing else', () => {
-  assert.equal(normalized('  Test   WORDS '), 'testwords');
-  assert.ok(codeMatches('TEST WORDS', code));
-  assert.ok(codeMatches('testwords', code));
-  assert.ok(!codeMatches('test word', code));
-  assert.ok(!codeMatches('anything', ''), 'no code set lets nobody in');
-});
-
-test('the gate cookie is signed, expires and needs the current code', () => {
-  const day = 86400_000;
-  const cookie = gateCookie(code, 1000).split(';')[0];
-  assert.ok(passedGate(`other=1; ${cookie}`, code, 2000));
-  assert.ok(passedGate(cookie, code, 1000 + 89 * day), 'nearly its whole ninety days');
-  assert.ok(!passedGate(cookie, 'another code', 2000), 'changing the code locks everyone out');
-  assert.ok(!passedGate(cookie, code, 1000 + 91 * day), 'expired');
-  assert.ok(!passedGate(cookie.replace(/\.[a-f0-9]{4}/, '.0000'), code, 2000), 'forged');
-  assert.ok(!passedGate(undefined, code, 2000));
-  assert.ok(!passedGate('encore_gate=abc', code, 2000));
-});
-
-test('a used gate cookie slides forward, renewing when it is a few days old', async () => {
-  const day = 86400_000;
-  const ask = (path: string, cookie: string | undefined, now: number) =>
-    webAnswer('GET', path, cookie, nothing, code, limits(true), 'ip', now);
-  const issued = gateCookie(code, 0).split(';')[0];
-  assert.match(String((await ask('/', issued, 2 * day))!.body), /id="app"/);
-  assert.equal((await ask('/', issued, 2 * day))!.headers['Set-Cookie'], undefined, 'only a few days old: nothing to renew');
-  const renewed = (await ask('/', issued, 4 * day))!.headers['Set-Cookie'];
-  assert.match(renewed, /^encore_gate=\d+\.[a-f0-9]{64}; Path=\/; Max-Age=7776000; HttpOnly; Secure; SameSite=Lax$/);
-  const sliding = renewed.split(';')[0];
-  assert.equal(Number(sliding.slice('encore_gate='.length).split('.')[0]), 4 * day + 90 * day, 'renewed for ninety days from now');
-  assert.equal((await ask('/', sliding, 5 * day))!.headers['Set-Cookie'], undefined, 'and fresh again');
-  assert.ok(!passedGate(sliding, 'another code', 5 * day), 'a renewed cookie needs the current code');
-  // Ninety days without a visit outlives it: the code is asked for again.
-  const gate = await ask('/', sliding, 95 * day);
-  assert.match(String(gate!.body), /encore-gate/);
-  assert.equal(gate!.status, 200);
-});
-
-test('a cookie from before the slide, still good, becomes the sliding kind at once', async () => {
-  const day = 86400_000;
-  const until = 365 * day;  // what the gate used to hand out
-  const signature = createHmac('sha256', `encore-gate:${normalized(code)}`).update(String(until)).digest('hex');
-  const old = `encore_gate=${until}.${signature}`;
-  assert.ok(passedGate(old, code, 1000));
-  const first = await webAnswer('GET', '/', old, nothing, code, limits(true), 'ip', 1000);
-  assert.match(first!.headers['Set-Cookie'] ?? '', /^encore_gate=/, 'renewed into the sliding kind on use');
-  assert.match(String(first!.body), /id="app"/);
-});
-
-test('the web address shows only the gate until the code is in', async () => {
-  const ask = (method: string, path: string, cookie?: string, input: () => Promise<unknown> = nothing, allowed = true, set = code) =>
-    webAnswer(method, path, cookie, input, set, limits(allowed), 'ip', 1000);
-  const gate = await ask('GET', '/');
-  assert.match(String(gate!.body), /encore-gate/);
-  assert.equal((await ask('GET', '/app.js'))!.status, 401, 'the app itself stays behind it');
-  assert.equal(await ask('GET', '/api/me'), null, 'the API answers for itself');
-
-  const wrong = await ask('POST', '/gate', undefined, async () => ({ code: 'wrong' }));
-  assert.equal(wrong!.status, 403);
-  assert.equal(wrong!.headers['Set-Cookie'], undefined);
-  assert.equal((await ask('POST', '/gate', undefined, async () => ({ code: 'x' }), false))!.status, 429);
-  assert.equal((await ask('POST', '/gate', undefined, async () => ({ code }), true, ''))!.status, 503, 'closed until set up');
-
-  const right = await ask('POST', '/gate', undefined, async () => ({ code: 'TEST WORDS' }));
-  assert.equal(right!.status, 200);
-  const cookie = right!.headers['Set-Cookie'].split(';')[0];
-  assert.match(right!.headers['Set-Cookie'], /HttpOnly; Secure; SameSite=Lax/);
-  const app = await ask('GET', '/', cookie);
-  assert.match(String(app!.body), /id="app"/);
-  assert.equal((await ask('GET', '/app.js', cookie))!.status, 200);
-  assert.match(String((await ask('GET', '/callback', cookie))!.body), /id="app"/, 'Spotify can return here');
 });

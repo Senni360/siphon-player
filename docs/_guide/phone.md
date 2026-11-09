@@ -4,16 +4,17 @@ description: Link your phone to Encore on your computer, and use the same accoun
 nav_order: 5
 ---
 
-Encore on your phone is a web page, at `encore.senni.dev`. It isn't public: it asks
-for a code first, which whoever runs your group can give you.
+Encore on your phone is a web page, at `encore.senni.dev`. The page itself is
+public, but it shows nothing until your phone is linked to your account. Every
+request it makes after that needs that phone's own secret.
 
 ## Link your phone
 
 1. On your computer, open Encore. Go to **Settings**, then **Devices**, then
    **Your phone**, and press **Link a phone**. Each code works once, so make another
    for a second phone or browser.
-2. On your phone, open `encore.senni.dev`, type the code to get in, then type the
-   eight letters Encore shows on your computer.
+2. On your phone, open `encore.senni.dev`, then type the eight letters Encore shows
+   on your computer.
 
 Your phone is then another device on your account, with the same groups. It shows
 your library, searches Spotify, SoundCloud and YouTube, opens artist pages, and plays

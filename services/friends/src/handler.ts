@@ -9,7 +9,6 @@ import { WEB_HOST, webAnswer } from './web.js';
 
 export function createHandler(env: NodeJS.ProcessEnv) {
   let service: ReturnType<typeof createService> | undefined;
-  let gateLimits: ReturnType<typeof configuredStorage> | undefined;
   return async function handler(req: IncomingMessage, res: ServerResponse) {
     const disconnected = new AbortController();
     const abort = () => disconnected.abort();
@@ -18,15 +17,7 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     res.once('close', closed);
     try {
       if (req.headers.host?.split(':')[0] === (env.ENCORE_WEB_HOST ?? WEB_HOST)) {
-        gateLimits ??= configuredStorage(env);
-        const answer = await webAnswer(req.method ?? 'GET', req.url ?? '/', req.headers.cookie, async () => {
-          const parsed = (req as IncomingMessage & { body?: unknown }).body;
-          if (parsed !== undefined) return Buffer.isBuffer(parsed) ? JSON.parse(parsed.toString('utf8')) : typeof parsed === 'string' ? JSON.parse(parsed) : parsed;
-          const parts: Buffer[] = [];
-          let size = 0;
-          for await (const part of req) { size += (part as Buffer).length; if (size > 1024) throw new Error('Too large'); parts.push(Buffer.from(part as Buffer)); }
-          return JSON.parse(Buffer.concat(parts).toString('utf8'));
-        }, env.ENCORE_WEB_CODE ?? '', gateLimits, env.VERCEL ? String(req.headers['x-vercel-forwarded-for'] ?? 'unknown') : req.socket.remoteAddress ?? 'local');
+        const answer = webAnswer(req.method ?? 'GET', req.url ?? '/');
         if (answer) {
           res.writeHead(answer.status, answer.headers);
           res.end(req.method === 'HEAD' ? undefined : answer.body);

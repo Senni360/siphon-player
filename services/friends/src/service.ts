@@ -289,6 +289,10 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       }
       // A phone joins the account of the computer showing this code. The code is
       // used once, and the phone gets a secret of its own that can be removed alone.
+      // Guessing one is not the door: eight letters from 31 is about 8.5 x 10^11
+      // possibilities, and twenty tries an hour per address is 175,200 a year, so
+      // even one address would need millions of years (and codes live five
+      // minutes and die on first use). The limit stays per address, not per code.
       if (path === '/link/claim' && method === 'POST') {
         if (!await storage.limit(`link:${hash(clientIp)}`, 20, 3600, signal)) return fail(429, 'Too many tries', 3600);
         const input = await body(request, signal, 1024);
