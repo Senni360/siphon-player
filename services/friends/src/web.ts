@@ -71,11 +71,12 @@ function file(name: string): Buffer {
 }
 
 /**
- * Images come from wherever a song's art is. Nothing else loads from elsewhere, and
- * only Spotify's own sign-in and API are spoken to from the page.
+ * Images come from wherever a song's art is. Nothing else loads from elsewhere.
+ * The page speaks to Spotify's own sign-in and API, and to the always-on edge
+ * after the group service has given it a short-lived token.
  */
 const HEADERS = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https:; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https:; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };

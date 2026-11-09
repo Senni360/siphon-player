@@ -72,6 +72,7 @@ Environment variables:
 | `AI_GATEWAY_API_KEY` | Optional. Without a TypeSafe key, Jev goes through Vercel AI Gateway with this key, or with the deployment's own OIDC token. |
 | `PORT` | Local runner port, default 8787. |
 | `SIPHON_FRIENDS_OWNER_SPOTIFY_ID` | Optional. The Spotify username that owns the first group. That account takes it over when it next connects. |
+| `EDGE_TOKEN_SECRET` | Optional. The HMAC secret shared with `services/edge`. When set (at least 32 characters), `POST /api/edge/token` mints five-minute live, media and sync tokens for the signed-in device. Unset answers 503 and the phone keeps using the computer. |
 | `SIPHON_FRIENDS_URL` | **Player-side only.** Base service URL including `/api`. |
 
 Production refuses to start without both Redis values. It never falls back to
@@ -106,6 +107,7 @@ Never log request bodies, Authorization headers, invites, or private share URLs.
 | `DELETE /api/posts/:id/replies/:reply` | Delete own reply -> `{ok:true}`. Other authors receive 403. |
 | `POST /api/jev/next` | `{recent: [{title, artists}] (1 to 10), candidates: [{id, title, artists}] (2 to 255)}` -> `{probabilities: {id: p} \| null}`. |
 | `POST /api/jev/titles` | `{uploads: [{title, uploader}] (1 to 50)}` -> `{readings: [{artist, title} \| null]}`, in order. |
+| `POST /api/edge/token` | `{role: "phone" \| "computer"}` -> `{url, live, media, sync}`: five-minute edge tokens with this account's id, each for its scope. `503` when `EDGE_TOKEN_SECRET` is unset. Rate limited per account. |
 
 ### Accounts and groups
 

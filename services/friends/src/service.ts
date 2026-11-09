@@ -9,6 +9,7 @@ import { createRemote } from './remote.js';
 import { FIRST_GROUP, admitPending, fullRights, groupById, groupRoute, keepDevices, manages, memberOf, memberRights, mergeUsers, removeMember, requestGroup, withGroups } from './groups.js';
 import type { Payload, Post, SharedPlaylist, State, Storage, User } from './storage.js';
 import { describe, noJev, titleReadings, type Ask, type Track } from './jev.js';
+import { EDGE_ROLES, EDGE_TOKEN_TTL_SECONDS, EDGE_URL, edgeConfigured, mintEdgeToken, type EdgeRole } from './edge.js';
 
 export const hash = (text: string) => createHash('sha256').update(text).digest('hex');
 function payload(body: Record<string, unknown>): Payload {
@@ -113,7 +114,7 @@ const MAX_PLAYLISTS = 1000;
 const MAX_PLAYLIST_SONGS = 1000;
 const seenByReader = (list: SharedPlaylist, reader: string) => !list.to?.length || list.by === reader || list.to.includes(reader);
 
-export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now, verify: VerifySpotify = verifySpotify, ownerSpotify = '', audioStore: AudioStore | null = null) {
+export function createService(storage: Storage, inviteCode: string, ask: Ask = noJev, clock: () => number = Date.now, verify: VerifySpotify = verifySpotify, ownerSpotify = '', audioStore: AudioStore | null = null, edgeSecret = '') {
   const live = createLive(storage, clock);
   const remote = createRemote(storage, clock);
   let roster: { state: State; until: number } | null = null;
@@ -320,6 +321,20 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
         const code = Array.from({ length: 8 }, () => LINK_LETTERS[randomInt(LINK_LETTERS.length)]).join('');
         await storage.livePut(linkKey(code), JSON.stringify({ user_id: user.user_id, ...(client_id ? { client_id } : {}) }), LINK_SECONDS, signal);
         return json({ code, seconds: LINK_SECONDS }, 201);
+      }
+      // The always-on edge shares this service's HMAC secret. A phone asks for
+      // its own short-lived tokens here, one per role it needs, instead of
+      // holding the secret. Refusing to mint is not an error on the phone: it
+      // keeps using the computer.
+      if (path === '/edge/token' && method === 'POST') {
+        if (!edgeConfigured(edgeSecret)) return fail(503, 'Edge is not configured');
+        if (!await storage.limit(`edge:${user.user_id}`, 30, 60, signal)) return fail(429, 'Too many requests', 60);
+        const input = await body(request, signal, 1024);
+        const role = input.role as EdgeRole;
+        if (!EDGE_ROLES.includes(role)) return fail(400, 'Invalid role');
+        const now = clock();
+        const mint = (scope: 'live' | 'media' | 'sync') => mintEdgeToken({ sub: user.user_id, role, scope, ttlSeconds: EDGE_TOKEN_TTL_SECONDS }, edgeSecret, now);
+        return json({ url: EDGE_URL, live: mint('live'), media: mint('media'), sync: mint('sync') });
       }
       const reads = method === 'GET';
       if (!await storage.limit(`user:${user.user_id}:${reads ? 'read' : 'write'}`, reads ? 120 : 60, 60, signal)) return fail(429, 'Too many requests', 60);
