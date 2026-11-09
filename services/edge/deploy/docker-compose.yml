@@ -1,0 +1,25 @@
+# Runs beside the VPS's existing Caddy: nothing is published on the host, and
+# Caddy reaches this container by name over its own Docker network.
+services:
+  encore-edge:
+    build: ..
+    container_name: encore-edge
+    restart: unless-stopped
+    env_file: ./edge.env
+    # One song is fetched at a time, and the password manager on this small
+    # machine must never be starved by a burst of work here.
+    environment:
+      EDGE_RESOLVE_CONCURRENCY: "1"
+    mem_limit: 420m
+    volumes:
+      - encore-edge-data:/data
+    networks:
+      - proxy
+
+volumes:
+  encore-edge-data:
+
+networks:
+  proxy:
+    name: vaultwarden_default
+    external: true
