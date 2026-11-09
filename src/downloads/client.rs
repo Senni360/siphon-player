@@ -487,6 +487,7 @@ enum Outcome {
 
 /// The download phase of a batch over one connection. Kept apart from
 /// [`run`]'s helper discovery so tests drive it with a fake helper.
+#[allow(clippy::too_many_arguments)]
 async fn run_session<W: AsyncWrite + Unpin + Send + Sync + 'static>(
     session: Arc<Session<W>>,
     id: u64,
@@ -547,6 +548,7 @@ impl Totals {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
     session: &Arc<Session<W>>,
     id: u64,
@@ -557,7 +559,7 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
     totals: &Arc<std::sync::Mutex<Totals>>,
     emit: &Emit,
 ) -> Result<(), String> {
-    let parallel = sources.len().min(MAX_PARALLEL).max(1);
+    let parallel = sources.len().clamp(1, MAX_PARALLEL);
     // Leave protocolVersion out deliberately. Version 1's compatibility
     // mode performs analysis inline, so done includes the final tags/path.
     // Deferred analysis would rename the file after done, which would make
@@ -591,9 +593,7 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
         let emit = Arc::clone(emit);
         tasks.spawn(async move {
             loop {
-                let Some((index, source)) = queue.lock().await.pop_front() else {
-                    return None;
-                };
+                let (index, source) = queue.lock().await.pop_front()?;
                 if let Some(fatal) = one_source(
                     &session,
                     id,
@@ -691,24 +691,26 @@ async fn one_source<W: AsyncWrite + Unpin>(
     };
     // A match saved earlier can go away, for example when a video is
     // removed. Forget it and search once more, rather than failing.
-    if result.is_err() && from_saved && !session.shared.closed() {
-        if let Source::Spotify(track) = &source {
-            saved.forget(&track.uri).await;
-            if let Ok(found) = remember_match(searcher, saved, track).await
-                && used.as_deref() != Some(found.as_str())
-            {
-                job = job_id(id, index, Some("retry"));
-                result = session
-                    .download(
-                        &job,
-                        &source,
-                        &found,
-                        preferences,
-                        &mut progress,
-                        &progress_event,
-                    )
-                    .await;
-            }
+    if result.is_err()
+        && from_saved
+        && !session.shared.closed()
+        && let Source::Spotify(track) = &source
+    {
+        saved.forget(&track.uri).await;
+        if let Ok(found) = remember_match(searcher, saved, track).await
+            && used.as_deref() != Some(found.as_str())
+        {
+            job = job_id(id, index, Some("retry"));
+            result = session
+                .download(
+                    &job,
+                    &source,
+                    &found,
+                    preferences,
+                    &mut progress,
+                    &progress_event,
+                )
+                .await;
         }
     }
     match result {
@@ -932,9 +934,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let totals = totals.lock().unwrap();
-        assert_eq!(totals.downloaded, 1);
-        assert!(totals.last_file().unwrap().contains("120 BPM"));
+        {
+            let totals = totals.lock().unwrap();
+            assert_eq!(totals.downloaded, 1);
+            assert!(totals.last_file().unwrap().contains("120 BPM"));
+        }
         assert!(events.lock().unwrap().iter().any(|event| matches!(event,
             Event::Progress {progress, ..} if progress.stage == "analyzing" && progress.fraction.is_none())));
         server.await.unwrap();
@@ -993,11 +997,12 @@ mod tests {
         )
         .await
         .unwrap();
-        let totals = totals.lock().unwrap();
-        assert_eq!(totals.downloaded, 6);
-        assert_eq!(totals.failed, 0);
-        assert_eq!(totals.last.as_ref().unwrap().0, 5);
-        drop(totals);
+        {
+            let totals = totals.lock().unwrap();
+            assert_eq!(totals.downloaded, 6);
+            assert_eq!(totals.failed, 0);
+            assert_eq!(totals.last.as_ref().unwrap().0, 5);
+        }
         server.await.unwrap();
     }
 
@@ -1052,10 +1057,11 @@ mod tests {
         )
         .await
         .unwrap();
-        let totals = totals.lock().unwrap();
-        assert_eq!(totals.downloaded, 2);
-        assert_eq!(totals.failed, 1);
-        drop(totals);
+        {
+            let totals = totals.lock().unwrap();
+            assert_eq!(totals.downloaded, 2);
+            assert_eq!(totals.failed, 1);
+        }
         assert!(events.lock().unwrap().iter().any(|event| matches!(event,
             Event::ItemFailed { message, .. } if message.starts_with("Bad: ") && message.contains("gone"))));
         drop(session);
