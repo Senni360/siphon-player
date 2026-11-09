@@ -1438,6 +1438,7 @@ pub fn apply_flags(app: &mut App, page: Option<&str>, show: Option<&str>) {
                     .enqueue(
                         "Northern Lights (Original Mix)".into(),
                         crate::downloads::Target::Items(vec![]),
+                        crate::downloads::Preferences::default(),
                     )
                     .unwrap();
                 app.downloads.progress(
