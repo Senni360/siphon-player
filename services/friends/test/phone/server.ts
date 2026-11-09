@@ -106,7 +106,7 @@ const PLAYLISTS = [
 // to load itself, Spotify's own sign-in and API, the edge, and images from
 // wherever art is. The local mock edge is this server, on 127.0.0.1.
 const HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https: http://127.0.0.1:*; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev http://127.0.0.1:* ws://127.0.0.1:*; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https: http://127.0.0.1:*; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev http://127.0.0.1:* ws://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };
@@ -138,6 +138,14 @@ function versionedIndex(): Buffer {
     .replaceAll('href="/manifest.webmanifest"', `href="${asset('/manifest.webmanifest')}"`)
     .replaceAll('href="/icon.svg"', `href="${asset('/icon.svg')}"`)
     .replaceAll('href="/icon-180.png"', `href="${asset('/icon-180.png')}"`));
+}
+const shellUrls = (): string[] => ['/', asset('/app.css'), asset('/app.js'), asset('/manifest.webmanifest'),
+  asset('/icon.svg'), asset('/icon-180.png'), asset('/icon-192.png'), asset('/icon-512.png')];
+function serviceWorker(): Buffer {
+  const urls = shellUrls();
+  return Buffer.from(readFileSync(join(WEB, 'sw.js'), 'utf8')
+    .replace('__VERSION__', hashOf(urls.join('\n') + versionedIndex().toString()))
+    .replace('__SHELL__', JSON.stringify(urls)));
 }
 
 export interface Failure {
@@ -543,9 +551,12 @@ export class PhoneServer {
 
   private serveStatic(request: IncomingMessage, response: ServerResponse, url: URL): void {
     const pathname = url.pathname;
-    const type = CONTENT[pathname] ?? (/^\/icon-\d+\.png$/.test(pathname) ? 'image/png' : 'text/html; charset=utf-8');
-    const body = CONTENT[pathname] || /^\/icon-\d+\.png$/.test(pathname) ? bytesOf(pathname.slice(1)) : versionedIndex();
-    const immutable = pathname !== '/manifest.webmanifest'
+    const worker = pathname === '/sw.js';
+    const type = worker ? 'text/javascript; charset=utf-8'
+      : CONTENT[pathname] ?? (/^\/icon-\d+\.png$/.test(pathname) ? 'image/png' : 'text/html; charset=utf-8');
+    const body = worker ? serviceWorker()
+      : CONTENT[pathname] || /^\/icon-\d+\.png$/.test(pathname) ? bytesOf(pathname.slice(1)) : versionedIndex();
+    const immutable = !worker && pathname !== '/manifest.webmanifest'
       && !type.startsWith('text/html')
       && url.searchParams.get('v') === hashOf(body);
     const etag = `"${hashOf(body)}"`;

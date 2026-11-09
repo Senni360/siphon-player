@@ -21,6 +21,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
+    // The app registers its offline worker on every open. Most tests are about
+    // the page itself, so the worker stays out of them; shell.spec.ts allows it.
+    serviceWorkers: 'block',
   },
   projects: [
     { name: 'iPhone 13', use: { ...devices['iPhone 13'] } },

@@ -234,6 +234,13 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .source-picture { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; background: var(--raised); margin-bottom: 10px; }
 .play-all[aria-pressed="true"] { color: var(--secondary); }
 .banner .tip-close { margin-left: auto; width: 32px; height: 32px; font-size: 20px; color: var(--secondary); flex: none; }
+.update { position: fixed; z-index: 20; top: calc(8px + var(--top)); left: 16px; right: 16px; display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px; border-radius: 14px; background: var(--raised); border: 1px solid var(--line-strong); color: var(--secondary);
+  font-size: 13px; box-shadow: 0 8px 28px rgb(0 0 0 / 35%); animation: rise .25s var(--ease); }
+.update span { flex: 1; }
+.update button { flex: none; height: 34px; padding: 0 12px; border-radius: 17px; color: var(--secondary); }
+.update .update-go { background: var(--inverse); color: var(--on-inverse); font-weight: 600; }
+.update .update-close { width: 34px; padding: 0; font-size: 20px; }
 .empty { text-align: center; color: var(--secondary); padding: 40px 16px; }
 .settings-link { margin-top: 28px; }
 .quiet { color: var(--secondary); font-size: 14px; height: 44px; }

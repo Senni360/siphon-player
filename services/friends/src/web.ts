@@ -58,13 +58,27 @@ function manifest(): string {
     .replaceAll('"/icon.svg"', `"${asset('/icon.svg')}"`);
 }
 
+/** Everything an offline open needs, at this build's URLs. */
+function shell(): string[] {
+  return ['/', asset('/app.css'), asset('/app.js'), asset('/manifest.webmanifest'),
+    asset('/icon.svg'), asset('/icon-180.png'), asset('/icon-192.png'), asset('/icon-512.png')];
+}
+
+/** The worker itself, with this build's version and shell baked in. */
+function serviceWorker(): string {
+  const urls = shell();
+  return file('sw.js').toString('utf8')
+    .replace('__VERSION__', hashOf(urls.join('\n') + html()))
+    .replace('__SHELL__', JSON.stringify(urls));
+}
+
 /**
  * Images come from wherever a song's art is. Nothing else loads from elsewhere.
  * The page speaks to Spotify's own sign-in and API, and to the always-on edge
  * after the group service has given it a short-lived token.
  */
 const HEADERS = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https:; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https:; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };
@@ -95,6 +109,7 @@ export function webAnswer(method: string, url: string, ifNoneMatch?: string): We
   if (path === '/api' || path.startsWith('/api/')) return null;
   if (method !== 'GET' && method !== 'HEAD') return plain(405, { error: 'Not allowed' });
   // The app routes its own screens, and Spotify returns to /callback.
+  if (path === '/sw.js') return answer(serviceWorker(), 'text/javascript; charset=utf-8', REVALIDATE, ifNoneMatch);
   if (path === '/manifest.webmanifest') return answer(manifest(), 'application/manifest+json', REVALIDATE, ifNoneMatch);
   const type = CONTENT[path];
   if (type) {

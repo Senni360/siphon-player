@@ -43,7 +43,24 @@ test('the page loads only itself, Spotify and artwork', () => {
   assert.match(policy, /default-src 'none'/);
   assert.match(policy, /script-src 'self'/);
   assert.match(policy, /connect-src 'self' https:\/\/accounts\.spotify\.com https:\/\/api\.spotify\.com/);
+  assert.match(policy, /worker-src 'self'/);
+  assert.doesNotMatch(policy, /worker-src[^;]*https?:/);
   assert.match(policy, /frame-ancestors 'none'/);
+});
+
+test('the worker is at the root, revalidates, and knows this build', () => {
+  const worker = get('/sw.js');
+  assert.equal(worker.status, 200);
+  assert.match(worker.headers['Content-Type'], /^text\/javascript/);
+  assert.equal(worker.headers['Cache-Control'], 'no-cache');
+  const source = String(worker.body);
+  assert.doesNotMatch(source, /__VERSION__|__SHELL__/);
+  assert.match(source, /const VERSION = '[a-f0-9]{12}'/);
+  assert.match(source, /\/app\.js\?v=[a-f0-9]{12}/);
+  assert.match(source, /self\.addEventListener\('fetch'/);
+  assert.match(source, /url\.pathname === '\/api'/, 'API calls are left alone');
+  assert.match(source, /request\.headers\.has\('range'\)/, 'range requests are left alone');
+  assert.match(source, /destination === 'audio'/, 'audio requests are left alone');
 });
 
 test('assets say what they are, and the page does not', () => {
