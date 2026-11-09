@@ -10,7 +10,7 @@ for a code first, which whoever runs your group can give you.
 ## Link your phone
 
 1. On your computer, open Encore. Go to **Settings**, then **Your phone**, and press
-   **Link a phone**. You can also find it in **Group**, under **People**.
+   **Link a phone**. Each code works once, so make another for a second phone or browser.
 2. On your phone, open `encore.senni.dev`, type the code to get in, then type the
    eight letters Encore shows on your computer.
 

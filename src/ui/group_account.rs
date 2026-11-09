@@ -17,14 +17,16 @@ use super::group::{card, field};
 pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
     let palette = app.palette;
     let locale = app.locale;
+    // A connected phone says so, but another can always be linked: a second
+    // phone, or another browser on the same one.
     if app.phone.watched {
         theme::text(
             ui,
-            gettext(locale, "Your phone is connected."),
+            gettext(locale, "A phone is connected."),
             theme::medium(13.0),
             palette.text,
         );
-        return;
+        ui.add_space(6.0);
     }
     let left = match &app.phone.code {
         Some(Ok((code, made))) => crate::app::remote::CODE_LASTS
@@ -57,6 +59,14 @@ pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
         );
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_secs(1));
+        ui.add_space(6.0);
+        // A code works once, so the next phone or browser needs its own.
+        let asking = app.phone.asking_code;
+        if theme::soft_button(ui, &palette, None, &gettext(locale, "New code"), asking).clicked()
+            && !asking
+        {
+            actions.push(Action::LinkPhone);
+        }
         return;
     }
     // A phone joins this computer's group account, so there has to be one.
@@ -85,7 +95,11 @@ pub(super) fn link_a_phone(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
         ui,
         &palette,
         Some(Icon::Plus),
-        &gettext(locale, "Link a phone"),
+        &if app.phone.watched {
+            gettext(locale, "Link another phone")
+        } else {
+            gettext(locale, "Link a phone")
+        },
         asking,
     )
     .clicked()
@@ -899,15 +913,6 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
                 });
             }
         }
-        ui.add_space(10.0);
-        theme::text(
-            ui,
-            gettext(locale, "Your phone"),
-            theme::medium(13.0),
-            palette.text,
-        );
-        ui.add_space(4.0);
-        link_a_phone(app, ui, actions);
         ui.add_space(10.0);
         if theme::soft_button(
             ui,

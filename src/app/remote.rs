@@ -153,6 +153,10 @@ impl App {
     pub(super) fn remote_event(&mut self, event: RemoteEvent) {
         match event {
             RemoteEvent::Watched(watched) => {
+                // The code that just linked a phone is spent.
+                if watched && !self.phone.watched {
+                    self.phone.code = None;
+                }
                 self.phone.watched = watched;
                 self.phone.last_state = None;
             }
