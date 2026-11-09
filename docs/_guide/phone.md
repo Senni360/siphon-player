@@ -10,7 +10,7 @@ request it makes after that needs that phone's own secret.
 
 ## Link your phone
 
-1. On your computer, open Encore. Go to **Settings**, then **Your phone**, and press
+1. On your computer, open Encore. Go to **Settings**, then **Devices**, then **Your phone**, and press
    **Link a phone**. Each code works once, so make another for a second phone or browser.
 2. On your phone, open the link Encore shows, or open `encore.senni.dev/link#CODE`
    with the eight letters in place of `CODE`. The code stays in the part of the
@@ -21,12 +21,21 @@ Your phone is then another device on your account, with the same groups. It show
 your library, searches Spotify, SoundCloud and YouTube, opens artist pages, and plays
 on your computer. Encore on your computer has to be open, even if only in the tray.
 
-A linked phone appears in **Settings** under **Your phone**, where **Sign out** removes
+A linked phone appears in **Settings** under **Devices > Your phone**, where **Sign out** removes
 it without signing out anything else. If a phone is removed, opening it again says
 so and offers to link it once more.
 
-To keep it like an app, add the page to your home screen: on an iPhone, press **Share**,
-then **Add to Home Screen**.
+To keep it like an app, install it. On an iPhone, press **Share**, then **Add to
+Home Screen**; Encore shows that once, and you can put the note away for good. On
+Android, press **Install** when Encore offers it. Installed, it opens full screen,
+keeps its place in your home screen's search and library shortcuts, and asks the
+browser to keep its sign-in.
+
+## Without a connection
+
+The page itself opens without a connection, because its shell is stored on the
+phone. Nothing plays until the connection is back, and a new version shows a small
+**Refresh** note when it is ready rather than reloading under what is playing.
 
 ## With the computer off
 

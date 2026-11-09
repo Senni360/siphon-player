@@ -16,9 +16,10 @@ this. On a fresh checkout, install the browsers once with
 ## What is here
 
 - `playwright.config.ts` — three phone projects: iPhone 13 and iPhone SE on
-  WebKit, Pixel 7 on Chromium.
+  WebKit, Pixel 7 on Chromium. Service workers stay blocked for most tests;
+  `shell.spec.ts` allows them for its own file.
 - `server.ts` — one local mock service per test. It serves `assets/web` with the
-  same headers as `src/web.ts` and answers `/api/*`: account, posts, members,
+  same headers, versioned asset URLs and generated `sw.js` as `src/web.ts` and answers `/api/*`: account, posts, members,
   playlists, live presence, and the `/api/live/remote/*` pair (state, send,
   reply, phone, events as server-sent events) that a computer would normally
   answer. The seed has a 200-song mixed playlist plus home sections, liked
@@ -53,7 +54,9 @@ server.sendEdgeState({ playing: false });
 
 A test that deliberately causes a browser-level log line (Chromium notes an
 injected HTTP 500 in the console) declares it with
-`observed.allowConsole(/pattern/)`. JavaScript console errors are never allowed.
+`observed.allowConsole(/pattern/)`; a browser-reported page error is declared
+with `observed.allowPageError(/pattern/)`. JavaScript console errors are never
+allowed.
 
 ## The navigation guard
 
