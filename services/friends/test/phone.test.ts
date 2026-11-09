@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 
-// The phone's own sign-out decision, lifted out of the browser file between
-// two markers so it can be asked about here without a DOM.
-const app = readFileSync(new URL('../assets/web/app.js', import.meta.url), 'utf8');
+// The phone's own sign-out decision, lifted out of the module that owns it
+// between two markers so it can be asked about here without a DOM.
+const app = readFileSync(new URL('../assets/web/js/auth.js', import.meta.url), 'utf8');
 const begin = app.indexOf('// [signout-begin]');
 const end = app.indexOf('// [signout-end]');
-assert.ok(begin >= 0 && end > begin, 'app.js marks its sign-out decision for these tests');
+assert.ok(begin >= 0 && end > begin, 'auth.js marks its sign-out decision for these tests');
 const removedDevice: (answer: Answer, attached: boolean, probe: () => Answer) => Promise<boolean> =
   vm.runInNewContext(`${app.slice(begin, end)}\nremovedDevice`, vm.createContext({}));
 
