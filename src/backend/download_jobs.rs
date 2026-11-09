@@ -99,7 +99,7 @@ impl Worker {
                 }),
                 Some(Err(error)) => Err(error),
                 Some(Ok(sources)) => {
-                    downloads::run(id, sources, searcher, saved, cancelled, |event| {
+                    downloads::run(id, sources, searcher, saved, cancelled, move |event| {
                         let _ = events.send(Event::Download(event));
                         waker.wake();
                     })
