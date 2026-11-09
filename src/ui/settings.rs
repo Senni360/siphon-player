@@ -1276,6 +1276,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
         ];
         let current_format = app.settings.download_format().to_owned();
         let current_quality = app.settings.download_quality().to_owned();
+        let drag_tray = gettext(locale, "Show downloads in the drag tray");
         section(ui, &palette, &downloads, |ui| {
             let folder_width = theme::soft_button_width(ui, &choose_folder) + 16.0;
             widgets::setting_row_sized(
@@ -1340,6 +1341,22 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                             app.settings.download_quality = Some((*value).into());
                             changed = true;
                         }
+                    }
+                },
+            );
+            widgets::setting_row(
+                ui,
+                &palette,
+                &drag_tray,
+                &gettext(
+                    locale,
+                    "Offer each finished file to the Siphon drag tray, to drop straight into your DAW.",
+                ),
+                |ui| {
+                    if widgets::switch(ui, &palette, &drag_tray, &mut app.settings.download_tray)
+                        .changed()
+                    {
+                        changed = true;
                     }
                 },
             );

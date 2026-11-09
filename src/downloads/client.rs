@@ -237,6 +237,20 @@ impl<W: AsyncWrite + Unpin> Session<W> {
         }
     }
 
+    /// Asks the helper's drag tray to show finished files. The answer is not
+    /// waited for: the files are already saved, and a helper without a tray
+    /// is never asked (the caller checks `dropzone`). No error reaches the
+    /// listener from here.
+    async fn show_drop(&self, files: &[String], title: &str) {
+        let request = json!({
+            "id": format!("drop-{}", self.shared.serial.fetch_add(1, Ordering::SeqCst)),
+            "type": "showDrop",
+            "items": [{"files": files, "title": title}],
+        });
+        let mut writer = self.writer.lock().await;
+        let _ = framing::write(&mut *writer, &request).await;
+    }
+
     /// Writes the helper's cooperative cancellation. The read side is never
     /// cancelled, so the frame after it cannot arrive half consumed.
     async fn cancel(&self, job: &str) {
@@ -561,6 +575,7 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
                 .into(),
         );
     }
+    let dropzone = hello["dropzone"] == true;
     let total = sources.len();
     let queue = Arc::new(Mutex::new(
         sources.into_iter().enumerate().collect::<VecDeque<_>>(),
@@ -588,6 +603,7 @@ async fn run_sources<W: AsyncWrite + Unpin + Send + Sync + 'static>(
                     &searcher,
                     &saved,
                     &preferences,
+                    dropzone,
                     &totals,
                     &emit,
                 )
@@ -631,6 +647,7 @@ async fn one_source<W: AsyncWrite + Unpin>(
     searcher: &matching::Searcher,
     saved: &saved::Saved,
     preferences: &Preferences,
+    dropzone: bool,
     totals: &Arc<std::sync::Mutex<Totals>>,
     emit: &Emit,
 ) -> Option<String> {
@@ -696,6 +713,11 @@ async fn one_source<W: AsyncWrite + Unpin>(
     }
     match result {
         Ok(files) => {
+            // A successful download may be offered to the drag tray, but a
+            // missing or unwilling tray never changes the download's result.
+            if preferences.tray && dropzone {
+                session.show_drop(&files, source.title()).await;
+            }
             if let Ok(mut totals) = totals.lock() {
                 totals.record(index, &files);
             }
@@ -1038,6 +1060,59 @@ mod tests {
             Event::ItemFailed { message, .. } if message.starts_with("Bad: ") && message.contains("gone"))));
         drop(session);
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn the_drag_tray_is_offered_a_file_only_when_supported_and_enabled() {
+        async fn run(dropzone: bool, tray: bool) -> Option<Value> {
+            let (client, host) = tokio::io::duplex(64 * 1024);
+            let (reader, writer) = tokio::io::split(client);
+            let session = Session::start(reader, writer);
+            let server = tokio::spawn(async move {
+                let (mut reader, mut writer) = tokio::io::split(host);
+                let request = read(&mut reader).await;
+                hello(&mut writer, &request, dropzone).await;
+                let download = read(&mut reader).await;
+                acknowledge(&mut writer, &download).await;
+                finish(&mut writer, &download["jobId"], "C:\\Music\\Song.mp3").await;
+                let offered =
+                    tokio::time::timeout(Duration::from_millis(400), framing::read(&mut reader))
+                        .await
+                        .ok()
+                        .and_then(Result::ok);
+                while framing::read(&mut reader).await.is_ok() {}
+                offered
+            });
+            let preferences = Preferences {
+                tray,
+                ..Default::default()
+            };
+            let totals = Arc::new(std::sync::Mutex::new(Totals::default()));
+            run_sources(
+                &session,
+                5,
+                vec![soundcloud("https://soundcloud.com/test/track", "Song")],
+                &matching::Searcher::no_network(),
+                &saved_matches(),
+                &preferences,
+                &totals,
+                &EmitQueue::new(|_| {}),
+            )
+            .await
+            .unwrap();
+            assert_eq!(totals.lock().unwrap().downloaded, 1);
+            drop(session);
+            server.await.unwrap()
+        }
+
+        let offered = run(true, true).await.expect("the tray is offered the file");
+        assert_eq!(offered["type"], "showDrop");
+        assert_eq!(offered["items"][0]["files"], json!(["C:\\Music\\Song.mp3"]));
+        assert_eq!(offered["items"][0]["title"], "Song");
+        // An older helper without a tray, or a listener who turned it off,
+        // gets no request and no error.
+        assert!(run(false, true).await.is_none());
+        assert!(run(true, false).await.is_none());
     }
 
     #[tokio::test]
