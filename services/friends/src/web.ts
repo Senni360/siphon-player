@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 
 // Encore on a phone, at its own address. The page itself is public: it shows
@@ -10,7 +11,6 @@ export const WEB_HOST = 'encore.senni.dev';
 const CONTENT: Record<string, string> = {
   '/app.js': 'text/javascript; charset=utf-8',
   '/app.css': 'text/css; charset=utf-8',
-  '/manifest.webmanifest': 'application/manifest+json',
   '/icon.svg': 'image/svg+xml',
   '/icon-180.png': 'image/png',
   '/icon-192.png': 'image/png',
@@ -27,6 +27,37 @@ function file(name: string): Buffer {
   return found;
 }
 
+/** A stable, short name for a piece of shell content. */
+const hashOf = (body: string | Buffer): string => createHash('sha256').update(body).digest('hex').slice(0, 12);
+const versionOf = (name: string): string => hashOf(file(name));
+
+/**
+ * A shell URL a browser may keep for good: its version changes whenever the
+ * bytes do, so an update is a new URL and a repeat open transfers nothing.
+ */
+function asset(path: string): string {
+  if (path === '/manifest.webmanifest') return `${path}?v=${hashOf(manifest())}`;
+  return `${path}?v=${versionOf(path.slice(1))}`;
+}
+
+/** The page, pointing at this build's assets. */
+function html(): string {
+  return file('index.html').toString('utf8')
+    .replaceAll('href="/app.css"', `href="${asset('/app.css')}"`)
+    .replaceAll('src="/app.js"', `src="${asset('/app.js')}"`)
+    .replaceAll('href="/manifest.webmanifest"', `href="${asset('/manifest.webmanifest')}"`)
+    .replaceAll('href="/icon.svg"', `href="${asset('/icon.svg')}"`)
+    .replaceAll('href="/icon-180.png"', `href="${asset('/icon-180.png')}"`);
+}
+
+/** The manifest keeps its shape in a file; its icon URLs carry their version. */
+function manifest(): string {
+  return file('manifest.webmanifest').toString('utf8')
+    .replaceAll('"/icon-192.png"', `"${asset('/icon-192.png')}"`)
+    .replaceAll('"/icon-512.png"', `"${asset('/icon-512.png')}"`)
+    .replaceAll('"/icon.svg"', `"${asset('/icon.svg')}"`);
+}
+
 /**
  * Images come from wherever a song's art is. Nothing else loads from elsewhere.
  * The page speaks to Spotify's own sign-in and API, and to the always-on edge
@@ -38,24 +69,37 @@ const HEADERS = {
   'Referrer-Policy': 'no-referrer',
 };
 
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+const REVALIDATE = 'no-cache';
+
 export interface WebAnswer { status: number; headers: Record<string, string>; body: string | Buffer }
 
-const page = (status: number, name: string): WebAnswer => ({
-  status,
-  headers: { ...HEADERS, 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
-  body: file(name),
-});
+const matches = (given: string, tag: string): boolean =>
+  given.split(',').some(value => value.trim().replace(/^W\//, '') === tag);
+
+/** A body with its own ETag; a matching If-None-Match answers 304 and no body. */
+function answer(body: string | Buffer, type: string, cache: string, ifNoneMatch?: string): WebAnswer {
+  const tag = `"${hashOf(body)}"`;
+  const headers = { ...HEADERS, 'Content-Type': type, 'Cache-Control': cache, ETag: tag };
+  return ifNoneMatch && matches(ifNoneMatch, tag) ? { status: 304, headers, body: '' } : { status: 200, headers, body };
+}
+
 const plain = (status: number, value: unknown): WebAnswer => ({
   status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }, body: JSON.stringify(value),
 });
 
 /** The answer to a browser on the web address, or null when it's the API's to answer. */
-export function webAnswer(method: string, url: string): WebAnswer | null {
-  const path = new URL(url, 'http://localhost').pathname;
+export function webAnswer(method: string, url: string, ifNoneMatch?: string): WebAnswer | null {
+  const parsed = new URL(url, 'http://localhost');
+  const path = parsed.pathname;
   if (path === '/api' || path.startsWith('/api/')) return null;
   if (method !== 'GET' && method !== 'HEAD') return plain(405, { error: 'Not allowed' });
-  const type = CONTENT[path];
-  if (type) return { status: 200, headers: { ...HEADERS, 'Content-Type': type, 'Cache-Control': 'no-cache' }, body: file(path.slice(1)) };
   // The app routes its own screens, and Spotify returns to /callback.
-  return page(200, 'index.html');
+  if (path === '/manifest.webmanifest') return answer(manifest(), 'application/manifest+json', REVALIDATE, ifNoneMatch);
+  const type = CONTENT[path];
+  if (type) {
+    const immutable = parsed.searchParams.get('v') === versionOf(path.slice(1));
+    return answer(file(path.slice(1)), type, immutable ? IMMUTABLE : REVALIDATE, ifNoneMatch);
+  }
+  return answer(html(), 'text/html; charset=utf-8', REVALIDATE, ifNoneMatch);
 }

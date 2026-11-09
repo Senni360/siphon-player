@@ -17,7 +17,8 @@ export function createHandler(env: NodeJS.ProcessEnv) {
     res.once('close', closed);
     try {
       if (req.headers.host?.split(':')[0] === (env.ENCORE_WEB_HOST ?? WEB_HOST)) {
-        const answer = webAnswer(req.method ?? 'GET', req.url ?? '/');
+        const tag = req.headers['if-none-match'];
+        const answer = webAnswer(req.method ?? 'GET', req.url ?? '/', Array.isArray(tag) ? tag.join(',') : tag);
         if (answer) {
           res.writeHead(answer.status, answer.headers);
           res.end(req.method === 'HEAD' ? undefined : answer.body);

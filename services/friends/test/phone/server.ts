@@ -12,6 +12,7 @@
 //   server.dropEventStream(1); server.endEventStreams();
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Socket } from 'node:net';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -119,6 +120,25 @@ const CONTENT: Record<string, string> = {
   '/icon-192.png': 'image/png',
   '/icon-512.png': 'image/png',
 };
+
+// The same shell caching as src/web.ts: versioned asset URLs may be kept for
+// good, while the page and manifest revalidate on every open.
+const hashOf = (body: Buffer | string): string => createHash('sha256').update(body).digest('hex').slice(0, 12);
+const bytesOf = (name: string): Buffer => readFileSync(join(WEB, name));
+const versionOf = (path: string): string => hashOf(bytesOf(path.slice(1)));
+const asset = (path: string): string => {
+  if (path === '/manifest.webmanifest') return `${path}?v=${hashOf(bytesOf('manifest.webmanifest'))}`;
+  return `${path}?v=${versionOf(path)}`;
+};
+function versionedIndex(): Buffer {
+  const source = readFileSync(join(WEB, 'index.html'), 'utf8');
+  return Buffer.from(source
+    .replaceAll('href="/app.css"', `href="${asset('/app.css')}"`)
+    .replaceAll('src="/app.js"', `src="${asset('/app.js')}"`)
+    .replaceAll('href="/manifest.webmanifest"', `href="${asset('/manifest.webmanifest')}"`)
+    .replaceAll('href="/icon.svg"', `href="${asset('/icon.svg')}"`)
+    .replaceAll('href="/icon-180.png"', `href="${asset('/icon-180.png')}"`));
+}
 
 export interface Failure {
   status: number;
@@ -424,7 +444,7 @@ export class PhoneServer {
       await this.handleApi(request, response, url);
       return;
     }
-    this.serveStatic(request, response, url.pathname);
+    this.serveStatic(request, response, url);
   }
 
   // ------------------------------------------------------------ the mock edge's socket
@@ -521,16 +541,26 @@ export class PhoneServer {
     this.json(response, status, { v: 1, error: code });
   }
 
-  private serveStatic(request: IncomingMessage, response: ServerResponse, pathname: string): void {
-    const type = CONTENT[pathname] ?? (/^\/icon-\d+\.png$/.test(pathname) ? 'image/png' : null);
-    const name = type ? pathname.slice(1) : 'index.html';
-    const body = readFileSync(join(WEB, name));
-    response.writeHead(200, {
+  private serveStatic(request: IncomingMessage, response: ServerResponse, url: URL): void {
+    const pathname = url.pathname;
+    const type = CONTENT[pathname] ?? (/^\/icon-\d+\.png$/.test(pathname) ? 'image/png' : 'text/html; charset=utf-8');
+    const body = CONTENT[pathname] || /^\/icon-\d+\.png$/.test(pathname) ? bytesOf(pathname.slice(1)) : versionedIndex();
+    const immutable = pathname !== '/manifest.webmanifest'
+      && !type.startsWith('text/html')
+      && url.searchParams.get('v') === hashOf(body);
+    const etag = `"${hashOf(body)}"`;
+    const headers = {
       ...HEADERS,
-      'Content-Type': type ?? 'text/html; charset=utf-8',
-      'Cache-Control': type ? 'no-cache' : 'no-store',
-      'Content-Length': body.length,
-    });
+      'Content-Type': type,
+      'Cache-Control': immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+      ETag: etag,
+    };
+    if (request.headers['if-none-match'] === etag) {
+      response.writeHead(304, headers);
+      response.end();
+      return;
+    }
+    response.writeHead(200, { ...headers, 'Content-Length': body.length });
     if (request.method === 'HEAD') { response.end(); return; }
     response.end(body);
   }
