@@ -18,7 +18,7 @@ The app serves both sides of the same person: the simple listener who just wants
 
 Siphon: Encore, shown as Encore throughout the app, is a private desktop music app for that group. One library, one queue and one search hold Spotify songs, SoundCloud uploads (private links included) and YouTube beats. The group's own shared songs come first; Spotify friend activity and SoundCloud's people-you-follow sit underneath as secondary feeds. Every track carries the Siphon helper's download and BPM/key tools.
 
-Success: it replaces the Spotify app and the SoundCloud tab for the group, sharing a song with friends takes one action, and opening the app on a normal day lands on new releases and a mix built from what Spotify and SoundCloud both recommend.
+Success: it replaces the Spotify app and the SoundCloud tab for the group, sharing a song with friends takes one action, and opening the app on a normal day lands on the group's newest shares, new releases and picks built from what Spotify, SoundCloud and YouTube both offer.
 
 ## Positioning
 
@@ -28,7 +28,7 @@ The only player where a Spotify song, a private SoundCloud upload and a YouTube 
 
 - A Windows desktop app open for long listening sessions, often beside music-making work; downloads and BPM/key lookups go through the installed Siphon helper.
 - Songs arrive from friends as links in chat apps. Private SoundCloud links and unlisted YouTube links open in the player instead of the browser.
-- Home: new releases and a blended Spotify and SoundCloud mix. Library: a sidebar or an equivalent that is always reachable. Now playing: always present, but not necessarily a classic bottom taskbar.
+- Home: the group's newest shares, new releases, and a blended mix of Spotify, SoundCloud and YouTube beats. Library: a sidebar or an equivalent that is always reachable. Now playing: always present, but not necessarily a classic bottom taskbar.
 
 ## Capabilities and Constraints
 
