@@ -24,10 +24,12 @@ as toasts. Playback continues throughout.
 Download all reads the original Spotify collection. For locally mixed playlists
 or locally inserted SoundCloud rows, select the rows and choose **Download**.
 
-Cancel stops the remaining selection and asks the helper to cancel its current
-job. Files already saved are kept. Closing the application cancels its jobs.
-The extension's own jobs run in a separate helper process and are unaffected.
-The player does not keep a download history or resume jobs after restarting.
+Cancel stops the remaining selection and asks the helper to cancel the jobs it
+still has. Files already saved are kept. Up to four songs of a selection download
+at once; a failed song is counted and the rest continue. Closing the application
+cancels its jobs. The extension's own jobs run in a separate helper process and
+are unaffected. The player does not keep a download history or resume jobs after
+restarting.
 
 ## Sources and matching
 
@@ -35,13 +37,18 @@ SoundCloud tracks and sets use the catalogue's public permalink. Private or
 restricted content can fail: the player does not export browser cookies or send
 Spotify/SoundCloud account credentials to the helper.
 
-For a Spotify track, the player searches YouTube for **artists - title** using
-the helper's `probe` request, then probes the first five results. It requires a
-known duration within three seconds, a matching title and primary artist, and
-matching recording qualifiers such as live, acoustic, remix, and remastered.
-The best qualifying result supplies the YouTube URL. A missing or uncertain
+For a Spotify track, the player searches YouTube and SoundCloud once for
+**artists - title**, using the public listing's own titles, uploaders and lengths.
+It requires a known duration within three seconds, a matching title and primary
+artist, and matching recording qualifiers such as live, acoustic, remix, and
+remastered. The best qualifying listing entry supplies a YouTube link or a public
+SoundCloud permalink; no candidate is fetched separately. A missing or uncertain
 match produces a toast and skips that track. Matching uses public metadata and
 can be conservative; it cannot establish recording identity with certainty.
+
+A found match is kept in `spotify-matches.json` with its date, so a later
+download or phone play needs no search. If that source stops working, Encore
+searches once more and replaces it. Removing the file only costs speed.
 
 This action saves an independently hosted YouTube recording. It never reads,
 rips, decrypts, or exports Spotify audio, and never changes the player's Spotify
@@ -51,19 +58,27 @@ playback source. Use downloads only where you have permission to save the audio.
 
 The installed helper owns yt-dlp, FFmpeg, extraction, leading-silence trimming,
 metadata, cover art, BPM/key analysis, filename suffixes, and file writes. The
-player does not bundle or duplicate that pipeline and adds no settings.
+player does not bundle or duplicate that pipeline.
 
-The player requests the helper's factory defaults, which match the extension's
-defaults: **MP3 at 320 kbps**, metadata and cover art, leading-silence trimming,
-BPM/key analysis and tags, and a filename suffix such as `[120 BPM Am]`. Files go to
-the helper's default folder, normally `%USERPROFILE%\Music\Siphon`; SoundCloud
-sets use the helper's playlist subfolder. Existing files are preserved.
+Settings, under **Downloads**, offers a folder, a format (MP3, M4A, Opus, FLAC or
+WAV) and a quality for lossy formats (320, 256, 192 or 128 kbps), plus whether a
+finished file is offered to the helper's drag tray. A choice left alone sends
+nothing, so the helper's factory defaults apply: **MP3 at 320 kbps**, metadata and
+cover art, leading-silence trimming, BPM/key analysis and tags, and a filename
+suffix such as `[120 BPM Am]`. Files go to the helper's default folder, normally
+`%USERPROFILE%\Music\Siphon`, unless a folder is chosen; SoundCloud sets use the
+helper's playlist subfolder. Existing files are preserved.
 
 The native protocol does not expose the extension's customized
 `chrome.storage.sync` preferences or saved helper defaults, and does not accept
 Spotify metadata overrides. Downloaded files therefore use the source's tags,
 even when matched from Spotify. Completion waits for inline BPM/key processing
-and its final filename. Analysis warnings do not undo a saved audio file.
+and its final filename, so the path shown, revealed and offered to a DAW is the
+one on disk. Analysis warnings do not undo a saved audio file.
+
+When the helper reports a drag tray, a finished file appears there with its title
+so it can be dropped into a DAW. Turning the setting off, or an older helper
+without a tray, sends nothing and shows no error.
 
 ## Transport and network access
 
@@ -77,9 +92,12 @@ does not search arbitrary executable names on PATH for a helper.
 Requests and replies use four-byte little-endian lengths followed by UTF-8 JSON
 on piped stdin/stdout. Response frames are bounded to one MiB. Helper discovery,
 process I/O, collection reads, and matching run on the backend runtime. There
-are at most three active selections, with tracks processed sequentially within
-each selection. The player sends `hello`, `probe`, `download`, and `cancel`;
-the helper's compatibility mode keeps analysis inline before `done`.
+are at most three active selections; each runs up to four songs at once through
+one helper connection, which `hello` asks to run that many jobs. The player sends
+`hello`, `download`, `cancel`, and — only when a tray is reported and enabled —
+`showDrop`; the helper's compatibility mode keeps analysis inline before `done`.
+Spotify matching reads YouTube's and SoundCloud's public listings directly, not
+through the helper.
 
 Spotify collection metadata uses the existing same-account session/Web API
 router. The helper contacts SoundCloud or YouTube, its media hosts, and the

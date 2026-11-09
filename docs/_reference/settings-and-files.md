@@ -75,6 +75,7 @@ Siphon follows each platform's conventions. On Linux:
 | Play history | `~/.local/state/siphonplayer/history.json` | Yes |
 | Local mixed playlists | `~/.local/state/siphonplayer/mixed-playlists.json` | Only if you want to lose these playlists |
 | Spotify playlist overlays | `~/.local/state/siphonplayer/playlist-overlay.json` | Only if you want to lose local SoundCloud insertions |
+| Spotify songs already matched to YouTube or SoundCloud | `~/.local/state/siphonplayer/spotify-matches.json` | Yes, the next play or download searches again |
 | Audio cache | `~/.cache/siphonplayer/audio/` | Always |
 | Artwork cache | `~/.cache/siphonplayer/art/` | Always |
 | Lyrics cache | `~/.cache/siphonplayer/lyrics/` | Always |
