@@ -44,7 +44,7 @@ from the helper's `siphon-host.exe` and `siphon-tray.exe`. Platform identity
 Local `spotifast:playlist:…`, `spotifast:overlay:…` and similar identifiers
 are retained because they are stored in existing user files. Saved Spotify
 Connect names and device IDs are preserved, including **Spotifast**. A fresh
-profile defaults to **Siphon**. Siphon also holds the old instance slot, so
+profile defaults to **Encore**. Siphon also holds the old instance slot, so
 launching either binary while the other is running reaches that player
 instead of starting a competing Spotify Connect device. Flatpak shares the
 old sandbox's runtime lock directory for this purpose.
@@ -541,7 +541,7 @@ main fields are:
 | `mac_show_in_dock` | `true` | macOS only: show Siphon in the Dock and Cmd+Tab. `false` keeps it in the menu bar only; the menu-bar icon always stays |
 | `check_for_updates` | `true` | Ask GitHub once a day for a newer release |
 | `web_client_id` | none | Client ID of your own Spotify app, which Siphon signs in with |
-| `phone_linked` | `false` | A phone has been linked, so this computer listens for it |
+| `phone_linked` | `false` | A phone or browser has been linked, so this computer listens for it |
 | `reduce_motion` | `false` | Keep animations to a minimum, whatever the system says |
 | `personal_app_nudge_at` | none | Legacy daily-reminder timestamp, retained for older releases |
 | `personal_app_intro_seen` | `false` | Whether the Premium personal-app introduction was dismissed or followed (available since 0.8.0) |

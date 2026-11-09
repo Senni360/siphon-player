@@ -45,10 +45,10 @@ computer off. This uses your own Spotify app, the same one as on your computer. 
 the Spotify developer dashboard, add this redirect address to it once:
 `https://encore.senni.dev/callback`
 
-The page still plays the sound itself. Choose **This phone** under **Playing on**, and
-a Spotify song plays as the same song found on YouTube or SoundCloud. With a Spotify
-sign-in, the page can also work whatever your Spotify account is already playing on
-your other devices; it never opens Spotify to start a song.
+Chosen as **This phone** under **Playing on**, the page plays the sound itself:
+a Spotify song plays as the same song found on YouTube or SoundCloud. With a
+Spotify sign-in, the page can also control whatever your Spotify account is
+already playing on your other devices; it never opens Spotify to start a song.
 
 ## What it can't do
 
