@@ -603,16 +603,32 @@ pub fn glow_in_card(
     reach: f32,
     color: egui::Color32,
 ) {
+    // Rings from the centre out to the card's edge, each point shaded by its
+    // real distance. One fan of long triangles from the centre to the edge
+    // shades along straight lines, which shows as a cone.
+    const RINGS: u32 = 16;
     let points = rounded_outline(rect, radius);
     let count = points.len() as u32;
     let mut mesh = egui::Mesh::default();
     mesh.colored_vertex(center, color);
-    for point in &points {
-        let left = (1.0 - (*point - center).length() / reach).clamp(0.0, 1.0);
-        mesh.colored_vertex(*point, color.gamma_multiply(left));
+    for ring in 1..=RINGS {
+        let along = ring as f32 / RINGS as f32;
+        for point in &points {
+            let at = center + (*point - center) * along;
+            let left = (1.0 - (at - center).length() / reach).clamp(0.0, 1.0);
+            let soft = left * left * (3.0 - 2.0 * left);
+            mesh.colored_vertex(at, color.gamma_multiply(soft));
+        }
     }
     for index in 0..count {
-        mesh.add_triangle(0, 1 + index, 1 + (index + 1) % count);
+        let next = (index + 1) % count;
+        mesh.add_triangle(0, 1 + index, 1 + next);
+        for ring in 0..RINGS - 1 {
+            let (a, b) = (1 + ring * count + index, 1 + ring * count + next);
+            let (c, d) = (a + count, b + count);
+            mesh.add_triangle(a, c, d);
+            mesh.add_triangle(a, d, b);
+        }
     }
     painter.add(egui::Shape::mesh(mesh));
 }
@@ -747,6 +763,8 @@ pub struct Gesture {
     pub press_shake: f32,
     /// A dip downward and back on a press, in points.
     pub press_dip: f32,
+    /// One whole turn around the upright axis on a press, as a card flips.
+    pub press_flip: bool,
 }
 
 /// How long a pressed icon's gesture takes.
@@ -764,6 +782,32 @@ pub fn gesture_pose(gesture: Gesture, hover: f32, press: Option<f32>) -> (egui::
         offset.y += gesture.press_dip * (t * std::f32::consts::PI).sin();
     }
     (offset, turn.to_radians())
+}
+
+/// How long a heart takes to fill and throw off its sparks.
+pub const LIKE: f32 = 0.45;
+
+/// Sparks leaving `center` as `t` goes from 0 to 1, for something just liked.
+pub fn sparks(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    reach: f32,
+    t: f32,
+    color: egui::Color32,
+) {
+    const COUNT: u32 = 7;
+    let t = t.clamp(0.0, 1.0);
+    // Held back at first, so they leave from behind the heart as it swells.
+    let out = ((t - 0.15) / 0.85).clamp(0.0, 1.0);
+    if out <= 0.0 {
+        return;
+    }
+    for index in 0..COUNT {
+        // A little off vertical, so no spark points straight up like a clock.
+        let angle = (index as f32 + 0.5) / COUNT as f32 * std::f32::consts::TAU;
+        let at = center + egui::Vec2::angled(angle) * reach * (0.55 + 0.45 * out);
+        painter.circle_filled(at, 1.6 * (1.0 - out * out), color.gamma_multiply(1.0 - out));
+    }
 }
 
 /// How long a changed count takes to roll to its new value.

@@ -1843,6 +1843,9 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
         });
     });
     ui.add_space(6.0);
+    if filter == Filter::Podcasts {
+        filter = Filter::Playlists;
+    }
 
     ui.horizontal_wrapped(|ui| {
         theme::pill_group(ui, &palette, |ui| {
@@ -1851,14 +1854,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                 (Filter::Playlists, gettext(locale, "Playlists")),
                 (Filter::Albums, gettext(locale, "Albums")),
                 (Filter::Artists, gettext(locale, "Artists")),
-                (Filter::Podcasts, gettext(locale, "Podcasts")),
             ] {
-                if value == Filter::Podcasts
-                    && filter != Filter::Podcasts
-                    && app.library.shows.items.is_empty()
-                {
-                    continue;
-                }
                 if theme::soft_button(ui, &palette, None, &label, filter == value).clicked() {
                     filter = value;
                 }

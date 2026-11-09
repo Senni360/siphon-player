@@ -3656,44 +3656,6 @@ mod tests {
         app.backend.shutdown();
     }
 
-    /// Spotify lists audiobooks among saved shows, but librespot can't play
-    /// them, so the Podcasts shelf leaves out any show marked as one.
-    #[test]
-    fn the_podcasts_shelf_leaves_out_audiobooks() {
-        let (ctx, mut app) = accessible_app("library-podcasts-audiobooks");
-        let view = crate::ui::sidebar::show;
-        view_frame(&ctx, &mut app, vec![], view);
-        let painted = view_frame(&ctx, &mut app, vec![], view);
-        let chip = painted
-            .iter()
-            .find(|(text, _)| text == "Podcasts")
-            .unwrap()
-            .1
-            .center();
-        view_frame(
-            &ctx,
-            &mut app,
-            pointer_click(chip, egui::PointerButton::Primary),
-            view,
-        );
-        let shows: Vec<(String, String)> = app
-            .library
-            .shows
-            .items
-            .iter()
-            .map(|saved| (saved.show.uri.clone(), saved.show.name.clone()))
-            .collect();
-        assert!(shows.len() >= 2, "the demo library saves several shows");
-        let painted = view_frame(&ctx, &mut app, vec![], view);
-        assert!(painted.iter().any(|(text, _)| *text == shows[0].1));
-
-        app.audiobook_shows.insert(shows[0].0.clone());
-        let painted = view_frame(&ctx, &mut app, vec![], view);
-        assert!(!painted.iter().any(|(text, _)| *text == shows[0].1));
-        assert!(painted.iter().any(|(text, _)| *text == shows[1].1));
-        app.backend.shutdown();
-    }
-
     #[test]
     fn library_grid_toggle_is_accessible_and_persistent() {
         use egui::accesskit::{Action as AccessibleAction, Role};
@@ -4112,7 +4074,6 @@ mod tests {
         for (shelf, label, page) in [
             (LibraryShelf::Albums, "Albums", Page::Albums),
             (LibraryShelf::Artists, "Artists", Page::Artists),
-            (LibraryShelf::Podcasts, "Podcasts", Page::Podcasts),
         ] {
             let (ctx, mut app) = accessible_app(&format!("library-sort-paging-{shelf:?}"));
             let view = crate::ui::sidebar::show;

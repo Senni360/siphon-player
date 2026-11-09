@@ -624,7 +624,7 @@ fn icon_gesture(icon: Icon) -> crate::ui::kit::motion::Gesture {
             ..Default::default()
         },
         Icon::Shuffle => Gesture {
-            press_shake: 3.5,
+            press_flip: true,
             ..Default::default()
         },
         Icon::Trash => Gesture {
@@ -684,30 +684,55 @@ pub fn icon_button(
         if was.is_some_and(|was| was != icon) {
             ui.ctx()
                 .data_mut(|data| data.insert_temp(swap_id.with("from"), was));
-            motion::begin(ui.ctx(), swap_id.with("run"), motion::POP);
+            let takes = if gesture.press_turn != 0.0 {
+                motion::GESTURE
+            } else if icon == Icon::HeartFilled {
+                motion::LIKE
+            } else {
+                motion::POP
+            };
+            motion::begin(ui.ctx(), swap_id.with("run"), takes);
         }
         ui.ctx().data_mut(|data| data.insert_temp(swap_id, icon));
         let swapping = motion::running(ui.ctx(), swap_id.with("run"));
         if let Some(t) = swapping {
-            if let Some(from) = ui
+            let from = ui
                 .ctx()
-                .data(|data| data.get_temp::<Icon>(swap_id.with("from")))
-            {
+                .data(|data| data.get_temp::<Icon>(swap_id.with("from")));
+            if gesture.press_turn != 0.0 {
+                // A control that turns (Repeat changing mode) keeps turning
+                // while its glyph changes, rather than popping in place.
+                let angle = gesture.press_turn.to_radians() * t;
+                let at = egui::Rect::from_center_size(rect.center(), Vec2::splat(size));
+                if let Some(from) = from {
+                    from.image(tint.gamma_multiply(1.0 - t), size)
+                        .rotate(angle, Vec2::splat(0.5))
+                        .paint_at(ui, at);
+                }
+                icon.image(tint.gamma_multiply(t), size)
+                    .rotate(angle, Vec2::splat(0.5))
+                    .paint_at(ui, at);
+            } else {
+                if let Some(from) = from {
+                    paint_icon(
+                        ui,
+                        from,
+                        rect,
+                        size * (1.0 - 0.5 * t),
+                        tint.gamma_multiply(1.0 - t),
+                    );
+                }
+                if icon == Icon::HeartFilled {
+                    motion::sparks(ui.painter(), rect.center(), size * 1.05, t, tint);
+                }
                 paint_icon(
                     ui,
-                    from,
+                    icon,
                     rect,
-                    size * (1.0 - 0.5 * t),
-                    tint.gamma_multiply(1.0 - t),
+                    size * (0.5 + 0.5 * t) * motion::pop(t),
+                    tint.gamma_multiply(t),
                 );
             }
-            paint_icon(
-                ui,
-                icon,
-                rect,
-                size * (0.5 + 0.5 * t) * motion::pop(t),
-                tint.gamma_multiply(t),
-            );
         } else if gesture == motion::Gesture::default() {
             paint_icon(ui, icon, rect, size * scale, tint);
         } else {
@@ -730,11 +755,23 @@ pub fn icon_button(
             let press = motion::running(ui.ctx(), press_id).map(motion::unease);
             let (offset, angle) = motion::gesture_pose(gesture, hover, press);
             let shown = size * scale;
+            // A flip narrows the glyph to its edge, and shows its mirror
+            // through the middle half of the turn.
+            let flip = press
+                .filter(|_| gesture.press_flip)
+                .map(|t| (t.clamp(0.0, 1.0) * std::f32::consts::TAU).cos());
+            let width = flip.map_or(shown, |flip| shown * flip.abs().max(0.08));
             let at = egui::Rect::from_center_size(
                 rect.center() + offset + play_glyph_offset(icon, shown),
-                Vec2::splat(shown),
+                Vec2::new(width, shown),
             );
-            let image = icon.image(tint, shown);
+            let mut image = icon.image(tint, shown);
+            if flip.is_some_and(|flip| flip < 0.0) {
+                image = image.uv(egui::Rect::from_min_max(
+                    egui::pos2(1.0, 0.0),
+                    egui::pos2(0.0, 1.0),
+                ));
+            }
             if angle == 0.0 {
                 image.paint_at(ui, at);
             } else {
@@ -748,6 +785,65 @@ pub fn icon_button(
     } else {
         response.on_hover_text(tooltip)
     }
+}
+
+/// How long Play takes to turn into Pause.
+const PLAY_MORPH: f32 = 0.24;
+
+/// Play as two pieces of one triangle, and Pause as two bars, corner for
+/// corner, in fractions of the icon's size. Clockwise, as filling needs.
+const PLAY_SHAPE: [[(f32, f32); 4]; 2] = [
+    [(-0.28, -0.40), (0.07, -0.20), (0.07, 0.20), (-0.28, 0.40)],
+    [(0.07, -0.20), (0.42, -0.01), (0.42, 0.01), (0.07, 0.20)],
+];
+const PAUSE_SHAPE: [[(f32, f32); 4]; 2] = [
+    [(-0.30, -0.38), (-0.08, -0.38), (-0.08, 0.38), (-0.30, 0.38)],
+    [(0.08, -0.38), (0.30, -0.38), (0.30, 0.38), (0.08, 0.38)],
+];
+
+/// Play at `pause` 0 and Pause at 1, the one reshaping into the other.
+fn paint_play_pause(ui: &egui::Ui, center: egui::Pos2, size: f32, pause: f32, color: Color32) {
+    let lerp = |a: f32, b: f32| a + (b - a) * pause;
+    for (play, bar) in PLAY_SHAPE.iter().zip(PAUSE_SHAPE.iter()) {
+        let points = play
+            .iter()
+            .zip(bar.iter())
+            .map(|(from, to)| center + Vec2::new(lerp(from.0, to.0), lerp(from.1, to.1)) * size)
+            .collect();
+        // The outline rounds the corners a touch and hides the join between
+        // the triangle's two pieces.
+        ui.painter().add(egui::Shape::convex_polygon(
+            points,
+            color,
+            Stroke::new(size * 0.05, color),
+        ));
+    }
+}
+
+/// The fill of a small control or tile: a thin veil that lets the page's
+/// colour through, as the glass cards do. `lit` is 0 at rest and 1 pointed at.
+pub fn frosted(palette: &Palette, lit: f32) -> Color32 {
+    let (rest, hover) = if palette.dark {
+        (20.0, 36.0)
+    } else {
+        (14.0, 26.0)
+    };
+    let alpha = (rest + (hover - rest) * lit.clamp(0.0, 1.0)) as u8;
+    if palette.dark {
+        Color32::from_white_alpha(alpha)
+    } else {
+        Color32::from_black_alpha(alpha)
+    }
+}
+
+/// The hairline that keeps a [`frosted`] shape's edge readable.
+pub fn frosted_edge(palette: &Palette) -> Stroke {
+    let color = if palette.dark {
+        Color32::from_white_alpha(16)
+    } else {
+        Color32::from_black_alpha(14)
+    };
+    Stroke::new(1.0, color)
 }
 
 /// Horizontal offset that optically centers play triangles.
@@ -823,32 +919,29 @@ pub fn circle_button(
             response.is_pointer_button_down_on(),
             motion::PRESS,
         );
-        let radius = diameter / 2.0 * (1.0 + 0.05 * hovered - 0.06 * pressed);
+        // It stays exactly where it is: the disc only swells and brightens
+        // under the pointer, and sinks a little while held.
+        let radius = diameter / 2.0 * (1.0 + 0.04 * hovered - 0.06 * pressed);
         let fill = crate::ui::blend(fill, fill_hover, hovered);
-        // The disc leans toward the pointer, as if drawn to it.
-        let pull = response
-            .hover_pos()
-            .map_or(Vec2::ZERO, |pos| (pos - rect.center()) * 0.14);
-        let drift = Vec2::new(
-            motion::spring(ctx, response.id.with("drift-x"), pull.x, motion::LIVELY),
-            motion::spring(ctx, response.id.with("drift-y"), pull.y, motion::LIVELY),
-        );
-        let rect = rect.translate(drift);
-        // A press sends a ring out from the disc.
-        let ring = response.id.with("ring");
-        if response.clicked() {
-            motion::begin(ctx, ring, motion::RIPPLE);
-        }
-        if let Some(t) = motion::running(ctx, ring) {
-            ui.painter().circle_stroke(
-                rect.center(),
-                diameter / 2.0 + 12.0 * t,
-                Stroke::new(2.0 * (1.0 - t), fill.gamma_multiply(0.5 * (1.0 - t))),
-            );
-        }
         ui.painter().circle_filled(rect.center(), radius, fill);
-        // A new icon (Play becoming Pause) grows in while the old one
-        // shrinks away, so the change reads as the press taking effect.
+        let icon_size = diameter * 0.46;
+        if matches!(icon, Icon::PlayFilled | Icon::PauseFilled) {
+            let pause = motion::toward(
+                ctx,
+                response.id.with("morph"),
+                icon == Icon::PauseFilled,
+                PLAY_MORPH,
+            );
+            let size = icon_size * (1.0 - 0.06 * pressed);
+            paint_play_pause(ui, rect.center(), size, pause, icon_color);
+            focus_ring(ui, &response);
+            return if tooltip.is_empty() {
+                response
+            } else {
+                response.on_hover_text(tooltip)
+            };
+        }
+        // Any other icon grows in while the old one shrinks away.
         let swap_id = response.id.with("icon");
         let previous = ctx.data(|data| data.get_temp::<Icon>(swap_id));
         if previous.is_some_and(|previous| previous != icon) {
@@ -856,7 +949,6 @@ pub fn circle_button(
             motion::begin(ctx, swap_id.with("swap"), motion::FEEDBACK);
         }
         ctx.data_mut(|data| data.insert_temp(swap_id, icon));
-        let icon_size = diameter * 0.46;
         let paint = |icon: Icon, scale: f32, alpha: f32| {
             let size = icon_size * scale;
             let offset = play_glyph_offset(icon, size);
@@ -1124,7 +1216,7 @@ fn soft_button_inner(
             response.is_pointer_button_down_on(),
             motion::PRESS,
         );
-        let rest = crate::ui::blend(palette.surface, palette.surface_hover, lit);
+        let rest = frosted(palette, lit);
         // In a group the one pill slides under the chip that is on.
         let in_group = ui.ctx().data_mut(|data| {
             let group = data.get_temp::<PillGroup>(pill_group_key());

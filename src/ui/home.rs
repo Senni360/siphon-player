@@ -248,16 +248,22 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
         .tint_for(art)
         .map(super::glow_color)
         .unwrap_or(palette.surface_active);
+    let ambient = super::ambient_glow(app);
+    let (tint, strength) = super::settled_glow(tint, ambient);
     let glow = super::entering(ui.ctx(), 0.05);
-    ui.painter().rect_filled(rect, 18.0, palette.surface);
+    // Glass, like the panels around it, with the cover's colour lit behind
+    // the cover and melting away before the far edge.
+    ui.painter()
+        .rect_filled(rect, 18.0, super::glass_fill(&palette, palette.panel));
     motion::glow_in_card(
         ui.painter(),
         rect,
         18.0,
-        rect.left_center() + egui::vec2(150.0, 0.0),
-        width * 0.75,
-        tint.gamma_multiply(0.75 * glow),
+        rect.left_center() + egui::vec2(134.0, 0.0),
+        width * 0.62,
+        tint.gamma_multiply(0.62 * strength * glow),
     );
+    super::glass_sheen(ui, rect, 18.0);
     let cover = egui::Rect::from_center_size(
         egui::pos2(rect.left() + 28.0 + 106.0, rect.center().y),
         egui::Vec2::splat(212.0),
@@ -495,7 +501,10 @@ fn project_card(app: &mut App, ui: &mut egui::Ui, project: &crate::for_you::Proj
         project.image(card_art),
         &project.name,
         &subtitle,
-        widgets::CardCover::square(current && app.believed_playing()),
+        widgets::CardCover {
+            stacked: !matches!(project.kind, crate::for_you::Kind::Single),
+            ..widgets::CardCover::square(current && app.believed_playing())
+        },
     );
     if card.play {
         app.actions.push(if current {
@@ -736,8 +745,17 @@ fn quick_access(app: &mut App, ui: &mut egui::Ui) {
                         hovered,
                         super::kit::motion::FEEDBACK,
                     );
-                    let fill = super::blend(palette.surface, palette.surface_hover, lit);
-                    ui.painter().rect_filled(rect, CornerRadius::same(6), fill);
+                    ui.painter().rect_filled(
+                        rect,
+                        CornerRadius::same(6),
+                        theme::frosted(&palette, lit),
+                    );
+                    ui.painter().rect_stroke(
+                        rect,
+                        CornerRadius::same(6),
+                        theme::frosted_edge(&palette),
+                        egui::StrokeKind::Inside,
+                    );
                     if let Some((pointer, strength)) =
                         super::kit::motion::pointer_light(ui, response.id.with("light"), rect)
                     {

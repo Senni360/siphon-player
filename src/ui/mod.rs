@@ -582,6 +582,44 @@ pub(crate) fn glow_color(tint: Color32) -> Color32 {
     Color32::from(hsva)
 }
 
+/// The colour the window glows with for what is playing now, if any.
+pub(crate) fn ambient_glow(app: &mut App) -> Option<Color32> {
+    if !app.settings.accent_from_art {
+        return None;
+    }
+    let art = app
+        .now_playing()
+        .and_then(|now| now.art_small.or(now.art_url));
+    app.tint_for(art.as_deref()).map(glow_color)
+}
+
+/// A card's own colour made to live on the page's: the further its hue is
+/// from the glow behind it, the more it gives up its colour for that glow's
+/// and the quieter it gets, so green never sits on red. Returns the colour
+/// and how strongly to show it.
+pub(crate) fn settled_glow(own: Color32, ambient: Option<Color32>) -> (Color32, f32) {
+    let Some(ambient) = ambient else {
+        return (own, 1.0);
+    };
+    let (a, b) = (
+        egui::ecolor::Hsva::from(own),
+        egui::ecolor::Hsva::from(ambient),
+    );
+    // Either one is too grey to clash.
+    if a.s < 0.15 || b.s < 0.15 {
+        return (own, 1.0);
+    }
+    let apart = (a.h - b.h).abs();
+    let apart = apart.min(1.0 - apart) * 2.0;
+    let clash = ((apart - 0.12) / 0.33).clamp(0.0, 1.0);
+    let clash = clash * clash * (3.0 - 2.0 * clash);
+    let muted = Color32::from(egui::ecolor::Hsva {
+        s: a.s * (1.0 - 0.8 * clash),
+        ..a
+    });
+    (blend(muted, ambient, 0.7 * clash), 1.0 - 0.4 * clash)
+}
+
 /// How long the glow takes to become the next song's colour.
 /// The narrowest page the player island still fits over.
 const ISLAND_NEEDS: f32 = 900.0;
@@ -1684,5 +1722,37 @@ mod tests {
             assert!(top.color.a() > 0);
             assert_eq!((top.color.r(), top.color.g(), top.color.b()), (0, 0, 0));
         }
+    }
+}
+
+#[cfg(test)]
+mod glow_tests {
+    use super::*;
+
+    const GREEN: Color32 = Color32::from_rgb(40, 170, 90);
+    const RED: Color32 = Color32::from_rgb(170, 30, 50);
+
+    #[test]
+    fn a_card_gives_up_a_colour_that_clashes_with_the_page() {
+        let (shown, strength) = settled_glow(GREEN, Some(RED));
+        assert!(strength < 1.0);
+        assert!(
+            shown.r() > shown.g(),
+            "green no longer reads as green: {shown:?}"
+        );
+    }
+
+    #[test]
+    fn a_card_keeps_a_colour_that_fits_the_page() {
+        assert_eq!(settled_glow(RED, Some(RED)), (RED, 1.0));
+        assert_eq!(settled_glow(GREEN, None), (GREEN, 1.0));
+    }
+
+    #[test]
+    fn a_grey_page_clashes_with_nothing() {
+        assert_eq!(
+            settled_glow(GREEN, Some(Color32::from_gray(90))),
+            (GREEN, 1.0)
+        );
     }
 }

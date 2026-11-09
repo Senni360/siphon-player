@@ -417,6 +417,7 @@ fn soundcloud_cards(
                     &user.name,
                     &gettext(app.locale, "Artist"),
                     widgets::CardCover {
+                        stacked: false,
                         circular: true,
                         playable: false,
                         playing: false,
@@ -436,6 +437,7 @@ fn soundcloud_cards(
                     &playlist.name,
                     &playlist.creator,
                     widgets::CardCover {
+                        stacked: false,
                         circular: false,
                         playable: false,
                         playing: false,

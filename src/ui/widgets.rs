@@ -144,11 +144,7 @@ pub(super) fn paint_cover_with_thumbnail(
     if !loaded || revealing.is_some() {
         let cover = revealing.map_or(1.0, |t| 1.0 - t);
         let painter = ui.painter();
-        let fill = if palette.dark {
-            palette.surface_hover
-        } else {
-            palette.surface_active
-        };
+        let fill = theme::frosted(palette, 1.0);
         // Over a cover that is fading in the placeholder is solid, or the
         // cover would show through before its turn.
         let fill = if revealing.is_some() {
@@ -161,13 +157,22 @@ pub(super) fn paint_cover_with_thumbnail(
         } else {
             painter.rect_filled(rect, corner, fill);
         }
-        let icon_size = (rect.width() * 0.42).clamp(12.0, 64.0);
+        if revealing.is_none() && radius < rect.width() / 2.0 - 0.5 {
+            painter.rect_stroke(
+                rect,
+                corner,
+                theme::frosted_edge(palette),
+                egui::StrokeKind::Inside,
+            );
+            super::glass_sheen(ui, rect, radius);
+        }
+        let icon_size = (rect.width() * 0.36).clamp(12.0, 56.0);
         theme::paint_icon(
             ui,
             fallback,
             rect,
             icon_size,
-            palette.dim.gamma_multiply(cover),
+            palette.secondary.gamma_multiply(0.7 * cover),
         );
     }
 }
@@ -3584,6 +3589,8 @@ pub struct CardCover {
     pub playable: bool,
     /// The card's context is the one playing, so the control pauses.
     pub playing: bool,
+    /// More than one song: sleeves show behind the cover, as a stack of records.
+    pub stacked: bool,
 }
 
 impl CardCover {
@@ -3666,6 +3673,7 @@ fn card_body(
         circular,
         playable,
         playing,
+        stacked,
     } = cover;
     let palette = app.palette;
     const PAD: f32 = 12.0;
@@ -3761,6 +3769,23 @@ fn card_body(
         let image_rect = Rect::from_min_size(rect.min + vec2(PAD, PAD), Vec2::splat(image_size));
         let radius = if circular { image_size / 2.0 } else { 6.0 };
         let image_rect = image_rect.expand(lift);
+        if stacked {
+            // Two sleeves stand behind an album's cover, each narrower and
+            // fainter than the one before. They part a little under the pointer.
+            for (step, alpha) in [(2.0_f32, 26_u8), (1.0, 48)] {
+                let rise = step * (4.0 + 1.5 * lit);
+                let sleeve = Rect::from_min_max(
+                    image_rect.min + vec2(step * 5.0, -rise),
+                    pos2(image_rect.right() - step * 5.0, image_rect.top() + radius),
+                );
+                let fill = if palette.dark {
+                    Color32::from_white_alpha(alpha)
+                } else {
+                    Color32::from_black_alpha(alpha)
+                };
+                ui.painter().rect_filled(sleeve, 4.0, fill);
+            }
+        }
         paint_shadow(ui, &palette, image_rect, radius);
         paint_cover(
             ui,
@@ -4619,11 +4644,7 @@ pub fn search_field(
     let height = 34.0;
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     let has_focus = ui.memory(|memory| memory.has_focus(id));
-    let fill = if has_focus {
-        palette.surface_hover
-    } else {
-        palette.surface
-    };
+    let fill = theme::frosted(palette, if has_focus { 1.0 } else { 0.0 });
     ui.painter().rect_filled(rect, height / 2.0, fill);
     // A field, not a line of words, on every surface it sits on.
     ui.painter().rect_stroke(
