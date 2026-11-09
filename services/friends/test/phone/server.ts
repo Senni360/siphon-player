@@ -11,9 +11,11 @@
 //   server.setComputerOffline(true);
 //   server.dropEventStream(1); server.endEventStreams();
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { Socket } from 'node:net';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { TestSocket } from './websocket.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const WEB = join(here, '..', '..', 'assets', 'web');
@@ -100,9 +102,10 @@ const PLAYLISTS = [
 
 // ---------------------------------------------------------------- the page's headers
 // Copied from src/web.ts (HEADERS). Keep the two in step: the page is only meant
-// to load itself, Spotify's own sign-in and API, and images from wherever art is.
+// to load itself, Spotify's own sign-in and API, the edge, and images from
+// wherever art is. The local mock edge is this server, on 127.0.0.1.
 const HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https:; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https: http://127.0.0.1:*; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev http://127.0.0.1:* ws://127.0.0.1:*; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };
@@ -232,6 +235,29 @@ export class PhoneServer {
   /** What the phone last said it is playing, if anything. */
   phone: unknown = null;
 
+  // ------------------------------------------------------------ the mock edge
+  /** Whether `/api/edge/token` answers tokens at all. Off by default, as today. */
+  edgeOn = false;
+  /** The token route answers 503, as a service without the shared secret does. */
+  edgeDown = false;
+  /** Whether a computer is on the edge's `/v1/live` room. */
+  edgeComputerPresent = false;
+  /** Sources `/v1/resolve` refuses. */
+  readonly edgeRefused = new Set<string>();
+  /** The next `/api/edge/token` names a media token that is already expired. */
+  edgeExpireNext = false;
+  /** What `/v1/match` answers. Null means no match. */
+  edgeMatchSource: string | null = 'soundcloud:encore/song-1';
+  /** The saved matches `/v1/sync/matches` reports. */
+  edgeSaved: Record<string, unknown> = {};
+
+  edgeTokenRequests = 0;
+  edgeResolveCalls: string[] = [];
+  edgeWarmed: string[] = [];
+  edgeMatchCalls = 0;
+  edgeStateSent = 0;
+  wsCommands: Array<Record<string, unknown>> = [];
+
   port = 0;
   requests: string[] = [];
   sent: Array<Record<string, unknown>> = [];
@@ -241,9 +267,18 @@ export class PhoneServer {
   phoneWrites = 0;
   computerOffline = false;
   private readonly allowedSecret = 'a'.repeat(64);
+  private readonly edgeMedia = 'edge-media-token';
+  private readonly edgeSync = 'edge-sync-token';
+  private readonly edgeLive = 'edge-live-token';
+  private readonly peers: TestSocket[] = [];
+  private wsSeq = 0;
 
   get url(): string {
     return `http://127.0.0.1:${this.port}`;
+  }
+
+  get edgePeers(): number {
+    return this.peers.length;
   }
 
   songAt(index: number): Song {
@@ -252,6 +287,41 @@ export class PhoneServer {
 
   countRequests(entry: string): number {
     return this.requests.filter(request => request === entry).length;
+  }
+
+  /** The edge is reachable: tokens, resolve, match, warm and a live room. */
+  enableEdge(options: { computer?: boolean; expireFirst?: boolean; match?: string | null; saved?: Record<string, unknown> } = {}): void {
+    this.edgeOn = true;
+    this.edgeDown = false;
+    this.edgeComputerPresent = !!options.computer;
+    this.edgeExpireNext = !!options.expireFirst;
+    if (options.match !== undefined) this.edgeMatchSource = options.match;
+    if (options.saved !== undefined) this.edgeSaved = options.saved;
+  }
+
+  /** The edge is away: the token route answers 503 and no socket is offered. */
+  disableEdge(): void {
+    this.edgeOn = false;
+    this.edgeDown = true;
+    this.edgeComputerPresent = false;
+  }
+
+  /** A computer joins or leaves the live room, and the page hears either. */
+  setEdgeComputerPresent(present: boolean): void {
+    this.edgeComputerPresent = present;
+    if (!present) return;
+    for (const peer of this.peers) this.sendEdgeState({}, peer);
+  }
+
+  /** The computer's player changes, but only the edge socket hears it. */
+  sendEdgeState(change: Partial<PlayerState> = {}, only?: TestSocket): void {
+    this.state = { ...this.state, ...change, at: Date.now() };
+    this.edgeStateSent++;
+    const payload = {
+      v: 1, t: 'state', id: `pc-${++this.wsSeq}`, from: 'computer', seq: this.wsSeq,
+      body: { v: 1, t: 'state', id: `pc-state-${this.wsSeq}`, state: { ...this.state }, at: Date.now() },
+    };
+    for (const peer of only ? [only] : this.peers) peer.send(payload);
   }
 
   async start(): Promise<void> {
@@ -266,6 +336,7 @@ export class PhoneServer {
       this.http!.once('error', reject);
       this.http!.listen(0, '127.0.0.1', () => resolve());
     });
+    this.http.on('upgrade', (request, socket) => this.upgrade(request, socket as Socket));
     const address = this.http.address();
     this.port = typeof address === 'object' && address ? address.port : 0;
     this.keepAlive = setInterval(() => {
@@ -279,6 +350,8 @@ export class PhoneServer {
   async close(): Promise<void> {
     this.closing = true;
     if (this.keepAlive) { clearInterval(this.keepAlive); this.keepAlive = null; }
+    for (const peer of this.peers) peer.close();
+    this.peers.length = 0;
     for (const response of [...this.events]) {
       try { response.end(); } catch { /* gone already */ }
     }
@@ -336,11 +409,109 @@ export class PhoneServer {
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
     this.requests.push(`${request.method ?? 'GET'} ${url.pathname}`);
+    if (url.pathname.startsWith('/v1/')) {
+      await this.handleEdge(request, response, url);
+      return;
+    }
     if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
       await this.handleApi(request, response, url);
       return;
     }
     this.serveStatic(request, response, url.pathname);
+  }
+
+  // ------------------------------------------------------------ the mock edge's socket
+  private upgrade(request: IncomingMessage, socket: Socket): void {
+    const url = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const allowed = this.edgeOn && !this.edgeDown && url.pathname === '/v1/live' && url.searchParams.get('token') === this.edgeLive;
+    if (!allowed) {
+      try {
+        socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+      } catch { /* gone already */ }
+      socket.destroy();
+      return;
+    }
+    let peer: TestSocket | null = null;
+    peer = TestSocket.accept(request, socket, text => { if (peer) this.edgeMessage(peer, text); });
+    if (!peer) return;
+    this.peers.push(peer);
+    this.sendHello(peer);
+  }
+
+  private sendHello(peer: TestSocket): void {
+    const state = this.edgeComputerPresent
+      ? {
+          t: 'state',
+          seq: ++this.wsSeq,
+          body: { v: 1, t: 'state', id: `pc-state-${this.wsSeq}`, state: { ...this.liveState() }, at: Date.now() },
+        }
+      : null;
+    peer.send({
+      v: 1, t: 'hello', id: 'srv-test', ok: true, role: 'phone', sub: 'user-1',
+      seq: this.wsSeq, epoch: 'test', reset: false, replayed: 0, state,
+      heartbeatMs: 15000, bufferMs: 120000,
+    });
+  }
+
+  private edgeMessage(peer: TestSocket, text: string): void {
+    let message: Record<string, unknown>;
+    try { message = JSON.parse(text) as Record<string, unknown>; } catch { return; }
+    if (!message || typeof message !== 'object') return;
+    this.wsCommands.push(message);
+    if (message.t === 'command') {
+      const answer = this.answer(String(message.kind ?? ''), message) as Record<string, unknown>;
+      peer.send({ v: 1, t: 'reply', id: message.id, from: 'computer', seq: ++this.wsSeq, ...answer });
+    } else if (message.t === 'phone') {
+      this.phone = message.phone ?? null;
+    }
+  }
+
+  // ------------------------------------------------------------ the mock edge's HTTP API
+  private async handleEdge(request: IncomingMessage, response: ServerResponse, url: URL): Promise<void> {
+    const auth = (request.headers.authorization ?? '').replace(/^Bearer /, '');
+    const method = request.method ?? 'GET';
+
+    if (url.pathname === '/v1/sync/matches' && method === 'GET') {
+      if (auth !== this.edgeSync) return this.edgeError(response, 401, 'unauthorized');
+      return this.json(response, 200, { v: 1, doc: 'matches', revision: 1, updatedAt: Date.now(), data: this.edgeSaved });
+    }
+    // The expired token is the first one the token route handed out.
+    if (auth !== this.edgeMedia) return this.edgeError(response, 401, 'unauthorized');
+
+    if (url.pathname === '/v1/resolve' && method === 'POST') {
+      const input = await this.readJson(request) as { source?: unknown } | null;
+      const source = typeof input?.source === 'string' ? input.source : '';
+      this.edgeResolveCalls.push(source);
+      if (!source || this.edgeRefused.has(source)) return this.edgeError(response, 400, 'invalid_source');
+      return this.json(response, 200, { v: 1, key: 'edge-key', contentType: 'audio/mp4', size: 1, cached: false, url: `/v1/media/edge-key?token=${encodeURIComponent(auth)}` });
+    }
+    if (url.pathname === '/v1/match' && method === 'POST') {
+      const input = await this.readJson(request) as Record<string, unknown> | null;
+      this.edgeMatchCalls++;
+      if (!input || typeof input.name !== 'string' || !input.name || !Array.isArray(input.artists) || !input.artists.length) {
+        return this.edgeError(response, 400, 'invalid_track');
+      }
+      const match = this.edgeMatchSource
+        ? { source: this.edgeMatchSource, provider: 'soundcloud', score: 0.98, title: input.name, uploader: 'Encore', duration: Number(input.durationMs ?? 0) / 1000 }
+        : null;
+      return this.json(response, 200, { v: 1, match });
+    }
+    if (url.pathname === '/v1/warm' && method === 'POST') {
+      const input = await this.readJson(request) as { sources?: unknown } | null;
+      const sources = Array.isArray(input?.sources) ? input.sources.map(String) : [];
+      this.edgeWarmed.push(...sources);
+      return this.json(response, 202, { v: 1, warmed: sources.map(() => ({ key: 'warm', state: 'queued' })), rejected: 0 });
+    }
+    if (url.pathname.startsWith('/v1/media/') && (method === 'GET' || method === 'HEAD')) {
+      response.writeHead(200, { 'Content-Type': 'audio/mp4', 'Content-Length': 1, 'Cache-Control': 'private, max-age=3600', 'Accept-Ranges': 'bytes' });
+      response.end(method === 'HEAD' ? undefined : Buffer.from([0]));
+      return;
+    }
+    return this.edgeError(response, 404, 'not_found');
+  }
+
+  private edgeError(response: ServerResponse, status: number, code: string): void {
+    this.json(response, status, { v: 1, error: code });
   }
 
   private serveStatic(request: IncomingMessage, response: ServerResponse, pathname: string): void {
@@ -370,6 +541,19 @@ export class PhoneServer {
       return this.json(response, 200, { secret: this.allowedSecret, display_name: 'Sam' });
     }
     if (!this.authorized(request)) return this.json(response, 401, { error: 'Sign in to the group' });
+
+    if (path === '/edge/token' && method === 'POST') {
+      this.edgeTokenRequests++;
+      if (this.edgeDown) return this.json(response, 503, { error: 'Edge is not configured' });
+      const input = await this.readJson(request) as { role?: unknown } | null;
+      if (input?.role !== 'phone' && input?.role !== 'computer') return this.json(response, 400, { error: 'Invalid role' });
+      // Without an edge to offer, this older-shaped answer names none: the phone
+      // falls back without a failed request in its console.
+      if (!this.edgeOn) return this.json(response, 200, { url: null });
+      let media = this.edgeMedia;
+      if (this.edgeExpireNext) { this.edgeExpireNext = false; media = 'edge-media-expired'; }
+      return this.json(response, 200, { url: this.url, live: this.edgeLive, media, sync: this.edgeSync });
+    }
 
     if (path === '/me' && method === 'GET') {
       return this.json(response, 200, { user_id: account.user_id, display_name: account.display_name });

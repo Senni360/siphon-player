@@ -124,28 +124,61 @@ through the same way and expire within a minute. No sign-in ever leaves this com
 the phone doesn't hold Spotify, SoundCloud or Google access. This connection only runs
 on a computer that has linked a phone.
 
+The always-on edge at `edge.encore.senni.dev` is the phone's second answer, for while
+this computer is off. It is spoken to directly and is entirely optional. The phone asks
+the group service (`POST /api/edge/token`) for five-minute tokens carrying its account
+id and its own role, one each for realtime, media and sync; the service signs them with
+the same HMAC secret the edge verifies, and answers 503 when that secret is not set.
+Tokens are fetched lazily and refreshed before they run out, and an expired one is
+replaced once. The phone never holds the secret itself.
+
+With an edge token, a song's audio comes from the edge first: a SoundCloud track by its
+public permalink, a Spotify track as the same song found by YouTube or SoundCloud with
+the download matcher (a saved match outranks a new search). Only public sources the
+edge accepts are sent, and a refusal, a timeout or a slow answer falls back to asking
+this computer as before. A YouTube song asks this computer first while it is online;
+without it the edge is tried, and the page's normal "can't play here" state follows if
+that fails too. The edge currently cannot produce YouTube audio, so those songs end up
+at this computer. Group links and anything else keep going through this computer. The
+phone also asks the edge to warm the next two songs ahead of time, instead of only
+looking up their addresses. None of this shows an error by itself: if neither side can
+answer, the page takes its existing stuck state with a plain reason.
+
+While the phone's page is open, it also keeps a WebSocket open to the edge's `/v1/live`
+room, reconnecting with backoff and replaying what it missed by sequence number, and
+tries again when the page becomes visible or the network returns. While a computer is
+in that room, the phone's commands travel over it and its state comes back the same
+way, so the two agree at once. The phone sends a command down one path only: with no
+computer in the room, or with the socket down, everything keeps using the group
+service's relay and event stream described below, unchanged, and a down socket is never
+shown as an error. The desktop app does not use the edge yet; it keeps its existing
+group-service connection.
+
 While the phone's page is open, the phone and this computer each also keep an event
 stream open to the group service (`/live/remote/events`), which hears through Redis
 publish and subscribe. A waiting command, a change to what plays here, or a ready answer
 then reaches the other side within moments, and the looks slow to every five or six
-seconds as a safety net. The service ends each stream after four minutes and it's
-opened again. While no phone is open, no stream is.
+seconds as a safety net. The stream stays open whether or not the edge WebSocket is:
+the edge carries commands only while a computer is in its room. The service ends each
+stream after four minutes and it's opened again. While no phone is open, no stream is.
 
-When the phone plays music itself, it tells the group service what it plays, whether
-it's paused and where it is, when that changes and at least every half minute, and the
-service keeps it for two minutes. This computer reads it with its looks, every four
+When the phone plays music itself, it tells the computer what it plays, whether
+it's paused and where it is, when that changes and at least every half minute, through
+the group service or the edge socket when a computer is in its room, and the service
+keeps it for two minutes. This computer reads it with its looks, every four
 seconds while the phone plays, and shows it over the player. Pressing pause or play
 there sends a word on the phone's stream, which only a phone with Encore open hears.
 **Play here** plays the same song on this computer from the same place and pauses the
 phone.
 
-When the phone plays music itself, it asks this computer where a song's audio is and
-gets back a short-lived address it fetches directly: SoundCloud's stream, YouTube's
-audio, or a group song's Blob link. A Spotify song is looked up by artist, title and
-length on YouTube and SoundCloud with the download matcher, and the first match is
-remembered on disk, so a later play or download searches no more. Without a match
-the page says so, with Skip and Play on computer: the phone never hands playback to
-another app or leaves the page.
+When the phone plays music itself, it asks for a song's audio, the edge first when that
+answers and this computer otherwise, and gets back a short-lived address it fetches
+directly: SoundCloud's stream, YouTube's audio, or a group song's Blob link. A Spotify
+song is looked up by artist, title and length on YouTube and SoundCloud with the
+download matcher, and the first match is remembered on disk, so a later play or
+download searches no more. The edge keeps its own saved matches and is preferred over
+a new search there. Without a match the page says so, with Skip and Play on computer:
+the phone never hands playback to another app or leaves the page.
 
 An artist's page also reads what they have elsewhere, so it can list what Spotify
 doesn't have. It searches SoundCloud's and YouTube's public listings for the artist's
@@ -321,7 +354,10 @@ out, or a reconnection that gives up stops it.
   stores nor logs it. That token carries the app's full Web API scopes until it
   expires, within the hour, so connecting means trusting whoever runs the service
   for that long. Nothing is sent before that press. No SoundCloud grant ever
-  leaves the app: linking SoundCloud only tells the service your username. See the repository's `services/friends/README.md`
+  leaves the app: linking SoundCloud only tells the service your username. The
+  same group sign-in can mint five-minute edge tokens; the service stores
+  neither them nor the shared secret, and only answers when `EDGE_TOKEN_SECRET`
+  is configured. See the repository's `services/friends/README.md`
   for its API, deployment setup, membership revocation and local-forget rules.
   Once a member agrees to share their listening, it also receives the song they
   are playing and its position, when that changes and every 90 seconds, and keeps

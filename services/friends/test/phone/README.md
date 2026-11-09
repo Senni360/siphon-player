@@ -22,7 +22,10 @@ this. On a fresh checkout, install the browsers once with
   playlists, live presence, and the `/api/live/remote/*` pair (state, send,
   reply, phone, events as server-sent events) that a computer would normally
   answer. The seed has a 200-song mixed playlist plus home sections, liked
-  songs and search results.
+  songs and search results. It also mocks the always-on edge at `/api/edge/token`,
+  `/v1/resolve`, `/v1/match`, `/v1/warm`, `/v1/sync/matches` and a `/v1/live`
+  WebSocket (`websocket.ts`); none of it is on by default, so a test opts in with
+  `server.enableEdge()`. Nothing here calls the real edge.
 - `browser-fake.js` — installed with `addInitScript`. `window.Audio` becomes a
   fake element (`window.__audio.advance/fail/play/pause`), and
   `navigator.mediaSession`/`MediaMetadata` record handlers, metadata and
@@ -43,6 +46,9 @@ server.setComputerOffline(true);
 server.dropEventStream(1);
 server.endEventStreams();
 server.setComputerState({ song: server.songAt(121), playing: false });
+server.enableEdge({ computer: true });     // or enableEdge({ expireFirst: true })
+server.edgeRefused.add('soundcloud:encore/song-1');
+server.sendEdgeState({ playing: false });
 ```
 
 A test that deliberately causes a browser-level log line (Chromium notes an
