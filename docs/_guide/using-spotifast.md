@@ -24,13 +24,24 @@ on **Middle-click autoscroll** under **Settings > Appearance**. It is off by
 default, because Linux desktops usually paste the primary selection on middle
 click. macOS retains its existing middle-click behavior.
 
-## Scrolling shelves
+## Home
 
-The tiles at the top of Home show what you played most recently, as
-Spotify's Home does: the playlists, albums, artists and podcasts you played
-from, Liked Songs, and songs you played on their own, newest first. A tile
-opens its page, and its play button starts it again; a song's tile plays the
-song and opens its album. Until Spotify's play history arrives, or when it
+Home opens with a greeting and one large pick: the best new album, EP or
+single from the artists you play and like most, or a song picked for you,
+with why it is there and the next few beside it. What is new from the group
+comes next, then recent places, **New releases**, **More for you**,
+**Beats for you**, and, when shown, **Made for you** and **Your top mixes**.
+**Recently played** follows, then **Your top artists** and **Your top songs**.
+
+Nothing on Home scrolls sideways: each row holds what fits. Elsewhere a shelf
+pages with the arrows at its ends, in whole cards, and the wheel keeps
+scrolling the page. Holding `Shift` while turning the wheel also moves a
+shelf sideways.
+
+**Recently played** shows the playlists, albums, artists and podcasts you
+played from, Liked Songs, and songs you played on their own, newest first. A
+tile opens its page, and its play button starts it again; a song's tile plays
+the song and opens its album. Until Spotify's play history arrives, or when it
 holds fewer than eight, Liked Songs and the first playlists in your Library
 fill the rest.
 
@@ -49,25 +60,25 @@ the same personalized read and has no fallback: the shelf appears once
 local playback has read it, and stays hidden for accounts Spotify gives no
 top mixes. If a refresh fails, the mixes already on screen remain.
 
-**New releases** shows the latest albums, EPs and singles from the artists
-you follow, newest first. A card opens its release. The shelf's title opens
-the **New releases** page, which lists every song of those releases, newest
-release first, with Play and Shuffle as on a playlist. The releases come
-from the feed behind the bell in Spotify's own apps when local playback is
-set up; reading it there does not mark anything as seen in Spotify. Without
-local playback, or when that feed cannot be read, the shelf asks the Web API
-for the newest albums and singles of up to 50 of the artists you follow
-instead. The shelf stays hidden when there are no releases.
+**New releases** gathers albums, EPs and singles just out from the artists
+you play and like most, across Spotify and SoundCloud, plus new uploads from
+artists and channels you follow. The newest is on the large card, and the
+rest follow in the shelf. A card opens its release; a single plays. A release
+scores by how much its artists are played, halved for every five days since
+it came out, so anything older than six weeks is left out. One copy of a
+release shows, from the source you use more, and no artist appears more than
+twice.
+
+**More for you** are songs across all three sources related to what you play,
+and **Beats for you** keeps the beats apart, mostly from YouTube. What you
+played just now gives way, no artist fills the page, and each source gets
+about its share of your listening.
 
 In Discover Weekly and Spotify's other playlists, a song's menu offers
 **Hide in this playlist**, as Spotify's apps do. A hidden song stays in the
 list, greyed out, and is skipped when the playlist plays; **Show in this
 playlist** brings it back. Spotify keeps the choice, so it carries over to
 its other apps. This needs local playback.
-
-Point at a horizontal shelf, such as Made for you or Recently played on
-Home, and hold `Shift` while turning the mouse wheel. The shelf moves while
-the surrounding page stays put. Release `Shift` to scroll the page normally.
 
 ## Podcasts
 
