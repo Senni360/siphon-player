@@ -3930,6 +3930,7 @@ impl App {
         if state.track_sequence != self.local.track_sequence
             && matches!(self.target(), Target::Local)
         {
+            self.stats_finish_listening();
             self.listening = None;
         }
         let track_changed =
@@ -15330,6 +15331,7 @@ impl App {
 
     /// Final teardown at real quit.
     pub fn shutdown(&mut self) {
+        self.stats_finish_listening();
         self.cancel_soundcloud_playlist_adds();
         self.save_state();
         self.flush_files();
@@ -35480,6 +35482,14 @@ mod tests {
             assert_eq!(app.plays.plays().len(), expected);
             app.handle_hybrid_event(tag, HybridEvent::EndOfTrack);
             assert!(app.listening.is_none());
+            let logged: Vec<_> = app
+                .backend
+                .take_stats_records()
+                .into_iter()
+                .flatten()
+                .collect();
+            assert_eq!(logged.len(), 1, "a song heard to its end is logged");
+            assert!(!logged[0].estimated);
         }
         app.backend.shutdown();
         app.flush_files();

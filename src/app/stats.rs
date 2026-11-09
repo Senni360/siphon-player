@@ -409,6 +409,45 @@ mod tests {
     }
 
     #[test]
+    fn a_new_song_from_the_spotify_engine_logs_the_one_it_ended() {
+        let mut app = test_app("stats-track-change");
+        app.remote = None;
+        app.selected_device = None;
+        let mut held = listening(Duration::from_secs(90));
+        held.play = app.stats_play_of(&now_playing("spotify:track:x"));
+        let state = |sequence: u64, uri: &str| crate::player::LocalState {
+            connected: true,
+            playback: crate::player::Playback::Playing,
+            track_sequence: sequence,
+            track: Some(crate::player::LocalTrack {
+                uri: uri.into(),
+                title: "Song".into(),
+                duration_ms: 200_000,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        app.local_ready = true;
+        app.handle_local(state(1, "spotify:track:x"));
+        app.listening = Some(held);
+        app.handle_local(state(2, "spotify:track:y"));
+        let plays = logged(&app);
+        assert_eq!(plays.len(), 1);
+        assert_eq!(plays[0].uri, "spotify:track:x");
+        assert!(!plays[0].estimated);
+    }
+
+    #[test]
+    fn quitting_logs_the_song_still_playing() {
+        let mut app = test_app("stats-quit");
+        let mut held = listening(Duration::from_secs(90));
+        held.play = app.stats_play_of(&now_playing("spotify:track:x"));
+        app.listening = Some(held);
+        app.shutdown();
+        assert_eq!(logged(&app).len(), 1);
+    }
+
+    #[test]
     fn a_skip_is_not_logged() {
         let mut app = test_app("stats-skip");
         let mut held = listening(Duration::from_secs(5));

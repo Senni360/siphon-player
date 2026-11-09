@@ -1268,6 +1268,7 @@ impl App {
         if let Some(pending) = &mut self.hybrid.pending {
             pending.request.position_ms = position_ms;
         }
+        self.stats_finish_listening();
         self.listening = None;
         self.played_row = None;
         if let Some(controls) = &mut self.media_controls {
