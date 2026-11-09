@@ -899,23 +899,39 @@ impl Engine {
             Duration::from_millis(500),
         )
         .await;
-        self.stop_decoder();
+        self.stop_decoder().await?;
         log::debug!("Playback handoff: decoder stopped; Spotify output inhibited");
         Ok(())
     }
 
-    fn stop_decoder(&self) {
+    async fn stop_decoder(&self) -> Result<()> {
         self.cancel_hybrid_events();
-        // A switch discards the queued audio instead of playing it out. The
-        // decoder stops on the player's ordered command channel, ahead of the
-        // load that replaces it, so nothing waits for a drain or an echo.
+        // A switch discards the queued audio instead of playing it out.
         self.audio.interrupt_output();
         self.player.stop();
+        // Player processes commands in order. Subscribing after Stop and
+        // requesting an unchanged volume echo is a barrier even when the
+        // decoder was already stopped, which emits no Stopped event. Without
+        // it, the old song's last events could be credited to the next one.
+        // Commands are quick, so this costs milliseconds, not the deadline.
+        let mut events = self.player.get_player_event_channel();
+        let volume = self.state.lock().unwrap_or_else(|p| p.into_inner()).volume;
+        self.player.emit_volume_changed_event(volume);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while let Some(event) = events.recv().await {
+                if matches!(event, PlayerEvent::VolumeChanged { .. }) {
+                    return Ok(());
+                }
+            }
+            anyhow::bail!("Spotify's decoder stopped responding")
+        })
+        .await
+        .context("Spotify did not acknowledge stopping")?
     }
 
     /// Explicit single-item list: Spirc has no context to resolve or autoplay.
-    /// The ordered Stop before this load replaces any previous child, and the
-    /// observer subscribes only after it, so an A, B, A sequence stays apart.
+    /// Stop acknowledgement also drains the previous play request before the
+    /// tagged observer subscribes, including an A, B, A sequence.
     pub async fn hybrid_load(
         &self,
         tag: PlaybackTag,
