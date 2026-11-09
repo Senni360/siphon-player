@@ -467,7 +467,7 @@ bullet; each artist name remains a separate link.
 
 ## Starting with your computer
 
-**Settings > Playback on this computer > Start with your computer** opens
+**Settings > Devices > Start with your computer** opens
 Siphon when you log in. **With the window** opens it as you would;
 **In the tray** starts it without a window, ready for media keys and the tray
 icon; on macOS it reads **In the menu bar**. **Off** leaves your login alone.
@@ -506,10 +506,9 @@ window or switching to the Winamp window creates its controls again. Media
 keys and the system's now-playing controls continue working while the window
 is closed.
 
-For the Winamp mini player, turn off **Show in taskbar** under
-**Settings > Winamp skins**, or **Show in taskbar** in its options menu.
-The choice survives restarts. The mini player stays visible; the tray icon,
-**Ctrl+M**, the skin logo, and launching Siphon again remain ways to reach
+For the Winamp mini player, turn off **Show in taskbar** in its options menu.
+The choice survives restarts. The mini player stays visible; the skin logo and
+launching Siphon again remain ways to reach
 the app. Returning to the main window always restores its taskbar button.
 Changing the option while the mini player is open replaces that window while
 playback continues. This setting is available on Windows and in Linux X11
@@ -543,7 +542,7 @@ the window is closed to the menu bar.
 
 ### Menu bar only
 
-Turn off **Show in Dock** under **Settings > Playback on this computer** to
+Turn off **Show in Dock** under **Settings > Devices** to
 run Siphon from the menu bar alone. The Dock icon goes at once, without a
 restart, and the window stays open in front. Siphon then also leaves the
 Cmd+Tab switcher and shows no menu bar of its own while you use it, as other
@@ -593,7 +592,7 @@ When music is paused, hovering still reveals the controls so you can
 resume playback directly from the notch.
 
 To turn on the notch overlay, check **MacBook notch widget** in
-Settings under **Playback on this computer**.
+Settings under **Devices**.
 
 ## Where the music is playing from
 
@@ -618,7 +617,7 @@ time; pausing or seeking the current play does not create another entry.
 The same play reported both locally and by Spotify appears once.
 
 The local list is stored in `history.json` and is never uploaded. Settings →
-Storage shows its location and has a **Clear history** button.
+Downloads & files shows its location and has a **Clear history** button.
 
 On Windows, the main window's minimize, maximize, and close buttons share the
 top bar with Siphon's controls. Drag an empty part of that bar to move or

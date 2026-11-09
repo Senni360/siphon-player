@@ -35,8 +35,9 @@ Choose **Turn off Soloist** in Settings to stop it and restore the built-in
 player's entry and settings. Saved built-in preferences are kept.
 While Soloist is enabled, built-in audio, EQ and visualization settings are
 hidden. Shared controls for the tray, startup and Siphon updates remain
-under **Application**. The Soloist card keeps version, expiry and limitations
-under **Details**, while pairing instructions and errors remain visible.
+under **Devices** and **Updates** in Settings. The Soloist card keeps version,
+expiry and limitations under **Details**, while pairing instructions and
+errors remain visible.
 The saved key and pairing are retained for **I already saved a key** next time; signing out of Siphon
 removes them. Closing Siphon completely stops the child player. Closing to
 the tray leaves both running.

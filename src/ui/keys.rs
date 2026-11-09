@@ -14,7 +14,6 @@ pub(super) const fn platform_shortcut<'a>(ctrl: &'a str, cmd: &'a str) -> &'a st
 
 pub(super) const SIDEBAR_SHORTCUT: &str = platform_shortcut("Ctrl+B", "Cmd+B");
 pub(super) const QUIT_SHORTCUT: &str = platform_shortcut("Ctrl+Q", "Cmd+Q");
-pub(super) const WINAMP_SHORTCUT: &str = platform_shortcut("Ctrl+M", "Cmd+Shift+M");
 
 pub fn handle(app: &mut App, ctx: &egui::Context) {
     // A focused song row still takes Ctrl+arrow and plain shortcuts to
@@ -79,16 +78,6 @@ pub fn handle(app: &mut App, ctx: &egui::Context) {
             key(Modifiers::COMMAND, Key::H, Action::Open(Page::Home));
         }
         key(Modifiers::COMMAND, Key::L, Action::Open(Page::LikedSongs));
-        // Cmd+M minimises on macOS.
-        if cfg!(target_os = "macos") {
-            key(
-                Modifiers::COMMAND | Modifiers::SHIFT,
-                Key::M,
-                Action::ToggleWinampWindow,
-            );
-        } else {
-            key(Modifiers::COMMAND, Key::M, Action::ToggleWinampWindow);
-        }
         key(
             Modifiers::COMMAND,
             Key::Slash,
@@ -349,7 +338,6 @@ pub fn shortcuts(locale: Locale) -> Vec<(Cow<'static, str>, Cow<'static, str>)> 
             keys(platform_shortcut("Ctrl+Shift+B", "Cmd+Shift+B")),
             gettext(locale, "Go to the playing album"),
         ),
-        (keys(WINAMP_SHORTCUT), gettext(locale, "Winamp mini player")),
         (
             keys(platform_shortcut("Ctrl+,", "Cmd+,")),
             gettext(locale, "Settings"),
@@ -583,11 +571,11 @@ mod tests {
     #[test]
     fn shortcut_constants_name_the_platform_modifier() {
         let expected = if cfg!(target_os = "macos") {
-            ["Cmd+B", "Cmd+Q", "Cmd+Shift+M"]
+            ["Cmd+B", "Cmd+Q"]
         } else {
-            ["Ctrl+B", "Ctrl+Q", "Ctrl+M"]
+            ["Ctrl+B", "Ctrl+Q"]
         };
-        assert_eq!([SIDEBAR_SHORTCUT, QUIT_SHORTCUT, WINAMP_SHORTCUT], expected);
+        assert_eq!([SIDEBAR_SHORTCUT, QUIT_SHORTCUT], expected);
     }
 
     #[test]
@@ -613,10 +601,8 @@ mod tests {
         };
         if cfg!(target_os = "macos") {
             assert_eq!(label("Home"), "Cmd+Shift+H");
-            assert_eq!(label("Winamp mini player"), "Cmd+Shift+M");
         } else {
             assert_eq!(label("Home"), "Ctrl+H");
-            assert_eq!(label("Winamp mini player"), "Ctrl+M");
         }
     }
 

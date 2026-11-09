@@ -562,21 +562,6 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 {
                     app.actions.push(Action::Open(Page::Settings));
                 }
-                if theme::icon_button(
-                    ui,
-                    Icon::Shrink,
-                    ICON_BUTTON_ICON,
-                    palette.secondary,
-                    palette.text,
-                    super::keys::platform_shortcut(
-                        &gettext(locale, "Winamp mini player (Ctrl+M)"),
-                        &gettext(locale, "Winamp mini player (Cmd+Shift+M)"),
-                    ),
-                )
-                .clicked()
-                {
-                    app.actions.push(Action::ToggleWinampWindow);
-                }
                 // A quiet spinner once the app has been at something in the
                 // background for a while, long enough that fast requests
                 // never flash it.

@@ -85,7 +85,7 @@ Siphon follows each platform's conventions. On Linux:
 | Last run's log | `~/.local/state/siphonplayer/siphon.log` | Always |
 | Crash log | `~/.local/state/siphonplayer/panic.log` | Always |
 
-Starting with your computer (Settings > Playback on this computer) is kept
+Starting with your computer (Settings > Devices) is kept
 where each system keeps it, not in `settings.json`:
 
 | Platform | Where |
@@ -706,7 +706,7 @@ already follows your desktop theme, so the two pickers are not shown.
 **How to make a theme**, beside the picker, opens this section. The
 **Open themes folder** icon button beside the picker creates the folder if
 needed and opens it in your file
-manager, using the same button style as the Winamp skins folder.
+manager.
 After adding or editing a JSON file on macOS or Windows, run
 `siphon reload-themes` to refresh the list and the selected palette without
 restarting playback. Since 0.10.2, Siphon on Linux notices changes to the

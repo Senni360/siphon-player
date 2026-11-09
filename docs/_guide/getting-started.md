@@ -78,10 +78,10 @@ You can rename it in Settings.
   bar only. On Linux, including Flatpak, a desktop with a working system
   tray is required for this behavior.
 - **The tray icon can match your panel.** On Linux and Windows, **Settings >
-  Playback on this computer > Tray icon** shows it in colour, white or black.
+  Devices > Tray icon** shows it in colour, white or black.
   The macOS menu bar already draws it black or white to match itself.
-- **Siphon can start with your computer.** Under **Settings > Playback on
-  this computer**, **Start with your computer** opens it when you log in,
+- **Siphon can start with your computer.** Under **Settings > Devices**,
+  **Start with your computer** opens it when you log in,
   **With the window** or quietly **In the tray** (**In the menu bar** on
   macOS).
 - **Play and Pause fade.** With the default audio settings, music played on

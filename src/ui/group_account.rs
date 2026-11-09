@@ -846,7 +846,7 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
             (None, None) => {
                 theme::text(
                     ui,
-                    gettext(locale, "Sign in to SoundCloud in Settings to link it"),
+                    gettext(locale, "Connect SoundCloud in Settings to link it"),
                     theme::regular(13.0),
                     palette.dim,
                 );
@@ -865,53 +865,6 @@ fn account_card(app: &App, ui: &mut Ui, account: &Account, actions: &mut Vec<Act
             actions.push(Action::Live(crate::friends::live::Action::SetSharing(
                 sharing,
             )));
-        }
-        let mut discord = app.settings.discord_presence;
-        if super::widgets::switch_line(
-            ui,
-            &palette,
-            &gettext(locale, "Show what I'm playing on Discord"),
-            &mut discord,
-        )
-        .changed()
-        {
-            actions.push(Action::SetDiscordPresence(discord));
-        }
-        if !account.devices.is_empty() {
-            ui.add_space(10.0);
-            theme::text(
-                ui,
-                gettext(locale, "Signed-in computers"),
-                theme::medium(13.0),
-                palette.text,
-            );
-            ui.add_space(4.0);
-            for device in &account.devices {
-                ui.horizontal(|ui| {
-                    let label = if device.current {
-                        format!(
-                            "{} ({})",
-                            app.private_text(&device.name),
-                            gettext(locale, "this one")
-                        )
-                    } else {
-                        app.private_text(&device.name)
-                    };
-                    theme::text(ui, label, theme::regular(13.0), palette.secondary);
-                    if !device.current
-                        && theme::soft_button(
-                            ui,
-                            &palette,
-                            None,
-                            &gettext(locale, "Sign out"),
-                            false,
-                        )
-                        .clicked()
-                    {
-                        actions.push(account_op(Op::RemoveDevice(device.id.clone())));
-                    }
-                });
-            }
         }
         ui.add_space(10.0);
         if theme::soft_button(

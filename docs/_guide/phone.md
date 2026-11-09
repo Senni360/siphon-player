@@ -9,8 +9,9 @@ for a code first, which whoever runs your group can give you.
 
 ## Link your phone
 
-1. On your computer, open Encore. Go to **Settings**, then **Your phone**, and press
-   **Link a phone**. Each code works once, so make another for a second phone or browser.
+1. On your computer, open Encore. Go to **Settings**, then **Devices**, then
+   **Your phone**, and press **Link a phone**. Each code works once, so make another
+   for a second phone or browser.
 2. On your phone, open `encore.senni.dev`, type the code to get in, then type the
    eight letters Encore shows on your computer.
 
@@ -18,8 +19,8 @@ Your phone is then another device on your account, with the same groups. It show
 your library, searches Spotify, SoundCloud and YouTube, opens artist pages, and plays
 on your computer. Encore on your computer has to be open, even if only in the tray.
 
-A linked phone appears in **Settings** under **Your phone**, where **Sign out** removes
-it without signing out anything else.
+A linked phone appears in **Settings** under **Devices > Your phone**, where
+**Sign out** removes it without signing out anything else.
 
 To keep it like an app, add the page to your home screen: on an iPhone, press **Share**,
 then **Add to Home Screen**.
