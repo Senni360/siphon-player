@@ -27,8 +27,8 @@ then **Add to Home Screen**.
 ## With the computer off
 
 Sign in to Spotify on your phone too, and your Spotify library still works with the
-computer off. It plays on your other Spotify devices, which you choose by pressing the
-line under the song in Now Playing.
+computer off. The sound then stays in Spotify: whatever the Spotify app on the phone
+or another device is playing shows here, and its buttons work.
 
 This uses your own Spotify app, the same one as on your computer. In the Spotify
 developer dashboard, add this redirect address to it once:
@@ -36,8 +36,8 @@ developer dashboard, add this redirect address to it once:
 
 ## What it can't do
 
-- A phone's browser can't play Spotify, so the sound comes from your computer or your
-  Spotify devices.
-- SoundCloud and YouTube need Encore on your computer. With the computer off, a song
-  shared in the group opens in its own app instead.
+- SoundCloud, YouTube and a Spotify song Encore finds elsewhere all need Encore on
+  your computer to find the audio. The phone plays everything on the page itself and
+  never opens another app: a song with no match says so, with **Skip** and **Play on
+  computer**.
 - The first time you open it, it can take up to 15 seconds to reach your computer.

@@ -142,8 +142,8 @@ When the phone plays music itself, it asks this computer where a song's audio is
 gets back a short-lived address it fetches directly: SoundCloud's stream, YouTube's
 audio, or a group song's Blob link. A Spotify song is looked up by artist, title and
 length on YouTube and SoundCloud with the download matcher, and the first match is
-remembered until Encore closes. Without a match the phone hands the song to the
-Spotify app.
+remembered until Encore closes. Without a match the page says so, with Skip and Play
+on computer: the phone never hands playback to another app or leaves the page.
 
 An artist's page also reads what they have elsewhere, so it can list what Spotify
 doesn't have. It searches SoundCloud's and YouTube's public listings for the artist's

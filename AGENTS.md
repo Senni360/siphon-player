@@ -13,7 +13,8 @@ wrong without it.
   the optional Soloist player, never from a substitute source. The one exception,
   the owner's call on 2026-11-05: the phone web app, which can't play Spotify,
   plays a Spotify song as the same song matched on YouTube or SoundCloud (the
-  download matcher's strict rules), and the Spotify app only when there's no match.
+  download matcher's strict rules). The phone never hands playback to another
+  app: a song with no match says so in the page.
 - Each listener uses their own Spotify developer app. Never use someone else's
   Client ID.
 - Windows x64 is the only target. Other platforms' code is unverified, so never

@@ -291,8 +291,8 @@ const DIRECT_ACTS = {
     if (!songs.includes(wanted)) throw new Error('That song plays from Encore on your computer.');
     const { devices } = await web('/me/player/devices');
     const device = devices.find(item => item.is_active) ?? devices[0];
-    // Nothing awake to send it to: the Spotify app takes it from here.
-    if (!device) { location.href = `https://open.spotify.com/track/${trackId(wanted)}`; return; }
+    // Nothing awake to send it to: this page never opens another app to play.
+    if (!device) throw new Error('No Spotify device is awake. Open Spotify first.');
     await web(`/me/player/play?device_id=${encodeURIComponent(device.id)}`, 'PUT', { uris: songs, offset: { uri: wanted } });
   },
 };
@@ -311,6 +311,9 @@ async function act(kind, args = {}) {
   }
   await api('/live/remote/send', 'POST', { id: uuid(), kind, ...args });
 }
+
+/** An answer from the computer, rather than a failure on the way to it. */
+const answered = message => Object.assign(new Error(message), { answered: true });
 
 /** Asks the computer something, and waits for it to answer. */
 async function ask(kind, args = {}, patience = 45000) {
@@ -331,7 +334,8 @@ async function ask(kind, args = {}, patience = 45000) {
       }
       const answer = await api(`/live/remote/reply/${id}`);
       if (answer.ready) {
-        if (answer.reply.error) throw new Error(answer.reply.error);
+        // The computer itself answered: no retry changes this.
+        if (answer.reply.error) throw answered(answer.reply.error);
         return answer.reply;
       }
     }
@@ -342,153 +346,360 @@ async function ask(kind, args = {}, patience = 45000) {
 // ---------------------------------------------------------------- playing on this phone
 // Every song plays in this page; the computer only says where its audio is. A Spotify
 // song plays as the same song from YouTube or SoundCloud, which the computer finds, so
-// a mixed playlist runs straight through. Only when there's no such match does it go
-// to the Spotify app, and the list carries on when it ends there.
+// a mixed playlist runs straight through. Nothing here leaves the page to play sound.
 const TARGET_KEY = 'encore.target';
-const here = { audio: null, list: [], index: -1, spotify: null, active: false };
+const HERE_KEY = 'encore.here';
+const HERE_KEEP = 500;
+const here = {
+  audio: null, list: [], index: -1, active: false, trouble: null, shuffle: false, repeat: 'off',
+  seq: 0, tries: 0, place: 0, likedUri: null, liked: false, pausedByUser: false, playingUri: null, pending: false,
+};
 const playsHere = () => localStorage.getItem(TARGET_KEY) === 'phone';
+
+/** The same song comes back after 1s, 2s, 4s, then every 8s until the phone is back. */
+const RETRY_MS = [1000, 2000, 4000];
+const OFFLINE_RETRY_MS = 8000;
+/** Ten seconds with nothing arriving means start the same song again. */
+const STALL_MS = 10000;
+let retryTimer = null;
+let stallTimer = null;
 
 function hereAudio() {
   if (here.audio) return here.audio;
   const audio = new Audio();
   audio.preload = 'auto';
-  audio.addEventListener('ended', () => playIndex(here.index + 1));
+  audio.addEventListener('ended', () => {
+    const next = nextIndex(1, true);
+    if (next < 0) { here.place = 0; saveHere(); refreshPlayer(); return; }
+    playIndex(next);
+  });
+  // A failure the page can mend itself is never a skipped song.
   audio.addEventListener('error', () => {
-    if (!here.active || here.spotify || !audio.src) return;
-    const song = here.list[here.index];
-    toast(`${song?.name ?? 'That song'} can't play on this phone.`);
-    playIndex(here.index + 1);
+    if (!here.active || here.trouble || !audio.src) return;
+    if (!here.pending && here.playingUri === here.list[here.index]?.uri && audio.currentTime > 0) here.place = audio.currentTime * 1000;
+    retryHere();
+  });
+  audio.addEventListener('pause', () => {
+    if (!here.pending && here.playingUri === here.list[here.index]?.uri && audio.currentTime > 0) here.place = audio.currentTime * 1000;
+    saveHere();
+  });
+  audio.addEventListener('playing', () => {
+    here.tries = 0;
+    here.pending = false;
+    here.pausedByUser = false;
+    clearTimeout(stallTimer);
+    lockScreenHandlers();
+    lockScreenState();
+    saveHere();
   });
   for (const event of ['play', 'pause', 'loadedmetadata']) audio.addEventListener(event, refreshPlayer);
   for (const event of ['play', 'pause', 'seeked']) audio.addEventListener(event, () => tellComputer(true));
+  for (const event of ['playing', 'timeupdate']) audio.addEventListener(event, () => clearTimeout(stallTimer));
+  for (const event of ['stalled', 'waiting']) audio.addEventListener(event, stallSoon);
   here.audio = audio;
+  lockScreenHandlers();
   return audio;
 }
+// iOS only lets sound begin inside a tap, so the element is here from the start.
+hereAudio();
 
-async function playHere(list, index) {
-  here.list = list;
-  here.active = true;
-  await playIndex(index);
+/** Stuck with nothing arriving: give it ten seconds, then start the same song again. */
+function stallSoon() {
+  clearTimeout(stallTimer);
+  stallTimer = setTimeout(() => {
+    const audio = here.audio;
+    if (!here.active || here.trouble || !audio || audio.paused) return;
+    if (here.playingUri === here.list[here.index]?.uri) here.place = audio.currentTime * 1000;
+    retryHere();
+  }, STALL_MS);
 }
 
+/** The next song: this one again while repeating it, else along the list. */
+function nextIndex(step = 1, ended = false) {
+  if (!here.list.length) return -1;
+  if (ended && here.repeat === 'one') return here.index;
+  const at = here.index + step;
+  if (at >= here.list.length) return here.repeat === 'all' ? 0 : -1;
+  if (at < 0) return 0;
+  return at;
+}
+
+/** Where the song is now: the audio's own place, or the one it is going to. */
+function herePosition() {
+  if (here.pending) return here.place;
+  const audio = here.audio;
+  const mine = here.playingUri === here.list[here.index]?.uri;
+  return audio && mine && audio.currentTime > 0 ? audio.currentTime * 1000 : here.place;
+}
+
+/** Whether this very song is liked: what the computer said, or what was just pressed here. */
+function hereLiked(song) {
+  if (here.likedUri === song?.uri) return here.liked;
+  return player.state?.song?.uri === song?.uri && !!player.state.liked;
+}
+
+/**
+ * Plays `list` here from `index`. From a tap it starts the element before anything is
+ * awaited, because iOS only lets sound begin inside that tap.
+ */
+function playHere(list, index, tap = false) {
+  here.list = list;
+  here.index = -1;
+  here.active = true;
+  here.trouble = null;
+  here.tries = 0;
+  here.place = 0;
+  if (tap) {
+    const audio = hereAudio();
+    const known = streams.get(list[index]?.uri)?.url;
+    if (known) { audio.src = known; here.playingUri = list[index]?.uri; }
+    // Straight away, in the tap itself, even when there's nothing to play yet.
+    Promise.resolve(audio.play()).catch(() => {});
+  }
+  saveHere();
+  return playIndex(index);
+}
+
+/** Stops playing here, and forgets what was left for a reload. */
 function stopHere() {
+  clearTimeout(retryTimer);
+  clearTimeout(stallTimer);
+  retryTimer = null;
+  here.seq++;
   here.audio?.pause();
   here.active = false;
-  here.spotify = null;
+  here.trouble = null;
+  here.list = [];
+  here.index = -1;
+  here.place = 0;
+  here.playingUri = null;
+  here.pending = false;
+  try { localStorage.removeItem(HERE_KEY); } catch { /* nothing to forget */ }
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.playbackState = 'none';
+    navigator.mediaSession.metadata = null;
+  }
   refreshPlayer();
   tellComputer();
 }
 
-async function playIndex(index) {
+/** Starts a song here. `at` is where to resume it, in ms. */
+async function playIndex(index, { at = 0 } = {}) {
   if (index < 0 || index >= here.list.length) {
     here.audio?.pause();
-    here.spotify = null;
     refreshPlayer();
+    saveHere();
     return;
   }
   here.index = index;
-  here.spotify = null;
+  here.trouble = null;
+  here.place = at;
+  here.pending = true;
+  here.pausedByUser = false;
   const song = here.list[index];
   mediaSession(song);
   refreshPlayer();
   markPlaying();
   tellComputer(true);
+  ahead();
+  saveHere();
+  await loadHere();
+}
+
+/** The next two songs' addresses, so this one ending starts them with no wait. */
+function ahead() {
+  for (const song of here.list.slice(here.index + 1, here.index + 3)) streamOf(song).catch(() => {});
+}
+
+/** Asks where the song is, then plays it where it was. A retry asks again: it may have expired. */
+async function loadHere(fresh = false) {
+  const song = here.list[here.index];
+  if (!song || !here.active) return;
+  const mine = ++here.seq;
+  clearTimeout(retryTimer);
+  retryTimer = null;
   try {
-    const found = await streamOf(song);
-    if (here.index !== index) return;
-    // The next song is looked up while this one plays, so there's no gap between them.
-    const next = here.list[index + 1];
-    if (next) streamOf(next).catch(() => {});
+    const found = await streamOf(song, fresh);
+    if (here.seq !== mine || !here.active) return;
+    if (!found?.url) throw answered('No audio for this song.');
     const audio = hereAudio();
-    if (found.hls && !audio.canPlayType('application/vnd.apple.mpegurl')) throw new Error("this browser can't play it");
+    if (found.hls && !audio.canPlayType('application/vnd.apple.mpegurl')) throw answered("this browser can't play it");
+    // Already started by the tap, from this very address: leave it running.
+    if (!audio.paused && !audio.ended && !audio.error && audio.src === found.url && audio.readyState > 0) return;
     audio.src = found.url;
+    here.playingUri = song.uri;
+    here.pending = true;
+    const at = here.place;
+    if (at > 0) audio.addEventListener('loadedmetadata', () => { audio.currentTime = at / 1000; }, { once: true });
     await audio.play();
   } catch (error) {
-    if (here.index !== index) return;
-    if (song.uri.startsWith('spotify:track:')) return handOff(song, index);
-    toast(`${song.name}: ${error.message}`);
-    playIndex(index + 1);
+    if (here.seq !== mine || !here.active) return;
+    if (error?.answered) return stuckHere(song, error.message);
+    retryHere();
   }
 }
 
-/** Where a song's audio is, asked once per song for a while. */
-const STREAM_KEEP_MS = 20 * 60 * 1000;
-const streams = new Map();
-function streamOf(song) {
-  const held = streams.get(song.uri);
-  if (held && Date.now() - held.at < STREAM_KEEP_MS) return held.found;
-  const question = song.uri.startsWith('spotify:')
-    ? { uri: song.uri, name: song.name, artists: song.artists, duration_ms: song.duration_ms }
-    : { uri: song.uri };
-  const found = ask('stream', question);
-  streams.set(song.uri, { at: Date.now(), found });
-  found.catch(() => streams.delete(song.uri));
-  return found;
+/** Tries the same song, at the same place, again. Never a different song. */
+function retryHere() {
+  if (!here.active || retryTimer) return;
+  const wait = here.tries < RETRY_MS.length ? RETRY_MS[here.tries] : OFFLINE_RETRY_MS;
+  here.tries++;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    // A pause the listener asked for stays paused.
+    if (here.active && !here.pausedByUser) loadHere(true);
+  }, wait);
+  refreshPlayer();
 }
 
-/** A Spotify song plays in the Spotify app on this phone, and the list waits for it. */
-async function handOff(song, index) {
+// Back on a network: the retry it was waiting for happens straight away.
+addEventListener('online', () => {
+  if (!retryTimer || here.pausedByUser) return;
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  loadHere(true);
+});
+
+/** The computer says there's no audio for this song: show that, and stop here. */
+function stuckHere(song, reason) {
+  clearTimeout(retryTimer);
+  clearTimeout(stallTimer);
+  retryTimer = null;
   here.audio?.pause();
-  const app = `https://open.spotify.com/track/${trackId(song.uri)}`;
-  if (!hasSpotify()) {
-    toast('Spotify songs play in the Spotify app.');
-    location.href = app;
-    stopHere();
-    return;
-  }
-  try {
-    const { devices } = await web('/me/player/devices');
-    const device = devices.find(item => item.type === 'Smartphone') ?? devices.find(item => item.is_active) ?? devices[0];
-    if (!device) { location.href = app; stopHere(); return; }
-    await web(`/me/player/play?device_id=${encodeURIComponent(device.id)}`, 'PUT', { uris: [song.uri] });
-    here.spotify = { uri: song.uri, position: 0, playing: true, at: Date.now(), started: Date.now(), seen: false };
-    followSpotify(index, song);
-  } catch (error) {
-    toast(error.message);
-    playIndex(index + 1);
-  }
+  here.trouble = { uri: song.uri, name: song.name, reason: reason || "This song can't play on this phone." };
+  refreshPlayer();
+  tellComputer(true);
+  saveHere();
 }
 
-/** Watches the Spotify app until its song ends, then carries on with the list here. */
-function followSpotify(index, song) {
-  const look = async () => {
-    if (here.index !== index || !here.spotify) return;
-    try {
-      const now = await web('/me/player');
-      const same = now?.item?.uri === here.spotify.uri;
-      if (same) {
-        Object.assign(here.spotify, { position: now.progress_ms ?? 0, playing: now.is_playing, at: Date.now(), seen: true });
-        refreshPlayer();
-        tellComputer();
-        const length = now.item.duration_ms ?? song.duration_ms ?? 0;
-        const finished = !now.is_playing && ((now.progress_ms ?? 0) >= length - 3000
-          || ((now.progress_ms ?? 0) === 0 && Date.now() - here.spotify.started > length - 5000));
-        if (finished) return playIndex(index + 1);
-      } else if (here.spotify.seen) {
-        // Spotify moved on by itself: take the list back.
-        await web('/me/player/pause', 'PUT').catch(() => {});
-        return playIndex(index + 1);
-      }
-    } catch { /* the next look tries again */ }
-    setTimeout(look, 2000);
-  };
-  setTimeout(look, 2500);
-}
-
-/** The phone's own playback, in the shape the player shows. */
+/** How the phone's own playback shows, in the shape the player already uses. */
 function hereState() {
   const song = here.list[here.index];
   if (!song) return null;
   const audio = here.audio;
-  const spotify = here.spotify;
-  const playing = spotify ? spotify.playing : !!audio && !audio.paused;
-  const position = spotify ? spotify.position + (spotify.playing ? Date.now() - spotify.at : 0) : (audio?.currentTime ?? 0) * 1000;
   return {
-    song: { ...song, duration_ms: song.duration_ms || (audio?.duration ? audio.duration * 1000 : 0) },
-    position_ms: position, playing, liked: false, shuffle: false, repeat: 'off',
-    volume: Math.round((audio?.volume ?? 1) * 100), device: spotify ? 'Spotify on this phone' : 'This phone',
-    next: here.list.slice(here.index + 1, here.index + 6), here: true,
+    song: { ...song, duration_ms: song.duration_ms || (here.playingUri === song.uri && audio?.duration ? audio.duration * 1000 : 0) },
+    position_ms: herePosition(), playing: !!audio && here.playingUri === song.uri && !audio.paused,
+    liked: hereLiked(song), shuffle: here.shuffle, repeat: here.repeat,
+    volume: Math.round((audio?.volume ?? 1) * 100), device: 'This phone',
+    next: here.list.slice(here.index + 1, here.index + 6), here: true, trouble: here.trouble,
   };
+}
+
+/** Remembers the queue and the place, so a reload carries on where it was, paused. */
+function saveHere() {
+  if (!here.active || !here.list.length) return;
+  here.place = Math.round(herePosition());
+  // At most 500 songs travel, with the one playing in the middle of them.
+  const half = Math.floor(HERE_KEEP / 2);
+  const from = Math.max(0, Math.min(here.index - half, here.list.length - HERE_KEEP));
+  try {
+    localStorage.setItem(HERE_KEY, JSON.stringify({
+      list: here.list.slice(from, from + HERE_KEEP), index: here.index - from, position: here.place,
+      target: localStorage.getItem(TARGET_KEY), shuffle: here.shuffle, repeat: here.repeat,
+    }));
+  } catch { /* no room, or no storage: playback carries on all the same */ }
+}
+
+/** Puts the queue and place back after a reload: paused, and nothing starts by itself. */
+function restoreHere() {
+  if (!playsHere()) return;
+  let saved;
+  try { saved = JSON.parse(localStorage.getItem(HERE_KEY) ?? 'null'); } catch { return; }
+  if (!Array.isArray(saved?.list) || !saved.list.length) return;
+  here.list = saved.list.slice(0, HERE_KEEP);
+  here.index = Math.min(Math.max(0, Number(saved.index) || 0), here.list.length - 1);
+  here.place = Math.max(0, Number(saved.position) || 0);
+  here.shuffle = !!saved.shuffle;
+  here.repeat = saved.repeat === 'one' || saved.repeat === 'all' ? saved.repeat : 'off';
+  here.active = true;
+  mediaSession(here.list[here.index]);
+  refreshPlayer();
+}
+setInterval(() => { if (here.active) saveHere(); }, 3000);
+addEventListener('pagehide', saveHere);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveHere(); });
+
+/** Where a song's audio is, asked once per song for a while. */
+const STREAM_KEEP_MS = 10 * 60 * 1000;
+const streams = new Map();
+function streamOf(song, fresh = false) {
+  const held = streams.get(song.uri);
+  if (!fresh && held && Date.now() - held.at < STREAM_KEEP_MS) return held.found;
+  const question = song.uri.startsWith('spotify:')
+    ? { uri: song.uri, name: song.name, artists: song.artists, duration_ms: song.duration_ms }
+    : { uri: song.uri };
+  const found = ask('stream', question);
+  const entry = { at: Date.now(), found, url: null };
+  streams.set(song.uri, entry);
+  found.then(value => { if (streams.get(song.uri) === entry) entry.url = value?.url ?? null; },
+    () => { if (streams.get(song.uri) === entry) streams.delete(song.uri); });
+  return found;
+}
+
+// Addresses don't last: ask for the next ones again before they could go stale.
+setInterval(() => {
+  if (!here.active) return;
+  const soon = STREAM_KEEP_MS - 60 * 1000;
+  for (const song of here.list.slice(here.index + 1, here.index + 3)) {
+    const held = streams.get(song.uri);
+    if (held && Date.now() - held.at > soon) streamOf(song, true).catch(() => {});
+  }
+}, 60 * 1000);
+
+/** The lock screen and headphones show the song and work the buttons. */
+function mediaSession(song) {
+  if (!('mediaSession' in navigator)) return;
+  const image = safeImage(song.image);
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: song.name, artist: song.artists.join(', '), artwork: artworkFor(image),
+  });
+  lockScreenHandlers();
+  lockScreenState();
+}
+
+/** Next and previous, not ±10s: iOS only shows those without the seek buttons. */
+function lockScreenHandlers() {
+  if (!('mediaSession' in navigator) || !here.audio) return;
+  const handlers = {
+    play: () => HERE_ACTS.toggle(), pause: () => HERE_ACTS.toggle(),
+    nexttrack: () => HERE_ACTS.next(), previoustrack: () => HERE_ACTS.previous(),
+    seekto: details => HERE_ACTS.seek({ ms: (details.seekTime ?? 0) * 1000 }),
+    seekbackward: null, seekforward: null,
+  };
+  for (const [action, handler] of Object.entries(handlers)) {
+    try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* not every phone has every one */ }
+  }
+}
+
+/** What the lock screen shows: playing or paused, and how far along. */
+function lockScreenState() {
+  if (!('mediaSession' in navigator)) return;
+  const audio = here.audio;
+  const mine = here.active && here.playingUri === here.list[here.index]?.uri;
+  navigator.mediaSession.playbackState = !here.active || !audio ? 'none' : mine && !audio.paused ? 'playing' : 'paused';
+  if (!mine || !audio || !Number.isFinite(audio.duration) || audio.duration <= 0) return;
+  try {
+    navigator.mediaSession.setPositionState({
+      duration: audio.duration, playbackRate: audio.playbackRate || 1,
+      position: Math.min(Math.max(audio.currentTime, 0), audio.duration),
+    });
+  } catch { /* an older phone */ }
+}
+
+/** The size an image address names, when it names one. */
+function imageSize(url) {
+  const named = /-t?(\d{2,4})x(\d{2,4})\./.exec(url);
+  if (named) return `${named[1]}x${named[2]}`;
+  // Spotify's covers end in a code for their size.
+  return { '0000b273': '640x640', '00001e02': '300x300', '00004851': '64x64' }[/ab67616d([0-9a-f]{8})/.exec(url)?.[1]] ?? null;
+}
+
+/** The lock screen's picture, at each size the phone asks for, or its true one. */
+function artworkFor(image) {
+  if (!image) return [];
+  const known = imageSize(image);
+  return (known ? [known] : ['96x96', '192x192', '256x256', '512x512']).map(sizes => ({ src: image, sizes }));
 }
 
 // ---------------------------------------------------------------- telling the computer
@@ -526,44 +737,62 @@ setInterval(() => { if (here.active) tellComputer(); }, 2000);
 
 const HERE_ACTS = {
   toggle: () => {
-    if (here.spotify) return web(`/me/player/${here.spotify.playing ? 'pause' : 'play'}`, 'PUT').then(() => { here.spotify.playing = !here.spotify.playing; here.spotify.at = Date.now(); refreshPlayer(); });
     const audio = hereAudio();
-    return audio.paused ? audio.play() : audio.pause();
+    // A press after the computer said no asks it once more.
+    if (here.trouble) { here.trouble = null; here.pausedByUser = false; return loadHere(true); }
+    if (!audio.src) { here.pausedByUser = false; return playIndex(here.index, { at: here.place }); }
+    if (audio.paused) { here.pausedByUser = false; if (audio.ended) audio.currentTime = 0; return audio.play(); }
+    here.pausedByUser = true;
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    return audio.pause();
   },
-  next: () => playIndex(here.index + 1),
+  next: () => {
+    const next = nextIndex(1);
+    if (next < 0) { here.audio?.pause(); saveHere(); refreshPlayer(); return; }
+    return playIndex(next);
+  },
   previous: () => {
-    const at = hereState()?.position_ms ?? 0;
-    if (at > 3000) return HERE_ACTS.seek({ ms: 0 });
+    if (herePosition() > 3000) return HERE_ACTS.seek({ ms: 0 });
     return playIndex(Math.max(0, here.index - 1));
   },
   seek: ({ ms }) => {
-    if (here.spotify) return web(`/me/player/seek?position_ms=${Math.round(ms)}`, 'PUT').then(() => { here.spotify.position = ms; here.spotify.at = Date.now(); });
-    hereAudio().currentTime = ms / 1000;
+    here.place = Math.max(0, ms);
+    here.pending = false;
+    const audio = hereAudio();
+    if (audio.src) audio.currentTime = here.place / 1000;
+    lockScreenState();
   },
   volume: ({ percent }) => { hereAudio().volume = Math.min(1, Math.max(0, percent / 100)); },
-  shuffle: () => toast("Shuffle isn't on this phone yet."),
-  repeat: () => toast("Repeat isn't on this phone yet."),
+  shuffle: () => {
+    here.shuffle = !here.shuffle;
+    // The song playing stays and the rest of the list goes round.
+    const song = here.list[here.index];
+    if (here.shuffle && song) {
+      here.list = [song, ...shuffled(here.list.filter((_, at) => at !== here.index))];
+      here.index = 0;
+    }
+    saveHere();
+    refreshPlayer();
+  },
+  repeat: () => {
+    here.repeat = here.repeat === 'off' ? 'all' : here.repeat === 'all' ? 'one' : 'off';
+    saveHere();
+    refreshPlayer();
+  },
 };
 
-/** The lock screen and headphones show the song and work the buttons. */
-function mediaSession(song) {
-  if (!('mediaSession' in navigator)) return;
-  const image = safeImage(song.image);
-  navigator.mediaSession.metadata = new MediaMetadata({ title: song.name, artist: song.artists.join(', '), artwork: image ? [{ src: image, sizes: '300x300' }] : [] });
-  const handlers = {
-    play: () => HERE_ACTS.toggle(), pause: () => HERE_ACTS.toggle(),
-    nexttrack: () => HERE_ACTS.next(), previoustrack: () => HERE_ACTS.previous(),
-    seekto: details => HERE_ACTS.seek({ ms: details.seekTime * 1000 }),
-  };
-  for (const [action, handler] of Object.entries(handlers)) {
-    try { navigator.mediaSession.setActionHandler(action, handler); } catch { /* not every phone has every one */ }
-  }
+/** Hands the song back to the computer and stops here. */
+function playOnComputer(song) {
+  localStorage.setItem(TARGET_KEY, 'computer');
+  stopHere();
+  act('play', { uris: [song.uri], index: 0 }).catch(() => toast("Encore isn't open on your computer."));
 }
 
 /** Where the sound comes from: the computer or this phone. */
 function targetPicker() {
   const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); panel.remove(); };
+  const close = () => { scrim.remove(); panel.remove(); overClosed(); };
   const choose = (label, chosen, run) => h('button', { text: `${chosen ? '♪ ' : ''}${label}`, onclick: () => { close(); run(); } });
   const onPhone = playsHere();
   const panel = h('div', { class: 'actions', role: 'menu' },
@@ -574,20 +803,18 @@ function targetPicker() {
     }),
     choose('This phone', onPhone, () => {
       localStorage.setItem(TARGET_KEY, 'phone');
-      // Whatever the computer was playing carries on here, from the same place.
+      // Whatever the computer has queued carries on here, from the same place.
       const state = player.state;
       if (state?.song && player.online) {
-        const list = [state.song, ...(state.next ?? [])];
+        const list = state.queue?.length ? [...state.queue] : [state.song, ...(state.next ?? [])];
+        const start = Math.max(0, list.findIndex(item => item.uri === state.song.uri));
         if (state.playing) api('/live/remote/send', 'POST', { id: uuid(), kind: 'toggle' }).catch(() => {});
-        playHere(list, 0).then(() => {
-          if (!here.spotify) HERE_ACTS.seek({ ms: position(state) });
-        });
+        playHere(list, start, true).then(() => HERE_ACTS.seek({ ms: position(state) }));
       }
-      refreshPlayer();
     }),
-    player.direct || hasSpotify() ? choose('A Spotify device…', false, () => devicePicker()) : null,
     h('button', { text: 'Cancel', onclick: () => close() }));
   document.body.append(scrim, panel);
+  over();
 }
 
 // ---------------------------------------------------------------- the player
@@ -599,15 +826,15 @@ function hold(field, value) {
   player.held.set(field, { value, until: Date.now() + HOLD_MS });
   refreshPlayer();
 }
+/** What the page shows: the phone's own player while it plays, else the computer's. */
 function shown() {
-  if (here.active) return hereState();
-  if (!player.state) return null;
-  const merged = { ...player.state };
+  const state = here.active ? hereState() : player.state ? { ...player.state } : null;
+  if (!state) return null;
   for (const [field, { value, until }] of player.held) {
-    if (Date.now() < until && player.state[field] !== value) merged[field] = value;
+    if (Date.now() < until && state[field] !== value) state[field] = value;
     else player.held.delete(field);
   }
-  return merged;
+  return state;
 }
 function position(state) {
   if (!state) return 0;
@@ -760,7 +987,7 @@ function buildMini() {
   const node = h('div', { class: 'mini', hidden: true },
     h('button', { class: 'open', 'aria-label': 'Open what is playing', onclick: openSheet }, image, h('span', { class: 'words' }, name, by)),
     play, line);
-  return { node, line, image, name, by, play, uri: null, playing: null };
+  return { node, line, image, name, by, play, uri: null, playing: null, trouble: false };
 }
 
 function refreshPlayer() {
@@ -785,15 +1012,20 @@ function refreshPlayer() {
         mini.playing = state.playing;
         mini.play.replaceChildren(icon(state.playing ? 'pause' : 'play'));
       }
+      if (mini.trouble !== !!state.trouble) {
+        mini.trouble = !!state.trouble;
+        mini.by.textContent = state.trouble ? state.trouble.reason : song.artists.join(', ');
+      }
       const at = state.here ? state.position_ms : position(state);
       mini.line.style.width = `${song.duration_ms ? at / song.duration_ms * 100 : 0}%`;
     }
   }
+  lockScreenState();
   player.sheet?.update(state);
 }
 /** Marks the song playing, wherever it's listed on the page. */
 function markPlaying() {
-  const uri = player.state?.song?.uri;
+  const uri = shown()?.song?.uri;
   document.querySelectorAll('.row[data-uri]').forEach(row => row.classList.toggle('playing', row.dataset.uri === uri));
 }
 /** A small knock under the thumb, where the phone can. */
@@ -826,7 +1058,7 @@ function range(value, max, onchange, label) {
 
 function openSheet() {
   if (player.sheet) return;
-  history.pushState(null, '');
+  over();
   const glow = h('div');
   const cover = h('div', { class: 'cover' });
   const name = h('span', { class: 'big' });
@@ -836,6 +1068,7 @@ function openSheet() {
     const state = shown();
     if (!state?.song) return;
     hold('liked', !state.liked);
+    if (here.active) { here.likedUri = state.song.uri; here.liked = !state.liked; }
     act('like', { uri: state.song.uri });
   } }, icon('heart'));
   const seek = range(0, 1000, seekTo, 'Position');
@@ -845,6 +1078,7 @@ function openSheet() {
   const shuffle = h('button', { class: 'side', 'aria-label': 'Shuffle', onclick: () => { hold('shuffle', !shown()?.shuffle); act('shuffle'); } }, icon('shuffle'));
   const repeat = h('button', { class: 'side', 'aria-label': 'Repeat', onclick: () => act('repeat') }, icon('repeat'));
   const volume = range(50, 100, percent => { hold('volume', percent); act('volume', { percent }); }, 'Volume');
+  const trouble = h('div', { class: 'quiet-note', hidden: true });
   const next = h('div', { class: 'upnext' });
   const lyricsBox = h('div', { class: 'lyrics', hidden: true });
   const lyricsButton = h('button', { 'aria-pressed': 'false', text: 'Lyrics', onclick: () => {
@@ -901,13 +1135,15 @@ function openSheet() {
   }
   let nextKey = '';
   let uri = null;
-  const close = () => { player.sheet = null; sheet.remove(); };
+  let shownTrouble = '';
+  const close = () => { player.sheet = null; sheet.remove(); overClosed(); };
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Now playing' },
     glow,
     h('header', {}, h('button', { 'aria-label': 'Close', onclick: close }, icon('down')), where, h('span', { class: 'spacer' })),
     cover,
     lyricsBox,
     h('div', { class: 'heading' }, h('div', {}, name, artist), heart),
+    trouble,
     h('div', { class: 'seek' }, seek.input, h('div', { class: 'times' }, elapsed, total)),
     h('div', { class: 'transport' }, shuffle,
       h('button', { 'aria-label': 'Previous', onclick: () => { knock(); act('previous'); } }, icon('previous')),
@@ -953,6 +1189,17 @@ function openSheet() {
       artist.onclick = song.artist_id ? () => { close(); go({ page: 'artist', id: song.artist_id }); } : null;
     }
     where.textContent = `${state.device ? `Playing on ${state.device}` : 'Playing on your computer'} ▾`;
+    // Only a song the computer said has no audio stops here: Skip, or hand it back.
+    const troubleKey = state.trouble ? `${state.trouble.uri}|${state.trouble.reason}` : '';
+    if (troubleKey !== shownTrouble) {
+      shownTrouble = troubleKey;
+      trouble.hidden = !state.trouble;
+      trouble.replaceChildren(...(state.trouble ? [
+        h('p', { text: state.trouble.reason }),
+        h('button', { class: 'play-all second', text: 'Skip', onclick: () => { here.trouble = null; HERE_ACTS.next(); } }),
+        h('button', { class: 'play-all second', text: 'Play on computer', onclick: () => playOnComputer(song) }),
+      ] : []));
+    }
     heart.setAttribute('aria-pressed', String(!!state.liked));
     shuffle.setAttribute('aria-pressed', String(!!state.shuffle));
     repeat.setAttribute('aria-pressed', String(state.repeat !== 'off'));
@@ -978,31 +1225,10 @@ function openSheet() {
   refreshPlayer();
 }
 
-/** Which of the listener's Spotify devices the sound comes from, with the computer off. */
-async function devicePicker() {
-  let devices;
-  try {
-    ({ devices } = await web('/me/player/devices'));
-  } catch (error) { toast(error.message); return; }
-  const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); panel.remove(); };
-  const panel = h('div', { class: 'actions', role: 'menu' },
-    h('div', { class: 'about' }, h('b', { text: 'Play on' }), h('span', { text: devices.length ? 'Your Spotify devices' : 'Open Spotify on a device, then look again.' })),
-    devices.map(device => h('button', { text: `${device.is_active ? '♪ ' : ''}${device.name}`, onclick: async () => {
-      close();
-      try {
-        await web('/me/player', 'PUT', { device_ids: [device.id], play: true });
-        setTimeout(pollSpotify, 700);
-      } catch (error) { toast(error.message); }
-    } })),
-    h('button', { text: 'Cancel', onclick: () => close() }));
-  document.body.append(scrim, panel);
-}
-
 // ---------------------------------------------------------------- rows and actions
 function songActions(song) {
   const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); panel.remove(); };
+  const close = () => { scrim.remove(); panel.remove(); overClosed(); };
   const choose = (label, run) => h('button', { onclick: () => { close(); run(); } , text: label });
   const panel = h('div', { class: 'actions', role: 'menu' },
     h('div', { class: 'about' }, h('b', { text: song.name, class: sourceOf(song.uri) }), h('span', { text: song.artists.join(', ') })),
@@ -1012,12 +1238,13 @@ function songActions(song) {
     song.artist_id && choose('Go to artist', () => go({ page: 'artist', id: song.artist_id })),
     choose('Cancel', () => {}));
   document.body.append(scrim, panel);
+  over();
 }
 /** Shares a song with the group, with a note if there's something to say. */
 function shareSong(song) {
   const note = h('input', { type: 'text', placeholder: 'Say something (optional)', 'aria-label': 'Note', maxlength: 280, enterkeyhint: 'send' });
   const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); panel.remove(); };
+  const close = () => { scrim.remove(); panel.remove(); overClosed(); };
   const panel = h('form', { class: 'actions share', onsubmit: async event => {
     event.preventDefault();
     close();
@@ -1031,11 +1258,12 @@ function shareSong(song) {
     note,
     h('button', { class: 'send-share', type: 'submit', text: 'Share with the group' }));
   document.body.append(scrim, panel);
+  over();
   note.focus();
 }
 
 function row(song, list, index) {
-  const playing = player.state?.song?.uri === song.uri;
+  const playing = shown()?.song?.uri === song.uri;
   const by = song.artists.join(', ');
   const plays = song.plays ? ` · ${count(song.plays)} plays` : '';
   return h('div', { class: `row${playing ? ' playing' : ''}`, 'data-uri': song.uri },
@@ -1046,7 +1274,7 @@ function row(song, list, index) {
     h('button', { class: 'more', 'aria-label': `More for ${song.name}`, onclick: () => songActions(song) }, icon('more')));
 }
 function playFrom(list, index) {
-  if (playsHere()) { playHere(list, index); return; }
+  if (playsHere()) { playHere(list, index, true); return; }
   if (!player.online && !hasSpotify()) { toast('Open Encore on your computer first.'); return; }
   // The computer plays 500 at most, so a very long list starts around the song.
   const start = Math.max(0, index - 100);
@@ -1087,11 +1315,27 @@ function go(next, remember = true) {
   keepPlace();
   if (remember) trail.push(current);
   current = next;
-  history.pushState(null, '');
-  render();
+  // A sheet closing right now gives back its own step first, then this page opens.
+  settled(() => { history.pushState({ page: next }, ''); render(); });
+}
+/** A sheet over the page is a step back of its own: the gesture closes it first. */
+let stepped = false;
+let afterStep = null;
+function over() { history.pushState({ over: true }, ''); }
+function overClosed() {
+  if (!history.state?.over) return;
+  stepped = true;
+  history.back();
+}
+/** Runs now, or once the step a closing sheet gave back has landed. */
+function settled(run) {
+  if (stepped) afterStep = run;
+  else run();
 }
 function back() {
   keepPlace();
+  // The gesture and this button take the same way back, so both agree.
+  if (history.state) { history.back(); return; }
   current = trail.pop() ?? { page: 'home' };
   render();
 }
@@ -1101,10 +1345,20 @@ addEventListener('keydown', event => {
   if (document.querySelector('.actions')) document.querySelector('.scrim')?.click();
   else if (player.sheet) player.sheet.close();
 });
-addEventListener('popstate', () => {
+addEventListener('popstate', event => {
+  // Closing a sheet by hand takes the step back it left behind.
+  if (stepped) {
+    stepped = false;
+    const run = afterStep;
+    afterStep = null;
+    if (run) run();
+    return;
+  }
   if (document.querySelector('.actions')) { document.querySelector('.scrim')?.click(); return; }
-  if (player.sheet) player.sheet.close();
-  else if (trail.length) back();
+  if (player.sheet) { player.sheet.close(); return; }
+  keepPlace();
+  current = trail.pop() ?? event.state?.page ?? { page: 'home' };
+  render();
 });
 
 function backButton() {
@@ -1368,8 +1622,8 @@ function sourceScreen() {
 }
 
 function playShared(url) {
-  // With the computer off, the song's own app can still play its own link.
-  if (!player.online) { location.href = url; return; }
+  // The phone never leaves the page to play: the computer takes the link from here.
+  if (!player.online) { toast('Shared links play through Encore on your computer.'); return; }
   act('play_link', { url }).catch(() => toast("Couldn't reach Encore."));
   toast('Starting on your computer');
 }
@@ -1421,9 +1675,9 @@ function groupScreen() {
     const [account, feed, live, people, lists] = await Promise.all([api('/account'), api('/posts?limit=30'), api('/live').catch(() => null), api('/members').catch(() => null), api('/playlists').catch(() => null)]);
     const groups = account.groups ?? [];
     const chosen = localStorage.getItem(STORE.group);
-    const here = groups.find(group => group.id === chosen) ?? groups[0];
-    if (here) title.textContent = here.name;
-    chooser.replaceChildren(...(groups.length > 1 ? [h('div', { class: 'chips' }, groups.map(group => h('button', { class: 'chip plain', 'aria-pressed': String(group.id === here?.id), text: group.name, onclick: () => {
+    const chosenGroup = groups.find(group => group.id === chosen) ?? groups[0];
+    if (chosenGroup) title.textContent = chosenGroup.name;
+    chooser.replaceChildren(...(groups.length > 1 ? [h('div', { class: 'chips' }, groups.map(group => h('button', { class: 'chip plain', 'aria-pressed': String(group.id === chosenGroup?.id), text: group.name, onclick: () => {
       localStorage.setItem(STORE.group, group.id);
       refresh();
     } })))] : []));
@@ -1511,10 +1765,19 @@ function shell() {
   } }, icon(page), label)));
   app.replaceChildren(screen, player.mini.node, tabs);
   render();
+  restoreHere();
   refreshPlayer();
 }
 
-function unlink() {
+/** Unlinks this phone from the account, then forgets it here even without a network. */
+async function unlink() {
+  if (!confirm('Unlink this phone? Encore here signs out, and a new code links it again.')) return;
+  try {
+    const account = await api('/account');
+    const mine = (account.devices ?? []).find(device => device.current);
+    if (mine) await api(`/account/devices/${encodeURIComponent(mine.id)}`, 'DELETE');
+  } catch { /* the phone is forgotten here either way */ }
+  stopHere();
   for (const key of Object.values(STORE)) localStorage.removeItem(key);
   forgetSecret();
   start();
@@ -1526,7 +1789,8 @@ const phoneName = () => (/iPhone/.test(navigator.userAgent) ? 'iPhone' : /Androi
 function spotifyPanel() {
   const client = h('input', { 'aria-label': 'Spotify Client ID', placeholder: 'Client ID', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', maxlength: 64, value: localStorage.getItem(STORE.client) ?? '' });
   const problem = h('p', { class: 'problem', role: 'alert', hidden: true });
-  const scrim = h('div', { class: 'scrim', onclick: () => { scrim.remove(); panel.remove(); } });
+  const close = () => { scrim.remove(); panel.remove(); overClosed(); };
+  const scrim = h('div', { class: 'scrim', onclick: close });
   const address = h('input', { 'aria-label': 'Redirect address', readonly: true, value: redirectUri(), onfocus: event => event.target.select() });
   const panel = h('form', { class: 'door actions sign-in', onsubmit: event => {
     event.preventDefault();
@@ -1539,6 +1803,7 @@ function spotifyPanel() {
     h('label', { text: 'Your Client ID' }), client, problem,
     h('button', { class: 'primary', type: 'submit', text: 'Continue to Spotify' }));
   document.body.append(scrim, panel);
+  over();
 }
 
 // ---------------------------------------------------------------- linking
