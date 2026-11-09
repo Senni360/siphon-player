@@ -119,8 +119,8 @@ function rememberedSecret() {
   return /^[a-f0-9]{64}$/.test(held) ? held : null;
 }
 // Where the browser offers it, asking to keep this site's storage slows the
-// quiet clearing of it further.
-function askToKeep() {
+// quiet clearing of it further. An installed app asks for good, once.
+function keepStorage() {
   try { navigator.storage?.persist?.()?.catch?.(() => {}); } catch { /* an old browser */ }
 }
 
@@ -2252,6 +2252,7 @@ addEventListener('beforeinstallprompt', event => {
 addEventListener('appinstalled', () => {
   installEvent = null;
   localStorage.setItem(INSTALL_TIP, 'installed');
+  keepStorage();
   for (const tip of document.querySelectorAll('.install')) tip.remove();
 });
 
@@ -2314,7 +2315,7 @@ function start({ signedOut = false } = {}) {
   }
   if (localStorage.getItem(STORE.secret)) {
     keepSecret(localStorage.getItem(STORE.secret));  // the backup slides forward
-    askToKeep();
+    keepStorage();
     shell();
     if (!polling) { polling = true; pollState(); }
     listenComputer();

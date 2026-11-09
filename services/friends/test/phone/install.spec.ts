@@ -53,6 +53,29 @@ test('Android installs through the browser prompt when it offers one',
     expect(await page.evaluate(() => localStorage.getItem('encore.install'))).toBe('installed');
   });
 
+test('installing asks the browser to keep the sign-in', async ({ page, server }) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __persisted: number }).__persisted = 0;
+    try {
+      Object.defineProperty(navigator, 'storage', {
+        configurable: true,
+        value: {
+          persist: () => {
+            (window as unknown as { __persisted: number }).__persisted += 1;
+            return Promise.resolve(true);
+          },
+        },
+      });
+    } catch { /* the browser would not let the test see it */ }
+  });
+  await page.goto(`${server.url}/`);
+  await expect(page.locator('nav.tabs')).toBeVisible();
+
+  await page.evaluate(() => { (window as unknown as { __persisted: number }).__persisted = 0; });
+  await page.evaluate(() => window.dispatchEvent(new Event('appinstalled')));
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __persisted: number }).__persisted)).toBe(1);
+});
+
 test('a manifest shortcut opens its tab and leaves a clean address', async ({ page, server }) => {
   await page.goto(`${server.url}/?tab=library`);
   await expect(page.locator('nav.tabs')).toBeVisible();
