@@ -17,8 +17,10 @@ test('a dropped event stream comes back and keeps the app in step', async ({ pho
   await expect(phone.page.locator('.mini .name')).toHaveText(next.name, { timeout: 15_000 });
 });
 
-test('going offline and coming back keeps the phone playing', async ({ phone, server, context }) => {
+test('going offline and coming back keeps the phone playing', async ({ phone, server, context, observed }) => {
   await phone.open();
+  // WebKit reports the requests cut off by going offline; that is the failure under test.
+  observed.allowConsole(/^Failed to load resource: WebKit encountered an internal error/);
   await phone.openMix();
   const name = await phone.playRow(0);
   await phone.advance(3);
