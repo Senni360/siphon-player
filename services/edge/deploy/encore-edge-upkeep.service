@@ -1,0 +1,24 @@
+[Unit]
+Description=Nightly upkeep for Encore edge
+Documentation=file:/opt/encore-edge/deploy/README.md
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/encore-edge/deploy/upkeep.sh
+User=root
+Group=root
+StateDirectory=encore-edge-upkeep
+StateDirectoryMode=0750
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+TimeoutStartSec=30min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

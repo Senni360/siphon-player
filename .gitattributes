@@ -3,3 +3,5 @@
 # So must the Cast root certificates and the Cast test chain.
 assets/cast/** binary
 src/testdata/cast/** binary
+# Shell scripts must keep LF: bash -n and Linux hosts do not accept CRLF.
+*.sh text eol=lf

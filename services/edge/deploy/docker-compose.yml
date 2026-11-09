@@ -11,6 +11,13 @@ services:
     environment:
       EDGE_RESOLVE_CONCURRENCY: "1"
     mem_limit: 420m
+    # A small disk shared with other containers: keep this container's logs
+    # bounded so a chatty day cannot fill it.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     volumes:
       - encore-edge-data:/data
     networks:

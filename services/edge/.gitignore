@@ -3,3 +3,4 @@
 *.log
 .env
 .env.*
+/deploy/edge.env

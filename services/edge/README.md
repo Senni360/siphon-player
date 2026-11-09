@@ -34,6 +34,15 @@ npm test        # node:test, no network, fake yt-dlp/ffmpeg scripts
 npm run check   # node --check on every source file
 ```
 
+## Deploy
+
+Production is the `encore-edge` container beside the host's existing Caddy; see
+[`deploy/README.md`](./deploy/README.md) for the host layout, `deploy.sh` and
+the nightly `upkeep.sh` timer. If Caddy already runs there, append the site
+block to its Caddyfile in place (it is a single-file bind mount), validate the
+whole file in a throwaway container, then `caddy reload`; never restart Caddy
+or any other container.
+
 ## Environment
 
 | Variable | Default | Meaning |

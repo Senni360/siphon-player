@@ -1,5 +1,12 @@
-# Example only. Replace the site address with your own DNS name; the service
-# itself holds no certificate and listens on loopback.
+# The site block for the container deployment. Caddy and encore-edge share the
+# Docker network named in deploy/docker-compose.yml, so Caddy proxies to the
+# container name rather than a loopback port.
+#
+# If Caddy already runs on this host, append this block to its existing
+# Caddyfile in place. Do not replace or rename that file: it is a single-file
+# bind mount, and a rename leaves the container reading the old inode. Validate
+# the whole file in a throwaway container, then `caddy reload`; never restart
+# Caddy or any other container. See README.md.
 #
 # Do not enable Caddy's `encode` directive for this host: media responses must
 # stay uncompressed and Caddy must not touch Content-Length or ETag.
@@ -8,7 +15,7 @@ edge.encore.senni.dev {
 		max_size 1GB
 	}
 
-	reverse_proxy 127.0.0.1:8787 {
+	reverse_proxy encore-edge:8787 {
 		# WebSocket relays and long media reads must not be buffered.
 		flush_interval -1
 		transport http {
