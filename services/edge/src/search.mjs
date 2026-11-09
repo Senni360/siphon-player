@@ -27,7 +27,7 @@ export function buildYtSearchUrl(query) {
 }
 
 export function buildSoundCloudSearchUrl(query) {
-  return `https://soundcloud.com/search/sounds?q=${encodeURIComponent(cleanQuery(query))}`;
+  return `scsearch8:${cleanQuery(query)}`;
 }
 
 export function buildSearchArgs(url) {
@@ -151,16 +151,19 @@ export class MatchService {
     if (remembered) return remembered;
 
     const query = `${wanted.artists.map((artist) => (typeof artist === "string" ? artist : artist?.name ?? "")).join(", ")} - ${wanted.name}`;
-    const urls = [buildYtSearchUrl(query), buildSoundCloudSearchUrl(query)];
+    // SoundCloud only. YouTube's audio is refused from a server, so a YouTube
+    // match couldn't play here anyway, and its search takes many seconds.
+    // The computer finds and seeds those matches instead.
+    const urls = [buildSoundCloudSearchUrl(query)];
     const results = await Promise.allSettled(urls.map((url) => this.#search(url)));
     const candidates = [];
-    for (const [index, result] of results.entries()) {
+    for (const result of results) {
       if (result.status === "rejected") {
-        this.#logger?.warn("search_failed", { provider: index === 0 ? "youtube" : "soundcloud", code: result.reason?.code ?? "error" });
+        this.#logger?.warn("search_failed", { provider: "soundcloud", code: result.reason?.code ?? "error" });
         continue;
       }
       for (const value of result.value) {
-        candidates.push(...candidatesFromProbe(value, index === 0 ? "youtube" : "soundcloud"));
+        candidates.push(...candidatesFromProbe(value, "soundcloud"));
       }
     }
 

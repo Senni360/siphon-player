@@ -24,7 +24,7 @@ function writeFixture(target) {
 
 if (args.includes("--dump-single-json")) {
   const url = args[args.length - 1] ?? "";
-  const key = url.includes("soundcloud.com") ? "FAKE_SEARCH_SOUNDCLOUD" : "FAKE_SEARCH_YOUTUBE";
+  const key = (url.startsWith("scsearch") || url.includes("soundcloud.com")) ? "FAKE_SEARCH_SOUNDCLOUD" : "FAKE_SEARCH_YOUTUBE";
   const file = process.env[key];
   process.stdout.write(file && fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "{\"entries\":[]}");
 } else {
