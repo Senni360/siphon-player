@@ -183,33 +183,12 @@ See [proxy options and limits](/how-it-connects/#proxy).
 
 ## Build from source
 
-Build the single binary with Rust 1.98 or newer:
+Encore builds on Windows with Rust 1.98 or newer; `rust-toolchain.toml` pins
+1.98.0. In a checkout:
 
-```bash
-cargo install --git https://github.com/crmne/spotifast --locked
+```powershell
+cargo build --release
 ```
 
-
-
-```bash
-sudo pacman -S --needed alsa-lib pipewire libxkbcommon wayland cmake clang
-```
-
-On Debian or Ubuntu:
-
-```bash
-sudo apt install libasound2-dev libpipewire-0.3-dev libxkbcommon-dev libwayland-dev \
-  cmake clang libclang-dev
-```
-
-On Fedora:
-
-```bash
-sudo dnf install alsa-lib-devel pipewire-devel libxkbcommon-devel \
-  wayland-devel cmake clang clang-devel
-```
-
-
-
-With [Nix](https://nixos.org), `nix develop` in a checkout provides all of it,
-along with the exact toolchain `rust-toolchain.toml` pins.
+The single binary is `target\release\siphon.exe`. The demo build, which fills
+every page with sample data, needs `--features demo`.

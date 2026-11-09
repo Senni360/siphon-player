@@ -16,7 +16,7 @@ hero:
       link: /what-is-spotifast/
     - theme: alt
       text: GitHub
-      link: https://github.com/crmne/spotifast
+      link: https://github.com/Senni360/siphon-player
   image:
     src: /screenshot.png
     alt: "Siphon Home with the playlist library, recommendations, queue, and player visible"

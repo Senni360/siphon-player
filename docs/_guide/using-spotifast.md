@@ -212,9 +212,8 @@ not queued after it.
 
 ## Search from a launcher
 
-**In development, not included in 0.8.0:** a Spotify search link opens Search
-and fills the box without starting playback. To try it in a development build,
-set a launcher or keyboard shortcut to run:
+A Spotify search link opens Search and fills the box without starting playback.
+Set a launcher or keyboard shortcut to run:
 
 ```sh
 siphon 'https://open.spotify.com/search/here%20comes%20the%20sun'
@@ -224,9 +223,7 @@ This starts the app if needed or opens its existing window. When signed out,
 the latest search link waits for sign-in. Use `https://open.spotify.com/search`
 without a query to open an empty, focused search box.
 
-On Linux, `playerctl --player=siphon open` accepts the same search link
-when the app is running. Links to songs, albums, and playlists still start
-playback as before.
+Links to songs, albums, and playlists still start playback as before.
 
 ## Finding a setting
 
@@ -365,31 +362,22 @@ random token). Use the command rather than the channel itself.
 
 ## Updates
 
-The Windows installer, Mac app, AppImage, and portable Windows and Linux
-downloads update from inside Siphon. Click the green update button to download a
-release, then choose when to restart and install it. Settings can enable
-automatic background downloads; restarting always waits for your click.
+The Windows copy updates from inside Encore. Click the update button to
+download a release, then choose when to restart and install it. Settings can
+enable automatic background downloads; restarting always waits for your click.
 Closing the update window keeps a download running. You can also check for a
-new release from Settings, or on macOS from the application menu.
-**Release notes** in **Settings > About** opens the GitHub release page of
-the version you are running, to read what changed.
+new release from Settings. **Release notes** in **Settings > Updates** opens
+the GitHub release page of the version you are running, to read what changed.
 
-Siphon checks each download before installing it. An interrupted or damaged
-download leaves the running app alone, and a failed startup restores the
-previous installation. Updates keep your settings and sign-ins. On macOS,
-move Siphon to Applications before updating it.
+Encore checks each download's signature before installing it. An interrupted
+or damaged download leaves the running app alone, and a failed startup restores
+the previous installation. Updates keep your settings and sign-ins.
 
-Package-managed installations update through their package manager,
-including Homebrew, Flatpak, apt, dnf, pacman, Nix, and Cargo. Other
-installations use the [Download page](/download/). Portable archives
-identify themselves with `siphon-portable.txt`. On Windows, a portable
-copy keeps its settings, state and caches in the `siphon-data` folder
-next to it, which updates leave as it is (see
-[portable copies](/settings-and-files/#portable-copies)). The AppImage
-updates itself when you own it and can write to its folder, such as
-`~/Applications`; one in a system folder or someone else's says so and
-links to the release instead. AppImage updaters such as AppImageUpdate and
-Gear Lever work as well, from the update information inside it.
+A portable copy, one with `siphon-data` beside `siphon.exe`, updates the same
+way and keeps that folder as it is (see
+[portable copies](/settings-and-files/#portable-copies)).
+[Private Siphon Updates](/private-updates/) covers the signing and release
+rules.
 
 ## Library order
 
