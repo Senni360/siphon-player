@@ -396,3 +396,53 @@ test('groups keep their parties apart', async () => {
   assert.equal((await call(host.secret, 'GET', '/live', undefined, group.id)).body.channels.length, 1);
 });
 
+
+test('leaving the first group leaves a way back with the deployment invite', async () => {
+  const { call, signIn, legacy } = world();
+  const left = await signIn('leaver');
+  const seated = await legacy('seated');
+  assert.equal((await call(left.secret, 'POST', '/groups/join', { code: INVITE })).status, 200);
+  assert.equal((await call(left.secret, 'POST', `/groups/${FIRST_GROUP}/leave`)).status, 200);
+  const { body: gone } = await call(left.secret, 'GET', '/account');
+  assert.deepEqual(gone.groups, []);
+  // Even with the group it left still named on the request.
+  const back = await call(left.secret, 'POST', '/groups/join', { code: INVITE }, FIRST_GROUP);
+  assert.equal(back.status, 200, JSON.stringify(back.body));
+  assert.equal(back.body.id, FIRST_GROUP);
+  assert.equal((await call(left.secret, 'GET', '/posts', undefined, FIRST_GROUP)).status, 200);
+  assert.equal((await call(seated.secret, 'GET', '/posts')).status, 200);
+  assert.equal((await call(left.secret, 'POST', '/groups/join', { code: 'wrong' })).status, 403);
+});
+
+test('whoever comes back to an emptied first group holds it', async () => {
+  const { call, signIn } = world();
+  const first = await signIn('first');
+  await call(first.secret, 'POST', '/groups/join', { code: INVITE });
+  await call(first.secret, 'POST', `/groups/${FIRST_GROUP}/leave`);
+  const { body } = await call(first.secret, 'POST', '/groups/join', { code: INVITE });
+  assert.equal(body.id, FIRST_GROUP);
+  const mine = body.members.find((m: any) => m.user_id === first.id);
+  assert.equal(mine.role, 'owner');
+});
+
+test('the deployment owner gets back into a first group left with no owner', async () => {
+  const { call, signIn } = world('boss');
+  const boss = await signIn('boss');
+  await call(boss.secret, 'POST', `/groups/${FIRST_GROUP}/leave`).catch(() => {});
+  const again = await signIn('boss');
+  const { body } = await call(again.secret, 'GET', '/account');
+  const first = body.groups.find((g: any) => g.id === FIRST_GROUP);
+  assert.ok(first, 'the owner is back in the first group');
+});
+
+test('someone removed from the first group cannot use the deployment invite to return', async () => {
+  const { call, signIn, storage } = world();
+  const owner = await signIn('owner');
+  const other = await signIn('other');
+  await call(owner.secret, 'POST', '/groups/join', { code: INVITE });
+  await call(other.secret, 'POST', '/groups/join', { code: INVITE });
+  const removed = await call(owner.secret, 'DELETE', `/groups/${FIRST_GROUP}/members/${other.id}`);
+  assert.equal(removed.status, 200, JSON.stringify(removed.body));
+  assert.equal((await call(other.secret, 'POST', '/groups/join', { code: INVITE })).status, 403);
+  void storage;
+});

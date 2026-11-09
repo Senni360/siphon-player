@@ -166,7 +166,7 @@ export function spotifyIdOf(value: unknown): string {
 type Change = <T>(update: (state: State, user: User) => T) => Promise<T>;
 
 /** `/account` and `/groups`. Null when the path is neither. */
-export async function groupRoute(request: Request, path: string, user: User, state: State, currentHash: string, change: Change, signal: AbortSignal): Promise<Response | null> {
+export async function groupRoute(request: Request, path: string, user: User, state: State, currentHash: string, change: Change, signal: AbortSignal, isDeploymentInvite: (code: string) => boolean = () => false): Promise<Response | null> {
   const method = request.method;
   const body = () => readBody(request, signal);
   const me = user.user_id;
@@ -211,10 +211,18 @@ export async function groupRoute(request: Request, path: string, user: User, sta
   if (path === '/groups/join' && method === 'POST') {
     const code = text((await body()).code, 'code', 256);
     return json(await change((s, current) => {
-      const found = withGroups(s).find(g => g.invite !== null && g.invite === code) ?? fail(403, 'Invalid invite code');
+      // The first group has no code of its own at the start, so the deployment's invite opens it.
+      const found = withGroups(s).find(g => g.invite !== null && g.invite === code)
+        ?? (isDeploymentInvite(code) ? groupById(s, FIRST_GROUP) : undefined)
+        ?? fail(403, 'Invalid invite code');
       if (found.removed.includes(current.user_id)) return fail(403, 'You were removed from this group. Ask its admin to add you back');
       if (found.members.length >= MAX_USERS) return fail(409, 'Group is full');
-      if (!memberOf(found, current.user_id)) found.members.push({ user_id: current.user_id, role: 'member', rights: memberRights() });
+      if (!memberOf(found, current.user_id)) {
+        // Nobody can hand over a group with no owner, so whoever comes back to it holds it.
+        const claims = !found.owner_id && !found.members.length;
+        found.members.push({ user_id: current.user_id, role: claims ? 'owner' : 'member', rights: claims ? fullRights() : memberRights() });
+        if (claims) found.owner_id = current.user_id;
+      }
       return groupView(found, s, current.user_id);
     }));
   }

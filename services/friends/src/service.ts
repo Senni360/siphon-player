@@ -270,6 +270,10 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
           admitPending(state, account);
           // The owner the deployment names takes the first group once they prove who they are.
           const first = groupById(state, FIRST_GROUP);
+          // Even from outside it, when it has been left with no owner to let them back in.
+          if (first && ownerSpotify && profile.id === ownerSpotify && !first.owner_id && !memberOf(first, account.user_id)) {
+            first.members.push({ user_id: account.user_id, role: 'member', rights: memberRights() });
+          }
           if (first && ownerSpotify && profile.id === ownerSpotify && first.owner_id !== account.user_id && memberOf(first, account.user_id)) {
             for (const seat of first.members) if (seat.role === 'owner') seat.role = 'admin';
             first.owner_id = account.user_id;
@@ -320,7 +324,7 @@ export function createService(storage: Storage, inviteCode: string, ask: Ask = n
       const reads = method === 'GET';
       if (!await storage.limit(`user:${user.user_id}:${reads ? 'read' : 'write'}`, reads ? 120 : 60, 60, signal)) return fail(429, 'Too many requests', 60);
       signal.throwIfAborted();
-      const scoped = await groupRoute(request, path, user, state, secret_hash, update => memberChange(storage, secret_hash, update, signal).finally(() => { roster = null; }), signal);
+      const scoped = await groupRoute(request, path, user, state, secret_hash, update => memberChange(storage, secret_hash, update, signal).finally(() => { roster = null; }), signal, code => timingSafeEqual(Buffer.from(hash(code)), Buffer.from(hash(inviteCode))));
       if (scoped) return scoped;
       if (path === '/me' && method === 'GET') return json({ user_id: user.user_id, display_name: user.display_name });
       if (path === '/me' && method === 'PATCH') {
