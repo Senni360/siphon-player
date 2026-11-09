@@ -7,8 +7,7 @@ nav_order: 1
 Encore is built for **Windows x64** only. Each release is one ZIP file, with no
 installer and no administrator password.
 
-Get it from [the download page](https://encore.senni.dev/download), which sends
-you to the newest release's ZIP, or choose a version on the
+Get the newest ZIP from the
 [releases page](https://github.com/Senni360/siphon-player/releases). The file is
 named `siphon-vVERSION-x86_64-pc-windows-msvc.zip`.
 

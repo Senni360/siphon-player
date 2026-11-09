@@ -121,9 +121,10 @@ another device of the same account, with a secret of its own that can be signed 
 alone. Each code works once, so more than one phone or browser can be linked, each
 with its own code. Its commands then wait with the group service for this computer,
 which looks every fifteen seconds until a phone is watching. Answers (songs, names and pictures, and possibly private links in them) pass
-through the same way and expire within a minute. No sign-in ever leaves this computer:
-the phone doesn't hold Spotify, SoundCloud or Google access. This connection only runs
-on a computer that has linked a phone.
+through the same way and expire within a minute. The link carries no Spotify,
+SoundCloud or Google access, and none is sent from this computer to the phone.
+A Spotify sign-in made on the phone stays that phone's own. This connection only
+runs on a computer that has linked a phone.
 
 The always-on edge at `edge.encore.senni.dev` is the phone's second answer, for while
 this computer is off. It is spoken to directly and is entirely optional. The phone asks

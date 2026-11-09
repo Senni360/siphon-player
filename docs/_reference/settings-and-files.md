@@ -516,7 +516,7 @@ main fields are:
 | `sidebar_grid` | `false` | Library entries as responsive cover cards instead of rows |
 | `tracklist_compact` | `false` | One-line track rows without covers |
 | `middle_click_autoscroll` | `false` | Linux only: middle-click a list to autoscroll it. Windows always autoscrolls and macOS never does |
-| `winamp_window` | `false` | The window is the Winamp mini player |
+| `winamp_window` | `false` | The window is the Winamp mini player. Nothing in the interface opens it in this build |
 | `winamp_show_taskbar` | `true` | Windows since 0.8.0, and Linux X11 sessions: show the Winamp window's taskbar button; the main window always keeps its button. Wayland and macOS ignore it |
 | `custom_titlebar` | `true` | Windows and Linux: draw Siphon's own title bar and window buttons instead of the desktop's |
 | `skin` | none | File or folder name in the skins folder; blank uses the built-in skin |
@@ -550,6 +550,10 @@ main fields are:
 | `proxy_host` | none | Host of a manual HTTP or SOCKS5 proxy. Ignored when the mode is `off` or `system` |
 | `proxy_port` | none | Port of a manual HTTP or SOCKS5 proxy |
 | `proxy_username` | none | Optional proxy login for Web requests; authenticated local playback proxying is not supported |
+
+The Winamp, player-bar visualizer and language controls are not in Settings in
+this build. Their keys remain readable, so an older file keeps working, but a
+new choice there is not offered on the page.
 
 ## Command line
 
