@@ -1734,11 +1734,25 @@ function card(title, by, image, onclick, uri) {
 
 /** Once, a tip for keeping Encore on the home screen, where it opens like an app. */
 function installTip() {
-  const installed = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
-  if (installed || localStorage.getItem('encore.tip')) return null;
-  const how = /iPhone|iPad/.test(navigator.userAgent) ? 'Press Share, then Add to Home Screen.' : "Open your browser's menu, then Add to Home screen.";
-  const tip = h('div', { class: 'banner' }, h('div', {}, h('b', { text: 'Keep Encore on your home screen' }), how),
-    h('button', { class: 'tip-close', 'aria-label': 'Dismiss', onclick: () => { localStorage.setItem('encore.tip', '1'); tip.remove(); } }, '×'));
+  if (installed() || localStorage.getItem(INSTALL_TIP)) return null;
+  const apple = applePhone();
+  if (!apple && !installEvent) return null;
+  const done = value => {
+    localStorage.setItem(INSTALL_TIP, value);
+    tip.remove();
+  };
+  const tip = h('div', { class: 'banner install' },
+    h('div', {}, h('b', { text: apple ? 'Keep Encore on your home screen' : 'Install Encore' }),
+      apple ? 'Press Share, then Add to Home Screen.' : 'It opens full screen, like the app on your computer.'),
+    !apple && h('button', { class: 'chip plain install-go', text: 'Install', onclick: async () => {
+      const event = installEvent;
+      if (!event) return;
+      event.prompt();
+      const choice = await event.userChoice.catch(() => null);
+      installEvent = null;
+      done(choice?.outcome === 'accepted' ? 'installed' : '1');
+    } }),
+    h('button', { class: 'tip-close', 'aria-label': 'Dismiss', onclick: () => done('1') }, '×'));
   return tip;
 }
 
@@ -2220,6 +2234,35 @@ function linkScreen(problemText) {
 let polling = false;
 let arrival = null;
 
+// ---------------------------------------------------------------- installing the app
+const INSTALL_TIP = 'encore.install';
+let installEvent = null;
+const installed = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+const phoneBrowser = () => /iPhone|iPad|iPod|Android/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const applePhone = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Android offers an install prompt once; the tip below only appears when it
+// does. iPhone has no prompt, so its tip explains Share, then Add to Home Screen.
+addEventListener('beforeinstallprompt', event => {
+  if (!phoneBrowser() || installed()) return;
+  event.preventDefault();
+  installEvent = event;
+  if (screen && current.page === 'home' && !localStorage.getItem(INSTALL_TIP)) render(true);
+});
+addEventListener('appinstalled', () => {
+  installEvent = null;
+  localStorage.setItem(INSTALL_TIP, 'installed');
+  for (const tip of document.querySelectorAll('.install')) tip.remove();
+});
+
+/** A shortcut's ?tab=... opens that tab, leaving a clean address behind. */
+function shortcutTab() {
+  const tab = new URLSearchParams(location.search).get('tab');
+  if (tab !== 'search' && tab !== 'library') return;
+  current = { page: tab };
+  history.replaceState(null, '', '/');
+}
+
 // ---------------------------------------------------------------- the offline shell
 let watchingShell = false;
 /** Keeps the shell for an offline open, and offers a refresh when a new one lands. */
@@ -2257,6 +2300,7 @@ async function arrive() {
     try { await spotifyReturn(); } catch (error) { arrival = error.message; }
   }
   if (await linkFromAddress()) return;
+  shortcutTab();
   start();
   if (arrival) { toast(arrival); arrival = null; }
 }

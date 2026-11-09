@@ -18,7 +18,7 @@ const SEED = {
   'encore.name': 'Sam',
   'encore.group': 'group-1',
   'encore.target': 'phone',
-  'encore.tip': '1',
+  'encore.install': '1',
 };
 const SEED_SCRIPT = `(() => {
   const seed = ${JSON.stringify(SEED)};

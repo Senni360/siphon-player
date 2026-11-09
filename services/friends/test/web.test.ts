@@ -97,3 +97,20 @@ test('the manifest points at versioned icons, so an update is a new URL', () => 
   for (const icon of manifest.icons) assert.match(icon.src, /\?v=[a-f0-9]{12}$/, icon.src);
   assert.equal(get('/manifest.webmanifest').headers['Cache-Control'], 'no-cache');
 });
+
+test('the manifest makes an installable app with Search and Library shortcuts', () => {
+  const manifest = JSON.parse(String(get('/manifest.webmanifest').body)) as {
+    id: string; scope: string; start_url: string; display: string;
+    theme_color: string; background_color: string;
+    icons: Array<{ sizes: string; purpose?: string }>;
+    shortcuts: Array<{ url: string }>;
+  };
+  assert.equal(manifest.id, '/');
+  assert.equal(manifest.scope, '/');
+  assert.equal(manifest.start_url, '/');
+  assert.equal(manifest.display, 'standalone');
+  assert.equal(manifest.theme_color, '#0b0b0c');
+  assert.equal(manifest.background_color, '#0b0b0c');
+  assert.ok(manifest.icons.some(icon => icon.sizes === '512x512' && icon.purpose?.includes('maskable')), 'a maskable 512');
+  assert.deepEqual(manifest.shortcuts.map(shortcut => shortcut.url), ['/?tab=search', '/?tab=library']);
+});

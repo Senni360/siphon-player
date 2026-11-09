@@ -234,6 +234,7 @@ input[type=range]::-moz-range-thumb { width: 14px; height: 14px; border: 0; bord
 .source-picture { width: 112px; height: 112px; border-radius: 50%; object-fit: cover; background: var(--raised); margin-bottom: 10px; }
 .play-all[aria-pressed="true"] { color: var(--secondary); }
 .banner .tip-close { margin-left: auto; width: 32px; height: 32px; font-size: 20px; color: var(--secondary); flex: none; }
+.banner .install-go { margin-left: auto; align-self: center; flex: none; }
 .update { position: fixed; z-index: 20; top: calc(8px + var(--top)); left: 16px; right: 16px; display: flex; align-items: center; gap: 10px;
   padding: 10px 12px; border-radius: 14px; background: var(--raised); border: 1px solid var(--line-strong); color: var(--secondary);
   font-size: 13px; box-shadow: 0 8px 28px rgb(0 0 0 / 35%); animation: rise .25s var(--ease); }
