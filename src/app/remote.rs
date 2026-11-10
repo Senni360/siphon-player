@@ -28,6 +28,10 @@ pub struct Remote {
     pub asking_code: bool,
     /// Commands that have arrived, carried out on the next frame.
     incoming: Vec<Incoming>,
+    /// Command ids already taken from either path, so a command the relay and
+    /// the edge both deliver is acted on once. Five minutes matches the edge's
+    /// own dedupe window.
+    seen: Vec<(String, Instant)>,
     /// What the phone plays itself, while it does.
     pub there: Option<PlayingThere>,
 }
@@ -161,7 +165,7 @@ impl App {
                 self.phone.last_state = None;
             }
             RemoteEvent::Commands(commands) => {
-                self.phone.incoming.extend(commands);
+                self.accept_commands(commands);
             }
             RemoteEvent::Phone(word) => self.heard_from_phone(word),
             RemoteEvent::Code(answer) => {
@@ -177,9 +181,27 @@ impl App {
         }
     }
 
+    /// Takes the commands neither path has delivered before. The relay and the
+    /// edge socket can both carry the same command while one reconnects; its id
+    /// decides.
+    pub(super) fn accept_commands(&mut self, commands: Vec<Incoming>) {
+        const REMEMBER: Duration = Duration::from_secs(300);
+        let now = Instant::now();
+        self.phone
+            .seen
+            .retain(|(_, at)| now.duration_since(*at) < REMEMBER);
+        for command in commands {
+            if self.phone.seen.iter().any(|(id, _)| id == &command.id) {
+                continue;
+            }
+            self.phone.seen.push((command.id.clone(), now));
+            self.phone.incoming.push(command);
+        }
+    }
+
     /// Takes in what the phone plays itself. A word older than one already shown
     /// is passed over, and a press here holds until the phone agrees.
-    fn heard_from_phone(&mut self, word: Option<(crate::friends::PhonePlaying, i64)>) {
+    pub(super) fn heard_from_phone(&mut self, word: Option<(crate::friends::PhonePlaying, i64)>) {
         let Some((phone, age_ms)) = word.filter(|(_, age)| *age < THERE_FORGOTTEN_MS) else {
             self.phone.there = None;
             return;
@@ -280,9 +302,8 @@ impl App {
             }
             ctx.request_repaint_after(Duration::from_millis(250));
         }
-        if !self.phone.watched {
-            return;
-        }
+        // Whether or not anyone is watching the relay, the phone may still be
+        // in the edge room. Keep looking so a pause here reaches it at once.
         ctx.request_repaint_after(STATE_LOOK);
         if self
             .phone
@@ -304,13 +325,20 @@ impl App {
         };
         if tell {
             let value = serde_json::to_value(&snapshot).unwrap_or_default();
-            self.backend
-                .send(Command::Remote(RemoteRequest::State(value)));
+            if self.phone.watched {
+                // The relay handler also hands the same state to the edge, so
+                // the two paths never send it twice.
+                self.backend
+                    .send(Command::Remote(RemoteRequest::State(value)));
+            } else {
+                self.backend
+                    .send(Command::Edge(crate::edge::Request::State(value)));
+            }
             self.phone.last_state = Some((snapshot, Instant::now()));
         }
     }
 
-    fn remote_snapshot(&self) -> Snapshot {
+    pub(super) fn remote_snapshot(&self) -> Snapshot {
         let upcoming: Vec<_> = self
             .queue
             .get()
@@ -424,6 +452,34 @@ impl App {
                     share_url,
                     wanted: wanted.map(Box::new),
                 }));
+                // The edge cannot produce YouTube audio; put this one there
+                // too so the phone can play it later with this computer off.
+                if crate::youtube::is_track_uri(uri) {
+                    self.backend
+                        .send(Command::Edge(crate::edge::Request::Fetch(vec![
+                            uri.clone(),
+                        ])));
+                }
+                return;
+            }
+            Phone::Fetch { source, sources } => {
+                let mut seen = std::collections::HashSet::new();
+                let wanted: Vec<String> = std::iter::once(source.clone())
+                    .chain(sources.iter().cloned())
+                    .filter(|source| crate::remote::allowed_fetch(source))
+                    .filter(|source| seen.insert(source.clone()))
+                    .take(2)
+                    .collect();
+                if wanted.is_empty() {
+                    self.remote_reply(
+                        id,
+                        json!({ "error": "Only a YouTube song can be fetched." }),
+                    );
+                    return;
+                }
+                self.backend
+                    .send(Command::Edge(crate::edge::Request::Fetch(wanted)));
+                self.remote_reply(id, json!({ "ok": true }));
                 return;
             }
             Phone::Search { query } => {
@@ -693,5 +749,36 @@ impl App {
             "albums": albums,
             "looking": sources.looking(),
         }))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The relay and the edge socket can both deliver the same command while
+    /// one reconnects; its id is what stops a second press.
+    #[test]
+    fn the_same_command_from_both_paths_is_acted_on_once() {
+        let mut app = crate::app::tests::test_app("edge-command-dedupe");
+        let next = Incoming {
+            id: "phone-1".into(),
+            command: Phone::Next,
+        };
+        app.accept_commands(vec![next.clone()]);
+        app.accept_commands(vec![next]);
+        assert_eq!(app.phone.incoming.len(), 1);
+        app.accept_commands(vec![Incoming {
+            id: "phone-2".into(),
+            command: Phone::Toggle,
+        }]);
+        assert_eq!(app.phone.incoming.len(), 2);
+        // A different id is a different press, even for the same button.
+        app.accept_commands(vec![Incoming {
+            id: "phone-3".into(),
+            command: Phone::Next,
+        }]);
+        assert_eq!(app.phone.incoming.len(), 3);
+        app.backend.shutdown();
     }
 }

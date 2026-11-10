@@ -127,6 +127,15 @@ impl Saved {
         self.persist().await;
     }
 
+    /// Every saved match, for the always-on edge's match document.
+    pub async fn all(&self) -> BTreeMap<String, SavedMatch> {
+        self.ready().await;
+        self.inner
+            .as_ref()
+            .and_then(|inner| inner.matches.lock().ok().map(|held| held.clone()))
+            .unwrap_or_default()
+    }
+
     pub async fn forget(&self, spotify: &str) {
         self.ready().await;
         let Some(inner) = &self.inner else { return };

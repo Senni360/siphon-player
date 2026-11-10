@@ -155,6 +155,7 @@ impl Worker {
                     return;
                 }
                 self.hybrid.remote_running = true;
+                self.edge_start();
                 let emit = Arc::new(emit);
                 tokio::spawn(async move {
                     let mut watched = false;
@@ -234,6 +235,7 @@ impl Worker {
                 });
             }
             RemoteRequest::State(state) => {
+                self.edge(crate::edge::Request::State(state.clone()));
                 tokio::spawn(async move {
                     if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_state(&identity, &state).await;
@@ -241,6 +243,10 @@ impl Worker {
                 });
             }
             RemoteRequest::Reply { id, value } => {
+                self.edge(crate::edge::Request::Reply {
+                    id: id.clone(),
+                    value: value.clone(),
+                });
                 tokio::spawn(async move {
                     if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_reply(&identity, &id, &value).await;
@@ -298,6 +304,7 @@ impl Worker {
         let catalogue = self.youtube_catalogue();
         let soundcloud = self.soundcloud_client();
         let saved = self.saved_matches.clone();
+        let commands = self.commands.clone();
         let credentials = self.credentials.clone();
         let http = crate::http::build_collection_client(&self.engine_config.proxy)
             .map(Http::new)
@@ -322,6 +329,7 @@ impl Worker {
                             .await
                             .ok_or("This song isn't on YouTube or SoundCloud.")?;
                             saved.remember(&spotify_uri, &found).await;
+                            let _ = commands.send(Command::Edge(crate::edge::Request::Matches));
                             found.uri
                         }
                     };
