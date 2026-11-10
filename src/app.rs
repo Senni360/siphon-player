@@ -13766,6 +13766,7 @@ impl App {
                     self.request_lyrics();
                 }
             }
+            Action::RequestLyrics => self.request_lyrics(),
             Action::ToggleFriendsPanel => {
                 self.show_friends_panel = !self.show_friends_panel;
                 if self.show_friends_panel {
@@ -17344,6 +17345,34 @@ mod tests {
             app.lyrics_uri.as_deref(),
             Some("spotify:track:b"),
             "fullscreen requests the new track's lyrics"
+        );
+        app.backend.shutdown();
+    }
+
+    /// The Lyrics tab in Now playing asks for the playing song's words
+    /// itself; before this it only said to open the side panel.
+    #[test]
+    fn the_lyrics_tab_requests_and_keeps_the_playing_songs_words() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:a".into(),
+            duration_ms: 200_000,
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.apply(Action::RequestLyrics, &ctx);
+        assert_eq!(app.lyrics_uri.as_deref(), Some("spotify:track:a"));
+        assert!(matches!(app.lyrics, Loadable::Loading));
+        // An answer of no words becomes the tab's own state, and asking again
+        // for the same song does not look it up a second time.
+        let request = app.lyrics_request;
+        app.receive_lyrics("spotify:track:a", request, Ok(None));
+        assert!(matches!(app.lyrics, Loadable::Loaded(None)));
+        app.apply(Action::RequestLyrics, &ctx);
+        assert_eq!(
+            app.lyrics_request, request,
+            "the same answer is not asked for twice"
         );
         app.backend.shutdown();
     }

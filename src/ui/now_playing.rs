@@ -588,6 +588,11 @@ fn side_panel(app: &mut App, ui: &mut Ui, rect: Rect, uri: &str, position_ms: u3
             if *candidate == Tab::Credits && app.credits.get(uri).is_none() {
                 app.actions.push(Action::RequestCredits(uri.to_owned()));
             }
+            if *candidate == Tab::Lyrics && app.lyrics_uri.as_deref() != Some(uri) {
+                // The tab asks for its own words: the side panel may never
+                // have been opened, and it is what used to load them.
+                app.actions.push(Action::RequestLyrics);
+            }
         }
     }
 
@@ -772,6 +777,12 @@ fn up_next(app: &mut App, ui: &mut Ui) {
 fn lyrics(app: &mut App, ui: &mut Ui, uri: &str, position_ms: u32) {
     let locale = app.locale;
     let ours = app.lyrics_uri.as_deref() == Some(uri);
+    if !ours {
+        // The tab is open on a song whose words were never asked for. It
+        // follows the song by itself, and only this view knows that is the
+        // open tab (the flag lives with the widget, not the app).
+        app.actions.push(Action::RequestLyrics);
+    }
     match (&app.lyrics, ours) {
         (Loadable::Loaded(Some(lyrics)), true) if lyrics.instrumental => {
             theme::text(
@@ -813,13 +824,19 @@ fn lyrics(app: &mut App, ui: &mut Ui, uri: &str, position_ms: u32) {
                 );
             }
         }
-        (Loadable::Loading, true) => {
+        (Loadable::Failed(error), true) => {
+            let message =
+                gettext(locale, "Couldn't fetch the lyrics: {error}").replace("{error}", error);
             theme::text(
                 ui,
-                gettext(locale, "Loading lyrics…"),
+                message,
                 theme::regular(13.0),
                 Color32::from_white_alpha(185),
             );
+            ui.add_space(8.0);
+            if ui.button(gettext(locale, "Try again")).clicked() {
+                app.actions.push(Action::RetryLyrics);
+            }
         }
         (Loadable::Loaded(None), true) => {
             theme::text(
@@ -830,15 +847,14 @@ fn lyrics(app: &mut App, ui: &mut Ui, uri: &str, position_ms: u32) {
             );
         }
         _ => {
+            // Asked for a moment ago: the words replace this line when they
+            // arrive, and no lyrics says so instead.
             theme::text(
                 ui,
-                gettext(locale, "Lyrics load with the lyrics panel."),
-                theme::regular(12.5),
+                gettext(locale, "Loading lyrics…"),
+                theme::regular(13.0),
                 Color32::from_white_alpha(170),
             );
-            if !app.show_lyrics_panel && ui.button(gettext(locale, "Show lyrics")).clicked() {
-                app.actions.push(Action::ToggleLyricsPanel);
-            }
         }
     }
 }
