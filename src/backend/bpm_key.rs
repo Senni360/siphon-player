@@ -322,6 +322,19 @@ mod tests {
     }
 
     #[test]
+    fn a_file_at_its_own_rate_is_resampled_before_reading() {
+        for rate in [44_100, 48_000] {
+            let samples = clicks(20.0, 140.0, rate);
+            let reading = answer(&samples, rate, &AtomicBool::new(false))
+                .expect("a resampled click track answers");
+            assert!(
+                (f64::from(reading.bpm) - 140.0).abs() <= 1.0,
+                "at {rate} Hz, read {reading:?}"
+            );
+        }
+    }
+
+    #[test]
     fn too_little_sound_says_so_instead_of_guessing() {
         let samples = clicks(1.0, 140.0, crate::bpm_key::RATE);
         let error = answer(&samples, crate::bpm_key::RATE, &AtomicBool::new(false)).unwrap_err();
