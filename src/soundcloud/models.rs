@@ -105,6 +105,10 @@ pub struct Track {
     pub permalink_url: Option<String>,
     pub user: Option<User>,
     pub publisher_metadata: Option<Box<PublisherMetadata>>,
+    /// The credited artist on distribution-delivered tracks, separate from the
+    /// uploader's profile name. Falls back to the profile name when blank.
+    #[serde(default)]
+    pub metadata_artist: Option<String>,
     pub streamable: Option<bool>,
     pub policy: Option<String>,
     pub state: Option<String>,
@@ -163,7 +167,8 @@ impl Track {
                 user.artist_ref(
                     self.publisher_metadata
                         .as_ref()
-                        .and_then(|data| data.artist.as_deref()),
+                        .and_then(|data| data.artist.as_deref())
+                        .or(self.metadata_artist.as_deref()),
                 )
             })
             .into_iter()
@@ -228,6 +233,7 @@ impl Track {
             }),
             is_playable: Some(self.is_playable()),
             preview_only: self.is_preview(),
+            verified: self.user.as_ref().is_some_and(|user| user.verified),
             external_urls: external_urls(self.permalink_url.as_deref()),
             ..Default::default()
         };
