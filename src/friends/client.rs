@@ -332,7 +332,14 @@ impl Client {
                 400 | 413 | 415 => {
                     "Check the name, link and note. The service rejected this request."
                 }
-                502 => "Spotify isn't answering right now. Try again in a moment.",
+                // Signing in is the one request whose 502 is Spotify's: the
+                // service only says 502 after Spotify refused to answer it.
+                // Everywhere else the 502 is the group's own gateway, and
+                // blaming Spotify sent people looking in the wrong place.
+                502 if path == "/auth/spotify" => {
+                    "Spotify isn't answering right now. Try again in a moment."
+                }
+                502 => "The group service isn't answering. Try again in a moment.",
                 _ => "Friends is unavailable. Try again later.",
             }
             .into());
