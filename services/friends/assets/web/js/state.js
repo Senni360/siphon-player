@@ -55,4 +55,10 @@ export const hooks = {
   signedOut: null,
   /** Start the app again from the top. */
   restart: null,
+  /** Whether sound comes out of this phone (`playsHere`). */
+  playsHere: null,
+  /** Mark the playing song's row wherever it is listed (`markPlaying`). */
+  markPlaying: null,
+  /** Close the Now Playing sheet, if it is open. */
+  closeSheet: null,
 };

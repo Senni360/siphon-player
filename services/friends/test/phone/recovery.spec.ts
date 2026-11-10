@@ -114,6 +114,7 @@ test('a reload brings back the paused queue and its place', async ({ phone }) =>
   expect(audio!.paused).toBe(true);
 
   await phone.openSheet();
+  await phone.openQueue();
   await expect(phone.page.locator('.sheet .upnext .row .name').first()).toHaveText(queue[6]!);
 
   // Nothing is fetched until it's wanted; pressing play picks up the same place.

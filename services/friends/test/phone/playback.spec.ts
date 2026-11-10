@@ -44,6 +44,7 @@ test('next and previous move through the playlist', async ({ phone }) => {
   await expect(phone.page.locator('.sheet .big')).toHaveText(first);
 
   // And the queue is the list around it.
+  await phone.openQueue();
   await expect(phone.page.locator('.sheet .upnext .row .name').first()).toHaveText(second);
   await expect(phone.page.locator('.sheet .upnext .row .name').nth(1)).toHaveText(third);
 });

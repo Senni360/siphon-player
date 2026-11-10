@@ -1,27 +1,25 @@
 // A source's own page: someone on SoundCloud or YouTube.
 
-import { art, h, icon, SOURCE_NAMES, sourceOf } from '../dom.js';
+import { empty, h, SOURCE_NAMES, sourceOf } from '../dom.js';
 import { load } from '../load.js';
-import { backButton, current } from '../navigation.js';
-import { playFrom } from '../player.js';
+import { current, topBar } from '../navigation.js';
 import { ask } from '../remote.js';
-import { rows, shuffled } from '../rows.js';
+import { rows } from '../rows.js';
+import { listHead } from './list.js';
 
 export function sourceScreen() {
   const body = h('div');
+  const bar = topBar();
   const { uri } = current;
   load(async () => {
     const found = await ask('source', { uri });
     const songs = found.songs ?? [];
+    const name = found.name ?? 'Songs';
+    bar.setTitle(name);
     return [
-      found.image ? h('div', { class: 'source-head' }, art(found.image, 'source-picture')) : null,
-      h('h1', { class: 'title', text: found.name ?? 'Songs' }),
-      h('p', { class: 'note', text: SOURCE_NAMES[sourceOf(uri)] }),
-      songs.length ? h('div', { class: 'list-actions' },
-        h('button', { class: 'play-all', onclick: () => playFrom(songs, 0) }, icon('play'), 'Play'),
-        h('button', { class: 'play-all second', onclick: () => playFrom(shuffled(songs), 0) }, icon('shuffle'), 'Shuffle')) : h('p', { class: 'empty', text: 'Nothing here yet.' }),
-      h('div', { class: 'upnext' }, rows(songs, 50)),
+      listHead(name, songs, { image: found.image, note: SOURCE_NAMES[sourceOf(uri)], round: !!found.image }),
+      songs.length ? h('div', { class: 'upnext' }, rows(songs, 50)) : empty('Nothing here yet.'),
     ];
-  }, body);
-  return [backButton(), body];
+  }, body, 'list');
+  return [bar, body];
 }

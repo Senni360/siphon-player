@@ -30,7 +30,8 @@ test('only Spotify sign-in is allowed to leave the app', async ({ phone, server 
   // The one journey out of the origin a test may take: the listener's own
   // Spotify app, at the address the page hands them.
   phone.guard.allowNext(/^https:\/\/accounts\.spotify\.com\/authorize\?/);
-  await phone.page.getByRole('button', { name: 'Keep Spotify going with the computer off' }).click();
+  await phone.page.getByRole('button', { name: 'Settings' }).click();
+  await phone.page.getByRole('button', { name: /^Keep Spotify going with the computer off/ }).click();
   await phone.page.getByLabel('Spotify Client ID').fill('a1b2c3d4e5f6g7h8');
   await phone.page.getByRole('button', { name: 'Continue to Spotify' }).click();
 

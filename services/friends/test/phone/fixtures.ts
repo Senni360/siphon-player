@@ -163,6 +163,7 @@ export interface Phone {
   row(index: number): Locator;
   playRow(index: number): Promise<string>;
   openSheet(): Promise<void>;
+  openQueue(): Promise<void>;
   audio(): Promise<AudioSnapshot | null>;
   mediaSession(): Promise<SessionSnapshot>;
   advance(seconds: number): Promise<void>;
@@ -213,6 +214,18 @@ function makePhone(page: Page, server: PhoneServer, guard: NavigationGuard): Pho
     async openSheet() {
       await page.locator('.mini button.open').click();
       await expect(page.locator('.sheet')).toBeVisible();
+      // It rises into place over a moment. A finger waits for that; a mouse drag
+      // placed by coordinates does not, so wait here or it lands mid-animation.
+      await expect.poll(async () => page.evaluate(() => {
+        const sheet = document.querySelector('.sheet');
+        return sheet ? Math.round(sheet.getBoundingClientRect().top) : -1;
+      }), { message: 'the sheet settles into place' }).toBeLessThanOrEqual(1);
+    },
+
+    async openQueue() {
+      // The queue is one of the three things the middle of the sheet can show.
+      await page.locator('.sheet .tools button', { hasText: 'Queue' }).click();
+      await expect(page.locator('.sheet .upnext')).toBeVisible();
     },
 
     async audio() {
