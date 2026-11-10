@@ -9,6 +9,8 @@
 
 pub use fastframe_power::{Ack, Activity, Conditions, Event, KeepAwake, Power};
 
+use std::time::Duration;
+
 use crate::player::{LocalState, Playback};
 
 /// How much the app may spend on drawing and polling.
@@ -51,6 +53,48 @@ pub fn visualiser_fps(budget: Budget, conditions: Conditions, fps: u32) -> Optio
             Some(if conditions.saver { half.min(30) } else { half })
         }
     }
+}
+
+/// How often the progress readout, and anything else that merely ticks along
+/// with a playing song, needs a new frame: four times a second is plenty for a
+/// line that moves a few pixels a second.
+pub const PROGRESS_FRAME: Duration = Duration::from_millis(250);
+
+/// The gap until a continuous animation's next frame, when it wants one every
+/// `interval`, within `budget`: as asked in focus, half as often out of focus
+/// or while saving energy, and no frame at all while nobody can see the
+/// window.
+pub fn animation_interval(budget: Budget, interval: Duration) -> Option<Duration> {
+    match budget {
+        Budget::Background => None,
+        Budget::Saver => Some(interval.saturating_mul(2)),
+        Budget::Normal => Some(interval),
+    }
+}
+
+/// The soonest the drawing pass needs another frame for what merely moves with
+/// the song: the progress readout's pace while one plays. `None` when nothing
+/// needs a frame, so a paused window stays still.
+pub fn progress_frame(budget: Budget, playing: bool) -> Option<Duration> {
+    if budget == Budget::Background || !playing {
+        return None;
+    }
+    Some(PROGRESS_FRAME)
+}
+
+/// Keeps this pass's budget where the drawing helpers can read it.
+pub fn note_budget(ctx: &egui::Context, budget: Budget) {
+    ctx.data_mut(|data| data.insert_temp(budget_id(), budget));
+}
+
+/// The budget of the pass being drawn, as [`note_budget`] last set it.
+pub fn frame_budget(ctx: &egui::Context) -> Budget {
+    ctx.data(|data| data.get_temp(budget_id()))
+        .unwrap_or_default()
+}
+
+fn budget_id() -> egui::Id {
+    egui::Id::new("power-frame-budget")
 }
 
 /// Whether local playback is doing work the user is waiting for, which
@@ -180,5 +224,43 @@ mod tests {
             "a song playing on through a dropped session"
         );
         assert!(!playback_needs_activity(&LocalState::default()));
+    }
+
+    /// A decoration that wants a frame every 66 ms gets one in focus, one every
+    /// 132 ms out of focus or saving energy, and none while nobody can see the
+    /// window, so hidden and minimised windows go quiet.
+    #[test]
+    fn animations_go_quiet_unseen_and_stretch_out_of_focus() {
+        let wanted = Duration::from_millis(66);
+        assert_eq!(animation_interval(Budget::Normal, wanted), Some(wanted));
+        assert_eq!(
+            animation_interval(Budget::Saver, wanted),
+            Some(Duration::from_millis(132))
+        );
+        assert_eq!(animation_interval(Budget::Background, wanted), None);
+    }
+
+    /// A playing song only needs the four-times-a-second progress pace; paused
+    /// or unseen, nothing asks for a frame on its behalf.
+    #[test]
+    fn a_playing_song_needs_only_the_progress_pace() {
+        assert!(PROGRESS_FRAME >= Duration::from_millis(100));
+        assert!(PROGRESS_FRAME <= Duration::from_millis(250));
+        assert_eq!(progress_frame(Budget::Normal, true), Some(PROGRESS_FRAME));
+        assert_eq!(progress_frame(Budget::Saver, true), Some(PROGRESS_FRAME));
+        assert_eq!(progress_frame(Budget::Normal, false), None);
+        assert_eq!(progress_frame(Budget::Background, true), None);
+    }
+
+    /// The budget noted for the pass is the one the drawing helpers read, and
+    /// a context that was never told anything draws as designed.
+    #[test]
+    fn the_pass_budget_is_readable_from_the_context() {
+        let ctx = egui::Context::default();
+        assert_eq!(frame_budget(&ctx), Budget::Normal);
+        note_budget(&ctx, Budget::Background);
+        assert_eq!(frame_budget(&ctx), Budget::Background);
+        note_budget(&ctx, Budget::Saver);
+        assert_eq!(frame_budget(&ctx), Budget::Saver);
     }
 }

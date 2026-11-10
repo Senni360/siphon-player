@@ -260,7 +260,7 @@ fn file_drop_overlay(app: &App, ctx: &Context) {
                         palette.text.gamma_multiply(0.35),
                     );
                 }
-                ctx.request_repaint();
+                theme::animation_frame(ctx, std::time::Duration::from_millis(50));
             }
             let card = Rect::from_center_size(
                 window.center(),

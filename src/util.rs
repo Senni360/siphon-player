@@ -1,6 +1,7 @@
 //! Small helpers shared across the application.
 
 use std::borrow::Cow;
+use std::time::Duration;
 
 use crate::i18n::{Locale, gettext, ngettext, pgettext};
 
@@ -130,6 +131,37 @@ pub fn is_relative_date(iso: &str, now: jiff::Timestamp) -> bool {
     };
     let seconds = added.duration_until(now).as_secs_f64().floor() as i64;
     (0..RELATIVE_DATE_LIMIT_SECONDS).contains(&seconds)
+}
+
+/// The wait until `iso`'s relative label reads differently at `now`:
+/// the next whole second under a minute, then the next minute, hour, day and
+/// week boundary, and the end of the relative window. `None` once the label
+/// is a plain date.
+///
+/// Scheduling the repaint this way keeps an idle table still between labels
+/// instead of redrawing it every second.
+pub fn relative_date_refresh(iso: &str, now: jiff::Timestamp) -> Option<Duration> {
+    if !is_relative_date(iso, now) {
+        return None;
+    }
+    let added = iso.parse::<jiff::Timestamp>().ok()?;
+    let elapsed = added.duration_until(now).as_secs_f64();
+    let limit = RELATIVE_DATE_LIMIT_SECONDS as f64;
+    let unit = if elapsed < 60.0 {
+        1.0
+    } else if elapsed < 60.0 * 60.0 {
+        60.0
+    } else if elapsed < 24.0 * 60.0 * 60.0 {
+        60.0 * 60.0
+    } else if elapsed < 7.0 * 24.0 * 60.0 * 60.0 {
+        24.0 * 60.0 * 60.0
+    } else {
+        7.0 * 24.0 * 60.0 * 60.0
+    };
+    let next = (elapsed / unit).floor() * unit + unit;
+    // The label becomes a date at the window's end, whatever the unit says.
+    let wait = (next - elapsed).min(limit - elapsed).max(0.05);
+    Some(Duration::from_secs_f64(wait))
 }
 
 /// `5 minutes ago` for recent ISO-8601 timestamps, otherwise the usual date.
@@ -492,6 +524,49 @@ mod tests {
         let pt = format_relative_date(Locale::PortugueseBrazil, "2026-08-31T11:59:30Z", now);
         assert!(!pt.ends_with(" ago"));
         assert!(is_relative_date("2026-08-31T11:59:30Z", now));
+    }
+
+    /// A relative date wakes the app when its wording changes, not once a
+    /// second: the next second under a minute, then the next minute, hour, day
+    /// and week, and the end of the relative window.
+    #[test]
+    fn relative_dates_schedule_their_next_wording() {
+        let now: jiff::Timestamp = "2026-08-31T12:00:00Z".parse().unwrap();
+        let wait = |iso: &str| relative_date_refresh(iso, now).map(|wait| wait.as_secs_f64());
+        let close = |iso: &str, expected: f64, why: &str| {
+            let got = wait(iso).unwrap_or_else(|| panic!("{iso} should wake once: {why}"));
+            assert!((got - expected).abs() < 0.001, "{iso}: {got} s, {why}");
+        };
+        close("2026-08-31T11:59:00.5Z", 0.5, "the next second");
+        close("2026-08-31T11:58:30Z", 30.0, "the next minute");
+        close(
+            "2026-08-31T11:59:00Z",
+            60.0,
+            "one minute old: the next minute",
+        );
+        close(
+            "2026-08-31T11:00:00Z",
+            60.0 * 60.0,
+            "one hour old: the next hour",
+        );
+        close(
+            "2026-08-30T12:00:00Z",
+            24.0 * 60.0 * 60.0,
+            "one day old: the next day",
+        );
+        close(
+            "2026-08-17T12:00:00Z",
+            7.0 * 24.0 * 60.0 * 60.0,
+            "a week old: the next week",
+        );
+        close(
+            "2026-08-02T12:00:00Z",
+            24.0 * 60.0 * 60.0,
+            "the label becomes a date at the window's end",
+        );
+        assert_eq!(wait("2026-08-01T12:00:00Z"), None);
+        assert_eq!(wait("2026-09-01T12:00:00Z"), None);
+        assert_eq!(wait("not-a-date"), None);
     }
 
     #[test]

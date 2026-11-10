@@ -14824,6 +14824,8 @@ impl App {
             !self.window_hidden && !ctx.input(|input| input.viewport().minimized.unwrap_or(false));
         let focused = ctx.input(|input| input.viewport().focused.unwrap_or(true));
         let budget = crate::power::budget(conditions, shown, focused);
+        // The drawing helpers pace their animations from this pass's budget.
+        crate::power::note_budget(ctx, budget);
         if budget != self.budget {
             log::debug!("budget: {budget:?}");
             self.budget = budget;
@@ -15191,6 +15193,13 @@ impl App {
 
         if !self.toasts.is_empty() {
             ctx.request_repaint_after(TOAST_FRAME);
+        }
+        // While a song plays, only the progress line and the time move; four
+        // passes a second keep them honest. Paused or hidden, nothing here
+        // asks for a frame, so the window settles.
+        let playing = self.frame_now.as_ref().is_some_and(|now| now.playing);
+        if let Some(wait) = crate::power::progress_frame(self.budget, playing) {
+            ctx.request_repaint_after(wait);
         }
         self.theme_transition.paint(ctx);
         self.frame_now = None;

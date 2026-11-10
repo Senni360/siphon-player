@@ -1281,6 +1281,17 @@ pub fn repaint_after(ctx: &egui::Context, interval: std::time::Duration) {
     ctx.request_repaint_after(interval + std::time::Duration::from_secs_f32(predicted));
 }
 
+/// Asks for the next frame of a continuous animation that wants one every
+/// `interval`, within this pass's power budget: nothing while nobody can see
+/// the window, and half as often out of focus or while saving energy. Brief,
+/// user-started transitions keep asking for their own frames.
+pub fn animation_frame(ctx: &egui::Context, interval: std::time::Duration) {
+    let budget = crate::power::frame_budget(ctx);
+    if let Some(interval) = crate::power::animation_interval(budget, interval) {
+        repaint_after(ctx, interval);
+    }
+}
+
 /// Asks for a moving visualiser's next frame at `rate` frames a second, from
 /// [`crate::power::visualiser_fps`]: 0 is the display's own rate, and `None`
 /// asks for nothing, since nobody can see it.
@@ -1337,8 +1348,7 @@ fn next_beat(due: f64, now: f64, interval: f64) -> f64 {
 pub fn spinner(ui: &mut egui::Ui, size: f32, color: Color32) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     if ui.is_rect_visible(rect) {
-        ui.ctx()
-            .request_repaint_after(std::time::Duration::from_millis(33));
+        animation_frame(ui.ctx(), std::time::Duration::from_millis(66));
         let radius = size / 2.0 - 2.0;
         let start = ui.input(|input| input.time) * std::f64::consts::TAU * 1.2;
         let sweep = 250_f64.to_radians();
@@ -1701,6 +1711,24 @@ mod tests {
         assert_eq!(delays.len(), 1);
         let ms = delays[0].as_secs_f64() * 1_000.0;
         assert!((ms - 33.0).abs() < 0.5, "{ms} ms");
+    }
+
+    /// A decoration's frames follow the pass's budget: none while nobody can
+    /// see the window, half as often out of focus or saving energy.
+    #[test]
+    fn animation_frames_follow_the_budget() {
+        let ctx = egui::Context::default();
+        let delays = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = std::sync::Arc::clone(&delays);
+        ctx.set_request_repaint_callback(move |info| seen.lock().unwrap().push(info.delay));
+        crate::power::note_budget(&ctx, crate::power::Budget::Background);
+        animation_frame(&ctx, std::time::Duration::from_millis(66));
+        assert!(delays.lock().unwrap().is_empty(), "nobody can see it");
+        crate::power::note_budget(&ctx, crate::power::Budget::Saver);
+        animation_frame(&ctx, std::time::Duration::from_millis(66));
+        let delays = delays.lock().unwrap();
+        let ms = delays[0].as_secs_f64() * 1_000.0;
+        assert!((ms - 132.0).abs() < 0.5, "{ms} ms out of focus");
     }
 
     /// A visualiser nobody can see asks for no frames at all.
