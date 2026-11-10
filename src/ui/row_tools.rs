@@ -208,7 +208,16 @@ fn bpm_state(app: &App, locale: crate::i18n::Locale, uri: &str) -> State {
                 bpm_label(bpm, &key),
                 gettext(locale, "Click to see")
             )),
-            None => State::Ready(gettext(locale, "Measure this song's BPM and key").into_owned()),
+            None => {
+                let has_file =
+                    app.local_file(uri).is_some() || app.downloaded_files.contains_key(uri);
+                match crate::bpm_key::unavailable(uri) {
+                    Some(reason) if !has_file => State::Off(reason.to_owned()),
+                    _ => State::Ready(
+                        gettext(locale, "Measure this song's BPM and key").into_owned(),
+                    ),
+                }
+            }
         },
     }
 }
@@ -244,9 +253,7 @@ fn apply(
             if open == Some(Tool::BpmKey) {
                 set_open(None);
             } else {
-                if app.known_bpm_key(item.uri()).is_none()
-                    && !matches!(app.bpm_key.get(item.uri()), Some(Loadable::Loading))
-                {
+                if !matches!(app.bpm_key.get(item.uri()), Some(Loadable::Loading)) {
                     app.actions
                         .push(Action::RequestBpmKey(item.uri().to_string()));
                 }
@@ -324,12 +331,7 @@ fn bpm_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Re
     let locale = app.locale;
     let reading = app.bpm_key.reading(uri).or_else(|| app.beats.known(uri));
     let label = reading.map(|reading| match reading.key {
-        Some((key, confidence)) => format!(
-            "{} BPM · {} · {:.0}% sure",
-            reading.bpm,
-            key.name(),
-            confidence * 100.0
-        ),
+        Some((key, _)) => format!("{} BPM · {}", reading.bpm, key.name()),
         None => format!("{} BPM", reading.bpm),
     });
     let failed = match app.bpm_key.get(uri) {
@@ -344,6 +346,7 @@ fn bpm_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Re
         .into_owned()
     });
     let mut retry = false;
+    let mut stop = false;
     let mut copy = None;
     let keep = popover(&palette, ctx, id, anchor, |ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
@@ -366,6 +369,8 @@ fn bpm_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Re
             }
         } else if let Some(tip) = &loading_tip {
             theme::text(ui, tip, theme::regular(12.5), palette.secondary);
+            stop =
+                theme::soft_button(ui, &palette, None, &gettext(locale, "Stop"), false).clicked();
         } else if let Some(error) = &failed {
             theme::text(ui, error, theme::regular(12.5), palette.secondary);
             retry = ui.button(gettext(locale, "Try again")).clicked();
@@ -384,6 +389,9 @@ fn bpm_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Re
     }
     if retry {
         app.actions.push(Action::RequestBpmKey(uri.to_owned()));
+    }
+    if stop {
+        app.actions.push(Action::CancelBpmKey(uri.to_owned()));
     }
     if !keep {
         ctx.data_mut(|data| data.remove::<Tool>(id.with("open")));

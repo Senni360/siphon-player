@@ -16,7 +16,7 @@ The app serves both sides of the same person: the simple listener who just wants
 
 ## Product Purpose
 
-Siphon: Encore, shown as Encore throughout the app, is a private desktop music app for that group. One library, one queue and one search hold Spotify songs, SoundCloud uploads (private links included) and YouTube beats. The group's own shared songs come first; Spotify friend activity and SoundCloud's people-you-follow sit underneath as secondary feeds. Every track carries the Siphon helper's download and BPM/key tools.
+Siphon: Encore, shown as Encore throughout the app, is a private desktop music app for that group. One library, one queue and one search hold Spotify songs, SoundCloud uploads (private links included) and YouTube beats. The group's own shared songs come first; Spotify friend activity and SoundCloud's people-you-follow sit underneath as secondary feeds. Every track carries download and BPM/key tools.
 
 Success: it replaces the Spotify app and the SoundCloud tab for the group, sharing a song with friends takes one action, and opening the app on a normal day lands on the group's newest shares, new releases and picks built from what Spotify, SoundCloud and YouTube both offer.
 
@@ -26,7 +26,7 @@ The only player where a Spotify song, a private SoundCloud upload and a YouTube 
 
 ## Operating Context
 
-- A Windows desktop app open for long listening sessions, often beside music-making work; downloads and BPM/key lookups go through the installed Siphon helper.
+- A Windows desktop app open for long listening sessions, often beside music-making work; downloads go through the installed Siphon helper, while BPM and key are measured from the song's own audio.
 - Songs arrive from friends as links in chat apps. Private SoundCloud links and unlisted YouTube links open in the player instead of the browser.
 - Home: the group's newest shares, new releases, and a blended mix of Spotify, SoundCloud and YouTube beats. Library: a sidebar or an equivalent that is always reachable. Now playing: always present, but not necessarily a classic bottom taskbar.
 
@@ -39,7 +39,7 @@ The only player where a Spotify song, a private SoundCloud upload and a YouTube 
 - YouTube plays through the helper's yt-dlp, which also serves search, channels, playlists and mixes. Likes and followed channels stay inside Siphon unless a listener connects their YouTube account through their own Google project, which syncs both ways. There is deliberately no page of recommendations: this is for finding beats.
 - Hidden or out of scope: the player-bar visualizer, the Winamp mini player and skins, the language picker, and the Podcasts tab in the library. Podcast results still open from Search; podcasts and audiobooks are not on Home. Out of scope: Canvas and other video, waveforms, timed comments, tags, and comment counts. Windows x64 is the only supported target; other platforms' code is unverified.
 - On a phone, `encore.senni.dev` is a public web app. A one-time code from Settings links it, and each phone or browser gets its own code and sign-in, so more than one can be linked. Linked, it is another device of the same account: library, search, artist pages, the group, and playback on the computer or on the phone itself. A browser can't play Spotify itself, so the page plays a Spotify song as the same song found on YouTube or SoundCloud, and it never opens another app to play. It installs to the home screen and keeps its shell for an offline open.
-- Built since this list was written: source-coloured titles instead of source chips; like/save on every source; repost for SoundCloud songs only; the group feed on the Vercel friends service, joined with a Spotify account; play counts where a source provides them; release dates (upload date for YouTube); lyrics where available; loudness matched across every source; BPM and key; square per-row buttons for download, BPM/key, credits and add-to-last-playlist; the Siphon helper's downloads, drag tray and BPM/key analysis inside the app; SoundCloud-to-Spotify matching by ISRC.
+- Built since this list was written: source-coloured titles instead of source chips; like/save on every source; repost for SoundCloud songs only; the group feed on the Vercel friends service, joined with a Spotify account; play counts where a source provides them; release dates (upload date for YouTube); lyrics where available; loudness matched across every source; BPM and key; square per-row buttons for download, BPM/key, credits and add-to-last-playlist; the Siphon helper's downloads and drag tray, and BPM/key analysis inside the app; SoundCloud-to-Spotify matching by ISRC.
 - Still planned: a native party over the local network (`services/party-room` exists, the player does not use it yet) and a Windows ARM build (releases build x86_64 only).
 
 ## Brand Commitments

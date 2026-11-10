@@ -475,6 +475,10 @@ fn pills(
         app.actions.push(Action::Download(vec![item.clone()]));
     }
     x += width + 8.0;
+    let has_file = app.local_file(uri).is_some() || app.downloaded_files.contains_key(uri);
+    let unavailable = (!has_file)
+        .then(|| crate::bpm_key::unavailable(uri))
+        .flatten();
     let bpm_tip = match app.bpm_key.get(uri) {
         Some(Loadable::Loading) => match app.bpm_key.stage(uri) {
             Some(crate::bpm_key::Stage::Finding) => {
@@ -494,7 +498,9 @@ fn pills(
                 };
                 format!("{reading}. {}", gettext(locale, "Click to copy"))
             }
-            None => gettext(locale, "Measure this song's BPM and key").into_owned(),
+            None => unavailable
+                .map(str::to_owned)
+                .unwrap_or_else(|| gettext(locale, "Measure this song's BPM and key").into_owned()),
         },
     };
     let (response, width) = pill(
@@ -503,7 +509,7 @@ fn pills(
         Icon::Activity,
         &gettext(locale, "BPM and key"),
         &bpm_tip,
-        true,
+        unavailable.is_none() || app.known_bpm_key(uri).is_some(),
         shown(1),
     );
     if response.clicked() {
