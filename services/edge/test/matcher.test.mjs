@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { bestMatch, score, searchUrl, youtubeUrl } from "../src/matcher.mjs";
 
@@ -124,4 +125,26 @@ test("below the threshold returns nothing, never a guess", () => {
 test("song with no artists cannot pass the primary-artist gate", () => {
   assert.equal(score(track({ artists: [] }), candidate("Northern Lights", "Aurora", 200)), null);
   assert.equal(score(track({ durationMs: Number.NaN }), candidate("Northern Lights", "Aurora", 200)), null);
+});
+
+// The same file the Rust test reads. A change to one implementation that the
+// other does not make shows up as a failure in both test suites.
+const cases = JSON.parse(
+  readFileSync(new URL("../../../src/downloads/testdata/matching-cases.json", import.meta.url), "utf8"),
+).cases;
+
+test("the published matching cases hold", () => {
+  assert.ok(cases.length >= 90, `${cases.length} cases`);
+  for (const entry of cases) {
+    const best = bestMatch(entry.track, entry.candidates);
+    if (entry.expect.result === "match") {
+      assert.ok(best, `${entry.id}: expected a match`);
+      assert.notEqual(score(entry.track, best), null, `${entry.id}: chosen candidate scores`);
+      if (entry.expect.index !== undefined) {
+        assert.equal(entry.candidates.indexOf(best), entry.expect.index, `${entry.id}: chosen candidate`);
+      }
+    } else {
+      assert.equal(best, null, `${entry.id}: expected no match, got ${best?.title}`);
+    }
+  }
 });
