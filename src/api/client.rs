@@ -24,6 +24,39 @@ const MAX_IN_FLIGHT: usize = 6;
 const MAX_BACKGROUND_IN_FLIGHT: usize = 4;
 const RATE_LIMIT_RETRIES: u32 = 3;
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(30);
+/// A transport command lost to a dropped connection is retried this many
+/// times, with these waits between tries. The interface has already shown
+/// the command as done; the retries only decide whether it sticks.
+const TRANSPORT_RETRIES: u32 = 2;
+const TRANSPORT_BACKOFF: [Duration; 2] = [Duration::from_millis(200), Duration::from_millis(700)];
+
+/// Transport endpoints that set a state rather than step it, so sending one
+/// again says the same thing. `/me/player` is the transfer call (PUT).
+fn sets_player_state(path: &str) -> bool {
+    matches!(
+        path,
+        "/me/player"
+            | "/me/player/play"
+            | "/me/player/pause"
+            | "/me/player/seek"
+            | "/me/player/volume"
+            | "/me/player/shuffle"
+            | "/me/player/repeat"
+    )
+}
+
+/// Whether a transport failure is worth another try. Only player commands are
+/// repeated; every other request keeps its own policy, and a playlist
+/// mutation is never repeated automatically. A connection that never opened
+/// sent nothing, so any player command can go again. One that may have
+/// reached Spotify is only repeated when it sets the same state again: next
+/// and previous step once per request, and repeating them could skip twice.
+fn transport_retry(method: &Method, path: &str, error: &reqwest::Error) -> bool {
+    if path != "/me/player" && !path.starts_with("/me/player/") {
+        return false;
+    }
+    error.is_connect() || error.is_body() || (*method == Method::PUT && sets_player_state(path))
+}
 
 /// Reject foreign resource identifiers before authentication or network work.
 pub(crate) fn reject_foreign_resources(
@@ -603,6 +636,9 @@ impl ApiClient {
         let _activity = ActivityGuard::begin(&self.activity);
 
         let mut attempt = 0;
+        let mut transport_attempt = 0;
+        let mut refreshed = false;
+        let mut retried_server = false;
         let queue_write = method == Method::POST && path == "/me/player/queue";
         loop {
             attempt = u32::saturating_add(attempt, 1);
@@ -631,10 +667,34 @@ impl ApiClient {
             } else if matches!(method, Method::PUT | Method::POST | Method::DELETE) {
                 request = request.header(reqwest::header::CONTENT_LENGTH, "0");
             }
-            let response = request.send().await?;
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(error) => {
+                    // A saved play/pause/skip shows at once; a dropped
+                    // connection is usually gone before the next breath, so
+                    // ask again a couple of times before reporting it.
+                    if transport_attempt < TRANSPORT_RETRIES
+                        && transport_retry(&method, path, &error)
+                    {
+                        drop(permit);
+                        let wait = TRANSPORT_BACKOFF[transport_attempt as usize];
+                        transport_attempt += 1;
+                        log::warn!(
+                            "Spotify request source={} method={} path={} lost its connection ({error}); retrying in {wait:?}",
+                            self.source,
+                            method,
+                            logged_path(path),
+                        );
+                        tokio::time::sleep(wait).await;
+                        continue;
+                    }
+                    return Err(error.into());
+                }
+            };
             let status = response.status();
 
-            if status == StatusCode::UNAUTHORIZED && attempt == 1 {
+            if status == StatusCode::UNAUTHORIZED && !refreshed {
+                refreshed = true;
                 drop(permit);
                 provider.invalidate(&token).await;
                 continue;
@@ -672,7 +732,8 @@ impl ApiClient {
                 }
                 continue;
             }
-            if status.is_server_error() && method == Method::GET && attempt == 1 {
+            if status.is_server_error() && method == Method::GET && !retried_server {
+                retried_server = true;
                 drop(permit);
                 tokio::time::sleep(Duration::from_millis(800)).await;
                 continue;
@@ -1812,6 +1873,74 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(queued.await.unwrap().unwrap(), "{}");
+    }
+
+    /// A player command whose connection drops is asked again: a short
+    /// network blink must not leave the interface showing a pause that never
+    /// reached Spotify.
+    #[tokio::test]
+    async fn a_dropped_connection_repeats_a_player_command() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut seen = 0;
+            for reply in [
+                None,
+                Some("HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"),
+            ] {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut request = Vec::new();
+                let mut buffer = [0u8; 4096];
+                loop {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                seen += 1;
+                if let Some(reply) = reply {
+                    stream.write_all(reply.as_bytes()).await.unwrap();
+                }
+            }
+            seen
+        });
+        let client = client_with_token(Some(format!("http://{address}")), "test-only");
+        client.pause(None).await.unwrap();
+        assert_eq!(
+            server.await.unwrap(),
+            2,
+            "the pause was asked for again after the first connection dropped"
+        );
+    }
+
+    /// A skip steps once per request, so a lost connection that may have
+    /// carried it is not asked again: one skip must not become two.
+    #[tokio::test]
+    async fn a_lost_skip_is_not_repeated() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0u8; 4096];
+            let _ = stream.read(&mut buffer).await.unwrap();
+            drop(stream);
+            tokio::time::timeout(Duration::from_millis(500), listener.accept())
+                .await
+                .is_err()
+        });
+        let client = client_with_token(Some(format!("http://{address}")), "test-only");
+        let error = client.next(None).await.unwrap_err();
+        assert!(
+            error.is_network(),
+            "the skip failed instead of pretending: {error:?}"
+        );
+        assert!(server.await.unwrap(), "the skip was not sent a second time");
     }
 
     #[tokio::test]
