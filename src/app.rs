@@ -15775,6 +15775,9 @@ fn engine_error_text(locale: Locale, error: &str) -> String {
         )
         .into_owned();
     }
+    if error == crate::sink::OUTPUT_INTERRUPTED {
+        return gettext(locale, crate::sink::OUTPUT_INTERRUPTED).into_owned();
+    }
     error.to_owned()
 }
 
@@ -15958,6 +15961,19 @@ mod tests {
             engine_error_text(Locale::German, "Something else"),
             "Something else"
         );
+    }
+
+    /// An output taken by another app is a wait, not a crash: the message is
+    /// translated like the missing-device one.
+    #[test]
+    fn an_output_taken_by_another_app_is_explained_in_the_users_language() {
+        assert_eq!(
+            engine_error_text(Locale::English, crate::sink::OUTPUT_INTERRUPTED),
+            crate::sink::OUTPUT_INTERRUPTED
+        );
+        let german = engine_error_text(Locale::German, crate::sink::OUTPUT_INTERRUPTED);
+        assert_ne!(german, crate::sink::OUTPUT_INTERRUPTED);
+        assert!(!german.is_empty());
     }
 
     #[test]

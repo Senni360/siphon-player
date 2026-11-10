@@ -6,6 +6,7 @@ pub mod app;
 #[cfg(target_os = "linux")]
 pub mod appearance;
 pub mod artist_sources;
+pub mod audio_recovery;
 pub mod auth;
 pub mod autoscroll;
 pub mod backend;

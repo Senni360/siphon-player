@@ -43,6 +43,14 @@ pub type DeviceHook = Arc<dyn Fn(String, DeviceId) + Send + Sync>;
 pub const NO_DEVICE: &str =
     "No audio output device was found. Connect or enable one, then press play again.";
 
+/// Reported when the device stopped under a playing song: another app took it
+/// in exclusive mode (FL Studio and its ASIO driver, most of all), or it went
+/// away and Windows is still finding another. Playback waits where it stopped
+/// and the engine opens the device again by itself, so the interface shows
+/// this as a wait rather than a failure. Recognised like [`NO_DEVICE`].
+pub const OUTPUT_INTERRUPTED: &str =
+    "Another app is using your speakers. Encore will continue when they're free.";
+
 /// Opens the output: the saved device, else the default.
 type Opener = fn(Option<&str>, u32, &AudioControl) -> Result<Output, OpenError>;
 
@@ -114,6 +122,14 @@ pub struct AudioControl {
     waiting_for_track: AtomicBool,
     reset_output: AtomicBool,
     reset_processing: AtomicBool,
+    /// The device failed under the music: librespot paused, and the engine's
+    /// recovery task opens the device again until it works.
+    device_lost: AtomicBool,
+    device_lost_wake: tokio::sync::Notify,
+    /// The one output, so the recovery task can open it without librespot.
+    output: Mutex<Weak<Mutex<RodioSink>>>,
+    /// The engine's current recovery task, replaced with its session.
+    recovery: Mutex<Option<tokio::task::AbortHandle>>,
     buffer_ms: u32,
 }
 
@@ -135,6 +151,10 @@ impl AudioControl {
             waiting_for_track: AtomicBool::new(false),
             reset_output: AtomicBool::new(false),
             reset_processing: AtomicBool::new(false),
+            device_lost: AtomicBool::new(false),
+            device_lost_wake: tokio::sync::Notify::new(),
+            output: Mutex::new(Weak::new()),
+            recovery: Mutex::new(None),
             buffer_ms: buffer_ms.clamp(*BUFFER_MS_RANGE.start(), *BUFFER_MS_RANGE.end()),
         })
     }
@@ -144,8 +164,13 @@ impl AudioControl {
     pub(crate) fn inhibit_spotify(&self, inhibited: bool) {
         let _guard = self.producer.lock().unwrap_or_else(PoisonError::into_inner);
         let previous = self.spotify_inhibited.swap(inhibited, Ordering::SeqCst);
-        if inhibited && !previous && !self.external_active.load(Ordering::SeqCst) {
-            self.interrupt_output();
+        if inhibited && !previous {
+            // Another engine takes the output: Spotify is not waiting for
+            // the device, and its retry must not start a song behind it.
+            self.device_back();
+            if !self.external_active.load(Ordering::SeqCst) {
+                self.interrupt_output();
+            }
         }
     }
 
@@ -162,6 +187,66 @@ impl AudioControl {
                 return;
             }
             ready.await;
+        }
+    }
+
+    /// Waits for the output to fail under the music. A failure that happened
+    /// before the wait began is not lost.
+    pub(crate) async fn wait_for_device_loss(&self) {
+        loop {
+            let woken = self.device_lost_wake.notified();
+            tokio::pin!(woken);
+            woken.as_mut().enable();
+            if self.device_lost() {
+                return;
+            }
+            woken.await;
+        }
+    }
+
+    /// Whether a song is being held by a device that will not open.
+    pub(crate) fn device_lost(&self) -> bool {
+        self.device_lost.load(Ordering::SeqCst)
+    }
+
+    /// The output failed: it could not be opened, or its stream stopped
+    /// asking for sound and would not come back. Wakes the recovery task.
+    pub(crate) fn note_device_lost(&self) {
+        self.device_lost.store(true, Ordering::SeqCst);
+        self.device_lost_wake.notify_one();
+    }
+
+    /// The device is usable again, or nothing should wait for it any more.
+    /// A new failure arms the retries from the start.
+    pub(crate) fn device_back(&self) {
+        self.device_lost.store(false, Ordering::SeqCst);
+    }
+
+    /// Opens the output again for the retry after a loss, without playing
+    /// anything yet. Opening asks the sound system, so this runs where the
+    /// sink opens a device, never on the UI thread.
+    pub(crate) fn reopen_device(&self) -> Result<(), String> {
+        let sink = self
+            .output
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .upgrade()
+            .ok_or_else(|| "the audio output has not been built yet".to_string())?;
+        let mut sink = sink.lock().unwrap_or_else(PoisonError::into_inner);
+        sink.open_if_needed().map_err(|error| error.to_string())
+    }
+
+    /// Keeps the one output reachable for [`Self::reopen_device`].
+    pub(crate) fn watch_output(&self, sink: &Arc<Mutex<RodioSink>>) {
+        *self.output.lock().unwrap_or_else(PoisonError::into_inner) = Arc::downgrade(sink);
+    }
+
+    /// Takes over as the output's recovery task, ending the session's old
+    /// one so two do not resume the same song.
+    pub(crate) fn own_recovery(&self, task: tokio::task::AbortHandle) {
+        let mut slot = self.recovery.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(previous) = slot.replace(task) {
+            previous.abort();
         }
     }
 
@@ -1218,13 +1303,35 @@ impl RodioSink {
 
     /// As `open_if_needed`, reporting a failure to the interface.
     fn ensure_open(&mut self) -> SinkResult<()> {
-        self.open_if_needed().map_err(|error| {
-            let message = error.to_string();
-            log::error!("{message}");
-            (self.on_error)(message.clone());
-            SinkError::ConnectionRefused(message)
-        })
+        match self.open_if_needed() {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                let message = report_lost(&self.control, &self.on_error, &error);
+                Err(SinkError::ConnectionRefused(message.to_string()))
+            }
+        }
     }
+}
+
+/// The line the interface shows for an output that will not open. A missing
+/// device is its own message; anything else is most often an app holding the
+/// speakers in exclusive mode.
+fn lost_message(error: &OpenError) -> &'static str {
+    match error {
+        OpenError::NoDevice => NO_DEVICE,
+        OpenError::Lost | OpenError::Device(_) => OUTPUT_INTERRUPTED,
+    }
+}
+
+/// Tells the interface and the engine's recovery task that the output went
+/// away, and answers with what to say. The song is not over: it waits at its
+/// position until the device comes back.
+fn report_lost(control: &AudioControl, on_error: &ErrorHook, error: &OpenError) -> &'static str {
+    let message = lost_message(error);
+    log::warn!("audio output lost: {error}");
+    on_error(message.to_string());
+    control.note_device_lost();
+    message
 }
 
 impl Sink for RodioSink {
@@ -1368,10 +1475,15 @@ impl Sink for RodioSink {
                         self.applied_volume = -1.0;
                     }
                 }
-                Ok(_) | Err(_) => {
-                    let message = "The audio output stopped working".to_string();
-                    (self.on_error)(message.clone());
-                    return Err(SinkError::OnWrite(message));
+                // The stream failed and opening another did not work. The
+                // music waits here for the engine's retry instead of ending.
+                other => {
+                    let error = match other {
+                        Err(error) => error,
+                        Ok(_) => OpenError::Lost,
+                    };
+                    let message = report_lost(&self.control, &self.on_error, &error);
+                    return Err(SinkError::OnWrite(message.to_string()));
                 }
             }
             if !queue_is_full(output.queued.frames(), output.sample_rate) {
@@ -1466,6 +1578,9 @@ impl Saved {
 enum OpenError {
     #[error("{NO_DEVICE}")]
     NoDevice,
+    /// The stream stopped and `maintain` could not open another.
+    #[error("{OUTPUT_INTERRUPTED}")]
+    Lost,
     #[error("{0}")]
     Device(fastframe_audio::OpenError),
 }
@@ -2103,6 +2218,11 @@ mod tests {
         Err(OpenError::NoDevice)
     }
 
+    /// A device that another app holds: there is one, but it refuses.
+    fn taken_device(_: Option<&str>, _: u32, _: &AudioControl) -> Result<Output, OpenError> {
+        Err(OpenError::Lost)
+    }
+
     /// #623: a PC with no output at all. librespot exits the process when
     /// `start` fails from its playing loop, but pauses cleanly when `write`
     /// fails, so the failure has to surface from `write`, reported to the
@@ -2111,6 +2231,7 @@ mod tests {
     fn with_no_output_at_all_playing_fails_at_the_first_packet_not_at_start() {
         let reported: Arc<Mutex<Vec<String>>> = Arc::default();
         let store = Arc::clone(&reported);
+        let control = AudioControl::new(DEFAULT_BUFFER_MS);
         let mut sink = RodioSink {
             open: no_device,
             ..RodioSink::new(
@@ -2118,7 +2239,7 @@ mod tests {
                 Arc::new(move |message| store.lock().unwrap().push(message)),
                 Box::new(librespot_playback::mixer::NoOpVolume),
                 DEFAULT_BUFFER_MS,
-                AudioControl::new(DEFAULT_BUFFER_MS),
+                Arc::clone(&control),
             )
         };
         let mut converter = Converter::new(None);
@@ -2135,10 +2256,58 @@ mod tests {
             assert_eq!(message, NO_DEVICE);
             assert_eq!(reported.lock().unwrap().len(), attempt);
             assert_eq!(reported.lock().unwrap().last().unwrap(), NO_DEVICE);
+            assert!(
+                control.device_lost(),
+                "a device that is not there is waited for, not given up on"
+            );
+            control.device_back();
 
             // librespot pauses on the failed write, which stops the sink.
             assert!(sink.stop().is_ok());
         }
+    }
+
+    /// FL Studio (or any app that takes the speakers) makes the device refuse
+    /// a shared-mode stream. The song is held, the interface is told it is a
+    /// wait, and the engine's retry gets the output back without librespot
+    /// writing anything.
+    #[test]
+    fn a_device_taken_by_another_app_holds_the_song_for_the_retry() {
+        let reported: Arc<Mutex<Vec<String>>> = Arc::default();
+        let store = Arc::clone(&reported);
+        let control = AudioControl::new(DEFAULT_BUFFER_MS);
+        let sink = Arc::new(Mutex::new(RodioSink {
+            open: taken_device,
+            ..RodioSink::new(
+                None,
+                Arc::new(move |message| store.lock().unwrap().push(message)),
+                Box::new(librespot_playback::mixer::NoOpVolume),
+                DEFAULT_BUFFER_MS,
+                Arc::clone(&control),
+            )
+        }));
+        control.watch_output(&sink);
+        let mut converter = Converter::new(None);
+        let packet = || AudioPacket::Samples(vec![0.0; 441 * NUM_CHANNELS as usize]);
+
+        let mut sink = sink.lock().unwrap();
+        // A device that is not free yet: the retry says so and keeps waiting.
+        assert!(control.reopen_device().is_err());
+        assert!(!control.device_lost(), "nothing has failed on a write yet");
+
+        let Err(SinkError::ConnectionRefused(message)) = sink.write(packet(), &mut converter)
+        else {
+            panic!("the first packet must report the taken device");
+        };
+        assert_eq!(message, OUTPUT_INTERRUPTED);
+        assert_eq!(reported.lock().unwrap().as_slice(), [OUTPUT_INTERRUPTED]);
+        assert!(control.device_lost());
+        drop(sink);
+
+        // The listener pausing, or the device coming back, ends the wait.
+        control.device_back();
+        assert!(!control.device_lost());
+        assert!(control.reopen_device().is_err(), "still no device");
     }
 
     /// A rate that keeps a ramp short enough to step through in a test.
