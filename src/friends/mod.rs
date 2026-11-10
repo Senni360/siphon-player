@@ -10,8 +10,8 @@ pub mod pick;
 mod state;
 
 pub use client::{
-    Client, DEFAULT_BASE_URL, EventLines, Feed, Identity, NewPost, PhonePlaying, PhoneSong, Post,
-    Profile, RemoteWord, Reply, Source,
+    Client, DEFAULT_BASE_URL, EdgeGrant, EventLines, Feed, Identity, NewPost, PhonePlaying,
+    PhoneSong, Post, Profile, RemoteWord, Reply, Source,
 };
 pub use state::{
     Action, Event, Model, PENDING_REPLY, PENDING_SHARE, Request, Runtime, SongsFor, saved_identity,

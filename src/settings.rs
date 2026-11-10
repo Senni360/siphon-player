@@ -374,6 +374,17 @@ pub struct Settings {
     pub web_client_id: Option<String>,
     /// A phone has been linked, so this computer listens for it.
     pub phone_linked: bool,
+    /// Offer the local files in a playlist to the linked phone: Encore
+    /// uploads them to the listener's own edge server, slowly and in the
+    /// background, so the phone can play them while this computer is off.
+    /// On for files from 0.15.0 onward; turning it off also stops uploads.
+    #[serde(default = "default_local_files_on_phone")]
+    pub local_files_on_phone: bool,
+    /// Keep the Spotify and SoundCloud sign-ins in the edge vault so the
+    /// phone works while this computer is off. `None` follows the account:
+    /// on for the group's owner, off for everyone else.
+    #[serde(default)]
+    pub vault_signins: Option<bool>,
     /// Keep animations to a minimum, whatever the system says.
     pub reduce_motion: bool,
     /// Legacy reminder time, retained for older Siphon versions.
@@ -549,6 +560,8 @@ impl Default for Settings {
             show_shortcut_hints: true,
             web_client_id: None,
             phone_linked: false,
+            local_files_on_phone: true,
+            vault_signins: None,
             reduce_motion: false,
             personal_app_nudge_at: None,
             personal_app_intro_seen: false,
@@ -599,6 +612,11 @@ impl Default for Settings {
 
 fn default_buffer_ms() -> u32 {
     crate::sink::DEFAULT_BUFFER_MS
+}
+
+/// A linked phone gets a playlist's local files unless the listener says no.
+fn default_local_files_on_phone() -> bool {
+    true
 }
 
 /// A beat's BPM and key show after ten seconds of listening, in files from

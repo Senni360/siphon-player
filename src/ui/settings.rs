@@ -1352,6 +1352,23 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 "Sign-ins are saved in the system credential store when available.",
             ),
         ),
+        RowText::new(
+            gettext(locale, "Play my local files on my phone"),
+            gettext(
+                locale,
+                "Songs from your playlists are stored on your server so your phone can play them while this computer is off.",
+            ),
+        ),
+        RowText::new(
+            gettext(
+                locale,
+                "Keep my sign-ins on my server so my phone works when this computer is off",
+            ),
+            gettext(
+                locale,
+                "Your Spotify and SoundCloud sign-ins are stored encrypted on your server. Off: they stay only on this computer.",
+            ),
+        ),
     ];
     if section_matches(&needle, &downloads, &downloads_rows) {
         any_visible = true;
@@ -1587,6 +1604,51 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 &downloads,
                 &downloads_rows[8],
                 |_| {},
+            );
+            let mut local_files_on_phone = app.settings.local_files_on_phone;
+            filtered_row(
+                ui,
+                &palette,
+                &needle,
+                &downloads,
+                &downloads_rows[9],
+                |ui| {
+                    if widgets::switch(
+                        ui,
+                        &palette,
+                        &gettext(locale, "Play my local files on my phone"),
+                        &mut local_files_on_phone,
+                    )
+                    .changed()
+                    {
+                        app.settings.local_files_on_phone = local_files_on_phone;
+                        changed = true;
+                    }
+                },
+            );
+            let mut vault_signins = app.vault_signins_enabled();
+            filtered_row(
+                ui,
+                &palette,
+                &needle,
+                &downloads,
+                &downloads_rows[10],
+                |ui| {
+                    if widgets::switch(
+                        ui,
+                        &palette,
+                        &gettext(
+                            locale,
+                            "Keep my sign-ins on my server so my phone works when this computer is off",
+                        ),
+                        &mut vault_signins,
+                    )
+                    .changed()
+                    {
+                        app.settings.vault_signins = Some(vault_signins);
+                        changed = true;
+                    }
+                },
             );
         });
     }

@@ -1,6 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
 mod download_actions;
+mod edge;
 mod extension_bridge;
 mod group;
 mod hybrid;
@@ -560,6 +561,7 @@ pub struct App {
     for_you_inputs: Option<ForYouInputs>,
     /// A linked phone's connection.
     pub phone: remote::Remote,
+    pub edge: edge::Edge,
     /// Which artist each SoundCloud and YouTube account page leads back to.
     pub artist_links: HashMap<String, (String, String)>,
     artist_links_asked: bool,
@@ -1301,6 +1303,7 @@ impl App {
             for_you_serial: 0,
             for_you_inputs: None,
             phone: remote::Remote::default(),
+            edge: edge::Edge::default(),
             artist_links: HashMap::new(),
             artist_links_asked: false,
             artist_news: Vec::new(),
@@ -3171,6 +3174,7 @@ impl App {
                     self.artist_news = news;
                 }
                 Event::Remote(event) => self.remote_event(event),
+                Event::Edge(event) => self.edge_event(event),
                 Event::ForYou(shown) => {
                     let tracks: Vec<Track> = shown
                         .picks
@@ -4724,6 +4728,7 @@ impl App {
 
     fn tick(&mut self, ctx: &egui::Context) {
         self.remote_tick(ctx);
+        self.edge_tick();
         // The group is read while something shows it: its page, Home's
         // shelf, the friends panel, or the sidebar's unread count.
         let feed_visible = (self.show_friends_panel
