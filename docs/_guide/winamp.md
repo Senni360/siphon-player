@@ -4,23 +4,26 @@ description: Use classic Winamp 2 skins with an analyser, equalizer, and playlis
 nav_order: 4
 ---
 
-Open the mini player with Ctrl+M (Cmd+Shift+M on macOS), the shrink button, or
-**Switch to it** in Settings. It supports classic Winamp 2 `.wsz` skins. Find
-skins at the [Winamp Skin Museum](https://skins.webamp.org).
+The mini player is not in Encore's interface in this build: there is no button,
+menu item or shortcut that opens it, and Settings has no Winamp or skin
+controls. This page describes it for when it returns. It supports classic
+Winamp 2 `.wsz` skins; find skins at the
+[Winamp Skin Museum](https://skins.webamp.org).
 
-Only one player window is open at a time. Click the skin logo or Eject, or use
-the shortcut again, to return to the main window.
+Only one player window is open at a time. Click the skin logo or Eject to
+return to the main window.
 
 ![The mini player wearing the built-in skin](/assets/images/winamp.png)
 
 ## Skins and window size
 
-Drop a `.wsz` file on either window to install and use it. Settings lists the
-installed skins and can open the skins folder.
+Drop a `.wsz` file on either window to install and use it. The skins folder
+sits beside `settings.json` (see
+[Settings & Files](/settings-and-files/)).
 
-Choose **Random**, first in that list, to get a different skin each time you
-switch to the mini player, never the same one twice in a row. Settings says
-which skin it picked, and choosing a skin yourself turns Random off.
+Choose **Random** to get a different skin each time you switch to the mini
+player, never the same one twice in a row. Choosing a skin yourself turns
+Random off.
 
 You can also use an unpacked skin folder. Siphon finds skin files inside
 its subfolders, up to eight folders deep, so you do not need to move them all

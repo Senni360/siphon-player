@@ -7,8 +7,8 @@ nav_order: 0
 
 ## Why Siphon
 
-**Spotify, native and fast.** Siphon is a lightweight Spotify app for
-Linux, macOS, and Windows. It opens in well under a second and typically uses
+**Spotify, SoundCloud and YouTube, native and fast.** Siphon: Encore is a
+private Windows music app. It opens in well under a second and typically uses
 100–250 MB of memory, while Spotify's desktop app often uses 600 MB to over 1 GB.
 
 Your Spotify playlists stay on your account.
@@ -29,8 +29,9 @@ cannot play music through Siphon on this computer or another device.
   another computer from the device picker, and keep controlling it: play,
   pause, skip, seek, shuffle, repeat, volume. The picker expands upward to
   show several devices at once, fitting the window; longer lists scroll.
-- **Library.** Browse playlists, Liked Songs, saved albums, followed artists,
-  podcasts, and saved episodes. Create, edit, and reorder your playlists.
+- **Library.** Browse playlists, Liked Songs, saved albums and followed
+  artists, and open the group's shared songs. Create, edit, and reorder your
+  playlists.
 - **Search** across songs, artists, albums, playlists, podcasts, and
   episodes, with artist pages, discographies, and related artists. When Spotify
   provides an artist profile, select its name on a song, including the top
@@ -72,13 +73,14 @@ Siphon has a limited scope:
   The playback software Siphon uses, librespot, cannot play Spotify's
   protected lossless audio. Siphon will reconsider this if
   [librespot adds lawful support](https://github.com/librespot-org/librespot/issues/1583).
-- No video podcasts or social features.
+- No video. Podcasts are not in the library or on Home: their Spotify search
+  results still open and play. The group is the only social feature.
 - Siphon is an **unofficial** app. Changes at Spotify can temporarily
   break features until Siphon is updated.
 
 Bug reports should include `siphon.log`, `panic.log` after a crash, and
 steps to reproduce the problem. See the
-[issue form](https://github.com/crmne/spotifast/issues/new/choose).
+[issues page](https://github.com/Senni360/siphon-player/issues).
 Development builds after 0.8.0 also record the app version, operating system,
 and graphics details in the log. If the window fails to open, the log can
 help explain why, even when you started the app from your desktop.

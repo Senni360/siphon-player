@@ -113,8 +113,9 @@ prior-account results are ignored. Model actions own optimistic changes and
 backoff; a widget must not add a second polling loop.
 
 The action family includes Open, Join, Rename, Refresh, More, Share, Like,
-Delete, DismissSecret, `LeaveGroup` (remote membership revocation) and `Leave`
-(local forget, available offline). Remote leave retains shared posts as Former
+Delete, DismissSecret, `LeaveGroup` (leaves the current group only; the account,
+its other groups and its phones stay) and `Leave` (local forget, available
+offline). Remote leave retains shared posts as Former
 member and removes that member's hearts. Requests use a fresh serial within the
 account generation, so stale answers cannot replace newer actions. See
 [the service README](../../services/friends/README.md) for exact leave semantics,
@@ -124,9 +125,9 @@ group that receives it, so preserve the link but redact diagnostic output.
 
 Poll only while the friends panel/window is visible, online and not already
 busy. The model backs off after errors and stops polling during optimistic work.
-`SIPHON_FRIENDS_URL` supplies the development/service URL, including `/api`.
-There is no configured production endpoint in this repository. No deployment or
-paid resources were created. Production requires Redis and a configured invite;
+`SIPHON_FRIENDS_URL` replaces the service URL, including `/api`.
+`DEFAULT_BASE_URL` in `src/friends/client.rs` names the deployed service, and a
+distributed build uses it. Production requires Redis and a configured invite;
 in-memory storage is only for development/tests.
 
 ## Playback, queue and loudness

@@ -8,7 +8,8 @@ description: Update source and signing requirements for Siphon releases.
 Siphon checks `Senni360/siphon-player` for GitHub releases once a day and
 from **Check for updates**. It never falls back to the upstream
 `crmne/spotifast` releases, which could replace Siphon with a different
-product. The About release-notes link uses the same repository.
+product. The release-notes link in **Settings → Updates** uses the same
+repository.
 
 A preview (`0.15.0-pre.N`) is offered the next preview or the next stable
 release, whichever is newer. A stable copy is offered only stable releases.

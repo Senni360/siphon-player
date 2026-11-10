@@ -40,7 +40,8 @@ tagged or released.
 - **Friends:** TypeScript service and Rust client with invite enrollment,
   hashed bearer secrets, private group shares, pagination, hearts, own-post
   deletion, rename, rate limits and membership revocation. Leave group revokes
-  remotely; Forget this device works offline. Redis CAS retries recheck
+  that group's membership remotely and leaves the account's other groups and
+  phones; Forget this device works offline. Redis CAS retries recheck
   authorization. Uncertain remote leave retains the credential for explicit
   retry. No production endpoint is configured.
 - **Credits/lyrics:** verified Spotify operation/hash, source-based credits,

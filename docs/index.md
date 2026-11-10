@@ -1,12 +1,12 @@
 ---
 layout: home
 title: Siphon
-description: A fast, lightweight Spotify app for Linux, macOS, and Windows.
+description: A fast, private music app for Windows, with Spotify, SoundCloud and YouTube in one library.
 permalink: /
 hero:
   name: Siphon
-  text: Spotify, native and fast
-  tagline: A lightweight Spotify app for Linux, macOS, and Windows. Listen on your computer, browse your music, and control your other devices.
+  text: Spotify, SoundCloud and YouTube, native and fast
+  tagline: A private music app for Windows. One library, one queue and one search for the group's music, with a phone that works alongside it.
   actions:
     - theme: brand
       text: Download
@@ -16,7 +16,7 @@ hero:
       link: /what-is-spotifast/
     - theme: alt
       text: GitHub
-      link: https://github.com/crmne/spotifast
+      link: https://github.com/Senni360/siphon-player
   image:
     src: /screenshot.png
     alt: "Siphon Home with the playlist library, recommendations, queue, and player visible"
@@ -51,17 +51,11 @@ hero:
   }
 </style>
 
-## It turns into Winamp
+## Your music, also on your phone
 
-Load a classic `.wsz` skin from the
-[Winamp Skin Museum](https://skins.webamp.org). The mini player includes
-animated sound displays, an equalizer to adjust your sound, and a playlist.
-Roll it up into a thin bar or enlarge it while keeping the classic pixels
-sharp. [See the mini player in detail](/winamp/).
-
-<div class="winamp-showcase">
-  <img src="/assets/images/winamp.png" alt="The mini player wearing the built-in skin" width="550" height="812">
-</div>
+Link a phone with a one-time code from Settings. It then has the same account,
+groups and library, and can play on the computer or on the phone itself.
+[Set up the phone](/phone/).
 
 
 

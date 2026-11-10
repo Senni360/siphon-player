@@ -1,216 +1,65 @@
 ---
 title: Download
-description: Download the app for macOS, Windows, or Linux, with install instructions for each.
+description: Download Encore for Windows x64, run it without an installer, and check the file.
 nav_order: 1
 ---
 
-This fork builds as **Siphon**. The package names below describe its renamed
-packaging templates. Upstream download links still refer to Spotifast;
-build this checkout until release hosting is configured for the fork.
+Encore is built for **Windows x64** only. Each release is one ZIP file, with no
+installer and no administrator password.
 
+Get the newest ZIP from the
+[releases page](https://github.com/Senni360/siphon-player/releases). The file is
+named `siphon-vVERSION-x86_64-pc-windows-msvc.zip`.
 
-{% assign v = site.siphon_version %}
-{% assign base = "https://github.com/crmne/spotifast/releases/download/v" | append: v %}
-{% comment %} Releases after 0.12.0 ship a Windows Installer package (.msi). {% endcomment %}
-{% assign version = v | split: "." %}
-{% assign major = version[0] | plus: 0 %}
-{% assign minor = version[1] | plus: 0 %}
-{% assign patch = version[2] | plus: 0 %}
-{% assign windows_installer = "-setup.exe" %}
-{% if major > 0 or minor > 12 or minor == 12 and patch > 0 %}{% assign windows_installer = ".msi" %}{% endif %}
+## Run it
 
-The current version is **v{{ v }}**. You can use the
-[download checksums]({{ base }}/checksums.txt) to check that a file has not
-been damaged or changed. Older versions are on the
-[releases page](https://github.com/crmne/spotifast/releases).
+Extract the ZIP and open `siphon.exe`. The first time you open a new copy from
+your Downloads folder, it copies itself to `%LOCALAPPDATA%\Programs\Encore`,
+adds a Start menu entry, and runs from there. The download stays where it was
+and can be deleted. A copy in any other folder, or one with a `siphon-data`
+folder beside it, stays where it is.
 
-## macOS
-
-One download for both Apple Silicon and Intel:
-
-- [Download for Mac]({{ base }}/siphon-v{{ v }}-macos-universal.dmg)
-
-Open the downloaded file and drag **Siphon** to **Applications**.
-
-If you use [Homebrew](https://brew.sh), you can install it with:
-
-```sh
-brew install --cask crmne/tap/siphon
-```
-
-### First open on macOS
-
-Open **Siphon** from Applications. If your Mac asks whether you want to
-open an app downloaded from the internet, choose **Open**.
-
-Starting with 0.8.0, the Mac download passes Apple's security checks. You do
-not need to change security settings or run commands in Terminal to open it.
-
-Quit the old app before opening Siphon. Your saved settings and sign-ins
-carry over. If an older version reports that its update helper exited before
-it was ready, install the DMG above manually once. The helper changes take
-effect for updates started from 0.9.1 onward.
-
-## Windows
-
-Download and run the installer. It adds Siphon to the Start menu and does
-not need an administrator password. Choose the first download for most PCs,
-or the ARM version if your PC uses an ARM processor:
-
-- [Windows installer (most PCs)]({{ base }}/siphon-v{{ v }}-x86_64-pc-windows-msvc{{ windows_installer }})
-- [Windows installer (ARM PCs)]({{ base }}/siphon-v{{ v }}-aarch64-pc-windows-msvc{{ windows_installer }})
-{% if windows_installer == ".msi" %}
-The installer is a Windows Installer package (`.msi`). Siphon installed
-with the earlier setup program (`-setup.exe`) moves to it when you run the new
-installer, and keeps its settings, its folder and its Start menu entry.
-Windows then lists one Siphon under installed apps. Versions 0.13.0 and
-later also move to it through their own updates; 0.12.x and earlier no longer
-find updates, so run the installer once by hand.
-{% endif %}
-To run Siphon without an installer, download a ZIP file, extract it, and
-open `siphon.exe`. Since 0.13.4, it keeps its settings, state and caches
-in a `siphon-data` folder next to it, so the folder carries everything
+To keep everything in one folder, extract the ZIP somewhere of your own, such
+as `D:\Encore`. The ZIP already carries `siphon-portable.txt` beside
+`siphon.exe`, so that copy stays where it is and keeps its settings, state and
+caches in `siphon-data` next to the executable. Updates leave that folder alone
 (see [portable copies](/settings-and-files/#portable-copies)).
 
-- [Windows ZIP (most PCs)]({{ base }}/siphon-v{{ v }}-x86_64-pc-windows-msvc.zip)
-- [Windows ZIP (ARM PCs)]({{ base }}/siphon-v{{ v }}-aarch64-pc-windows-msvc.zip)
+SmartScreen may warn about an unknown publisher on first run; choose **More
+info**, then **Run anyway**. The Windows files are not signed with a publisher
+certificate, so Windows has no publisher name to show.
 
-Either way, SmartScreen may warn about an unknown publisher on first run;
-choose **More info**, then **Run anyway**. The Windows files are not signed
-with a publisher certificate, so Windows has no publisher name to show.
-
-Siphon needs OpenGL 2.0 or newer, which every current Windows graphics
-driver provides. In a virtual machine or remote session that only has the
-Microsoft Basic Display Adapter, it cannot open its window and says so in a
-message that links to this page; install the machine's graphics driver, or
-enable GPU acceleration for the virtual machine.
+Encore needs OpenGL 2.0 or newer, which every current Windows graphics driver
+provides. In a virtual machine or remote session that only has the Microsoft
+Basic Display Adapter, it cannot open its window and says so in a message that
+links to this page; install the machine's graphics driver, or enable GPU
+acceleration for the virtual machine.
 
 To choose which app opens Spotify links, use **Settings → Apps → Default apps**
-in Windows.
+in Windows. [Web links](/web-links/) covers making Encore the handler for
+Spotify, SoundCloud and YouTube links too.
 
-Uninstalling while Siphon runs removes nothing until it is closed. The
-installer offers to close it for you; closing it that way ends it at once.
+## Check a download
 
-### Check a Windows download
-
-To check a file against the [published checksums]({{ base }}/checksums.txt),
-print its SHA-256 hash in PowerShell and compare it with that file's line,
-ignoring letter case:
+Each release publishes `checksums.txt` and its signature. To check the ZIP
+against it, print its SHA-256 hash in PowerShell and compare it with the file's
+line, ignoring letter case:
 
 ```powershell
-Get-FileHash "$HOME\Downloads\siphon-v{{ v }}-*-pc-windows-msvc*"
+Get-FileHash "$HOME\Downloads\siphon-v*-x86_64-pc-windows-msvc.zip"
 ```
+
+Encore also checks each update itself before installing it, and a failed check
+leaves the running copy alone.
 
 If Windows Security flags a download, open **Windows Security → Virus &
 threat protection → Protection history** and note the threat name. Include it,
 and the file's hash, when you
-[report the problem](https://github.com/crmne/spotifast/issues/new?template=bug.yml).
-To ask Microsoft to review the file, send it through
+[report the problem](https://github.com/Senni360/siphon-player/issues). To ask
+Microsoft to review the file, send it through
 [Submit a file for malware analysis](https://www.microsoft.com/en-us/wdsi/filesubmission)
 as incorrectly detected.
 
-## Linux
+## Build from source
 
-### Arch Linux
-
-Siphon is in the AUR, Arch's community package collection. Installing it
-also adds it to your app launcher:
-
-```sh
-yay -S siphon-bin      # the released build, ready made
-yay -S siphon          # the release, built from source
-yay -S siphon-git      # built from the latest commit
-```
-
-### Flatpak
-
-Download the [Siphon Flatpak]({{ base }}/siphon-v{{ v }}-x86_64.flatpak?flatpak-id=com.siphon.player).
-It requires Flatpak and the Freedesktop 25.08 runtime, a set of shared
-components used by Flatpak apps:
-
-```sh
-flatpak install --user ~/Downloads/siphon-v{{ v }}-x86_64.flatpak
-flatpak run com.siphon.player
-```
-
-The application ID is **`com.siphon.player`**.
-
-To update this Flatpak installation, download and install the new release.
-Flathub support is planned.
-
-Packages from other stores are maintained by their publishers. Report
-problems specific to those packages to their maintainers.
-
-### AppImage
-
-- [AppImage (Intel and AMD, 64-bit)]({{ base }}/siphon-{{ v }}-x86_64.AppImage)
-- [AppImage (ARM, 64-bit)]({{ base }}/siphon-{{ v }}-aarch64.AppImage)
-
-One file, no installation: make it executable and run it.
-
-```sh
-chmod +x ~/Downloads/siphon-{{ v }}-x86_64.AppImage
-~/Downloads/siphon-{{ v }}-x86_64.AppImage
-```
-
-The AppImage bundles no libraries: like the DEB and RPM, it needs glibc 2.39
-or newer and your desktop's own libraries. Running it needs FUSE; without
-FUSE, start it with `--appimage-extract-and-run`.
-
-From the release after 0.13.3, the AppImage updates itself like the portable
-downloads, as long as it sits in a folder of your own, such as
-`~/Applications`: Siphon replaces the file in place and restarts it. It
-also carries update information, so AppImageUpdate, AppImageLauncher, AM and
-Gear Lever can update it too, downloading only what changed. Copies of 0.13.3
-and earlier need one more manual download.
-
-### Other distributions
-
-- [Linux archive (Intel and AMD, 64-bit)]({{ base }}/siphon-v{{ v }}-x86_64-unknown-linux-gnu.tar.gz)
-- [Linux archive (ARM, 64-bit)]({{ base }}/siphon-v{{ v }}-aarch64-unknown-linux-gnu.tar.gz)
-
-Unpack, put `siphon` on your PATH, and copy the desktop entry and icon
-from the bundled `packaging/` directory if you want it in your launcher and
-handling `spotify:` links.
-The binary needs the ALSA and PipeWire libraries, and Wayland or X11. It plays
-through PipeWire, a PulseAudio server, or ALSA, whichever is running.
-
-Or build from source: see the [build instructions](/getting-started/#build-from-source).
-
-## Nix
-
-Add the repository [flake](https://github.com/crmne/spotifast) to your
-inputs:
-
-```nix
-inputs.siphon.url = "github:crmne/spotifast";
-```
-
-On NixOS, install the default package:
-
-```nix
-environment.systemPackages = [
-  inputs.siphon.packages."${pkgs.stdenv.hostPlatform.system}".default
-];
-```
-
-### nix-darwin
-
-On macOS, use the same `siphon` package to install Siphon as a Mac app:
-
-```nix
-environment.systemPackages = [
-  inputs.siphon.packages."${pkgs.stdenv.hostPlatform.system}".siphon
-];
-environment.pathsToLink = [ "/Applications" ];
-```
-
-The bundle appears in `/Applications/Nix Apps`. With Home Manager,
-`home.packages` is enough; its darwin support links app bundles into
-`~/Applications`:
-
-```nix
-home.packages = [
-  inputs.siphon.packages."${pkgs.stdenv.hostPlatform.system}".siphon
-];
-```
+See the [build instructions](/getting-started/#build-from-source).
