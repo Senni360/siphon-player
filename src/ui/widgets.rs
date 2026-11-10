@@ -2640,9 +2640,8 @@ fn track_row_contents(
                         palette.secondary.gamma_multiply(0.6),
                     );
                     theme::text(&mut child, &label, theme::regular(12.0), palette.secondary);
-                    if util::is_relative_date(added, now) {
-                        ui.ctx()
-                            .request_repaint_after(std::time::Duration::from_secs(1));
+                    if let Some(wait) = util::relative_date_refresh(added, now) {
+                        theme::repaint_after(ui.ctx(), wait);
                     }
                 }
             }
@@ -2680,9 +2679,8 @@ fn track_row_contents(
                     let now = jiff::Timestamp::now();
                     let label = util::format_relative_date(app.locale, added, now);
                     theme::text(&mut child, &label, theme::regular(12.0), palette.secondary);
-                    if util::is_relative_date(added, now) {
-                        ui.ctx()
-                            .request_repaint_after(std::time::Duration::from_secs(1));
+                    if let Some(wait) = util::relative_date_refresh(added, now) {
+                        theme::repaint_after(ui.ctx(), wait);
                     }
                 }
             }
@@ -2733,9 +2731,8 @@ fn track_row_contents(
                         let now = jiff::Timestamp::now();
                         let label = util::format_relative_date(app.locale, added, now);
                         theme::text(ui, &label, theme::regular(12.0), palette.secondary);
-                        if util::is_relative_date(added, now) {
-                            ui.ctx()
-                                .request_repaint_after(std::time::Duration::from_secs(1));
+                        if let Some(wait) = util::relative_date_refresh(added, now) {
+                            theme::repaint_after(ui.ctx(), wait);
                         }
                     }
                 }
@@ -2764,9 +2761,8 @@ fn track_row_contents(
                         let now = jiff::Timestamp::now();
                         let label = util::format_relative_date(app.locale, added, now);
                         theme::text(ui, &label, theme::regular(12.0), palette.secondary);
-                        if util::is_relative_date(added, now) {
-                            ui.ctx()
-                                .request_repaint_after(std::time::Duration::from_secs(1));
+                        if let Some(wait) = util::relative_date_refresh(added, now) {
+                            theme::repaint_after(ui.ctx(), wait);
                         }
                     }
                 }
@@ -2849,10 +2845,9 @@ fn track_row_contents(
                 palette.secondary,
             );
             // Relative labels cross a boundary while the table is idle, so
-            // keep the visible value in step with the clock.
-            if util::is_relative_date(added, now) {
-                ui.ctx()
-                    .request_repaint_after(std::time::Duration::from_secs(1));
+            // wake the app exactly when this one does.
+            if let Some(wait) = util::relative_date_refresh(added, now) {
+                theme::repaint_after(ui.ctx(), wait);
             }
         }
         x += cols.added;
@@ -4066,8 +4061,9 @@ fn skeleton_share(index: usize, line: usize) -> f32 {
 }
 
 /// Placeholder rows shaped like the songs a page is loading, in place of a
-/// spinner (#674): a cover and two lines each. They are drawn once and do
-/// not move, so loading asks for no frames. Screen readers hear Loading….
+/// spinner (#674): a cover and two lines each, with a soft light crossing them
+/// a few times a second and still entirely when less motion is asked for.
+/// Screen readers hear Loading….
 /// A page's title, its words rising into place one after another as the page
 /// opens, each out of a mask at its own foot. Afterwards it is ordinary text.
 pub fn title_in_words(ui: &mut Ui, title: &str, font: egui::FontId, color: Color32) {
@@ -4117,7 +4113,7 @@ fn skeleton_wave(ui: &Ui, rect: Rect, palette: &Palette) {
         .text
         .gamma_multiply(if palette.dark { 0.05 } else { 0.08 });
     super::kit::motion::glint(ui.painter(), rect, t, shine);
-    ui.ctx().request_repaint();
+    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(90));
 }
 
 pub fn skeleton_rows(ui: &mut Ui, palette: &Palette, locale: Locale, count: usize) {
