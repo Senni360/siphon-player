@@ -707,6 +707,9 @@ pub struct App {
     lyrics_request: u64,
     lyrics_query: Option<crate::lyrics::Query>,
     pub credits: crate::credits::State,
+    /// BPM and key readings worked out on demand, by song. See
+    /// [`crate::bpm_key`].
+    pub bpm_key: crate::bpm_key::State,
     /// Whether the panel follows the current line. Manual scrolling disables
     /// it until Follow is used or the track changes.
     pub lyrics_following: bool,
@@ -1394,6 +1397,7 @@ impl App {
             lyrics_request: 0,
             lyrics_query: None,
             credits: Default::default(),
+            bpm_key: Default::default(),
             lyrics_following: true,
             lyrics_line_shown: None,
             show_devices: false,
@@ -2983,6 +2987,9 @@ impl App {
                             | Event::UpdateProgress { .. }
                             | Event::UpdateDownloaded(_)
                             | Event::UpdateInstalling(_)
+                            // A downloaded or local file is measured offline.
+                            | Event::BpmKeyProgress { .. }
+                            | Event::BpmKey { .. }
                     ))
             {
                 continue;
@@ -3259,6 +3266,16 @@ impl App {
                 Event::Credits { uri, request, result } => {
                     self.credits.finish(&uri, request, result);
                 }
+                Event::BpmKeyProgress {
+                    uri,
+                    request,
+                    stage,
+                } => self.bpm_key.progress(&uri, request, stage),
+                Event::BpmKey {
+                    uri,
+                    request,
+                    result,
+                } => self.bpm_key.finish(&uri, request, result),
                 Event::Lyrics { uri, request, result } => self.receive_lyrics(&uri, request, result),
                 Event::PlaylistCache {
                     account_id,
@@ -4626,6 +4643,7 @@ impl App {
 
     pub(super) fn reset_track_details(&mut self) {
         self.credits.clear();
+        self.bpm_key.clear();
         self.frame_now = None;
         self.clear_lyrics();
         if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
@@ -13811,6 +13829,7 @@ impl App {
                     self.backend.send(Command::CancelCredits { uri, request });
                 }
             }
+            Action::RequestBpmKey(uri) => self.request_bpm_key(uri),
             Action::ToggleDevicesPopup => {
                 self.show_devices = !self.show_devices;
                 if self.show_devices {
@@ -14948,18 +14967,18 @@ impl App {
         }
     }
 
-    /// The BPM and key known for a track, for the player bar's quiet label:
-    /// `Some((140, "C♯m"))`. The key is empty when the analysis could not
-    /// name one confidently enough to show.
+    /// The BPM and key known for a track, for the player bar's quiet label and
+    /// a row's BPM and key tool: `Some((140, "C♯m"))`. The key is empty when
+    /// the analysis could not name one confidently enough to show.
     ///
-    /// Integration point: when `src/beats.rs` lands with BPM and key read
-    /// from a track's title or description, return that metadata answer
-    /// *first* here, so it wins and shows immediately, and fall back to
-    /// this session's audio analysis
-    /// ([`crate::beat_analysis::Collector::known`]) only when the metadata
-    /// says nothing.
+    /// A reading asked for from a row wins; then one the passive analyser
+    /// heard while the song played. A metadata reading from a title or
+    /// description still wins over both where it is shown (`src/beats.rs`).
     pub fn known_bpm_key(&self, uri: &str) -> Option<(u16, String)> {
-        let reading = self.beats.known(uri)?;
+        let reading = self
+            .bpm_key
+            .reading(uri)
+            .or_else(|| self.beats.known(uri))?;
         Some((
             reading.bpm,
             reading
@@ -14967,6 +14986,49 @@ impl App {
                 .map(|(key, _)| key.compact())
                 .unwrap_or_default(),
         ))
+    }
+
+    /// Asks the backend to measure `uri`'s BPM and key, from a downloaded or
+    /// local file when there is one and otherwise from its stream. A song
+    /// whose audio Encore can never hear, such as a Spotify song with no
+    /// downloaded copy, fails at once with the reason.
+    ///
+    /// A reading the passive analyser already made is kept and shown without
+    /// another request.
+    fn request_bpm_key(&mut self, uri: String) {
+        if let Some(reading) = self.beats.known(&uri) {
+            self.bpm_key.remember(&uri, reading);
+            return;
+        }
+        let file = self
+            .local_file(&uri)
+            .map(std::path::Path::to_path_buf)
+            .or_else(|| self.downloaded_file(&uri));
+        let Some(request) = self.bpm_key.begin(&uri) else {
+            return;
+        };
+        if file.is_none()
+            && let Some(reason) = crate::bpm_key::unhearable(&uri)
+        {
+            self.bpm_key.finish(&uri, request, Err(reason.to_owned()));
+            return;
+        }
+        let link = self.soundcloud_link(&uri);
+        self.backend.send(Command::AnalyzeBpmKey {
+            uri,
+            request,
+            file,
+            link,
+        });
+    }
+
+    /// The file a song downloaded to this session, by its URI or by the link
+    /// the helper saved it from.
+    fn downloaded_file(&self, uri: &str) -> Option<std::path::PathBuf> {
+        self.downloaded_files.get(uri).cloned().or_else(|| {
+            let link = self.soundcloud_link(uri)?;
+            self.downloaded_files.get(&link).cloned()
+        })
     }
 
     /// Records a track after enough active listening time.
@@ -17256,6 +17318,113 @@ mod tests {
         assert!(app.credits.get("soundcloud:track:123").is_none());
         assert!(matches!(app.lyrics, Loadable::Loading));
         assert_ne!(previous, app.lyrics_request);
+        app.backend.shutdown();
+    }
+
+    /// A 16-bit mono WAV of clicks at `bpm`, for the analyser to read.
+    fn click_wav(rate: u32, seconds: f64, bpm: f64) -> Vec<u8> {
+        let frames = (f64::from(rate) * seconds) as usize;
+        let period = f64::from(rate) * 60.0 / bpm;
+        let onset = 512_usize;
+        let mut samples = vec![0_i16; frames];
+        let mut next = 0.0_f64;
+        while next < frames as f64 {
+            let at = next.round() as usize;
+            for i in 0..onset {
+                if at + i < frames {
+                    let decay = (-(i as f32) / onset as f32 * 7.0).exp();
+                    let noise = (((i * 2654435761_usize) % 1000) as f32 / 1000.0) - 0.5;
+                    let value = 2.0 * noise * decay;
+                    samples[at + i] = (value * f32::from(i16::MAX)) as i16;
+                }
+            }
+            next += period;
+        }
+        let mut data = Vec::with_capacity(samples.len() * 2);
+        for sample in samples {
+            data.extend_from_slice(&sample.to_le_bytes());
+        }
+        let mut bytes = Vec::with_capacity(44 + data.len());
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * 2).to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&data);
+        bytes
+    }
+
+    /// The row's BPM and key tool goes the whole way: the action reaches the
+    /// backend, the file is measured off the UI thread, and the reading
+    /// shows from then on, in the row and the player bar alike.
+    #[test]
+    fn a_bpm_key_request_runs_from_the_tool_to_the_reading() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        let folder = crate::test_dirs::temp_dir().join(format!(
+            "spotifast-bpm-key-test-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("Click track.wav");
+        std::fs::write(&file, click_wav(11_025, 20.0, 140.0)).unwrap();
+        let uri = "spotify:local:Me:Beats:Click+track:20000";
+        let folder = folder.to_string_lossy().into_owned();
+        app.settings.local_files_folder = Some(folder.clone());
+        app.local_files = Some((
+            std::path::PathBuf::from(&folder),
+            Arc::new(HashMap::from([(local_file_key(uri), file.clone())])),
+        ));
+        app.apply(Action::RequestBpmKey(uri.into()), &ctx);
+        assert!(matches!(app.bpm_key.get(uri), Some(Loadable::Loading)));
+        for _ in 0..500 {
+            app.handle_events();
+            if app.known_bpm_key(uri).is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (bpm, _key) = app
+            .known_bpm_key(uri)
+            .expect("the analysis answers for the file");
+        assert!(
+            (i32::from(bpm) - 140).abs() <= 2,
+            "clicked at 140, read {bpm}"
+        );
+        // Asking again keeps the answer instead of starting another read.
+        app.apply(Action::RequestBpmKey(uri.into()), &ctx);
+        assert_eq!(
+            app.bpm_key.reading(uri).map(|reading| reading.bpm),
+            Some(bpm)
+        );
+        app.backend.shutdown();
+    }
+
+    /// A Spotify song Encore never hears explains itself at once, without a
+    /// request reaching the backend.
+    #[test]
+    fn a_spotify_song_without_a_download_says_why_it_cannot_be_measured() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        let uri = "spotify:track:no-audio";
+        app.apply(Action::RequestBpmKey(uri.into()), &ctx);
+        let Some(Loadable::Failed(reason)) = app.bpm_key.get(uri) else {
+            panic!("the row should hold the reason, not a reading");
+        };
+        assert!(reason.contains("never hears its audio"), "{reason}");
+        assert_eq!(app.known_bpm_key(uri), None);
+        assert!(
+            app.bpm_key.request(uri).is_none(),
+            "nothing is left running"
+        );
         app.backend.shutdown();
     }
 

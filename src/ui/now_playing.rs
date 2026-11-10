@@ -475,18 +475,50 @@ fn pills(
         app.actions.push(Action::Download(vec![item.clone()]));
     }
     x += width + 8.0;
-    let (_, width) = pill(
+    let bpm_tip = match app.bpm_key.get(uri) {
+        Some(Loadable::Loading) => match app.bpm_key.stage(uri) {
+            Some(crate::bpm_key::Stage::Finding) => {
+                gettext(locale, "Finding this song's audio…").into_owned()
+            }
+            _ => gettext(locale, "Listening for the beat…").into_owned(),
+        },
+        Some(Loadable::Failed(error)) => {
+            format!("{error} {}", gettext(locale, "Click to try again."))
+        }
+        _ => match app.known_bpm_key(uri) {
+            Some((bpm, key)) => {
+                let reading = if key.is_empty() {
+                    format!("{bpm} BPM")
+                } else {
+                    format!("{bpm} BPM · {key}")
+                };
+                format!("{reading}. {}", gettext(locale, "Click to copy"))
+            }
+            None => gettext(locale, "Measure this song's BPM and key").into_owned(),
+        },
+    };
+    let (response, width) = pill(
         ui,
         pos2(x, at.y),
         Icon::Activity,
         &gettext(locale, "BPM and key"),
-        &gettext(
-            locale,
-            "BPM and key arrive with the Siphon helper's analysis",
-        ),
-        false,
+        &bpm_tip,
+        true,
         shown(1),
     );
+    if response.clicked() {
+        if let Some((bpm, key)) = app.known_bpm_key(uri) {
+            let label = if key.is_empty() {
+                format!("{bpm} BPM")
+            } else {
+                format!("{bpm} BPM · {key}")
+            };
+            ui.ctx().copy_text(label.clone());
+            app.toast(format!("Copied {label}"));
+        } else if !matches!(app.bpm_key.get(uri), Some(Loadable::Loading)) {
+            app.actions.push(Action::RequestBpmKey(uri.to_owned()));
+        }
+    }
     x += width + 8.0;
     let (response, width) = pill(
         ui,

@@ -819,6 +819,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 }
 
 mod artist_sources;
+mod bpm_key;
 mod download_jobs;
 mod hybrid;
 pub(crate) mod remote;
@@ -913,6 +914,14 @@ pub enum Command {
     DiscoverDownloadHelper,
     Download(crate::downloads::Request),
     CancelDownload(u64),
+    /// Work out one song's BPM and key from its audio, off the UI thread.
+    /// `file` is a downloaded or local copy, which needs no network.
+    AnalyzeBpmKey {
+        uri: String,
+        request: u64,
+        file: Option<std::path::PathBuf>,
+        link: Option<String>,
+    },
     DownloadFinished {
         id: u64,
         result: Result<crate::downloads::Summary, String>,
@@ -1278,6 +1287,17 @@ pub enum Event {
         uri: String,
         request: u64,
         result: Result<Option<crate::credits::Credits>, String>,
+    },
+    /// Where an on-demand BPM and key reading has got to, for its row.
+    BpmKeyProgress {
+        uri: String,
+        request: u64,
+        stage: crate::bpm_key::Stage,
+    },
+    BpmKey {
+        uri: String,
+        request: u64,
+        result: Result<crate::beat_analysis::Reading, String>,
     },
     YouTubeTrack {
         generation: u64,
@@ -1800,6 +1820,9 @@ impl Backend {
                     | Command::InspectUpdate
                     | Command::DownloadUpdate { .. }
                     | Command::InstallUpdate { .. }
+                    // A downloaded or local file can be measured offline; a
+                    // stream fails in the task with the reason.
+                    | Command::AnalyzeBpmKey { .. }
             )
         {
             return;
@@ -2907,6 +2930,12 @@ impl Worker {
                 Command::DiscoverDownloadHelper => self.discover_download_helper(),
                 Command::Download(request) => self.start_download(request),
                 Command::CancelDownload(id) => self.download_jobs.cancel(id),
+                Command::AnalyzeBpmKey {
+                    uri,
+                    request,
+                    file,
+                    link,
+                } => self.analyze_bpm_key(uri, request, file, link),
                 Command::DownloadFinished { id, result } => {
                     self.download_jobs.finish(id);
                     self.emit(Event::Download(crate::downloads::Event::Finished {
