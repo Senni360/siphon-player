@@ -1,8 +1,8 @@
 //! The four square tools on every song row (`kit::tools`), wired to what the
 //! app can do today: Download through the helper, Credits from the backend's
-//! per-song reads, and Add to the playlist used last this session. BPM and
-//! key wait for the helper's analysis protocol, so that tool says so instead
-//! of answering with numbers nobody measured.
+//! per-song reads, Add to the playlist used last this session, and BPM and
+//! key measured from the song's own audio (see `crate::bpm_key`), which a
+//! click copies once it has answered.
 
 use egui::{Id, Rect, Ui, UiBuilder, pos2, vec2};
 
@@ -125,6 +125,7 @@ pub fn show(
         apply(app, &ctx, id, item, pick, open);
     }
     match ctx.data(|data| data.get_temp::<Tool>(id.with("open"))) {
+        Some(Tool::BpmKey) => bpm_popover(app, &ctx, id, &uri, row.rects[1]),
         Some(Tool::Credits) => credits_popover(app, &ctx, id, &uri, row.rects[2]),
         Some(Tool::AddToLast) => playlist_popover(app, &ctx, id, item, row.rects[3]),
         _ => {}
@@ -148,13 +149,11 @@ fn states(app: &App, ctx: &egui::Context, item: &PlayableItem, unavailable: bool
     } else {
         State::Ready(gettext(locale, "Download").into_owned())
     };
-    let bpm = State::Off(
-        gettext(
-            locale,
-            "BPM and key arrive with the Siphon helper's analysis",
-        )
-        .into_owned(),
-    );
+    let bpm = if unavailable {
+        off_here()
+    } else {
+        bpm_state(app, locale, item.uri())
+    };
     let credits = if unavailable {
         off_here()
     } else {
@@ -183,6 +182,46 @@ fn states(app: &App, ctx: &egui::Context, item: &PlayableItem, unavailable: bool
     [download, bpm, credits, add]
 }
 
+/// The BPM and key tool: a reading to copy, progress while it is measured,
+/// the reason it failed, or the invitation to measure it.
+fn bpm_state(app: &App, locale: crate::i18n::Locale, uri: &str) -> State {
+    match app.bpm_key.get(uri) {
+        Some(Loadable::Loading) => {
+            let tip = match app.bpm_key.stage(uri) {
+                Some(crate::bpm_key::Stage::Finding) => {
+                    gettext(locale, "Finding this song's audio…")
+                }
+                _ => gettext(locale, "Listening for the beat…"),
+            };
+            State::Running {
+                fraction: None,
+                tip: tip.into_owned(),
+            }
+        }
+        Some(Loadable::Failed(error)) => State::Ready(format!(
+            "{error} {}",
+            gettext(locale, "Click to try again.")
+        )),
+        _ => match app.known_bpm_key(uri) {
+            Some((bpm, key)) => State::Ready(format!(
+                "{}. {}",
+                bpm_label(bpm, &key),
+                gettext(locale, "Click to see")
+            )),
+            None => State::Ready(gettext(locale, "Measure this song's BPM and key").into_owned()),
+        },
+    }
+}
+
+/// "140 BPM · C♯m", or just the tempo when no key was confident enough.
+fn bpm_label(bpm: u16, key: &str) -> String {
+    if key.is_empty() {
+        format!("{bpm} BPM")
+    } else {
+        format!("{bpm} BPM · {key}")
+    }
+}
+
 fn apply(
     app: &mut App,
     ctx: &egui::Context,
@@ -201,8 +240,19 @@ fn apply(
     };
     match pick.tool {
         Tool::Download => app.actions.push(Action::Download(vec![item.clone()])),
-        // Off until the helper can analyse; a click does nothing.
-        Tool::BpmKey => {}
+        Tool::BpmKey => {
+            if open == Some(Tool::BpmKey) {
+                set_open(None);
+            } else {
+                if app.known_bpm_key(item.uri()).is_none()
+                    && !matches!(app.bpm_key.get(item.uri()), Some(Loadable::Loading))
+                {
+                    app.actions
+                        .push(Action::RequestBpmKey(item.uri().to_string()));
+                }
+                set_open(Some(Tool::BpmKey));
+            }
+        }
         Tool::Credits => {
             if open == Some(Tool::Credits) {
                 close_credits(app, item.uri());
@@ -267,6 +317,77 @@ fn popover(
             .is_some_and(|at| anchor.contains(at));
     let escape = ctx.input(|input| input.key_pressed(egui::Key::Escape));
     !(clicked_outside || escape)
+}
+
+fn bpm_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Rect) {
+    let palette = app.palette;
+    let locale = app.locale;
+    let reading = app.bpm_key.reading(uri).or_else(|| app.beats.known(uri));
+    let label = reading.map(|reading| match reading.key {
+        Some((key, confidence)) => format!(
+            "{} BPM · {} · {:.0}% sure",
+            reading.bpm,
+            key.name(),
+            confidence * 100.0
+        ),
+        None => format!("{} BPM", reading.bpm),
+    });
+    let failed = match app.bpm_key.get(uri) {
+        Some(Loadable::Failed(error)) => Some(error.clone()),
+        _ => None,
+    };
+    let loading_tip = matches!(app.bpm_key.get(uri), Some(Loadable::Loading)).then(|| {
+        match app.bpm_key.stage(uri) {
+            Some(crate::bpm_key::Stage::Finding) => gettext(locale, "Finding this song's audio…"),
+            _ => gettext(locale, "Listening for the beat…"),
+        }
+        .into_owned()
+    });
+    let mut retry = false;
+    let mut copy = None;
+    let keep = popover(&palette, ctx, id, anchor, |ui| {
+        ui.spacing_mut().item_spacing.y = 8.0;
+        theme::text(
+            ui,
+            gettext(locale, "BPM and key"),
+            theme::medium(13.0),
+            palette.text,
+        );
+        if let Some(label) = &label {
+            theme::text(ui, label, theme::medium(16.0), palette.text);
+            theme::text(
+                ui,
+                gettext(locale, "Measured from this song's audio."),
+                theme::regular(12.0),
+                palette.dim,
+            );
+            if theme::soft_button(ui, &palette, None, &gettext(locale, "Copy"), false).clicked() {
+                copy = Some(label.clone());
+            }
+        } else if let Some(tip) = &loading_tip {
+            theme::text(ui, tip, theme::regular(12.5), palette.secondary);
+        } else if let Some(error) = &failed {
+            theme::text(ui, error, theme::regular(12.5), palette.secondary);
+            retry = ui.button(gettext(locale, "Try again")).clicked();
+        } else {
+            theme::text(
+                ui,
+                gettext(locale, "Measure this song's BPM and key"),
+                theme::regular(12.5),
+                palette.secondary,
+            );
+        }
+    });
+    if let Some(label) = copy {
+        ctx.copy_text(label.clone());
+        app.toast(format!("Copied {label}"));
+    }
+    if retry {
+        app.actions.push(Action::RequestBpmKey(uri.to_owned()));
+    }
+    if !keep {
+        ctx.data_mut(|data| data.remove::<Tool>(id.with("open")));
+    }
 }
 
 fn credits_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Rect) {

@@ -1887,6 +1887,9 @@ pub enum Action {
     /// Credits for any track row, independent of current playback.
     RequestCredits(String),
     CancelCredits(String),
+    /// Work out a song's BPM and key from its audio, for any row or the
+    /// player bar. Answered by the backend off the UI thread.
+    RequestBpmKey(String),
     ToggleDevicesPopup,
     /// Ask GitHub for the latest release and report the result to the user.
     CheckForUpdates,
