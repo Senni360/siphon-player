@@ -1,0 +1,40 @@
+# Builds Encore for Apple Silicon Macs on demand and attaches it to a release.
+# Run it from the Actions tab or with: gh workflow run macos.yml -f tag=vVERSION
+name: macOS (Apple Silicon)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the Mac app to, such as v0.15.0-pre.21
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --bin siphon
+      - name: Bundle
+        run: |
+          version="$(./target/release/siphon --version | awk '{print $2}')"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          mkdir -p dist
+          bash packaging/macos/bundle.sh target/release/siphon dist/Encore.app "$version"
+          cd dist
+          ditto -c -k --keepParent Encore.app "encore-v$version-macos-arm64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: encore-macos-arm64
+          path: dist/*.zip
+          if-no-files-found: error
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" dist/*.zip --clobber
