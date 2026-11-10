@@ -1,5 +1,9 @@
 //! The edge socket's tests: a local WebSocket answers, and nothing here ever
 //! touches the real service.
+//!
+//! `tokio-tungstenite` answers a bad handshake with a large response type of
+//! its own, which the test's callback has to return as it is.
+#![allow(clippy::result_large_err)]
 
 use std::sync::{Arc, Mutex};
 

@@ -118,10 +118,10 @@ pub fn queue_doc(
 /// A saved match as the edge stores it: only public YouTube or SoundCloud
 /// sources qualify, and an older file that kept only a URL is read too.
 pub(crate) fn saved_entry(saved: &SavedMatch) -> Option<(&'static str, String)> {
-    if let Some(id) = saved.uri.strip_prefix("youtube:video:") {
-        if id.len() == 11 {
-            return Some(("youtube", saved.uri.clone()));
-        }
+    if let Some(id) = saved.uri.strip_prefix("youtube:video:")
+        && id.len() == 11
+    {
+        return Some(("youtube", saved.uri.clone()));
     }
     if saved.uri.starts_with("soundcloud:") && !saved.uri.contains(char::is_whitespace) {
         return Some(("soundcloud", saved.uri.clone()));
@@ -225,7 +225,7 @@ impl Sync {
 
     /// Offers `data` as the document's next revision. A conflict is not an
     /// error: the stored revision is read and the snapshot offered again.
-    pub async fn put(&self, doc: &'static str, data: Value) -> Result<(), String> {
+    pub async fn put(&self, doc: &'static str, data: &Value) -> Result<(), String> {
         for attempt in 0..2 {
             let (client, tokens, token) = self.http().await?;
             let revision = self.revisions.lock().await.get(doc).copied();
@@ -263,7 +263,148 @@ impl Sync {
     pub(crate) async fn matches(&self, saved: &Saved) -> Result<(), String> {
         let remote = self.get("matches").await?;
         take_matches(remote.get("data"), saved).await;
-        self.put("matches", matches_doc(&saved.all().await)).await
+        self.put("matches", &matches_doc(&saved.all().await)).await
+    }
+}
+
+/// The edge is not always reachable, and a snapshot offered while it is down
+/// would otherwise be lost until the next change. This keeps the newest one
+/// per document and sends it again until the edge accepts it. Only the newest
+/// matters: each document is a whole picture.
+struct Pending {
+    playlists: Option<Value>,
+    queue: Option<Value>,
+    matches: bool,
+}
+
+enum Next {
+    Playlists(Value),
+    Queue(Value),
+    Matches,
+    Wait,
+}
+
+/// How long a refused or unreachable push waits before it is offered again.
+const RETRY: [u64; 6] = [1, 2, 4, 8, 16, 30];
+
+/// Holds the snapshots the edge has not accepted yet. Dropping it stops the
+/// task, so turning the connection off leaves nothing running.
+pub(crate) struct Writer {
+    pending: std::sync::Arc<tokio::sync::Mutex<Pending>>,
+    wake: std::sync::Arc<tokio::sync::Notify>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Writer {
+    pub(crate) fn spawn(source: std::sync::Arc<Source>, saved: Saved) -> Self {
+        let pending = std::sync::Arc::new(tokio::sync::Mutex::new(Pending {
+            playlists: None,
+            queue: None,
+            matches: false,
+        }));
+        let wake = std::sync::Arc::new(tokio::sync::Notify::new());
+        let task = tokio::spawn(run(
+            Sync::new(source),
+            saved,
+            std::sync::Arc::clone(&pending),
+            std::sync::Arc::clone(&wake),
+        ));
+        Self {
+            pending,
+            wake,
+            task,
+        }
+    }
+
+    /// The playlists snapshot, replacing one still waiting to be sent.
+    pub async fn playlists(&self, doc: Value) {
+        self.pending.lock().await.playlists = Some(doc);
+        self.wake.notify_one();
+    }
+
+    /// The queue snapshot, replacing one still waiting to be sent.
+    pub async fn queue(&self, doc: Value) {
+        self.pending.lock().await.queue = Some(doc);
+        self.wake.notify_one();
+    }
+
+    /// Push the saved matches, and take the edge's back, when the edge allows.
+    pub async fn matches(&self) {
+        self.pending.lock().await.matches = true;
+        self.wake.notify_one();
+    }
+}
+
+impl Drop for Writer {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
+async fn run(
+    sync: Sync,
+    saved: Saved,
+    pending: std::sync::Arc<tokio::sync::Mutex<Pending>>,
+    wake: std::sync::Arc<tokio::sync::Notify>,
+) {
+    let mut retry = 0usize;
+    loop {
+        let next = {
+            let mut held = pending.lock().await;
+            if let Some(doc) = held.playlists.take() {
+                Next::Playlists(doc)
+            } else if let Some(doc) = held.queue.take() {
+                Next::Queue(doc)
+            } else if held.matches {
+                held.matches = false;
+                Next::Matches
+            } else {
+                Next::Wait
+            }
+        };
+        let (next, done) = match next {
+            Next::Wait => {
+                wake.notified().await;
+                continue;
+            }
+            Next::Playlists(doc) => {
+                let done = sync.put("playlists", &doc).await;
+                (Next::Playlists(doc), done)
+            }
+            Next::Queue(doc) => {
+                let done = sync.put("queue", &doc).await;
+                (Next::Queue(doc), done)
+            }
+            Next::Matches => {
+                let done = sync.matches(&saved).await;
+                (Next::Matches, done)
+            }
+        };
+        if done.is_ok() {
+            retry = 0;
+            continue;
+        }
+        // Put it back, unless something newer arrived while it was in flight.
+        {
+            let mut held = pending.lock().await;
+            match next {
+                Next::Playlists(doc) => {
+                    if held.playlists.is_none() {
+                        held.playlists = Some(doc);
+                    }
+                }
+                Next::Queue(doc) => {
+                    if held.queue.is_none() {
+                        held.queue = Some(doc);
+                    }
+                }
+                Next::Matches => held.matches = true,
+                Next::Wait => {}
+            }
+        }
+        let wait = RETRY[retry.min(RETRY.len() - 1)];
+        retry = retry.saturating_add(1);
+        tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
     }
 }
 
@@ -435,5 +576,138 @@ mod tests {
         assert_eq!(doc["spotify:track:a"]["confidence"], 0.9);
         assert_eq!(doc["spotify:track:a"]["date"], 20_000);
         assert_eq!(doc["spotify:track:a"]["manual"], false);
+    }
+
+    /// A snapshot offered while the edge is down is kept and offered again,
+    /// in the body shape the service accepts: `{ data, revision }`.
+    #[tokio::test]
+    async fn a_snapshot_waits_for_an_unreachable_edge_and_is_sent_again() {
+        use crate::edge::test_support::{Server, group_source};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let puts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&puts);
+        let server = Server::new(move |request| {
+            if request.path == "/edge/token" {
+                return (
+                    200,
+                    serde_json::json!({
+                        "url": "SELF", "live": "live", "media": "media", "sync": "sync"
+                    }),
+                );
+            }
+            if request.path == "/v1/sync/playlists" && request.method == "PUT" {
+                let attempt = counted.fetch_add(1, Ordering::SeqCst);
+                return if attempt == 0 {
+                    (500, serde_json::json!({ "v": 1, "error": "internal" }))
+                } else {
+                    (200, serde_json::json!({ "v": 1, "revision": 1 }))
+                };
+            }
+            (404, serde_json::json!({ "v": 1, "error": "not_found" }))
+        });
+        let source = group_source(&server).await;
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("siphon-edge-writer-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let writer = Writer::spawn(source, Saved::new(dir.join("matches.json")));
+        writer
+            .playlists(serde_json::json!({ "playlists": [], "mixed": [] }))
+            .await;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        while puts.load(Ordering::SeqCst) < 2 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the snapshot was not offered again"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let puts: Vec<_> = server
+            .hits()
+            .into_iter()
+            .filter(|hit| hit.path == "/v1/sync/playlists" && hit.method == "PUT")
+            .collect();
+        assert_eq!(puts.len(), 2);
+        // The second offer is the same picture, now accepted.
+        assert_eq!(puts[1].json()["data"]["playlists"], serde_json::json!([]));
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A phone writing first makes the offer a conflict: the stored revision
+    /// is read, and the same snapshot is offered once more with it.
+    #[tokio::test]
+    async fn a_conflict_reads_the_revision_and_offers_the_snapshot_again() {
+        use crate::edge::test_support::{Server, group_source};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let puts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&puts);
+        let server = Server::new(move |request| {
+            if request.path == "/edge/token" {
+                return (
+                    200,
+                    serde_json::json!({
+                        "url": "SELF", "live": "live", "media": "media", "sync": "sync"
+                    }),
+                );
+            }
+            if request.path == "/v1/sync/queue" && request.method == "GET" {
+                return (
+                    200,
+                    serde_json::json!({
+                        "v": 1, "doc": "queue", "revision": 4,
+                        "updatedAt": "2026-11-10T00:00:00.000Z",
+                        "data": { "playing": null, "position_ms": 0, "queue": [] },
+                    }),
+                );
+            }
+            if request.path == "/v1/sync/queue" && request.method == "PUT" {
+                let attempt = counted.fetch_add(1, Ordering::SeqCst);
+                return if attempt == 0 {
+                    (
+                        409,
+                        serde_json::json!({ "v": 1, "error": "revision_conflict" }),
+                    )
+                } else {
+                    (200, serde_json::json!({ "v": 1, "revision": 5 }))
+                };
+            }
+            (404, serde_json::json!({ "v": 1, "error": "not_found" }))
+        });
+        let source = group_source(&server).await;
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("siphon-edge-conflict-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let writer = Writer::spawn(source, Saved::new(dir.join("matches.json")));
+        writer
+            .queue(serde_json::json!({
+                "playing": { "uri": "spotify:track:a", "name": "A" },
+                "position_ms": 10_000,
+                "playing_state": true,
+                "queue": [],
+            }))
+            .await;
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        while puts.load(Ordering::SeqCst) < 2 {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the snapshot was not offered again"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        let puts: Vec<_> = server
+            .hits()
+            .into_iter()
+            .filter(|hit| hit.path == "/v1/sync/queue" && hit.method == "PUT")
+            .collect();
+        assert_eq!(puts.len(), 2);
+        assert!(puts[0].json().get("revision").is_none());
+        assert_eq!(puts[1].json()["revision"], 4);
+        assert_eq!(puts[1].json()["data"]["position_ms"], 10_000);
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

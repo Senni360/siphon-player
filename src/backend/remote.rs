@@ -260,11 +260,19 @@ impl Worker {
                 wanted,
             } => {
                 let find = self.remote_stream(uri, share_url, wanted);
+                let commands = self.commands.clone();
                 tokio::spawn(async move {
                     let value = match find.await {
                         Ok(value) => value,
                         Err(error) => serde_json::json!({ "error": error }),
                     };
+                    // The phone asks this over the edge socket when a computer
+                    // is in its room, so the answer goes back the same way, and
+                    // through the relay as before.
+                    let _ = commands.send(Command::Edge(crate::edge::Request::Reply {
+                        id: id.clone(),
+                        value: value.clone(),
+                    }));
                     if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_reply(&identity, &id, &value).await;
                     }
@@ -272,8 +280,13 @@ impl Worker {
             }
             RemoteRequest::Search { id, query } => {
                 let search = self.remote_search(query);
+                let commands = self.commands.clone();
                 tokio::spawn(async move {
                     let value = search.await;
+                    let _ = commands.send(Command::Edge(crate::edge::Request::Reply {
+                        id: id.clone(),
+                        value: value.clone(),
+                    }));
                     if let Some(identity) = signin.get(&credentials).await {
                         let _ = client.remote_reply(&identity, &id, &value).await;
                     }

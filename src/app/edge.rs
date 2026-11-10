@@ -16,6 +16,13 @@ use crate::edge::{self, MixedPlaylist, MixedTrack, PlaylistSummary, UploadJob};
 const SETTLE: Duration = Duration::from_secs(3);
 /// How often a possibly changed snapshot is looked at.
 const LOOK: Duration = Duration::from_secs(1);
+/// How often the playlist rows are searched for local files to offer. Reading
+/// a file's date waits for the disk, so it never happens every frame.
+const UPLOAD_LOOK: Duration = Duration::from_secs(10);
+/// The queue's position is stored to this many seconds. An exact position
+/// reaches the phone over the socket; a rounded one keeps a playing song from
+/// writing the document every few seconds.
+const POSITION_BUCKET_MS: u32 = 10_000;
 
 #[derive(Default)]
 pub struct Edge {
@@ -23,12 +30,16 @@ pub struct Edge {
     pub vault: Option<bool>,
     /// The last uploads setting handed to the backend.
     pub uploads: Option<bool>,
+    /// The last connection setting handed to the backend.
+    pub enabled: Option<bool>,
     /// A change waiting for quiet.
     dirty: Option<Instant>,
     /// The snapshot last written.
     signature: Option<u64>,
     /// When the snapshot was last looked at.
     looked: Option<Instant>,
+    /// When local files were last searched for.
+    scanned: Option<Instant>,
     /// Upload keys already handed over, so the same file waits only once.
     queued: HashSet<String>,
     /// A reset from the edge makes the next look write both documents.
@@ -40,6 +51,21 @@ impl App {
     /// and offers new local files. Runs on a linked phone only.
     pub(super) fn edge_tick(&mut self) {
         if !self.settings.phone_linked || !self.phone.started {
+            return;
+        }
+        let enabled = self.settings.edge_enabled;
+        if self.edge.enabled != Some(enabled) {
+            self.edge.enabled = Some(enabled);
+            self.backend
+                .send(Command::Edge(edge::Request::Enabled(enabled)));
+            // Switched back on: offer everything again, since the edge may
+            // have missed what changed while this computer was away.
+            if enabled {
+                self.edge.signature = None;
+                self.edge.dirty = Some(Instant::now());
+            }
+        }
+        if !enabled {
             return;
         }
         let vault = self.vault_signins_enabled();
@@ -54,7 +80,13 @@ impl App {
             self.backend
                 .send(Command::Edge(edge::Request::UploadsEnabled(uploads)));
         }
-        if uploads {
+        if uploads
+            && self
+                .edge
+                .scanned
+                .is_none_or(|scanned| scanned.elapsed() >= UPLOAD_LOOK)
+        {
+            self.edge.scanned = Some(Instant::now());
             self.edge_queue_uploads();
         }
         if self
@@ -165,7 +197,7 @@ impl App {
             edge::sync::playlists_doc(&spotify, &mixed),
             edge::sync::queue_doc(
                 snapshot.song.as_ref(),
-                snapshot.position_ms,
+                stored_position(snapshot.position_ms),
                 snapshot.playing,
                 &snapshot.next,
             ),
@@ -197,11 +229,13 @@ impl App {
             .filter(|uri| uri.starts_with("spotify:local:"))
             .filter(|uri| seen.insert(uri.clone()))
             .filter_map(|uri| {
-                let path = self.local_file(&uri)?.to_owned();
+                // The key comes from the URI alone, so a file already offered
+                // is passed over before its path or its date is looked for.
                 let key = edge::local_key(&uri);
                 if self.edge.queued.contains(&key) {
                     return None;
                 }
+                let path = self.local_file(&uri)?.to_owned();
                 let modified = std::fs::metadata(&path)
                     .and_then(|metadata| metadata.modified())
                     .unwrap_or(std::time::UNIX_EPOCH);
@@ -210,7 +244,7 @@ impl App {
             .collect();
         // Newest first: the most recently added file should reach the phone
         // first, and an old library finishes last.
-        files.sort_by(|left, right| right.0.cmp(&left.0));
+        files.sort_by_key(|left| std::cmp::Reverse(left.0));
         let jobs: Vec<UploadJob> = files
             .into_iter()
             .map(|(_, job)| {
@@ -247,7 +281,12 @@ impl App {
         match event {
             edge::Event::Commands(commands) => self.accept_commands(commands),
             edge::Event::Phone(phone) => self.heard_from_phone(phone.map(|phone| (phone, 0))),
-            edge::Event::Reset => self.edge.resync = true,
+            edge::Event::Reset => {
+                // The edge restarted or this computer was away long enough for
+                // its replay buffer to run out: every document is offered again.
+                self.edge.resync = true;
+                self.backend.send(Command::Edge(edge::Request::Matches));
+            }
         }
     }
 }
@@ -261,4 +300,39 @@ fn edge_signature(playlists: &serde_json::Value, queue: &serde_json::Value) -> u
         .unwrap_or_default()
         .hash(&mut hasher);
     hasher.finish()
+}
+
+/// The position the queue document keeps: rounded down to ten seconds, so a
+/// playing song does not make the document a new one every few seconds.
+fn stored_position(position_ms: u32) -> u32 {
+    position_ms - position_ms % POSITION_BUCKET_MS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A playing song's position moves every frame; the document is only a new
+    /// one every ten seconds, which is what keeps writes rare.
+    #[test]
+    fn only_a_whole_ten_seconds_of_position_changes_the_document() {
+        assert_eq!(stored_position(0), 0);
+        assert_eq!(stored_position(9_999), 0);
+        assert_eq!(stored_position(10_000), 10_000);
+        assert_eq!(stored_position(19_999), 10_000);
+        assert_eq!(stored_position(20_001), 20_000);
+        // A few seconds of playback never moves it within one bucket.
+        assert_eq!(stored_position(63_400), stored_position(69_999));
+        assert_ne!(stored_position(69_999), stored_position(70_000));
+    }
+
+    /// The store is filled again after a reset, without waiting for a change.
+    #[test]
+    fn a_reset_from_the_edge_asks_for_every_document_again() {
+        let mut app = crate::app::tests::test_app("edge-reset");
+        assert!(!app.edge.resync);
+        app.edge_event(edge::Event::Reset);
+        assert!(app.edge.resync);
+        app.backend.shutdown();
+    }
 }

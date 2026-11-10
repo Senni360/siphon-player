@@ -94,7 +94,10 @@ fn read(stream: &mut std::net::TcpStream) -> Option<Recorded> {
     let mut lines = head.lines();
     let mut request = lines.next()?.split_whitespace();
     let method = request.next()?.to_owned();
-    let path = request.next()?.split('?').next()?.to_owned();
+    let path = request.next()?.split('?').next()?;
+    // The group service is mounted under `/api`, as it is on Vercel. The
+    // handlers here name their routes the way the service does, without it.
+    let path = path.strip_prefix("/api").unwrap_or(path).to_owned();
     let mut length = 0usize;
     for line in lines {
         let Some((name, value)) = line.split_once(':') else {
@@ -124,7 +127,8 @@ fn read(stream: &mut std::net::TcpStream) -> Option<Recorded> {
 /// listener; the fake answers the mint route directly.
 pub async fn group_source(server: &Server) -> Arc<Source> {
     let http = Http::new(reqwest::Client::new());
-    let group = Client::new(http.clone(), server.url()).expect("a local group address");
+    let group =
+        Client::new(http.clone(), &format!("{}/api", server.url())).expect("a local group address");
     let root = crate::test_dirs::temp_dir().join(format!(
         "siphon-edge-credentials-{}-{:?}-{}",
         std::process::id(),
@@ -136,7 +140,9 @@ pub async fn group_source(server: &Server) -> Arc<Source> {
     let identity = crate::friends::Identity {
         user_id: "test-account".into(),
         secret: "a".repeat(64),
-        base_url: server.url().to_owned(),
+        // Exactly as the client spells it, or it is refused as another
+        // service's identity.
+        base_url: group.base_url().to_owned(),
     };
     credentials
         .lease(crate::credentials::Slot::Friends)

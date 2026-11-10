@@ -2336,6 +2336,9 @@ struct Worker {
     hybrid: hybrid::HybridRuntime,
     /// The always-on edge, once a phone is linked.
     edge: Option<crate::edge::Runtime>,
+    /// Whether this computer may speak to the edge at all. Off until the app
+    /// says otherwise, and off again the moment the listener turns it off.
+    edge_allowed: bool,
     soloist: Option<crate::soloist::Handle>,
     soloist_generation: u64,
     dirs: AppDirs,
@@ -2467,6 +2470,7 @@ impl Worker {
         Self {
             hybrid: hybrid::HybridRuntime::default(),
             edge: None,
+            edge_allowed: false,
             friends_feed: None,
             live: None,
             discord: None,

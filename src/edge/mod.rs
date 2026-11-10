@@ -190,6 +190,9 @@ impl Source {
 /// What the app asks of the edge connection.
 #[derive(Debug)]
 pub enum Request {
+    /// Whether this computer talks to the edge at all. Turning it off stops
+    /// the socket and everything waiting behind it; nothing is deleted there.
+    Enabled(bool),
     /// What this computer plays, sent to the phone at once.
     State(Value),
     /// The answer to a phone command, over the same socket.
@@ -234,6 +237,7 @@ pub enum Event {
 pub struct Runtime {
     tx: tokio::sync::mpsc::UnboundedSender<Request>,
     live: live::Live,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
 }
 
 impl Runtime {
@@ -245,54 +249,67 @@ impl Runtime {
     ) -> Self {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let live = live::spawn(Arc::clone(&source), emit);
+        let mut tasks = Vec::new();
 
         let (upload_tx, mut upload_rx) = tokio::sync::mpsc::unbounded_channel::<UploadJob>();
         let uploads_enabled = Arc::new(AtomicBool::new(true));
         let uploads = upload::Uploads::new(Arc::clone(&source));
         let enabled = Arc::clone(&uploads_enabled);
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             while let Some(job) = upload_rx.recv().await {
                 if !enabled.load(Ordering::Relaxed) {
                     continue;
                 }
                 let _ = uploads.upload(job).await;
             }
-        });
+        }));
 
-        let sync = sync::Sync::new(Arc::clone(&source));
+        let writer = sync::Writer::spawn(Arc::clone(&source), saved);
         let vault = vault::Vault::new(Arc::clone(&source));
-        let vault_enabled = Arc::new(AtomicBool::new(false));
-        let vault_flag = Arc::clone(&vault_enabled);
-        tokio::spawn(async move {
+        // `None` until the app says: pushing before the listener's choice is
+        // known would delete the sign-ins the phone is using.
+        let vault_setting = Arc::new(std::sync::Mutex::new(None::<bool>));
+        let vault_wake = Arc::new(tokio::sync::Notify::new());
+        let vault_flag = Arc::clone(&vault_setting);
+        let vault_woken = Arc::clone(&vault_wake);
+        tasks.push(tokio::spawn(async move {
             let mut every = tokio::time::interval(Duration::from_secs(60));
             every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             loop {
-                every.tick().await;
-                let _ = vault.push(vault_flag.load(Ordering::Relaxed)).await;
+                let setting = *vault_flag
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if let Some(on) = setting {
+                    let _ = vault.push(on).await;
+                }
+                tokio::select! {
+                    _ = every.tick() => {}
+                    () = vault_woken.notified() => {}
+                }
             }
-        });
+        }));
 
         let fetch_http = source.http();
         let fetcher = temp;
-        tokio::spawn(async move {
+        tasks.push(tokio::spawn(async move {
             while let Some(request) = rx.recv().await {
                 match request {
-                    Request::SyncPlaylists(data) => {
-                        let _ = sync.put("playlists", data).await;
-                    }
-                    Request::SyncQueue(data) => {
-                        let _ = sync.put("queue", data).await;
-                    }
-                    Request::Matches => {
-                        let _ = sync.matches(&saved).await;
-                    }
+                    Request::Enabled(_) => {}
+                    Request::SyncPlaylists(data) => writer.playlists(data).await,
+                    Request::SyncQueue(data) => writer.queue(data).await,
+                    Request::Matches => writer.matches().await,
                     Request::Upload(jobs) => {
                         for job in jobs {
                             let _ = upload_tx.send(job);
                         }
                     }
                     Request::UploadsEnabled(on) => uploads_enabled.store(on, Ordering::Relaxed),
-                    Request::Vault(on) => vault_enabled.store(on, Ordering::Relaxed),
+                    Request::Vault(on) => {
+                        *vault_setting
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(on);
+                        vault_wake.notify_one();
+                    }
                     Request::Fetch(sources) => {
                         let upload_tx = upload_tx.clone();
                         let http = fetch_http.clone();
@@ -310,9 +327,9 @@ impl Runtime {
                     Request::State(_) | Request::Reply { .. } => {}
                 }
             }
-        });
+        }));
 
-        Self { tx, live }
+        Self { tx, live, tasks }
     }
 
     pub fn send(&self, request: Request) {
@@ -323,6 +340,15 @@ impl Runtime {
                 let _ = self.tx.send(other);
             }
         }
+    }
+
+    /// Stops everything this computer does for the edge. The listener's files
+    /// and sign-ins stay where they are: only this computer's side stops.
+    pub fn stop(self) {
+        for task in self.tasks {
+            task.abort();
+        }
+        self.live.stop();
     }
 }
 

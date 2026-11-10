@@ -1,12 +1,21 @@
 //! The always-on edge runs beside the group relay. It is optional: without a
-//! group sign-in, or with no edge configured, the relay stays exactly as it
-//! was and nothing here is started.
+//! group sign-in, with no edge configured, or with the listener's setting off,
+//! the relay stays exactly as it was and nothing here is started.
 
 use super::*;
 
 impl Worker {
     /// Starts the edge the first time a phone is linked, then hands it work.
     pub(super) fn edge(&mut self, request: crate::edge::Request) {
+        if let crate::edge::Request::Enabled(on) = request {
+            self.edge_allowed = on;
+            if on {
+                self.edge_start();
+            } else if let Some(runtime) = self.edge.take() {
+                runtime.stop();
+            }
+            return;
+        }
         self.edge_start();
         if let Some(edge) = &self.edge {
             edge.send(request);
@@ -14,7 +23,7 @@ impl Worker {
     }
 
     pub(super) fn edge_start(&mut self) {
-        if self.edge.is_some() {
+        if !self.edge_allowed || self.edge.is_some() {
             return;
         }
         let http = crate::http::build_collection_client(&self.engine_config.proxy)

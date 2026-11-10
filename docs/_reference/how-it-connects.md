@@ -151,8 +151,37 @@ in that room, the phone's commands travel over it and its state comes back the s
 way, so the two agree at once. The phone sends a command down one path only: with no
 computer in the room, or with the socket down, everything keeps using the group
 service's relay and event stream described below, unchanged, and a down socket is never
-shown as an error. The desktop app does not use the edge yet; it keeps its existing
-group-service connection.
+shown as an error.
+
+This computer is the other side of that room once a phone is linked. It asks the same
+group route (`POST /api/edge/token`) for its own five-minute tokens, with the role
+`computer`, and keeps `/v1/live` open the same way: it sends its playback picture at
+least every eight seconds and whenever something changes, which is how the phone knows
+a computer is there. Its pause, play and seek reach the phone at once, and a command or
+a question from the phone is carried out here and answered on the same socket, with the
+relay answering too when it is open. A command seen on both paths is acted on once, by
+its id. Its token is replaced shortly before it expires and the socket is opened again
+with the fresh one, resuming from the last sequence number. Nothing about the edge is
+shown when it is unreachable: the relay goes on exactly as before, and reconnects wait
+1, 2, 4, 8, 16 and then 30 seconds.
+
+While a phone is linked, this computer also keeps the edge's small per-account store
+current: the playlist rows the phone lists, the mixed playlists with their songs, the
+queue and where it is, and the saved Spotify-to-YouTube/SoundCloud matches. A snapshot
+waits three seconds after a change, then is offered with the revision the edge last
+returned; a `409` means a phone wrote first, so the stored revision is read and the
+snapshot offered once more. A snapshot the edge does not accept is kept and offered
+again, so a computer that starts without a network still fills the store. The queue's
+position is stored to ten seconds; the exact one travels over the socket. Playlist local
+files are uploaded one at a time (`PUT /v1/upload/:key`) under a key derived from their
+URI — a file the edge already holds is skipped, and a protected M4P file never leaves
+this computer. A fetched YouTube song also goes to the upload route, so the phone can
+play it later with this computer off. If the listener allows it, this computer also
+keeps its Spotify and SoundCloud sign-ins in the edge's encrypted vault
+(`PUT /v1/vault/:provider`); turning that off deletes them there. `Settings > Devices >
+Your phone` has one switch for all of it — off stops the socket, the uploads and the
+vault writes, and leaves the phone's group connection exactly as it was. No token, no
+address carrying one, and no sign-in is ever logged.
 
 While the phone's page is open, the phone and this computer each also keep an event
 stream open to the group service (`/live/remote/events`), which hears through Redis
