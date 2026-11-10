@@ -56,6 +56,12 @@ test("empty or wordless artists cannot pass the primary-artist gate", () => {
   }
   assert.notEqual(score(track({ artists: ["Aurora"] }), candidate("Northern Lights", "Aurora", 200)), null);
   assert.equal(score(track({ artists: [{ name: "Aurora" }], name: "" }), candidate("Northern Lights", "Aurora", 200)), null);
+  // An ISRC cannot stand in for the artist that identifies the recording.
+  const isrc = "USUM72100001";
+  assert.equal(
+    score(track({ artists: [], isrc }), candidate("Northern Lights", "Aurora", 200, { isrc })),
+    null,
+  );
 });
 
 test("unicode names fold case, accents and width", () => {
@@ -68,13 +74,26 @@ test("unicode names fold case, accents and width", () => {
   assert.equal(score(track({ name: "Café", artists: [{ name: "Aurora" }] }), candidate("Aurora - Caff", "Aurora", 200)), null);
 });
 
-test("combining marks are part of a word, as Rust's is_alphanumeric treats them", {
-  todo: "matcher.mjs words() splits on [^\\p{L}\\p{N}], so Unicode combining marks (Mc/Mn, e.g. Devanagari matras) are dropped; Rust's char::is_alphanumeric keeps them",
-}, () => {
+test("combining marks are part of a word, as Rust's is_alphanumeric treats them", () => {
   // Two different Devanagari words that differ only in the vowel sign.
   assert.notDeepEqual([...words("कि")], [...words("की")]);
   assert.equal(score(track({ name: "कि", artists: [{ name: "क" }] }), candidate("की", "क", 200)), null);
   assert.notEqual(score(track({ name: "कि", artists: [{ name: "क" }] }), candidate("कि", "क", 200)), null);
+});
+
+test("letters without a diacritic still fold like Rust's accent table", () => {
+  const cases = [
+    ["ØZI", "OZI"],
+    ["Straße", "Strasse"],
+    ["Łódź", "Lodz"],
+    ["Æther", "Aether"],
+    ["Þorn", "Thorn"],
+  ];
+  for (const [name, upload] of cases) {
+    assert.notEqual(score(track({ name, artists: [{ name: "Aurora" }] }), candidate(upload, "Aurora", 200)), null, name);
+  }
+  // A final Greek sigma lowercases to σ, not the contextual ς.
+  assert.notEqual(score(track({ name: "ΟΣ", artists: [{ name: "Aurora" }] }), candidate("οσ", "Aurora", 200)), null);
 });
 
 test("boilerplate is dropped but a meaningful extra word is not", () => {
@@ -91,10 +110,46 @@ test("boilerplate is dropped but a meaningful extra word is not", () => {
   assert.equal(score(track({ name: "Northern Lights (Live)" }), candidate("Aurora - Northern Lights", "Aurora", 200)), null);
 });
 
+test("a version word in the main title is an edit, not part of the song", () => {
+  const stars = track({ name: "All The Stars", durationMs: 230_000, artists: [{ name: "Kendrick Lamar" }] });
+  for (const title of [
+    "All The Stars Remix",
+    "All The Stars Live",
+    "All The Stars Cover",
+    "All The Stars Acoustic",
+    "All The Stars Remastered",
+    "All The Stars (Remix",
+  ]) {
+    assert.equal(score(stars, candidate(title, "Kendrick Lamar", 230)), null, title);
+  }
+  // A title that really contains the word stays the song.
+  const live = track({ name: "Live Forever", durationMs: 280_000, artists: [{ name: "Oasis" }] });
+  assert.notEqual(score(live, candidate("Live Forever", "Oasis", 280)), null);
+  assert.equal(score(live, candidate("Live Forever Live", "Oasis", 280)), null);
+});
+
+test("a part or version marker cannot hide behind a long title", () => {
+  const stars = track({ name: "All The Stars", durationMs: 230_000, artists: [{ name: "Kendrick Lamar" }] });
+  for (const title of ["All The Stars (Pt. 2)", "All The Stars Part 2", "All The Stars V2", "All The Stars Intro"]) {
+    assert.equal(score(stars, candidate(title, "Kendrick Lamar", 230)), null, title);
+  }
+  const part = track({ name: "All The Stars (Pt. 2)", durationMs: 230_000, artists: [{ name: "Kendrick Lamar" }] });
+  assert.notEqual(score(part, candidate("All The Stars Pt 2", "Kendrick Lamar", 230)), null);
+});
+
+test("a bare feature credit in the wanted title is metadata, not wording", () => {
+  const feat = track({ name: "Song feat. Y", artists: [{ name: "X" }] });
+  assert.notEqual(score(feat, candidate("Song", "X", 200)), null);
+  assert.notEqual(score(feat, candidate("Song (feat. Y)", "X", 200)), null);
+  // "Producer" is an ordinary title word, not a credit marker, on this side.
+  const producer = track({ name: "The Producer Song", artists: [{ name: "X" }] });
+  assert.equal(score(producer, candidate("The Producer", "X", 200)), null);
+});
+
 test("bestMatch keeps the documented tie rules and the SoundCloud window", () => {
   const exact = candidate("Northern Lights", "Aurora", 200.0);
   const equal = candidate("Northern Lights", "Aurora", 200.0, { url: "https://www.youtube.com/watch?v=bbbbbbbbbbb" });
-  assert.equal(bestMatch(track(), [exact, equal]), equal, "the last equal score wins");
+  assert.equal(bestMatch(track(), [exact, equal]), exact, "the first equal score wins");
 
   const youtube = candidate("Northern Lights", "Aurora", 200.0, { source: "youtube" });
   const soundcloud = candidate("Northern Lights", "Aurora", 200.3, { source: "soundcloud", url: "https://soundcloud.com/a/b" });

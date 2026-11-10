@@ -1,6 +1,8 @@
-// Exact port of src/downloads/matching.rs. Keep the folding, title readings,
-// gates, version tags and formula in step with the Rust module. A change here
-// without the same change there breaks the shared fixture test.
+// Port of src/downloads/matching.rs. Keep the folding, title readings, gates,
+// version tags and formula in step with the Rust module; the places where this
+// side is deliberately stricter are noted in the report that came with this
+// port, and the shared fixture test catches drift. A change here without the
+// same change there breaks the shared fixture test.
 //
 // A candidate passes only when its title is the same song and its version is
 // the one that was asked for. Credits, tags and spelling are metadata, never
@@ -82,6 +84,9 @@ const CREDIT_TAIL = Object.freeze([
   "producer",
 ]);
 
+/** Only feature credits are safe to drop from the wanted title too. */
+const FEATURE_TAIL = Object.freeze(["feat", "featuring", "ft"]);
+
 export const BOILERPLATE = Object.freeze([
   "audio",
   "hd",
@@ -96,25 +101,73 @@ export const BOILERPLATE = Object.freeze([
 ]);
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
-const WORD = /[\p{L}\p{N}]/u;
+const WORD_RUN = /[\p{Alphabetic}\p{N}]+/gu;
+const WORD_SEPARATOR = /[^\p{Alphabetic}\p{N}]+/u;
+
+/**
+ * Accented letters grouped under the letter they are read as, copied from
+ * `matching.rs` so an upload that writes `OZI` or `Strasse` still says `ØZI`
+ * or `Straße`. Letters from other scripts are left alone: their marks carry
+ * meaning, so they are not diacritics to drop.
+ */
+const ACCENT_GROUPS = Object.freeze([
+  ["a", "àáâãäåāăąǎǟǡǻȁȃȧḁạảấầẩẫậắằẳẵặɑ"],
+  ["ae", "æ"],
+  ["b", "ḃḅḇƀ"],
+  ["c", "çćĉċčḉ"],
+  ["d", "ďḋḍḏḑḓđð"],
+  ["e", "èéêëēĕėęěȅȇȩḕḗḙḛḝẹẻẽếềểễệ"],
+  ["f", "ḟ"],
+  ["g", "ĝğġģǧǵḡ"],
+  ["h", "ĥȟḣḥḧḩḫẖħ"],
+  ["i", "ìíîïĩīĭįİǐȉȋḭḯỉịıɨ"],
+  ["j", "ĵǰ"],
+  ["k", "ķǩḱḳḵ"],
+  ["l", "ĺļľḷḹḻḽł"],
+  ["m", "ḿṁṃ"],
+  ["n", "ñńņňǹṅṇṉṋŋ"],
+  ["o", "òóôõöōŏőơǒǫǭȍȏȫȭȯȱṍṏṑṓọỏốồổỗộớờởỡợø"],
+  ["oe", "œ"],
+  ["p", "ṕṗ"],
+  ["r", "ŕŗřȑȓṙṛṝṟ"],
+  ["s", "śŝşšșṡṣṥṧṩʂ"],
+  ["ss", "ß"],
+  ["t", "ţťțṫṭṯṱẗŧ"],
+  ["th", "þ"],
+  ["u", "ùúûüũūŭůűųưǔǖǘǚǜȕȗṳṵṷṹṻụủứừửữựʉ"],
+  ["v", "ṽṿ"],
+  ["w", "ŵẁẃẅẇẉẘ"],
+  ["x", "ẋẍ"],
+  ["y", "ýÿŷȳẏẙỳỵỷỹ"],
+  ["z", "źżžẑẓẕƶ"],
+]);
+const ACCENT_BASES = new Map();
+for (const [base, letters] of ACCENT_GROUPS) {
+  for (const letter of letters) ACCENT_BASES.set(letter, base);
+}
 
 /**
  * Fold a title or name to the form the gates compare: compatibility forms
- * unified, apostrophes removed, nonspacing marks dropped (diacritics),
- * lowercase, everything else kept so `$`, `&` and emoji still separate words.
+ * unified, apostrophes removed, Latin diacritics dropped, lowercase, everything
+ * else kept so `$`, `&`, emoji and non-Latin marks still separate or join words
+ * the way Rust's `char::is_alphanumeric` does.
  */
 export function fold(text) {
   if (typeof text !== "string") return "";
-  return text
+  const normalized = text
     .normalize("NFKC")
-    .replace(/['\u2018\u2019\u02bc\u00b4`]/g, "")
-    .normalize("NFD")
-    .replace(/\p{Mn}/gu, "")
-    .toLowerCase();
+    .replace(/['\u2018\u2019\u02bc\u00b4`]/g, "");
+  let out = "";
+  // Lowercase one code point at a time, as Rust does: a whole-string
+  // toLowerCase() would turn a final Greek Σ into ς while Rust keeps σ.
+  for (const c of normalized) {
+    for (const lower of c.toLowerCase()) out += ACCENT_BASES.get(lower) ?? lower;
+  }
+  return out;
 }
 
 function tokensOf(text) {
-  return fold(text).split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
+  return fold(text).split(WORD_SEPARATOR).filter((word) => word.length > 0);
 }
 
 function set(tokens) {
@@ -123,15 +176,33 @@ function set(tokens) {
 
 /** `$` read as `s`, tried only when the primary spelling does not line up. */
 function secondaryTokens(text) {
-  return fold(text).replaceAll("$", "s").split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 0);
+  return fold(text).replaceAll("$", "s").split(WORD_SEPARATOR).filter((word) => word.length > 0);
 }
 
 function collapsed(tokens) {
   return tokens.join("");
 }
 
-function isWord(text) {
-  return WORD.test(text);
+function tokenCounts(tokens) {
+  const counts = new Map();
+  for (const token of tokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+  return counts;
+}
+
+/** Identity markers, with `pt` and `part` read as one word. */
+function identityCounts(tokens) {
+  const counts = new Map();
+  for (const token of tokens) {
+    const canonical = token === "pt" ? "part" : token;
+    if (IDENTITY_MARKERS.includes(canonical)) counts.set(canonical, (counts.get(canonical) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function sameCounts(left, right) {
+  if (left.size !== right.size) return false;
+  for (const [token, count] of left) if (right.get(token) !== count) return false;
+  return true;
 }
 
 /** Rust `words()`, kept as the module's public tokenizer. */
@@ -224,6 +295,8 @@ function splitParts(text) {
       outside.push(c);
     }
   }
+  // An unclosed bracket still carries metadata: "Song (Live" is not "Song".
+  if (depth > 0 && source.length > start) brackets.push(source.slice(start));
   const joined = outside.join("");
   const parts = [];
   let current = "";
@@ -243,21 +316,9 @@ function splitParts(text) {
 }
 
 /** Drop a producer or feature credit that runs on from the song name. */
-function stripCreditTail(part) {
-  const tokens = [];
-  let start = null;
-  for (let index = 0; index < part.length; index += 1) {
-    const c = part[index];
-    if (isWord(c)) {
-      if (start === null) start = index;
-    } else if (start !== null) {
-      tokens.push({ start, word: fold(part.slice(start, index)) });
-      start = null;
-    }
-  }
-  if (start !== null) tokens.push({ start, word: fold(part.slice(start)) });
-  for (const token of tokens) {
-    if (CREDIT_TAIL.includes(token.word)) return part.slice(0, token.start).trimEnd();
+function stripCreditTail(part, credits = CREDIT_TAIL) {
+  for (const match of part.matchAll(WORD_RUN)) {
+    if (credits.includes(fold(match[0]))) return part.slice(0, match.index).trimEnd();
   }
   return part;
 }
@@ -265,8 +326,9 @@ function stripCreditTail(part) {
 function parseWanted(name) {
   const { parts, brackets } = splitParts(name);
   const segments = [...brackets, ...parts.slice(1)];
-  let tokens = parts.length > 0 ? tokensOf(parts[0]) : [];
-  if (tokens.length === 0) tokens = tokensOf(name);
+  let mainTokens = parts.length > 0 ? tokensOf(stripCreditTail(parts[0], FEATURE_TAIL)) : [];
+  if (mainTokens.length === 0) mainTokens = tokensOf(name);
+  const tokens = [...mainTokens];
   for (const segment of segments) {
     if (hasIdentityMarker(segment)) tokens.push(...tokensOf(segment));
   }
@@ -274,10 +336,17 @@ function parseWanted(name) {
   for (const segment of segments) for (const tag of tagsIn(tokensOf(segment), false)) versions.add(tag);
   for (const tag of tagsIn(tokensOf(name), true)) versions.add(tag);
   const soft = softTags(tokensOf(name));
-  return { words: set(tokens), collapsed: collapsed(tokens), versions, soft };
+  return {
+    words: set(tokens),
+    collapsed: collapsed(tokens),
+    versions,
+    soft,
+    identity: identityCounts(tokensOf(name)),
+    mainCounts: tokenCounts(mainTokens),
+  };
 }
 
-function parseCandidate(title, wanted, wantedCollapsed) {
+function parseCandidate(title, wanted) {
   const { parts: rawParts, brackets } = splitParts(title);
   const parts = rawParts.map((part) => stripCreditTail(part).trim()).filter((part) => part.length > 0);
   let main = null;
@@ -286,8 +355,8 @@ function parseCandidate(title, wanted, wantedCollapsed) {
     const tokens = tokensOf(part);
     const wordSet = set(tokens);
     let shared = 0;
-    for (const word of wordSet) if (wanted.has(word)) shared += 1;
-    const key = [shared, collapsed(tokens) === wantedCollapsed ? 1 : 0, index];
+    for (const word of wordSet) if (wanted.words.has(word)) shared += 1;
+    const key = [shared, collapsed(tokens) === wanted.collapsed ? 1 : 0, index];
     if (
       bestKey === null ||
       key[0] > bestKey[0] ||
@@ -298,7 +367,8 @@ function parseCandidate(title, wanted, wantedCollapsed) {
       main = index;
     }
   });
-  const tokens = main === null ? [] : tokensOf(parts[main]);
+  const mainTokens = main === null ? [] : tokensOf(parts[main]);
+  const tokens = [...mainTokens];
   const segments = [
     ...brackets,
     ...parts.filter((_, index) => index !== main),
@@ -309,8 +379,22 @@ function parseCandidate(title, wanted, wantedCollapsed) {
   const versions = new Set();
   for (const segment of segments) for (const tag of tagsIn(tokensOf(segment), false)) versions.add(tag);
   for (const tag of tagsIn(tokensOf(title), true)) versions.add(tag);
+  // A version word left in the main title counts when the wanted title does
+  // not carry it: "All The Stars Remix" is an edit, while "Live Forever"
+  // stays the song. Comparing counts keeps "Live Forever Live" an edit too.
+  for (const [token, count] of tokenCounts(mainTokens)) {
+    if (SEGMENT_QUALIFIERS.includes(token) && count > (wanted.mainCounts.get(token) ?? 0)) {
+      versions.add(token);
+    }
+  }
   const soft = softTags(tokensOf(title));
-  return { words: set(tokens), collapsed: collapsed(tokens), versions, soft };
+  return {
+    words: set(tokens),
+    collapsed: collapsed(tokens),
+    versions,
+    soft,
+    identity: identityCounts(tokensOf(title)),
+  };
 }
 
 function isrcOf(track, candidate) {
@@ -367,10 +451,11 @@ function evaluate(track, candidate) {
   const wanted = normalizeTrack(track);
   if (!Number.isFinite(wanted.durationMs) || wanted.durationMs <= 0) return null;
   if (candidate?.live === true) return null;
+  if (wanted.artists[0] === undefined || wanted.artists[0] === null) return null;
   const primaryName = primaryArtist(wanted);
   const wantedTitle = parseWanted(wanted.name);
   if (wantedTitle.words.size === 0) return null;
-  const parsed = parseCandidate(candidate?.title ?? "", wantedTitle.words, wantedTitle.collapsed);
+  const parsed = parseCandidate(candidate?.title ?? "", wantedTitle);
   if (parsed.words.size === 0) return null;
   const duration = typeof candidate?.duration === "number" && Number.isFinite(candidate.duration) && candidate.duration > 0
     ? candidate.duration
@@ -403,6 +488,7 @@ function evaluate(track, candidate) {
     if (!named) return null;
   }
   if (!sameSet(parsed.versions, wantedTitle.versions)) return null;
+  if (!sameCounts(parsed.identity, wantedTitle.identity)) return null;
   for (const tag of parsed.soft) if (!wantedTitle.soft.has(tag)) return null;
   if (!identityExact && coverage(wantedTitle.words, parsed.words) < 0.9) return null;
   if (precision < 0.75) return null;
@@ -441,12 +527,12 @@ export function providerOf(candidate) {
  * The best candidate. Scores within 0.02 of the winner prefer SoundCloud,
  * because its public tracks are the more faithful copy when both fit. Then
  * the recording's evidence breaks the tie: ISRC, a verified account, a
- * publisher credit naming the artist. Exact ties keep the last one, as the
- * Rust `max_by` helper always has.
+ * publisher credit naming the artist. Exact ties keep the first one, as the
+ * Rust `pick` and `best_match_index` helpers do.
  */
 export function bestMatch(track, candidates) {
   const scored = [];
-  for (const candidate of candidates ?? []) {
+  for (const candidate of Array.isArray(candidates) ? candidates : []) {
     const verdict = evaluate(track, candidate);
     if (verdict !== null) scored.push({ candidate, verdict });
   }
@@ -463,7 +549,7 @@ export function bestMatch(track, candidates) {
     : scored.filter((entry) => entry.verdict.score === max);
   let best = null;
   for (const entry of pool) {
-    if (best === null || !better(best.verdict, entry.verdict)) best = entry;
+    if (best === null || better(entry.verdict, best.verdict)) best = entry;
   }
   return best?.candidate ?? null;
 }
