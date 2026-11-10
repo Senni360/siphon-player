@@ -28,6 +28,10 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     // checksums.txt lists them (#737): an AppImage replaces itself with the
     // next one.
     appimage: true,
+    // Only siphon.exe updates itself. Without this, any program run from
+    // beside the portable marker (a tray or yt-dlp) would have siphon.exe
+    // installed over it.
+    portable_executable: Some("siphon"),
     ..UpdateConfig::new(
         "Senni360/siphon-player",
         "Encore",
@@ -36,9 +40,19 @@ pub const CONFIG: UpdateConfig = UpdateConfig {
     )
 };
 
+/// What the update engine asks of its client: 15 seconds to connect, and 15
+/// minutes for the whole download.
+const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 /// An updater on Siphon's HTTP client, through the configured proxy.
 pub fn updater(proxy: &crate::settings::ProxyConfig) -> anyhow::Result<Updater> {
-    let builder = crate::http::blocking_builder(proxy).map_err(anyhow::Error::msg)?;
+    // A dropped connection must end the download, or the dialog stays on
+    // Downloading and refuses every retry until the app restarts.
+    let builder = crate::http::blocking_builder(proxy)
+        .map_err(anyhow::Error::msg)?
+        .connect_timeout(CONNECT_TIMEOUT)
+        .timeout(DOWNLOAD_TIMEOUT);
     Ok(Updater::new(CONFIG, ReqwestTransport::new(builder)?))
 }
 
@@ -50,6 +64,8 @@ mod tests {
     fn update_config_is_valid() {
         CONFIG.validate().unwrap();
         assert_eq!(CONFIG.current_version, env!("CARGO_PKG_VERSION"));
+        // Only the app itself may update, never a program beside it.
+        assert_eq!(CONFIG.portable_executable, Some("siphon"));
     }
 
     #[test]
