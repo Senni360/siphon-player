@@ -1639,7 +1639,7 @@ fn transport(app: &mut App, ui: &mut egui::Ui, now: Option<&NowPlaying>, region:
                 t,
                 palette.text.gamma_multiply(0.7),
             );
-            theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(100));
+            theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(16));
         }
     }
     let event_is_commit = matches!(slider_event, SliderEvent::Committed(_));
@@ -1791,7 +1791,7 @@ fn starting_arc(ui: &egui::Ui, center: egui::Pos2, color: egui::Color32) {
     if crate::motion::seconds(ui.ctx(), 1.0) <= 0.0 {
         return;
     }
-    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(66));
+    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(33));
     let radius = 12.0;
     let sweep = 250_f64.to_radians();
     let rotation = ui.input(|input| input.time) * std::f64::consts::TAU * 1.2;

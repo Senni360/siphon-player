@@ -197,7 +197,7 @@ pub(super) fn song_aurora(
         strength,
     );
     if moving && !colors.is_empty() {
-        theme::animation_frame(ctx, std::time::Duration::from_millis(100));
+        theme::animation_frame(ctx, std::time::Duration::from_millis(33));
     }
 }
 

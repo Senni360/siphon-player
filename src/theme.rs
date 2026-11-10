@@ -1348,7 +1348,7 @@ fn next_beat(due: f64, now: f64, interval: f64) -> f64 {
 pub fn spinner(ui: &mut egui::Ui, size: f32, color: Color32) -> Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::hover());
     if ui.is_rect_visible(rect) {
-        animation_frame(ui.ctx(), std::time::Duration::from_millis(66));
+        animation_frame(ui.ctx(), std::time::Duration::from_millis(33));
         let radius = size / 2.0 - 2.0;
         let start = ui.input(|input| input.time) * std::f64::consts::TAU * 1.2;
         let sweep = 250_f64.to_radians();

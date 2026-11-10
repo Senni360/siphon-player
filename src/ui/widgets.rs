@@ -4123,7 +4123,7 @@ fn skeleton_wave(ui: &Ui, rect: Rect, palette: &Palette) {
         .text
         .gamma_multiply(if palette.dark { 0.05 } else { 0.08 });
     super::kit::motion::glint(ui.painter(), rect, t, shine);
-    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(90));
+    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(16));
 }
 
 pub fn skeleton_rows(ui: &mut Ui, palette: &Palette, locale: Locale, count: usize) {

@@ -2272,7 +2272,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, grid_art: Option<Rect>) {
                             palette.accent.gamma_multiply((0.14 + 0.1 * breath) * held),
                         );
                         if crate::motion::seconds(ui.ctx(), 1.0) > 0.0 {
-                            theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(80));
+                            theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(16));
                         }
                         ui.painter().rect_stroke(
                             rect,

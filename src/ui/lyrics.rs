@@ -307,7 +307,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui) {
                     && line.text.is_empty()
                     && crate::motion::seconds(ui.ctx(), 1.0) > 0.0
                 {
-                    crate::theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(66));
+                    crate::theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(33));
                     (ui.input(|input| input.time) * 3.5).sin() as f32 * 3.0
                 } else {
                     0.0
