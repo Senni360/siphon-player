@@ -463,6 +463,30 @@ async function handle(req, res, services) {
     const claims = authenticate(req, url, { scope: "media" });
     const body = await readJson(req, 64 * 1024);
     if (typeof body.source !== "string") throw new HttpError("invalid_source", 400);
+    // A playlist local file this computer offered is `upload:<key>`; a song it
+    // fetched for the phone is `yt-<video-id>`. Prefer either over yt-dlp,
+    // which YouTube may refuse here.
+    const local = /^upload:([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/.exec(body.source);
+    const youtube = /^youtube:video:([A-Za-z0-9_-]{11})$/.exec(body.source);
+    const wantedKey = local ? local[1] : youtube ? `yt-${youtube[1]}` : null;
+    if (wantedKey) {
+      const uploaded = uploads.lookup(claims.sub, wantedKey);
+      // A missing local file is final; a YouTube video without an upload is
+      // still worth resolving on the edge.
+      if (!uploaded && local) throw new HttpError("not_found", 404);
+      if (uploaded) {
+        json(res, 200, {
+          v: 1,
+          key: wantedKey,
+          contentType: uploaded.contentType,
+          size: uploaded.size,
+          cached: true,
+          streaming: false,
+          url: media.urlFor(claims.sub, wantedKey, { role: claims.role }),
+        }, cors);
+        return "/v1/resolve";
+      }
+    }
     const job = resolve.acquire(claims.sub, body.source);
     const release = () => job.release();
     res.once("close", release);

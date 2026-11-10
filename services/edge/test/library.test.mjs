@@ -185,6 +185,48 @@ test("playlists paginate and append mixed playlists from the sync snapshot", asy
   assert.equal(nextPage.next, null);
 });
 
+test("a mixed playlist carries a local file's upload key and its details", async (t) => {
+  const { ctx } = await startLibrary(t, { linkSpotify: false });
+  await request(ctx.base, "/v1/sync/playlists", {
+    method: "PUT",
+    token: phoneToken(),
+    body: {
+      data: {
+        mixed: [{
+          id: "m1local",
+          uri: "spotifast:playlist:m1local",
+          name: "Locals",
+          image: null,
+          tracks: [
+            {
+              id: "e1",
+              upload: "local-abc",
+              track: {
+                uri: "spotify:local:Artist:Album:Song:180",
+                name: "Song",
+                artists: [{ name: "Artist" }],
+                duration_ms: 180_000,
+                album: { images: [{ url: "https://img.example/local.jpg" }] },
+              },
+            },
+            { id: "e2", track: { uri: "soundcloud:artist/song", name: "Cloud" } },
+          ],
+        }],
+      },
+    },
+  });
+  const detail = await (await request(ctx.base, "/v1/library/playlists/m1local", { token: phoneToken() })).json();
+  assert.equal(detail.playlist.name, "Locals");
+  assert.equal(detail.items.length, 2);
+  assert.equal(detail.items[0].upload, "local-abc");
+  assert.equal(detail.items[0].name, "Song");
+  assert.deepEqual(detail.items[0].artists, [{ id: null, name: "Artist" }]);
+  assert.equal(detail.items[0].image, "https://img.example/local.jpg");
+  assert.equal(detail.items[0].duration_ms, 180_000);
+  assert.equal(detail.items[0].source, "mixed");
+  assert.equal(detail.items[1].upload, undefined);
+});
+
 test("playlists still list mixed entries when Spotify is not linked", async (t) => {
   const { ctx } = await startLibrary(t, { linkSpotify: false });
   await request(ctx.base, "/v1/sync/playlists", {

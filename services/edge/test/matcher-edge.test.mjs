@@ -64,9 +64,7 @@ test("unicode names keep their case-insensitive match", () => {
   assert.equal(score(track({ name: "Café", artists: [{ name: "Aurora" }] }), candidate("Aurora - Cafe", "Aurora", 200)), null);
 });
 
-test("combining marks are part of a word, as Rust's is_alphanumeric treats them", {
-  todo: "matcher.mjs words() splits on [^\\p{L}\\p{N}], so Unicode combining marks (Mc/Mn, e.g. Devanagari matras) are dropped; Rust's char::is_alphanumeric keeps them",
-}, () => {
+test("combining marks are part of a word, as Rust's is_alphanumeric treats them", () => {
   // Two different Devanagari words that differ only in the vowel sign.
   assert.notDeepEqual([...words("कि")], [...words("की")]);
   assert.equal(score(track({ name: "कि", artists: [{ name: "क" }] }), candidate("की", "क", 200)), null);

@@ -93,9 +93,7 @@ test("two uploads of one key in flight at once settle on one file and one size",
   assert.equal((await fs.readdir(owner)).length, 1);
 });
 
-test("a removal during another upload does not inflate the account's usage", {
-  todo: "uploads.mjs #store computes projected usage before its final awaits, so a concurrent remove's subtraction is overwritten",
-}, async (t) => {
+test("a removal during another upload does not inflate the account's usage", async (t) => {
   const dir = await tempDir();
   t.after(() => fs.rm(dir, { recursive: true, force: true }));
   const uploads = new UploadStore({ dir, userMaxBytes: 100_000, fileMaxBytes: 100_000 });
