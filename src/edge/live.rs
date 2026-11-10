@@ -20,21 +20,27 @@ use super::{Event, Source, Tokens, live_url};
 const HEARTBEAT: Duration = Duration::from_secs(15);
 const RETRY: [u64; 6] = [1, 2, 4, 8, 16, 30];
 
-/// A handle the runtime sends state and replies through. Sending while the
-/// socket is down simply drops the message; the next state is a whole picture.
+/// A handle the runtime sends state and replies through. The queue is small
+/// and lossy on purpose: state is a whole picture and a reply that waits out
+/// a long outage is of no use to the phone about to time out. A bounded queue
+/// keeps a disconnected edge from growing this computer's memory.
 #[derive(Clone)]
 pub struct Live {
-    tx: tokio::sync::mpsc::UnboundedSender<Message>,
+    tx: tokio::sync::mpsc::Sender<Message>,
     task: Arc<tokio::task::JoinHandle<()>>,
 }
 
 impl Live {
     pub fn state(&self, snapshot: Value) {
-        let _ = self.tx.send(Message::Text(state_frame(&snapshot).into()));
+        let _ = self
+            .tx
+            .try_send(Message::Text(state_frame(&snapshot).into()));
     }
 
     pub fn reply(&self, id: &str, value: Value) {
-        let _ = self.tx.send(Message::Text(reply_frame(id, &value).into()));
+        let _ = self
+            .tx
+            .try_send(Message::Text(reply_frame(id, &value).into()));
     }
 
     /// Closes the socket and stops trying. Nothing else is left running.
@@ -70,14 +76,16 @@ fn reply_frame(id: &str, value: &Value) -> String {
 }
 
 pub fn spawn(source: Arc<Source>, emit: Arc<dyn Fn(Event) + Send + Sync>) -> Live {
-    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    // Deep enough for a burst of replies while a socket drains, small enough
+    // that a long outage cannot pile up a state picture every eight seconds.
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
     let task = Arc::new(tokio::spawn(run(source, rx, emit)));
     Live { tx, task }
 }
 
 async fn run(
     source: Arc<Source>,
-    mut outgoing: tokio::sync::mpsc::UnboundedReceiver<Message>,
+    mut outgoing: tokio::sync::mpsc::Receiver<Message>,
     emit: Arc<dyn Fn(Event) + Send + Sync>,
 ) {
     let mut last_seq = 0u64;
@@ -179,7 +187,7 @@ fn heard(text: &str, emit: &Arc<dyn Fn(Event) + Send + Sync>, last_seq: &mut u64
             // The edge's own hello carries the last thing the phone said, in
             // the same shape a relayed `phone` frame has.
             if let Some(body) = message.get("state").and_then(|state| state.get("body"))
-                && let Some(phone) = playback_body(body).and_then(phone_state)
+                && let Some(phone) = phone_state(body)
             {
                 emit(Event::Phone(Some(phone)));
             }
@@ -191,7 +199,7 @@ fn heard(text: &str, emit: &Arc<dyn Fn(Event) + Send + Sync>, last_seq: &mut u64
         }
         // A phone sends `phone`; the same playback picture may also arrive as
         // a `state` frame, so both are read the same way.
-        Some("state") | Some("phone") => match playback_body(&message).and_then(phone_state) {
+        Some("state") | Some("phone") => match phone_state(&message) {
             Some(phone) => emit(Event::Phone(Some(phone))),
             None => emit(Event::Phone(None)),
         },
@@ -199,22 +207,21 @@ fn heard(text: &str, emit: &Arc<dyn Fn(Event) + Send + Sync>, last_seq: &mut u64
     }
 }
 
-/// The playback picture inside one frame: `state` for a computer, `phone` for
-/// a phone. The frame itself is the last resort, for a bare payload.
-fn playback_body(frame: &Value) -> Option<&Value> {
-    frame
+/// The phone's playback as the edge relays it. The frame carries the edge's
+/// clock, so a replay is judged by when it was heard there, not now.
+fn phone_state(frame: &Value) -> Option<crate::friends::PhonePlaying> {
+    let at = frame.get("at").and_then(Value::as_i64).unwrap_or(0);
+    let value = frame
         .get("state")
         .or_else(|| frame.get("phone"))
-        .or(Some(frame))
-}
-
-/// The phone's playback as the edge relays it. The edge's clock is not in
-/// this frame, so the local arrival time is the best age available.
-fn phone_state(value: &Value) -> Option<crate::friends::PhonePlaying> {
+        .unwrap_or(frame);
     if !value.is_object() {
         return None;
     }
     let mut phone: crate::friends::PhonePlaying = serde_json::from_value(value.clone()).ok()?;
+    if at > 0 {
+        phone.at = at;
+    }
     if phone.at == 0 {
         phone.at = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -337,6 +344,32 @@ mod tests {
                 // The edge's clock is not in the frame, so arrival time is used.
                 assert!(phone.at > 0);
             }
+            _ => panic!("the phone's playback was expected"),
+        }
+    }
+
+    /// The edge stamps a frame with its own clock; a replayed frame keeps that
+    /// time so the app can tell it is old.
+    #[test]
+    fn a_replayed_frame_keeps_the_edges_clock() {
+        let (seen, emit) = collected();
+        let mut seq = 0;
+        heard(
+            &serde_json::json!({
+                "v": 1, "t": "phone", "id": "p3", "seq": 5,
+                "at": 1_700_000_000_000i64, "from": "phone",
+                "phone": {
+                    "song": { "uri": "soundcloud:track:7", "name": "Cloud" },
+                    "playing": false, "position_ms": 1000,
+                },
+            })
+            .to_string(),
+            &emit,
+            &mut seq,
+        );
+        let seen = seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        match &seen[0] {
+            Event::Phone(Some(phone)) => assert_eq!(phone.at, 1_700_000_000_000),
             _ => panic!("the phone's playback was expected"),
         }
     }

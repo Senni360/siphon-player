@@ -462,26 +462,6 @@ impl App {
                 }
                 return;
             }
-            Phone::Fetch { source, sources } => {
-                let mut seen = std::collections::HashSet::new();
-                let wanted: Vec<String> = std::iter::once(source.clone())
-                    .chain(sources.iter().cloned())
-                    .filter(|source| crate::remote::allowed_fetch(source))
-                    .filter(|source| seen.insert(source.clone()))
-                    .take(2)
-                    .collect();
-                if wanted.is_empty() {
-                    self.remote_reply(
-                        id,
-                        json!({ "error": "Only a YouTube song can be fetched." }),
-                    );
-                    return;
-                }
-                self.backend
-                    .send(Command::Edge(crate::edge::Request::Fetch(wanted)));
-                self.remote_reply(id, json!({ "ok": true }));
-                return;
-            }
             Phone::Search { query } => {
                 let query = query.trim().chars().take(200).collect();
                 self.backend

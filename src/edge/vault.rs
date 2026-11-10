@@ -41,7 +41,7 @@ impl Vault {
         let was_enabled = pushed.enabled == Some(true);
         pushed.enabled = Some(true);
 
-        let spotify = self.spotify().await;
+        let spotify = self.spotify().await?;
         if spotify != pushed.spotify || (!was_enabled && spotify.is_some()) {
             match &spotify {
                 Some((client_id, refresh_token)) => {
@@ -62,7 +62,7 @@ impl Vault {
             pushed.spotify = spotify;
         }
 
-        let soundcloud = self.soundcloud().await;
+        let soundcloud = self.soundcloud().await?;
         if soundcloud != pushed.soundcloud || (!was_enabled && soundcloud.is_some()) {
             match &soundcloud {
                 Some(token) => {
@@ -79,29 +79,34 @@ impl Vault {
         Ok(())
     }
 
-    /// Both deletes go once when the listener turns the setting off.
+    /// Both deletes go when the listener turns the setting off. Only a
+    /// completed pair counts as off, so a failed delete at a network blip is
+    /// tried again on the next minute instead of leaving a sign-in behind.
     async fn disable(&self) -> Result<(), String> {
         let mut pushed = self.pushed.lock().await;
         if pushed.enabled == Some(false) {
             return Ok(());
         }
+        self.delete("spotify").await?;
+        self.delete("soundcloud").await?;
         pushed.enabled = Some(false);
         pushed.spotify = None;
         pushed.soundcloud = None;
-        self.delete("spotify").await?;
-        self.delete("soundcloud").await
+        Ok(())
     }
 
-    async fn spotify(&self) -> Option<(String, String)> {
+    async fn spotify(&self) -> Result<Option<(String, String)>, String> {
         let loaded = self
             .source
             .credentials()
             .lease(Slot::Personal)
             .load()
             .await
-            .ok()?;
-        match loaded.grant? {
-            Grant::Web(token)
+            // A credential store that cannot be read is not a sign-out:
+            // deleting the edge's copy would lose a working sign-in.
+            .map_err(|_| "The Spotify sign-in could not be read.".to_owned())?;
+        Ok(match loaded.grant {
+            Some(Grant::Web(token))
                 if !token.client_id.is_empty()
                     && !token.refresh_token.is_empty()
                     && token
@@ -112,20 +117,24 @@ impl Vault {
                 Some((token.client_id, token.refresh_token))
             }
             _ => None,
-        }
+        })
     }
 
-    async fn soundcloud(&self) -> Option<String> {
+    async fn soundcloud(&self) -> Result<Option<String>, String> {
         let bytes = self
             .source
             .credentials()
             .lease(Slot::SoundCloud)
             .load_secret()
             .await
-            .ok()??;
-        let token = String::from_utf8(bytes).ok()?;
+            .map_err(|_| "The SoundCloud sign-in could not be read.".to_owned())?;
+        let Some(bytes) = bytes else {
+            return Ok(None);
+        };
+        let token = String::from_utf8(bytes)
+            .map_err(|_| "The SoundCloud sign-in could not be read.".to_owned())?;
         let token = token.trim().to_owned();
-        (!token.is_empty() && !token.chars().any(char::is_whitespace)).then_some(token)
+        Ok((!token.is_empty() && !token.chars().any(char::is_whitespace)).then_some(token))
     }
 
     async fn put(&self, provider: &str, body: serde_json::Value) -> Result<(), String> {
@@ -197,6 +206,40 @@ mod tests {
         assert_eq!(deletes.len(), 2);
         assert!(deletes.iter().any(|hit| hit.path.ends_with("/spotify")));
         assert!(deletes.iter().any(|hit| hit.path.ends_with("/soundcloud")));
+    }
+
+    #[tokio::test]
+    async fn a_failed_delete_is_tried_again_instead_of_leaving_a_sign_in() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let first = std::sync::Arc::new(AtomicBool::new(true));
+        let server = Server::new(move |request| {
+            if request.path == "/edge/token" {
+                return (
+                    200,
+                    serde_json::json!({
+                        "url": "SELF", "live": "live", "media": "media", "sync": "sync"
+                    }),
+                );
+            }
+            if request.path.starts_with("/v1/vault/") {
+                if first.swap(false, Ordering::SeqCst) {
+                    return (500, serde_json::json!({ "v": 1, "error": "internal" }));
+                }
+                return (200, serde_json::json!({ "v": 1 }));
+            }
+            (404, serde_json::json!({ "error": "not_found" }))
+        });
+        let vault = Vault::new(group_source(&server).await);
+        assert!(vault.push(false).await.is_err());
+        // The next minute tries both again, and then stops.
+        assert!(vault.push(false).await.is_ok());
+        assert!(vault.push(false).await.is_ok());
+        let deletes = server
+            .hits()
+            .iter()
+            .filter(|hit| hit.method == "DELETE")
+            .count();
+        assert_eq!(deletes, 3, "one failure and the two that remove them");
     }
 
     #[tokio::test]

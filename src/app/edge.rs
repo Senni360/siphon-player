@@ -16,8 +16,7 @@ use crate::edge::{self, MixedPlaylist, MixedTrack, PlaylistSummary, UploadJob};
 const SETTLE: Duration = Duration::from_secs(3);
 /// How often a possibly changed snapshot is looked at.
 const LOOK: Duration = Duration::from_secs(1);
-/// How often the playlist rows are searched for local files to offer. Reading
-/// a file's date waits for the disk, so it never happens every frame.
+/// How often the playlist rows are searched for local files to offer.
 const UPLOAD_LOOK: Duration = Duration::from_secs(10);
 /// The queue's position is stored to this many seconds. An exact position
 /// reaches the phone over the socket; a rounded one keeps a playing song from
@@ -34,8 +33,11 @@ pub struct Edge {
     pub enabled: Option<bool>,
     /// A change waiting for quiet.
     dirty: Option<Instant>,
-    /// The snapshot last written.
-    signature: Option<u64>,
+    /// The snapshot signatures last looked at.
+    looked_signature: Option<(u64, u64)>,
+    /// The snapshot signatures last handed to the backend. Each document is
+    /// offered on its own, so a moving queue never rewrites the playlists.
+    sent: Option<(u64, u64)>,
     /// When the snapshot was last looked at.
     looked: Option<Instant>,
     /// When local files were last searched for.
@@ -51,6 +53,7 @@ impl App {
     /// and offers new local files. Runs on a linked phone only.
     pub(super) fn edge_tick(&mut self) {
         if !self.settings.phone_linked || !self.phone.started {
+            self.edge_off();
             return;
         }
         let enabled = self.settings.edge_enabled;
@@ -58,18 +61,23 @@ impl App {
             self.edge.enabled = Some(enabled);
             self.backend
                 .send(Command::Edge(edge::Request::Enabled(enabled)));
-            // Switched back on: offer everything again, since the edge may
-            // have missed what changed while this computer was away.
             if enabled {
-                self.edge.signature = None;
-                self.edge.dirty = Some(Instant::now());
+                // Switched back on: offer everything again, since the edge may
+                // have missed what changed while this computer was away.
+                self.edge.sent = None;
+                self.edge.looked_signature = None;
+                self.edge.dirty = Some(Instant::now() - SETTLE);
+            } else {
+                self.edge_off();
+                return;
             }
         }
         if !enabled {
             return;
         }
-        let vault = self.vault_signins_enabled();
-        if self.edge.vault != Some(vault) {
+        if let Some(vault) = self.vault_signins_enabled()
+            && self.edge.vault != Some(vault)
+        {
             self.edge.vault = Some(vault);
             self.backend
                 .send(Command::Edge(edge::Request::Vault(vault)));
@@ -79,6 +87,13 @@ impl App {
             self.edge.uploads = Some(uploads);
             self.backend
                 .send(Command::Edge(edge::Request::UploadsEnabled(uploads)));
+            if uploads {
+                // Offer the files again: one skipped while the setting was off
+                // must not wait for a restart.
+                self.edge.scanned = None;
+            } else {
+                self.edge.queued.clear();
+            }
         }
         if uploads
             && self
@@ -98,13 +113,14 @@ impl App {
         }
         self.edge.looked = Some(Instant::now());
         let (playlists, queue) = self.edge_documents();
-        let signature = edge_signature(&playlists, &queue);
-        if self.edge.signature != Some(signature) {
-            self.edge.signature = Some(signature);
+        let signature = (edge_signature(&playlists), edge_signature(&queue));
+        if self.edge.looked_signature != Some(signature) {
+            self.edge.looked_signature = Some(signature);
             self.edge.dirty = Some(Instant::now());
         }
         if self.edge.resync {
             self.edge.resync = false;
+            self.edge.sent = None;
             self.edge.dirty = Some(Instant::now() - SETTLE);
         }
         if self
@@ -113,10 +129,36 @@ impl App {
             .is_some_and(|dirty| dirty.elapsed() >= SETTLE)
         {
             self.edge.dirty = None;
+            let sent = self.edge.sent;
+            if sent.is_none_or(|(playlists, _)| playlists != signature.0) {
+                self.backend
+                    .send(Command::Edge(edge::Request::SyncPlaylists(playlists)));
+            }
+            if sent.is_none_or(|(_, queue)| queue != signature.1) {
+                self.backend
+                    .send(Command::Edge(edge::Request::SyncQueue(queue)));
+            }
+            self.edge.sent = Some(signature);
+        }
+    }
+
+    /// Forgets everything the backend held for a connection that is now off,
+    /// so turning it on again offers the vault, the uploads and both
+    /// documents from scratch.
+    fn edge_off(&mut self) {
+        let was_on = self.edge.enabled != Some(false);
+        self.edge.enabled = Some(false);
+        self.edge.vault = None;
+        self.edge.uploads = None;
+        self.edge.queued.clear();
+        self.edge.scanned = None;
+        self.edge.looked = None;
+        self.edge.looked_signature = None;
+        self.edge.sent = None;
+        self.edge.dirty = Some(Instant::now() - SETTLE);
+        if was_on {
             self.backend
-                .send(Command::Edge(edge::Request::SyncPlaylists(playlists)));
-            self.backend
-                .send(Command::Edge(edge::Request::SyncQueue(queue)));
+                .send(Command::Edge(edge::Request::Enabled(false)));
         }
     }
 
@@ -176,9 +218,9 @@ impl App {
                                     crate::api::models::pick_image(&album.images, 300)
                                 })
                                 .map(str::to_owned),
-                            source: uri
-                                .starts_with("spotify:local:")
-                                .then(|| format!("upload:{}", edge::local_key(&uri))),
+                            upload: (self.settings.local_files_on_phone
+                                && uri.starts_with("spotify:local:"))
+                            .then(|| edge::local_key(&uri)),
                             uri,
                         }
                     })
@@ -224,34 +266,29 @@ impl App {
             }
         }
         let mut seen = HashSet::new();
-        let mut files: Vec<(std::time::SystemTime, UploadJob)> = uris
+        let jobs: Vec<UploadJob> = uris
             .into_iter()
             .filter(|uri| uri.starts_with("spotify:local:"))
             .filter(|uri| seen.insert(uri.clone()))
             .filter_map(|uri| {
                 // The key comes from the URI alone, so a file already offered
-                // is passed over before its path or its date is looked for.
+                // is passed over before its path is looked for.
                 let key = edge::local_key(&uri);
                 if self.edge.queued.contains(&key) {
                     return None;
                 }
-                let path = self.local_file(&uri)?.to_owned();
-                let modified = std::fs::metadata(&path)
-                    .and_then(|metadata| metadata.modified())
-                    .unwrap_or(std::time::UNIX_EPOCH);
-                Some((modified, UploadJob { key, path }))
+                // A stat here would wait for a network folder on the UI
+                // thread; the uploader reads the file itself.
+                Some(UploadJob {
+                    key,
+                    path: self.local_file(&uri)?.to_owned(),
+                    fetched: false,
+                })
             })
             .collect();
-        // Newest first: the most recently added file should reach the phone
-        // first, and an old library finishes last.
-        files.sort_by_key(|left| std::cmp::Reverse(left.0));
-        let jobs: Vec<UploadJob> = files
-            .into_iter()
-            .map(|(_, job)| {
-                self.edge.queued.insert(job.key.clone());
-                job
-            })
-            .collect();
+        for job in &jobs {
+            self.edge.queued.insert(job.key.clone());
+        }
         if !jobs.is_empty() {
             self.backend
                 .send(Command::Edge(edge::Request::Upload(jobs)));
@@ -260,27 +297,40 @@ impl App {
 
     /// Whether the listener wants the sign-ins kept in the edge vault. An
     /// unset choice is on for the group's owner and off for everyone else.
-    pub(crate) fn vault_signins_enabled(&self) -> bool {
-        self.settings
-            .vault_signins
-            .unwrap_or_else(|| self.is_group_owner())
-    }
-
-    /// The owner of the group this listener is in, on their own account.
-    fn is_group_owner(&self) -> bool {
-        let Some(account) = self.friends_feed.account.as_ref() else {
-            return false;
-        };
-        let Some(group) = account.chosen_group(self.settings.group_current.as_deref()) else {
-            return false;
-        };
-        group.owner_id.as_deref() == Some(account.user_id.as_str())
+    /// `None` until the account is known: deciding earlier would delete a
+    /// vault the owner set up before this computer read its groups.
+    pub(crate) fn vault_signins_enabled(&self) -> Option<bool> {
+        if let Some(choice) = self.settings.vault_signins {
+            return Some(choice);
+        }
+        let account = self.friends_feed.account.as_ref()?;
+        Some(
+            account
+                .chosen_group(self.settings.group_current.as_deref())
+                .and_then(|group| group.owner_id.as_deref())
+                .is_some_and(|owner| owner == account.user_id),
+        )
     }
 
     pub(super) fn edge_event(&mut self, event: edge::Event) {
         match event {
             edge::Event::Commands(commands) => self.accept_commands(commands),
-            edge::Event::Phone(phone) => self.heard_from_phone(phone.map(|phone| (phone, 0))),
+            edge::Event::Phone(phone) => {
+                // The edge stamps a frame with its own clock, so a replay after
+                // a reconnect is judged as old instead of fresh.
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|elapsed| elapsed.as_millis().min(i64::MAX as u128) as i64)
+                    .unwrap_or_default();
+                self.heard_from_phone(phone.map(|phone| {
+                    let age = if phone.at > 0 {
+                        now.saturating_sub(phone.at)
+                    } else {
+                        0
+                    };
+                    (phone, age)
+                }));
+            }
             edge::Event::Reset => {
                 // The edge restarted or this computer was away long enough for
                 // its replay buffer to run out: every document is offered again.
@@ -291,12 +341,9 @@ impl App {
     }
 }
 
-fn edge_signature(playlists: &serde_json::Value, queue: &serde_json::Value) -> u64 {
+fn edge_signature(document: &serde_json::Value) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    serde_json::to_string(playlists)
-        .unwrap_or_default()
-        .hash(&mut hasher);
-    serde_json::to_string(queue)
+    serde_json::to_string(document)
         .unwrap_or_default()
         .hash(&mut hasher);
     hasher.finish()
@@ -333,6 +380,48 @@ mod tests {
         assert!(!app.edge.resync);
         app.edge_event(edge::Event::Reset);
         assert!(app.edge.resync);
+        app.backend.shutdown();
+    }
+
+    /// Turning the connection off forgets what the stopped backend held, so
+    /// turning it back on offers the vault and the uploads again.
+    #[test]
+    fn switching_the_edge_off_and_on_offers_everything_again() {
+        let mut app = crate::app::tests::test_app("edge-off-on");
+        app.settings.phone_linked = true;
+        app.phone.started = true;
+        app.settings.vault_signins = Some(true);
+        app.settings.edge_enabled = true;
+        app.edge_tick();
+        assert_eq!(app.edge.enabled, Some(true));
+        assert_eq!(app.edge.vault, Some(true));
+        assert_eq!(app.edge.uploads, Some(true));
+        app.settings.edge_enabled = false;
+        app.edge_tick();
+        assert_eq!(app.edge.enabled, Some(false));
+        assert_eq!(app.edge.vault, None);
+        assert_eq!(app.edge.uploads, None);
+        app.settings.edge_enabled = true;
+        app.edge_tick();
+        assert_eq!(app.edge.enabled, Some(true));
+        assert_eq!(app.edge.vault, Some(true));
+        assert_eq!(app.edge.uploads, Some(true));
+        app.backend.shutdown();
+    }
+
+    /// The vault default follows the account's owner, which is unknown until
+    /// the group loads. Guessing before that would delete the owner's vault.
+    #[test]
+    fn the_vault_choice_waits_for_the_group_account() {
+        let mut app = crate::app::tests::test_app("edge-vault-account");
+        app.settings.phone_linked = true;
+        app.phone.started = true;
+        app.settings.edge_enabled = true;
+        app.edge_tick();
+        assert_eq!(app.edge.vault, None);
+        app.settings.vault_signins = Some(false);
+        app.edge_tick();
+        assert_eq!(app.edge.vault, Some(false));
         app.backend.shutdown();
     }
 }

@@ -1,7 +1,8 @@
-//! YouTube audio the edge cannot produce itself. The edge asks for one source,
-//! or the phone asks while a computer is in the room; the existing yt-dlp path
-//! finds the M4A URL, this downloads it, and the uploader offers it to the edge.
-//! No cookies are used and no source outside YouTube is accepted.
+//! A YouTube song's audio for the edge, which cannot produce it itself. When
+//! the phone plays one, the existing yt-dlp path finds the M4A URL, this
+//! downloads it, and the uploader offers it under `yt-<id>` so a later play
+//! finds it there. No cookies are used and no source outside YouTube is
+//! accepted.
 
 use std::path::{Path, PathBuf};
 
@@ -56,12 +57,14 @@ pub async fn download(
     let mut response = response;
     let mut written = 0u64;
     loop {
-        let Some(chunk) = response
-            .chunk()
-            .await
-            .map_err(|_| "The download stopped early.".to_owned())?
-        else {
-            break;
+        let chunk = match response.chunk().await {
+            Ok(Some(chunk)) => chunk,
+            Ok(None) => break,
+            Err(_) => {
+                drop(file);
+                let _ = tokio::fs::remove_file(&path).await;
+                return Err("The download stopped early.".into());
+            }
         };
         written += chunk.len() as u64;
         if written > MAX_UPLOAD_BYTES {
@@ -69,19 +72,48 @@ pub async fn download(
             let _ = tokio::fs::remove_file(&path).await;
             return Err("That song is too large for the edge.".into());
         }
-        file.write_all(&chunk)
-            .await
-            .map_err(|_| "The fetched audio could not be saved.".to_owned())?;
+        if file.write_all(&chunk).await.is_err() {
+            drop(file);
+            let _ = tokio::fs::remove_file(&path).await;
+            return Err("The fetched audio could not be saved.".into());
+        }
     }
     if written == 0 {
         drop(file);
         let _ = tokio::fs::remove_file(&path).await;
         return Err("YouTube offered an empty file.".into());
     }
-    file.flush()
-        .await
-        .map_err(|_| "The fetched audio could not be saved.".to_owned())?;
+    if file.flush().await.is_err() {
+        drop(file);
+        let _ = tokio::fs::remove_file(&path).await;
+        return Err("The fetched audio could not be saved.".into());
+    }
     Ok((key, path))
+}
+
+/// Removes fetched files a crash or a stop left behind. They live in the cache
+/// folder, but a half-written song should not wait for the next cache cleanup.
+pub async fn sweep(dir: &Path, older_than: std::time::Duration) {
+    let Ok(mut entries) = tokio::fs::read_dir(dir).await else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let Ok(metadata) = entry.metadata().await else {
+            continue;
+        };
+        if !metadata.is_file() {
+            continue;
+        }
+        let old = metadata
+            .modified()
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .is_some_and(|age| age > older_than);
+        if old {
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
 }
 
 #[cfg(test)]
@@ -98,5 +130,30 @@ mod tests {
         assert!(key_for("spotify:track:a").is_none());
         assert!(key_for("https://www.youtube.com/watch?v=aB9_-012xyz").is_none());
         assert!(key_for("youtube:video:aB9_-012xy?").is_none());
+    }
+
+    /// A fetch cut off by a crash leaves a large file; a fresh one stays for
+    /// the upload that may still be waiting.
+    #[tokio::test]
+    async fn a_stale_fetch_is_swept_and_a_fresh_one_is_kept() {
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("siphon-edge-sweep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("yt-old.m4a");
+        let fresh = dir.join("yt-fresh.m4a");
+        std::fs::write(&old, b"old").unwrap();
+        std::fs::write(&fresh, b"fresh").unwrap();
+        let two_days = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 24 * 3600);
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(two_days)
+            .unwrap();
+        sweep(&dir, std::time::Duration::from_secs(24 * 3600)).await;
+        assert!(!old.exists());
+        assert!(fresh.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -629,8 +629,8 @@ fn default_local_files_on_phone() -> bool {
     true
 }
 
-/// The edge is on for files from before the setting existed: a linked phone
-/// already expects to reach this computer's library with it off.
+/// The edge is on for files from before the setting existed: a listener with
+/// a linked phone expects it to keep working while this computer is off.
 fn default_edge_on() -> bool {
     true
 }

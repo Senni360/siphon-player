@@ -19,6 +19,7 @@ fn tokens() -> Tokens {
         media: "media-secret".into(),
         sync: "sync-secret".into(),
         expires_at: crate::edge::now_secs() + 300,
+        account: "test-account".into(),
     }
 }
 
@@ -34,6 +35,21 @@ fn no_token_is_ever_printed() {
     assert_eq!(source.get(Scope::Live), "live-secret");
     assert_eq!(source.get(Scope::Media), "media-secret");
     assert_eq!(source.get(Scope::Sync), "sync-secret");
+}
+
+/// The edge's socket cannot carry an answer over 64 KiB; a larger one is
+/// replaced by a small error so the phone asks over the relay instead.
+#[test]
+fn an_answer_too_large_for_the_edge_becomes_a_small_error() {
+    let small = serde_json::json!({ "ok": true, "url": "https://example/a.m4a" });
+    assert_eq!(crate::edge::edge_reply(small.clone()), small);
+    let large = serde_json::json!({
+        "songs": "x".repeat(crate::edge::MAX_REPLY_BYTES),
+    });
+    assert_eq!(
+        crate::edge::edge_reply(large),
+        serde_json::json!({ "error": "answer_too_large" })
+    );
 }
 
 #[tokio::test]
@@ -210,6 +226,7 @@ async fn turning_uploads_off_stops_a_waiting_local_file() {
     runtime.send(crate::edge::Request::Upload(vec![crate::edge::UploadJob {
         key: crate::edge::local_key("spotify:local:a:b:c:1"),
         path: file,
+        fetched: false,
     }]));
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     assert!(

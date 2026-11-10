@@ -16,6 +16,15 @@ impl Worker {
             }
             return;
         }
+        // The edge's socket has a small frame limit; an answer that cannot fit
+        // is sent over the group relay instead, with a word telling the phone.
+        let request = match request {
+            crate::edge::Request::Reply { id, value } => crate::edge::Request::Reply {
+                id,
+                value: crate::edge::edge_reply(value),
+            },
+            request => request,
+        };
         self.edge_start();
         if let Some(edge) = &self.edge {
             edge.send(request);

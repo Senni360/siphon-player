@@ -987,7 +987,7 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                         changed = true;
                     }
                 });
-                let mut vault_signins = app.vault_signins_enabled();
+                let mut vault_signins = app.vault_signins_enabled().unwrap_or(false);
                 filtered_row(ui, &palette, &needle, &devices, &devices_rows[11], |ui| {
                     if widgets::switch(
                             ui,

@@ -43,6 +43,23 @@ pub fn local_key(uri: &str) -> String {
 /// How long before a token's expiry it is replaced. Tokens live five minutes.
 const REFRESH_BEFORE: i64 = 90;
 
+/// The edge's socket accepts 64 KiB frames. A reply larger than this leaves
+/// room for the envelope; the group relay carries the whole answer instead.
+pub(crate) const MAX_REPLY_BYTES: usize = 48 * 1024;
+
+/// A reply the edge's socket can carry. A larger one becomes a small error the
+/// phone answers by asking over the relay, which has no such frame limit.
+pub(crate) fn edge_reply(value: Value) -> Value {
+    let size = serde_json::to_string(&value)
+        .map(|text| text.len())
+        .unwrap_or(usize::MAX);
+    if size <= MAX_REPLY_BYTES {
+        value
+    } else {
+        serde_json::json!({ "error": "answer_too_large" })
+    }
+}
+
 /// The scopes the group service mints separately.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
@@ -63,6 +80,9 @@ pub struct Tokens {
     sync: String,
     /// Unix seconds.
     pub expires_at: i64,
+    /// The account the group service minted these for. A sign-in or group
+    /// switch must never write one account's library into another's store.
+    account: String,
 }
 
 impl Tokens {
@@ -94,7 +114,21 @@ fn now_secs() -> i64 {
 /// The expiry a token names in its own payload. A test token need not be
 /// signed; it then lives as long as a real one.
 fn token_expiry(token: &str) -> i64 {
-    let payload = token
+    token_payload(token)
+        .and_then(|value| value.get("exp").and_then(Value::as_i64))
+        .unwrap_or_else(|| now_secs() + 240)
+}
+
+/// The account id a token names in its own payload.
+fn token_account(token: &str) -> Option<String> {
+    token_payload(token)?
+        .get("sub")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn token_payload(token: &str) -> Option<Value> {
+    token
         .split('.')
         .nth(1)
         .and_then(|segment| {
@@ -103,8 +137,6 @@ fn token_expiry(token: &str) -> i64 {
                 .ok()
         })
         .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-        .and_then(|value| value.get("exp").and_then(Value::as_i64));
-    payload.unwrap_or_else(|| now_secs() + 240)
 }
 
 /// Where every edge request gets its token and address from. Minting is
@@ -139,7 +171,10 @@ impl Source {
     async fn identity(&self) -> Option<Identity> {
         if let Ok(held) = self.identity.lock()
             && let Some((identity, at)) = held.as_ref()
-            && at.elapsed() < Duration::from_secs(60)
+            // Short enough that signing out or switching account stops the
+            // edge quickly, long enough not to read the credential store on
+            // every sync write.
+            && at.elapsed() < Duration::from_secs(15)
         {
             return Some(identity.clone());
         }
@@ -154,10 +189,22 @@ impl Source {
     /// mint is not an error worth showing: the relay still works.
     pub async fn tokens(&self) -> Result<Tokens, String> {
         let mut held = self.tokens.lock().await;
-        if let Some(tokens) = held.as_ref()
-            && tokens.expires_at - now_secs() > REFRESH_BEFORE
+        let cached = held
+            .as_ref()
+            .map(|tokens| (tokens.account.clone(), tokens.expires_at, tokens.clone()));
+        if let Some((account, expires_at, tokens)) = cached
+            && expires_at - now_secs() > REFRESH_BEFORE
         {
-            return Ok(tokens.clone());
+            match self.identity().await {
+                Some(identity) if identity.user_id == account => return Ok(tokens),
+                // Signed out or signed into another account: the cached tokens
+                // belong to someone else's store.
+                Some(_) => *held = None,
+                None => {
+                    *held = None;
+                    return Err("Connect to your group to use the edge.".to_owned());
+                }
+            }
         }
         let identity = self
             .identity()
@@ -171,6 +218,7 @@ impl Source {
             .unwrap_or_else(|| now_secs() + 240);
         let tokens = Tokens {
             url: grant.url,
+            account: token_account(&grant.sync).unwrap_or_else(|| identity.user_id.clone()),
             live: grant.live,
             media: grant.media,
             sync: grant.sync,
@@ -178,6 +226,12 @@ impl Source {
         };
         *held = Some(tokens.clone());
         Ok(tokens)
+    }
+
+    /// Drops the cached tokens after the edge refused one, so the next
+    /// request mints a fresh set.
+    pub async fn forget_tokens(&self) {
+        *self.tokens.lock().await = None;
     }
 
     pub async fn token(&self, scope: Scope) -> Result<(Tokens, String), String> {
@@ -203,11 +257,11 @@ pub enum Request {
     SyncQueue(Value),
     /// Push the saved matches and take the edge's back.
     Matches,
-    /// Local files to offer, newest first. Skipped ones are not retried.
+    /// Local files to offer, in playlist order. Skipped ones are not retried.
     Upload(Vec<UploadJob>),
     /// The listener turned playlist uploads on or off.
     UploadsEnabled(bool),
-    /// YouTube sources the edge asked for, at most two.
+    /// YouTube sources the phone needs on the edge, at most two.
     Fetch(Vec<String>),
     /// Keep the sign-ins in the vault, or remove them.
     Vault(bool),
@@ -218,6 +272,9 @@ pub struct UploadJob {
     /// The stable key the phone resolves this file by.
     pub key: String,
     pub path: PathBuf,
+    /// A file this computer fetched for the phone; it is removed once the
+    /// edge has it. A playlist local file stays where it is.
+    pub fetched: bool,
 }
 
 /// What comes back from the edge socket.
@@ -238,6 +295,9 @@ pub struct Runtime {
     tx: tokio::sync::mpsc::UnboundedSender<Request>,
     live: live::Live,
     tasks: Vec<tokio::task::JoinHandle<()>>,
+    /// Downloads started for a phone, kept so turning the connection off stops
+    /// them instead of leaving a long fetch running behind a stopped runtime.
+    fetches: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
 }
 
 impl Runtime {
@@ -250,17 +310,38 @@ impl Runtime {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let live = live::spawn(Arc::clone(&source), emit);
         let mut tasks = Vec::new();
+        let fetches = Arc::new(std::sync::Mutex::new(
+            Vec::<tokio::task::JoinHandle<()>>::new(),
+        ));
+        let fetch_tasks = Arc::clone(&fetches);
 
         let (upload_tx, mut upload_rx) = tokio::sync::mpsc::unbounded_channel::<UploadJob>();
         let uploads_enabled = Arc::new(AtomicBool::new(true));
-        let uploads = upload::Uploads::new(Arc::clone(&source));
+        let fetched = Arc::new(tokio::sync::Mutex::new(
+            std::collections::HashSet::<String>::new(),
+        ));
+        let uploads = upload::Uploads::new(Arc::clone(&source), Arc::clone(&uploads_enabled));
         let enabled = Arc::clone(&uploads_enabled);
+        let finished = Arc::clone(&fetched);
         tasks.push(tokio::spawn(async move {
             while let Some(job) = upload_rx.recv().await {
                 if !enabled.load(Ordering::Relaxed) {
+                    // A fetched file no one may upload is of no use here.
+                    if job.fetched {
+                        let _ = tokio::fs::remove_file(&job.path).await;
+                        finished.lock().await.remove(&job.key);
+                    }
                     continue;
                 }
-                let _ = uploads.upload(job).await;
+                let result = uploads.upload(job.clone()).await;
+                if job.fetched {
+                    if result.is_err() {
+                        // A later play asks for the song again and downloads
+                        // it once more, instead of keeping a broken copy.
+                        finished.lock().await.remove(&job.key);
+                    }
+                    let _ = tokio::fs::remove_file(&job.path).await;
+                }
             }
         }));
 
@@ -290,7 +371,14 @@ impl Runtime {
         }));
 
         let fetch_http = source.http();
+        let fetch_source = Arc::clone(&source);
         let fetcher = temp;
+        let sweep = fetcher.clone();
+        tasks.push(tokio::spawn(async move {
+            // A fetch cut off by a quit or a crash leaves a large file behind.
+            fetch::sweep(&sweep, Duration::from_secs(24 * 60 * 60)).await;
+        }));
+        let fetch_slot = Arc::new(tokio::sync::Semaphore::new(1));
         tasks.push(tokio::spawn(async move {
             while let Some(request) = rx.recv().await {
                 match request {
@@ -314,14 +402,56 @@ impl Runtime {
                         let upload_tx = upload_tx.clone();
                         let http = fetch_http.clone();
                         let dir = fetcher.clone();
-                        tokio::spawn(async move {
-                            for source in sources.into_iter().take(2) {
-                                let Ok((key, path)) = fetch::download(&http, &source, &dir).await
-                                else {
+                        let enabled = Arc::clone(&uploads_enabled);
+                        let fetched = Arc::clone(&fetched);
+                        let slot = Arc::clone(&fetch_slot);
+                        let source = Arc::clone(&fetch_source);
+                        let handle = tokio::spawn(async move {
+                            for source_uri in sources.into_iter().take(2) {
+                                // Nothing to offer when the listener turned
+                                // uploads off, and one download at a time: a
+                                // song fetched twice is a minute wasted.
+                                if !enabled.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                if source.tokens().await.is_err() {
+                                    // Not signed in to a group: no upload can
+                                    // follow, so do not spend the bandwidth.
+                                    break;
+                                }
+                                let Some(key) = fetch::key_for(&source_uri) else {
                                     continue;
                                 };
-                                let _ = upload_tx.send(UploadJob { key, path });
+                                if !fetched.lock().await.insert(key.clone()) {
+                                    continue;
+                                }
+                                // A request that arrives while a song is
+                                // already downloading is dropped, not queued:
+                                // skipping through a playlist must not leave
+                                // hours of downloads behind it.
+                                let Ok(_permit) = Arc::clone(&slot).try_acquire_owned() else {
+                                    fetched.lock().await.remove(&key);
+                                    continue;
+                                };
+                                match fetch::download(&http, &source_uri, &dir).await {
+                                    Ok((key, path)) => {
+                                        let _ = upload_tx.send(UploadJob {
+                                            key,
+                                            path,
+                                            fetched: true,
+                                        });
+                                    }
+                                    Err(_) => {
+                                        fetched.lock().await.remove(&key);
+                                    }
+                                }
                             }
+                        });
+                        // Keep the newest handle and drop finished ones, so
+                        // turning the connection off can cancel this download.
+                        let _ = fetch_tasks.lock().map(|mut held| {
+                            held.retain(|task| !task.is_finished());
+                            held.push(handle);
                         });
                     }
                     Request::State(_) | Request::Reply { .. } => {}
@@ -329,7 +459,12 @@ impl Runtime {
             }
         }));
 
-        Self { tx, live, tasks }
+        Self {
+            tx,
+            live,
+            tasks,
+            fetches,
+        }
     }
 
     pub fn send(&self, request: Request) {
@@ -347,6 +482,11 @@ impl Runtime {
     pub fn stop(self) {
         for task in self.tasks {
             task.abort();
+        }
+        if let Ok(mut fetches) = self.fetches.lock() {
+            for task in fetches.drain(..) {
+                task.abort();
+            }
         }
         self.live.stop();
     }

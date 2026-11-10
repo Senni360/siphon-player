@@ -31,9 +31,9 @@ pub struct MixedTrack {
     pub artists: Vec<String>,
     pub duration_ms: u32,
     pub image: Option<String>,
-    /// Where the phone finds this song's audio on the edge. A playlist local
-    /// file names its upload key as `upload:<key>`; nothing else sets it.
-    pub source: Option<String>,
+    /// The upload key of a playlist local file, so the phone can ask the edge
+    /// for its audio. Nothing else sets it.
+    pub upload: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,9 +78,9 @@ pub fn playlists_doc(spotify: &[PlaylistSummary], mixed: &[MixedPlaylist]) -> Va
                             "album": track.image.as_ref().map(|url| json!({ "images": [{ "url": url }] })),
                         },
                     });
-                    if let Some(source) = &track.source {
-                        entry["source"] = json!(source);
-                        entry["track"]["source"] = json!(source);
+                    if let Some(upload) = &track.upload {
+                        entry["upload"] = json!(upload);
+                        entry["track"]["upload"] = json!(upload);
                     }
                     entry
                 })
@@ -118,33 +118,55 @@ pub fn queue_doc(
 /// A saved match as the edge stores it: only public YouTube or SoundCloud
 /// sources qualify, and an older file that kept only a URL is read too.
 pub(crate) fn saved_entry(saved: &SavedMatch) -> Option<(&'static str, String)> {
-    if let Some(id) = saved.uri.strip_prefix("youtube:video:")
-        && id.len() == 11
-    {
-        return Some(("youtube", saved.uri.clone()));
-    }
-    if saved.uri.starts_with("soundcloud:") && !saved.uri.contains(char::is_whitespace) {
-        return Some(("soundcloud", saved.uri.clone()));
-    }
-    if let Some(permalink) = crate::youtube::parse(&saved.uri) {
-        return Some(("youtube", permalink));
-    }
-    if let Some(rest) = soundcloud_path(&saved.source) {
-        return Some(("soundcloud", format!("soundcloud:{rest}")));
-    }
-    if saved.source.starts_with("soundcloud:") {
-        return Some(("soundcloud", saved.source.clone()));
-    }
-    None
+    match_source(&saved.uri).or_else(|| match_source(&saved.source))
 }
 
+/// The edge's canonical source for a saved match, or `None` when the match
+/// names something it may not be given: a private SoundCloud path, a numeric
+/// track URI, another host, or a YouTube link that is not a plain video.
+pub(crate) fn match_source(text: &str) -> Option<(&'static str, String)> {
+    // `youtube::parse` canonicalises a track URI and a watch link, and refuses
+    // everything else. Only the canonical track URI is ever sent.
+    if let Some(uri) = crate::youtube::parse(text).filter(|uri| crate::youtube::is_track_uri(uri)) {
+        return Some(("youtube", uri));
+    }
+    soundcloud_path(text).map(|path| ("soundcloud", format!("soundcloud:{path}")))
+}
+
+/// The public path of a SoundCloud permalink or `soundcloud:` URI. A private
+/// link's `s-` path segment, a query or fragment, or anything that is not a
+/// SoundCloud permalink is refused: the edge must only see what is public.
 fn soundcloud_path(url: &str) -> Option<String> {
-    let url = url.trim();
-    let rest = url
+    let text = url.trim();
+    let rest = text
         .strip_prefix("https://soundcloud.com/")
-        .or_else(|| url.strip_prefix("http://soundcloud.com/"))?;
+        .or_else(|| text.strip_prefix("http://soundcloud.com/"))
+        .or_else(|| text.strip_prefix("soundcloud:"))?;
     let path = rest.split(['?', '#']).next()?.trim_end_matches('/');
-    (!path.is_empty() && !path.contains(char::is_whitespace)).then(|| path.to_owned())
+    if path.is_empty()
+        || path.contains(char::is_whitespace)
+        || path.contains('\\')
+        || path.contains("..")
+    {
+        return None;
+    }
+    let segments: Vec<&str> = path.split('/').collect();
+    // The edge's resolver accepts a track permalink, never a bare user page.
+    if !(2..=5).contains(&segments.len()) {
+        return None;
+    }
+    for segment in &segments {
+        if !segment.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+        }) {
+            return None;
+        }
+        // `s-…` is SoundCloud's private share path; it must never leave here.
+        if segment.to_ascii_lowercase().starts_with("s-") {
+            return None;
+        }
+    }
+    Some(path.to_owned())
 }
 
 /// The matches document: every saved Spotify song as an automatic choice.
@@ -163,7 +185,9 @@ pub(crate) fn matches_doc(saved: &std::collections::BTreeMap<String, SavedMatch>
                 "source": source,
                 "sourceUri": source_uri,
                 "confidence": 0.9,
-                "date": found.at.max(0).saturating_mul(1000),
+                // A hand-edited file must not make the edge refuse the whole
+                // document as an invalid date.
+                "date": found.at.clamp(0, 4_000_000_000).saturating_mul(1000),
                 "manual": false,
             }),
         );
@@ -171,24 +195,49 @@ pub(crate) fn matches_doc(saved: &std::collections::BTreeMap<String, SavedMatch>
     Value::Object(entries)
 }
 
-/// A public URL for a source URI, so a match taken back from the edge can be
-/// remembered locally the same way a search would have.
-fn source_url(source_uri: &str) -> Option<String> {
-    if let Some(id) = source_uri.strip_prefix("youtube:video:") {
-        return (id.len() == 11).then(|| format!("https://www.youtube.com/watch?v={id}"));
+/// What the local match store keeps for an edge source, so a match taken back
+/// from the edge is remembered the same way a search would have. A SoundCloud
+/// match keeps its public URL only: the local store's playable form needs a
+/// numeric track id, which the edge's answer does not carry.
+fn local_match(source_uri: &str) -> Option<matching::Match> {
+    let (provider, canonical) = match_source(source_uri)?;
+    if provider == "youtube" {
+        return Some(matching::Match {
+            uri: canonical.clone(),
+            source: crate::youtube::permalink(&canonical)?,
+        });
     }
-    let rest = source_uri.strip_prefix("soundcloud:")?;
-    (!rest.is_empty() && !rest.contains(char::is_whitespace))
-        .then(|| format!("https://soundcloud.com/{rest}"))
+    let path = canonical.strip_prefix("soundcloud:")?;
+    Some(matching::Match {
+        uri: String::new(),
+        source: format!("https://soundcloud.com/{path}"),
+    })
 }
 
-pub struct Sync {
+pub(crate) struct Sync {
     source: Arc<Source>,
     revisions: tokio::sync::Mutex<std::collections::HashMap<&'static str, u64>>,
 }
 
+/// Why an offer was refused. A snapshot the service can never accept, such as
+/// one over its size limit, is dropped instead of being offered forever.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Failure {
+    retry: bool,
+}
+
+impl Failure {
+    fn retry() -> Self {
+        Self { retry: true }
+    }
+
+    fn permanent() -> Self {
+        Self { retry: false }
+    }
+}
+
 impl Sync {
-    pub fn new(source: Arc<Source>) -> Self {
+    pub(crate) fn new(source: Arc<Source>) -> Self {
         Self {
             source,
             revisions: tokio::sync::Mutex::new(std::collections::HashMap::new()),
@@ -201,7 +250,7 @@ impl Sync {
         Ok((client, tokens, token))
     }
 
-    pub async fn get(&self, doc: &'static str) -> Result<Value, String> {
+    pub(crate) async fn get(&self, doc: &'static str) -> Result<Value, String> {
         let (client, tokens, token) = self.http().await?;
         let response = client
             .get(format!("{}/v1/sync/{doc}", tokens.url))
@@ -225,9 +274,11 @@ impl Sync {
 
     /// Offers `data` as the document's next revision. A conflict is not an
     /// error: the stored revision is read and the snapshot offered again.
-    pub async fn put(&self, doc: &'static str, data: &Value) -> Result<(), String> {
-        for attempt in 0..2 {
-            let (client, tokens, token) = self.http().await?;
+    pub(crate) async fn put(&self, doc: &'static str, data: &Value) -> Result<(), Failure> {
+        let mut attempt = 0u8;
+        loop {
+            attempt = attempt.saturating_add(1);
+            let (client, tokens, token) = self.http().await.map_err(|_| Failure::retry())?;
             let revision = self.revisions.lock().await.get(doc).copied();
             let mut body = json!({ "data": data.clone() });
             if let Some(revision) = revision {
@@ -240,13 +291,26 @@ impl Sync {
                 .timeout(std::time::Duration::from_secs(20))
                 .send()
                 .await
-                .map_err(|_| "The edge could not be reached.".to_owned())?;
-            if response.status().as_u16() == 409 && attempt == 0 {
-                self.get(doc).await?;
+                .map_err(|_| Failure::retry())?;
+            let status = response.status().as_u16();
+            if status == 409 && attempt < 3 {
+                self.get(doc).await.map_err(|_| Failure::retry())?;
+                continue;
+            }
+            // A token that ran out between the check and the request is
+            // replaced once, then the same snapshot is offered again.
+            if status == 401 && attempt < 3 {
+                self.source.forget_tokens().await;
                 continue;
             }
             if !response.status().is_success() {
-                return Err("The edge refused that sync write.".into());
+                // The size and shape of a snapshot are the caller's, not a
+                // passing condition: offering it again cannot make it fit.
+                return Err(if matches!(status, 400 | 413 | 415 | 422) {
+                    Failure::permanent()
+                } else {
+                    Failure::retry()
+                });
             }
             if let Ok(record) = response.json::<Value>().await
                 && let Some(revision) = record.get("revision").and_then(Value::as_u64)
@@ -255,13 +319,12 @@ impl Sync {
             }
             return Ok(());
         }
-        Err("The edge's sync revision kept moving.".into())
     }
 
     /// Sends every saved match, and keeps the edge's automatic answers. A
     /// hand-chosen edge match is never overwritten or copied over a local one.
-    pub(crate) async fn matches(&self, saved: &Saved) -> Result<(), String> {
-        let remote = self.get("matches").await?;
+    pub(crate) async fn matches(&self, saved: &Saved) -> Result<(), Failure> {
+        let remote = self.get("matches").await.map_err(|_| Failure::retry())?;
         take_matches(remote.get("data"), saved).await;
         self.put("matches", &matches_doc(&saved.all().await)).await
     }
@@ -380,7 +443,13 @@ async fn run(
                 (Next::Matches, done)
             }
         };
-        if done.is_ok() {
+        if let Err(failure) = done {
+            if !failure.retry {
+                // Offering it again cannot help; the next change starts over.
+                retry = 0;
+                continue;
+            }
+        } else {
             retry = 0;
             continue;
         }
@@ -414,8 +483,10 @@ async fn take_matches(data: Option<&Value>, saved: &Saved) {
     let Some(entries) = data.and_then(Value::as_object) else {
         return;
     };
+    let local = saved.all().await;
+    let mut found = Vec::new();
     for (uri, entry) in entries {
-        if !uri.starts_with("spotify:track:") {
+        if !uri.starts_with("spotify:track:") || local.contains_key(uri) {
             continue;
         }
         if entry
@@ -428,21 +499,11 @@ async fn take_matches(data: Option<&Value>, saved: &Saved) {
         let Some(source_uri) = entry.get("sourceUri").and_then(Value::as_str) else {
             continue;
         };
-        let Some(url) = source_url(source_uri) else {
-            continue;
-        };
-        if saved.get(uri).await.is_none() {
-            saved
-                .remember(
-                    uri,
-                    &matching::Match {
-                        uri: source_uri.to_owned(),
-                        source: url,
-                    },
-                )
-                .await;
+        if let Some(matched) = local_match(source_uri) {
+            found.push((uri.clone(), matched));
         }
     }
+    saved.remember_all(found).await;
 }
 
 #[cfg(test)]
@@ -472,7 +533,7 @@ mod tests {
                         artists: vec!["A".into()],
                         duration_ms: 180_000,
                         image: None,
-                        source: Some("upload:local-abc".into()),
+                        upload: Some("local-abc".into()),
                     },
                     MixedTrack {
                         id: "e2".into(),
@@ -481,7 +542,7 @@ mod tests {
                         artists: vec!["B".into()],
                         duration_ms: 1_000,
                         image: Some("https://i.example/b".into()),
-                        source: None,
+                        upload: None,
                     },
                 ],
             }],
@@ -495,7 +556,8 @@ mod tests {
             mixed["tracks"][0]["track"]["uri"],
             "spotify:local:A:B:C:180"
         );
-        assert_eq!(mixed["tracks"][0]["source"], "upload:local-abc");
+        assert_eq!(mixed["tracks"][0]["upload"], "local-abc");
+        assert_eq!(mixed["tracks"][0]["track"]["upload"], "local-abc");
         assert_eq!(mixed["tracks"][1]["track"]["uri"], "soundcloud:track:7");
         assert_eq!(
             mixed["tracks"][1]["track"]["album"]["images"][0]["url"],
@@ -530,9 +592,11 @@ mod tests {
             saved_entry(&saved),
             Some(("youtube", "youtube:video:abcdefghijk".into()))
         );
+        // A real SoundCloud match keeps a numeric track URI and a public
+        // permalink. The edge resolver accepts only the permalink.
         let cloud = SavedMatch {
             source: "https://soundcloud.com/artist/song".into(),
-            uri: String::new(),
+            uri: "soundcloud:track:12345".into(),
             at: 0,
         };
         assert_eq!(
@@ -540,16 +604,34 @@ mod tests {
             Some(("soundcloud", "soundcloud:artist/song".into()))
         );
         let private = SavedMatch {
-            source: "https://soundcloud.com/artist/song?token=secret".into(),
+            source: "https://soundcloud.com/artist/song/s-AbCdEf?si=secret".into(),
             uri: String::new(),
             at: 0,
         };
-        // The trailing token is dropped with the query, and the public path
-        // is still a usable source.
+        // A private `s-` path never leaves this computer, and the query is
+        // never sent either.
+        assert_eq!(saved_entry(&private), None);
+        let private_uri = SavedMatch {
+            source: String::new(),
+            uri: "soundcloud:artist/song/s-AbCdEf".into(),
+            at: 0,
+        };
+        assert_eq!(saved_entry(&private_uri), None);
+        let queried = SavedMatch {
+            source: "https://soundcloud.com/artist/song?si=public".into(),
+            uri: String::new(),
+            at: 0,
+        };
         assert_eq!(
-            saved_entry(&private),
+            saved_entry(&queried),
             Some(("soundcloud", "soundcloud:artist/song".into()))
         );
+        let numeric = SavedMatch {
+            source: String::new(),
+            uri: "soundcloud:track:12345".into(),
+            at: 0,
+        };
+        assert_eq!(saved_entry(&numeric), None);
         assert_eq!(
             saved_entry(&SavedMatch {
                 source: "https://example.com/x".into(),
@@ -576,6 +658,62 @@ mod tests {
         assert_eq!(doc["spotify:track:a"]["confidence"], 0.9);
         assert_eq!(doc["spotify:track:a"]["date"], 20_000);
         assert_eq!(doc["spotify:track:a"]["manual"], false);
+        // A hand-edited date cannot make the edge refuse the document.
+        saved.insert(
+            "spotify:track:b".into(),
+            SavedMatch {
+                source: "https://www.youtube.com/watch?v=abcdefghijk".into(),
+                uri: "youtube:video:abcdefghijk".into(),
+                at: i64::MAX,
+            },
+        );
+        assert_eq!(
+            matches_doc(&saved)["spotify:track:b"]["date"],
+            4_000_000_000_000i64
+        );
+    }
+
+    /// A match taken back from the edge stays usable here: a YouTube answer is
+    /// playable as it is, and a SoundCloud answer keeps its public URL without
+    /// pretending that a permalink is a numeric track URI.
+    #[tokio::test]
+    async fn a_match_taken_from_the_edge_is_remembered_in_a_form_that_plays() {
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("siphon-edge-take-matches-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let saved = Saved::new(dir.join("matches.json"));
+        let data = serde_json::json!({
+            "spotify:track:a": {
+                "source": "youtube", "sourceUri": "youtube:video:abcdefghijk",
+                "confidence": 0.9, "date": "2026-01-01T00:00:00.000Z", "manual": false,
+            },
+            "spotify:track:b": {
+                "source": "soundcloud", "sourceUri": "soundcloud:artist/song",
+                "confidence": 0.9, "date": "2026-01-01T00:00:00.000Z", "manual": false,
+            },
+            "spotify:track:c": {
+                "source": "soundcloud", "sourceUri": "soundcloud:artist/song/s-Secret",
+                "confidence": 0.9, "date": "2026-01-01T00:00:00.000Z", "manual": false,
+            },
+            "spotify:track:d": {
+                "source": "youtube", "sourceUri": "youtube:video:abcdefghijk",
+                "confidence": 1, "date": "2026-01-01T00:00:00.000Z", "manual": true,
+            },
+        });
+        take_matches(Some(&data), &saved).await;
+        let youtube = saved.get("spotify:track:a").await.unwrap();
+        assert_eq!(youtube.uri, "youtube:video:abcdefghijk");
+        assert_eq!(
+            youtube.source,
+            "https://www.youtube.com/watch?v=abcdefghijk"
+        );
+        let soundcloud = saved.get("spotify:track:b").await.unwrap();
+        assert_eq!(soundcloud.uri, "");
+        assert_eq!(soundcloud.source, "https://soundcloud.com/artist/song");
+        assert!(saved.get("spotify:track:c").await.is_none());
+        // A hand-chosen edge match is never copied over a local one.
+        assert!(saved.get("spotify:track:d").await.is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A snapshot offered while the edge is down is kept and offered again,
@@ -631,6 +769,48 @@ mod tests {
         assert_eq!(puts.len(), 2);
         // The second offer is the same picture, now accepted.
         assert_eq!(puts[1].json()["data"]["playlists"], serde_json::json!([]));
+        drop(writer);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A snapshot the service can never accept is dropped instead of being
+    /// offered every few seconds forever.
+    #[tokio::test]
+    async fn a_snapshot_the_edge_can_never_accept_is_not_retried() {
+        use crate::edge::test_support::{Server, group_source};
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let puts = Arc::new(AtomicUsize::new(0));
+        let counted = Arc::clone(&puts);
+        let server = Server::new(move |request| {
+            if request.path == "/edge/token" {
+                return (
+                    200,
+                    serde_json::json!({
+                        "url": "SELF", "live": "live", "media": "media", "sync": "sync"
+                    }),
+                );
+            }
+            if request.path == "/v1/sync/playlists" && request.method == "PUT" {
+                counted.fetch_add(1, Ordering::SeqCst);
+                return (
+                    413,
+                    serde_json::json!({ "v": 1, "error": "user_limit_reached" }),
+                );
+            }
+            (404, serde_json::json!({ "v": 1, "error": "not_found" }))
+        });
+        let source = group_source(&server).await;
+        let dir = crate::test_dirs::temp_dir()
+            .join(format!("siphon-edge-too-large-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let writer = Writer::spawn(source, Saved::new(dir.join("matches.json")));
+        writer
+            .playlists(serde_json::json!({ "playlists": [], "mixed": [] }))
+            .await;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        assert_eq!(puts.load(Ordering::SeqCst), 1);
         drop(writer);
         let _ = std::fs::remove_dir_all(&dir);
     }

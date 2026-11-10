@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use base64::Engine;
@@ -64,17 +65,22 @@ async fn protected(path: &Path) -> bool {
 pub struct Uploads {
     source: Arc<Source>,
     known: tokio::sync::Mutex<HashSet<String>>,
+    enabled: Arc<AtomicBool>,
 }
 
 impl Uploads {
-    pub fn new(source: Arc<Source>) -> Self {
+    pub fn new(source: Arc<Source>, enabled: Arc<AtomicBool>) -> Self {
         Self {
             source,
             known: tokio::sync::Mutex::new(HashSet::new()),
+            enabled,
         }
     }
 
     pub async fn upload(&self, job: UploadJob) -> Result<(), String> {
+        if !self.enabled.load(Ordering::Relaxed) {
+            return Err("Local files are not being offered.".into());
+        }
         if self.known.lock().await.contains(&job.key) {
             return Ok(());
         }
@@ -101,7 +107,7 @@ impl Uploads {
         let file = tokio::fs::File::open(&job.path)
             .await
             .map_err(|_| "That local file could not be read.".to_owned())?;
-        let body = reqwest::Body::wrap_stream(stream(file));
+        let body = reqwest::Body::wrap_stream(stream(file, Arc::clone(&self.enabled)));
         let response = client
             .put(format!("{}/v1/upload/{}", tokens.url, job.key))
             .bearer_auth(&token)
@@ -141,23 +147,32 @@ impl Uploads {
     }
 }
 
-/// One file, a piece at a time, with a pause so the network is shared.
+/// One file, a piece at a time, with a pause so the network is shared. Turning
+/// the setting off ends the stream at the next piece; the edge then refuses the
+/// short body and keeps nothing.
 fn stream(
     file: tokio::fs::File,
+    enabled: Arc<AtomicBool>,
 ) -> impl futures_util::Stream<Item = Result<Vec<u8>, std::io::Error>> {
-    futures_util::stream::unfold(file, |mut file| async move {
-        let mut buffer = vec![0u8; CHUNK];
-        match file.read(&mut buffer).await {
-            Ok(0) => {
-                let _ = &mut file;
-                None
+    futures_util::stream::unfold(file, move |mut file| {
+        let enabled = Arc::clone(&enabled);
+        async move {
+            if !enabled.load(Ordering::Relaxed) {
+                return None;
             }
-            Ok(read) => {
-                buffer.truncate(read);
-                tokio::time::sleep(Duration::from_millis(2)).await;
-                Some((Ok(buffer), file))
+            let mut buffer = vec![0u8; CHUNK];
+            match file.read(&mut buffer).await {
+                Ok(0) => {
+                    let _ = &mut file;
+                    None
+                }
+                Ok(read) => {
+                    buffer.truncate(read);
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                    Some((Ok(buffer), file))
+                }
+                Err(error) => Some((Err(error), file)),
             }
-            Err(error) => Some((Err(error), file)),
         }
     })
 }
@@ -215,11 +230,12 @@ mod tests {
             (404, serde_json::json!({ "error": "not_found" }))
         });
         let source = group_source(&server).await;
-        let uploads = Uploads::new(source);
+        let uploads = Uploads::new(source, Arc::new(AtomicBool::new(true)));
         uploads
             .upload(UploadJob {
                 key: key_for_uri("spotify:local:a"),
                 path: some.clone(),
+                fetched: false,
             })
             .await
             .unwrap();
@@ -227,6 +243,7 @@ mod tests {
             .upload(UploadJob {
                 key: key_for_uri("spotify:local:b"),
                 path: other.clone(),
+                fetched: false,
             })
             .await
             .unwrap();
