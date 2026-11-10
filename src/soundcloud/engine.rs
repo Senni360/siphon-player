@@ -245,6 +245,7 @@ pub fn sample(
     runtime: Handle,
     stream: &Stream,
     seconds: f64,
+    cancel: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<f32>, String> {
     let fetch = Fetch {
         http: http.clone(),
@@ -257,6 +258,9 @@ pub fn sample(
     let wanted = (seconds.max(0.0) * 44_100.0) as usize;
     let mut mono = Vec::with_capacity(wanted);
     while mono.len() < wanted {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(crate::bpm_key::CANCELLED.to_string());
+        }
         match decoder.next() {
             Ok(Some(pcm)) => {
                 for frame in pcm.as_chunks::<2>().0 {

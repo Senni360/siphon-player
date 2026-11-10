@@ -924,6 +924,10 @@ pub enum Command {
         file: Option<std::path::PathBuf>,
         link: Option<String>,
     },
+    /// Stop one on-demand BPM and key read. Its late answer is dropped.
+    CancelBpmKey {
+        request: u64,
+    },
     DownloadFinished {
         id: u64,
         result: Result<crate::downloads::Summary, String>,
@@ -1299,7 +1303,7 @@ pub enum Event {
     BpmKey {
         uri: String,
         request: u64,
-        result: Result<crate::beat_analysis::Reading, String>,
+        result: Result<crate::bpm_key::Reading, String>,
     },
     YouTubeTrack {
         generation: u64,
@@ -1825,6 +1829,7 @@ impl Backend {
                     // A downloaded or local file can be measured offline; a
                     // stream fails in the task with the reason.
                     | Command::AnalyzeBpmKey { .. }
+                    | Command::CancelBpmKey { .. }
             )
         {
             return;
@@ -2350,6 +2355,8 @@ struct Worker {
     live: Option<mpsc::UnboundedSender<crate::friends::live::Request>>,
     discord: Option<Option<mpsc::UnboundedSender<Option<crate::discord::Status>>>>,
     download_jobs: download_jobs::Jobs,
+    /// On-demand BPM and key reads, bounded and cancellable.
+    bpm_key_jobs: Arc<bpm_key::Jobs>,
     /// Spotify songs already matched to a source, shared with the phone path.
     saved_matches: crate::downloads::saved::Saved,
     track_details: track_details::Jobs,
@@ -2488,6 +2495,7 @@ impl Worker {
             live: None,
             discord: None,
             download_jobs: download_jobs::Jobs::default(),
+            bpm_key_jobs: Arc::new(bpm_key::Jobs::default()),
             saved_matches,
             track_details: track_details::Jobs::default(),
             soloist: None,
@@ -2947,6 +2955,7 @@ impl Worker {
                     file,
                     link,
                 } => self.analyze_bpm_key(uri, request, file, link),
+                Command::CancelBpmKey { request } => self.bpm_key_jobs.cancel(request),
                 Command::DownloadFinished { id, result } => {
                     self.download_jobs.finish(id);
                     self.emit(Event::Download(crate::downloads::Event::Finished {

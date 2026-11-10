@@ -5,6 +5,7 @@
 //! worker thread; it never touches the interface or the audio device.
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
@@ -18,8 +19,9 @@ use symphonia::core::probe::Hint;
 const UNREADABLE: &str = "That file couldn't be read as audio.";
 
 /// `path` mixed down to mono, at its own sample rate, for at most
-/// `max_seconds`. Returns the samples and the rate they are at.
-pub fn mono(path: &Path, max_seconds: f64) -> Result<(Vec<f32>, u32), String> {
+/// `max_seconds`. Returns the samples and the rate they are at. A set
+/// `cancel` stops the reading between packets.
+pub fn mono(path: &Path, max_seconds: f64, cancel: &AtomicBool) -> Result<(Vec<f32>, u32), String> {
     let file =
         std::fs::File::open(path).map_err(|_| "That file couldn't be opened.".to_string())?;
     let mut hint = Hint::new();
@@ -53,7 +55,12 @@ pub fn mono(path: &Path, max_seconds: f64) -> Result<(Vec<f32>, u32), String> {
         .map_err(|_| UNREADABLE.to_string())?;
     let wanted = (max_seconds.max(0.0) * f64::from(rate)) as usize;
     let mut mono = Vec::with_capacity(wanted);
+    let mut packets = 0_usize;
     while mono.len() < wanted {
+        if packets.is_multiple_of(32) && cancel.load(Ordering::Relaxed) {
+            return Err(crate::bpm_key::CANCELLED.to_string());
+        }
+        packets += 1;
         let packet = match probed.format.next_packet() {
             Ok(packet) => packet,
             // The end of the file is the end of the reading; a broken tail
@@ -128,13 +135,17 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("tone.wav");
         std::fs::write(&path, wav(8_000, 1.5, 220.0)).unwrap();
-        let (samples, rate) = mono(&path, 30.0).expect("a plain WAV reads");
+        let never = AtomicBool::new(false);
+        let (samples, rate) = mono(&path, 30.0, &never).expect("a plain WAV reads");
         assert_eq!(rate, 8_000);
         assert_eq!(samples.len(), 12_000);
         assert!(samples.iter().any(|sample| sample.abs() > 0.1));
         // The limit stops the reading early.
-        let (short, _) = mono(&path, 0.5).expect("a WAV reads");
+        let (short, _) = mono(&path, 0.5, &never).expect("a WAV reads");
         assert_eq!(short.len(), 4_000);
+        // A cancel stops it before the end.
+        let cancelled = AtomicBool::new(true);
+        assert!(mono(&path, 30.0, &cancelled).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -145,7 +156,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("notes.txt");
         std::fs::write(&path, b"not a song").unwrap();
-        assert!(mono(&path, 30.0).is_err());
+        assert!(mono(&path, 30.0, &AtomicBool::new(false)).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

@@ -1108,7 +1108,13 @@ async fn a_stream_can_be_sampled_for_analysis_without_playing() {
     let handle = tokio::runtime::Handle::current();
     let http = crate::http::Http::new(reqwest::Client::builder().no_proxy().build().unwrap());
     let mono = tokio::task::spawn_blocking(move || {
-        crate::soundcloud::engine::sample(&http, handle, &stream, 2.0)
+        crate::soundcloud::engine::sample(
+            &http,
+            handle,
+            &stream,
+            2.0,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
     })
     .await
     .unwrap()

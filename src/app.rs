@@ -710,6 +710,8 @@ pub struct App {
     /// BPM and key readings worked out on demand, by song. See
     /// [`crate::bpm_key`].
     pub bpm_key: crate::bpm_key::State,
+    /// The readings remembered across launches.
+    bpm_key_cache: crate::bpm_key::Cache,
     /// Whether the panel follows the current line. Manual scrolling disables
     /// it until Follow is used or the track changes.
     pub lyrics_following: bool,
@@ -1181,6 +1183,11 @@ impl App {
         let mixed_playlists_writable = mixed.is_ok();
         let playlist_overlay_writable = overlay.is_ok();
         let palette = settings.fixed_palette().unwrap_or_else(Palette::dark);
+        let bpm_key_cache = crate::bpm_key::Cache::load(dirs.bpm_key_cache_file());
+        let remembered_bpm_key: Vec<(String, crate::bpm_key::Reading)> = bpm_key_cache
+            .readings()
+            .map(|(uri, reading)| (uri.clone(), *reading))
+            .collect();
         let mut app = Self {
             youtube: Default::default(),
             playback_owner: PlaybackOwner::SpotifyConnect,
@@ -1398,6 +1405,7 @@ impl App {
             lyrics_query: None,
             credits: Default::default(),
             bpm_key: Default::default(),
+            bpm_key_cache,
             lyrics_following: true,
             lyrics_line_shown: None,
             show_devices: false,
@@ -1508,6 +1516,7 @@ impl App {
             player_bar_analyser: crate::vis::WideAnalyser::default(),
             pixels_per_point: 1.0,
         };
+        app.bpm_key.load(remembered_bpm_key);
         app.local.volume = app.settings.volume;
         app.restore_hybrid(session.hybrid.clone());
         app.restore_hybrid_start(session.hybrid_start.clone());
@@ -3275,7 +3284,7 @@ impl App {
                     uri,
                     request,
                     result,
-                } => self.bpm_key.finish(&uri, request, result),
+                } => self.receive_bpm_key(uri, request, result),
                 Event::Lyrics { uri, request, result } => self.receive_lyrics(&uri, request, result),
                 Event::PlaylistCache {
                     account_id,
@@ -4643,7 +4652,6 @@ impl App {
 
     pub(super) fn reset_track_details(&mut self) {
         self.credits.clear();
-        self.bpm_key.clear();
         self.frame_now = None;
         self.clear_lyrics();
         if self.show_lyrics_panel || self.lyrics_fullscreen.is_some() {
@@ -13864,6 +13872,11 @@ impl App {
                 }
             }
             Action::RequestBpmKey(uri) => self.request_bpm_key(uri),
+            Action::CancelBpmKey(uri) => {
+                if let Some(request) = self.bpm_key.cancel(&uri) {
+                    self.backend.send(Command::CancelBpmKey { request });
+                }
+            }
             Action::ToggleDevicesPopup => {
                 self.show_devices = !self.show_devices;
                 if self.show_devices {
@@ -15032,8 +15045,13 @@ impl App {
     /// A reading the passive analyser already made is kept and shown without
     /// another request.
     fn request_bpm_key(&mut self, uri: String) {
+        if self.bpm_key.reading(&uri).is_some() {
+            return;
+        }
         if let Some(reading) = self.beats.known(&uri) {
             self.bpm_key.remember(&uri, reading);
+            self.bpm_key_cache.insert(&uri, reading);
+            self.save_bpm_key_cache();
             return;
         }
         let file = self
@@ -15044,7 +15062,7 @@ impl App {
             return;
         };
         if file.is_none()
-            && let Some(reason) = crate::bpm_key::unhearable(&uri)
+            && let Some(reason) = crate::bpm_key::unavailable(&uri)
         {
             self.bpm_key.finish(&uri, request, Err(reason.to_owned()));
             return;
@@ -15056,6 +15074,37 @@ impl App {
             file,
             link,
         });
+    }
+
+    /// Takes an on-demand reading: shows it on the row and remembers it for
+    /// the next launch. A late answer for a replaced or cancelled request is
+    /// already dropped by `State`, so it never reaches the cache.
+    fn receive_bpm_key(
+        &mut self,
+        uri: String,
+        request: u64,
+        result: Result<crate::bpm_key::Reading, String>,
+    ) {
+        let current = self.bpm_key.request(&uri) == Some(request);
+        let reading = result.as_ref().ok().copied();
+        self.bpm_key.finish(&uri, request, result);
+        if current && let Some(reading) = reading {
+            self.bpm_key_cache.insert(&uri, reading);
+            self.save_bpm_key_cache();
+        }
+    }
+
+    /// Hands the encoded cache to the file writer. Encoding happens here,
+    /// the disk write on the writer's own thread.
+    fn save_bpm_key_cache(&self) {
+        let Some(path) = self.bpm_key_cache.path().map(std::path::Path::to_path_buf) else {
+            return;
+        };
+        self.files.write(
+            &path,
+            self.bpm_key_cache.encode(),
+            fastframe_file::Access::Private,
+        );
     }
 
     /// The file a song downloaded to this session, by its URI or by the link
@@ -17451,14 +17500,22 @@ mod tests {
         app.backend.shutdown();
     }
 
-    /// A Spotify song Encore never hears explains itself at once, without a
-    /// request reaching the backend.
+    /// A Spotify song with no download and no remembered match explains
+    /// itself: the backend has nothing to decode and says why.
     #[test]
     fn a_spotify_song_without_a_download_says_why_it_cannot_be_measured() {
         let mut app = headless_app();
         let ctx = egui::Context::default();
         let uri = "spotify:track:no-audio";
         app.apply(Action::RequestBpmKey(uri.into()), &ctx);
+        assert!(matches!(app.bpm_key.get(uri), Some(Loadable::Loading)));
+        for _ in 0..500 {
+            app.handle_events();
+            if matches!(app.bpm_key.get(uri), Some(Loadable::Failed(_))) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let Some(Loadable::Failed(reason)) = app.bpm_key.get(uri) else {
             panic!("the row should hold the reason, not a reading");
         };
@@ -17469,6 +17526,60 @@ mod tests {
             "nothing is left running"
         );
         app.backend.shutdown();
+    }
+
+    /// A Spotify song with a download the app already has is measured from
+    /// that file, and the reading is handed to the cache writer, never
+    /// written on the drawing thread.
+    #[test]
+    fn a_downloaded_spotify_song_is_measured_and_cached() {
+        let mut app = headless_app();
+        let ctx = egui::Context::default();
+        let folder = crate::test_dirs::temp_dir().join(format!(
+            "spotifast-bpm-key-cache-test-{}-{:016x}",
+            std::process::id(),
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&folder).unwrap();
+        let file = folder.join("Click track.wav");
+        std::fs::write(&file, click_wav(11_025, 20.0, 120.0)).unwrap();
+        let uri = "soundcloud:track:123";
+        app.downloaded_files.insert(uri.into(), file);
+        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let seen = Arc::clone(&written);
+        app.files = Arc::new(fastframe_file::Writer::with_write(
+            move |path, bytes, _access| {
+                seen.lock()
+                    .unwrap()
+                    .push((path.to_path_buf(), bytes.to_vec()));
+                Ok(())
+            },
+        ));
+        app.apply(Action::RequestBpmKey(uri.into()), &ctx);
+        for _ in 0..500 {
+            app.handle_events();
+            if app.known_bpm_key(uri).is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let (bpm, _) = app.known_bpm_key(uri).expect("the file answers");
+        assert!((i32::from(bpm) - 120).abs() <= 2, "read {bpm}");
+        app.files.flush(Duration::from_secs(2));
+        let written = written.lock().unwrap();
+        let (path, bytes) = written
+            .iter()
+            .find(|(path, _)| *path == app.dirs.bpm_key_cache_file())
+            .expect("the cache is written through the writer");
+        let file: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        assert_eq!(
+            file["readings"][uri]["bpm"].as_u64(),
+            Some(u64::from(bpm)),
+            "{}",
+            path.display()
+        );
+        app.backend.shutdown();
+        let _ = std::fs::remove_dir_all(folder);
     }
 
     #[test]
