@@ -105,6 +105,14 @@ pub enum Command {
         #[serde(default)]
         duration_ms: Option<u32>,
     },
+    /// Put a YouTube song's audio on this listener's own edge server, so the
+    /// phone can play it later while this computer is off. The edge asks for
+    /// one song, or at most two upcoming ones; never a list to hunt through.
+    Fetch {
+        source: String,
+        #[serde(default)]
+        sources: Vec<String>,
+    },
 }
 
 /// Whether a phone may have this computer play or change `uri`. Anything else,
@@ -122,6 +130,17 @@ pub fn allowed_uri(uri: &str) -> bool {
             ]
             .iter()
             .any(|prefix| uri.starts_with(prefix)))
+}
+
+/// A song whose audio the edge may ask this computer to fetch. Only a plain
+/// YouTube video id: never a search, a playlist or a URL with parameters.
+pub fn allowed_fetch(source: &str) -> bool {
+    source.strip_prefix("youtube:video:").is_some_and(|id| {
+        id.len() == 11
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    })
 }
 
 /// A song as the phone shows it.
@@ -262,6 +281,26 @@ mod tests {
         );
         assert!(serde_json::from_str::<Incoming>(r#"{"id":"1","kind":"format_disk"}"#).is_err());
         assert!(serde_json::from_str::<Incoming>(r#"{"id":"1","kind":"seek"}"#).is_err());
+        assert_eq!(
+            read(&format!(
+                r#"{{{id},"kind":"fetch","source":"youtube:video:aB9_-012xyz","sources":[]}}"#
+            )),
+            Command::Fetch {
+                source: "youtube:video:aB9_-012xyz".into(),
+                sources: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn the_edge_may_only_ask_for_a_plain_youtube_video() {
+        assert!(allowed_fetch("youtube:video:aB9_-012xyz"));
+        assert!(!allowed_fetch("youtube:video:short"));
+        assert!(!allowed_fetch(
+            "https://www.youtube.com/watch?v=aB9_-012xyz"
+        ));
+        assert!(!allowed_fetch("youtube:playlist:aB9_-012xyz"));
+        assert!(!allowed_fetch("youtube:video:aB9_-012xy?list=1"));
     }
 
     #[test]

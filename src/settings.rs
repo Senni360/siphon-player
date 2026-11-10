@@ -377,6 +377,22 @@ pub struct Settings {
     pub web_client_id: Option<String>,
     /// A phone has been linked, so this computer listens for it.
     pub phone_linked: bool,
+    /// Talk to the always-on edge server, so the phone works while this
+    /// computer is off. Off: this computer keeps only its group connection,
+    /// and its playlists, queue, matches and local files stay here.
+    #[serde(default = "default_edge_on")]
+    pub edge_enabled: bool,
+    /// Offer the local files in a playlist to the linked phone: Encore
+    /// uploads them to the listener's own edge server, slowly and in the
+    /// background, so the phone can play them while this computer is off.
+    /// On for files from 0.15.0 onward; turning it off also stops uploads.
+    #[serde(default = "default_local_files_on_phone")]
+    pub local_files_on_phone: bool,
+    /// Keep the Spotify and SoundCloud sign-ins in the edge vault so the
+    /// phone works while this computer is off. `None` follows the account:
+    /// on for the group's owner, off for everyone else.
+    #[serde(default)]
+    pub vault_signins: Option<bool>,
     /// Keep animations to a minimum, whatever the system says.
     pub reduce_motion: bool,
     /// Legacy reminder time, retained for older Siphon versions.
@@ -553,6 +569,9 @@ impl Default for Settings {
             show_shortcut_hints: true,
             web_client_id: None,
             phone_linked: false,
+            edge_enabled: true,
+            local_files_on_phone: true,
+            vault_signins: None,
             reduce_motion: false,
             personal_app_nudge_at: None,
             personal_app_intro_seen: false,
@@ -603,6 +622,17 @@ impl Default for Settings {
 
 fn default_buffer_ms() -> u32 {
     crate::sink::DEFAULT_BUFFER_MS
+}
+
+/// A linked phone gets a playlist's local files unless the listener says no.
+fn default_local_files_on_phone() -> bool {
+    true
+}
+
+/// The edge is on for files from before the setting existed: a linked phone
+/// already expects to reach this computer's library with it off.
+fn default_edge_on() -> bool {
+    true
 }
 
 /// A beat's BPM and key show after ten seconds of listening, in files from
@@ -1102,6 +1132,23 @@ mod tests {
         assert!(settings.system_theme_cache.is_none());
         assert_eq!(settings.theme, ThemeChoice::Dark);
         assert_eq!(settings.volume, 37);
+    }
+
+    /// The edge connection is on for files from before the setting existed,
+    /// and a listener who turned it off keeps it off.
+    #[test]
+    fn the_edge_connection_defaults_on_and_a_saved_off_stays_off() {
+        assert!(Settings::default().edge_enabled);
+        let absent: Settings = serde_json::from_str("{}").unwrap();
+        assert!(absent.edge_enabled);
+        let old_file: Settings = serde_json::from_value(serde_json::json!({"volume": 37})).unwrap();
+        assert!(old_file.edge_enabled);
+        let off = Settings {
+            edge_enabled: false,
+            ..Default::default()
+        };
+        let reloaded: Settings = serde_json::from_str(&off.encode().unwrap()).unwrap();
+        assert!(!reloaded.edge_enabled);
     }
 
     /// A beat's BPM and key: ten seconds for files from before the setting

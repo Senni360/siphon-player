@@ -820,6 +820,7 @@ pub fn autostart() -> fastframe_autostart::Autostart {
 
 mod artist_sources;
 mod download_jobs;
+mod edge;
 mod hybrid;
 pub(crate) mod remote;
 pub(crate) mod soundcloud_library;
@@ -887,6 +888,8 @@ pub enum Command {
     WarmYouTube(String),
     /// A linked phone's connection.
     Remote(remote::RemoteRequest),
+    /// The always-on edge: realtime socket, sync store, uploads and vault.
+    Edge(crate::edge::Request),
     /// What an artist has on SoundCloud and YouTube.
     ArtistSources(crate::artist_sources::Request),
     ChooseArtistAccount {
@@ -1344,6 +1347,8 @@ pub enum Event {
     YouTubeAccount(youtube_account::Response),
     ForYou(Box<crate::for_you::ForYou>),
     Remote(remote::RemoteEvent),
+    /// What the always-on edge passed on.
+    Edge(crate::edge::Event),
     ArtistSource {
         artist: String,
         ask: u64,
@@ -2331,6 +2336,11 @@ struct Worker {
     saved_matches: crate::downloads::saved::Saved,
     track_details: track_details::Jobs,
     hybrid: hybrid::HybridRuntime,
+    /// The always-on edge, once a phone is linked.
+    edge: Option<crate::edge::Runtime>,
+    /// Whether this computer may speak to the edge at all. Off until the app
+    /// says otherwise, and off again the moment the listener turns it off.
+    edge_allowed: bool,
     soloist: Option<crate::soloist::Handle>,
     soloist_generation: u64,
     dirs: AppDirs,
@@ -2461,6 +2471,8 @@ impl Worker {
         let saved_matches = crate::downloads::saved::Saved::new(dirs.spotify_matches_file());
         Self {
             hybrid: hybrid::HybridRuntime::default(),
+            edge: None,
+            edge_allowed: false,
             friends_feed: None,
             live: None,
             discord: None,
@@ -3012,6 +3024,7 @@ impl Worker {
                 }
                 Command::WarmYouTube(uri) => self.warm_youtube(uri),
                 Command::Remote(request) => self.remote(request),
+                Command::Edge(request) => self.edge(request),
                 Command::ArtistSources(request) => self.artist_sources(request),
                 Command::ChooseArtistAccount {
                     request,
