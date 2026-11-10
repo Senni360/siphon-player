@@ -126,9 +126,7 @@ test("an evicted cache entry is a plain 404, also for a range request", async (t
   assert.equal(goneRange.status, 404);
 });
 
-test("a cache entry evicted between the headers and the first byte never yields a short 206", {
-  todo: "media.mjs resolves the entry and writes headers before opening the file; an eviction in that window closes the socket with no response at all",
-}, async (t) => {
+test("a cache entry evicted between the headers and the first byte never yields a short 206", async (t) => {
   const ctx = await startEdge();
   t.after(() => ctx.close());
   const source = await tempDir();

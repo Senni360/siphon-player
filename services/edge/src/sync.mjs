@@ -4,7 +4,7 @@
 
 import fs from "node:fs/promises";
 import path from "node:path";
-import { atomicWriteJson, byteLength, KeyedQueue, readJsonFile, userHash } from "./atomic.mjs";
+import { atomicWriteJson, byteLength, CorruptJsonError, KeyedQueue, readJsonFile, userHash } from "./atomic.mjs";
 
 export const SYNC_DOCS = Object.freeze(["playlists", "queue", "matches"]);
 const DOC_SET = new Set(SYNC_DOCS);
@@ -110,13 +110,15 @@ export class SyncStore {
   #dir;
   #limit;
   #now;
+  #logger;
   #queue = new KeyedQueue();
   #users = new Map();
 
-  constructor({ dir, userMaxBytes = 4 * 1024 * 1024, now = Date.now }) {
+  constructor({ dir, userMaxBytes = 4 * 1024 * 1024, now = Date.now, logger = null }) {
     this.#dir = path.join(dir, "sync");
     this.#limit = userMaxBytes;
     this.#now = now;
+    this.#logger = logger;
   }
 
   userDir(sub) {
@@ -128,7 +130,7 @@ export class SyncStore {
     const key = userHash(sub).slice(0, 32);
     let slot = this.#users.get(key);
     if (!slot) {
-      slot = { key, loaded: null, docs: new Map(), lastUsed: this.#now() };
+      slot = { key, loaded: null, docs: new Map(), corrupt: new Set(), lastUsed: this.#now() };
       this.#users.set(key, slot);
     }
     slot.lastUsed = this.#now();
@@ -137,16 +139,36 @@ export class SyncStore {
 
   async #load(slot) {
     if (slot.loaded) return slot.loaded;
-    slot.loaded = (async () => {
+    const loading = (async () => {
       const dir = path.join(this.#dir, slot.key);
       for (const doc of SYNC_DOCS) {
-        const stored = await readJsonFile(path.join(dir, `${doc}.json`), null);
+        if (slot.corrupt.has(doc)) throw new SyncError("sync_corrupt", 500);
+        const file = path.join(dir, `${doc}.json`);
+        let stored;
+        try {
+          stored = await readJsonFile(file, null);
+        } catch (error) {
+          if (!(error instanceof CorruptJsonError)) throw error;
+          // Keep the bytes for repair and refuse to invent revision 0: a phone
+          // holding revision 41 must not see a fresh document.
+          const moved = `${file}.corrupt-${this.#now()}`;
+          await fs.rename(file, moved).catch(() => {});
+          slot.corrupt.add(doc);
+          this.#logger?.error("sync_corrupt", { doc });
+          throw new SyncError("sync_corrupt", 500);
+        }
         if (stored && typeof stored === "object" && stored.doc === doc && Number.isSafeInteger(stored.revision)) {
           slot.docs.set(doc, stored);
         }
       }
       return slot;
     })();
+    // A transient read error is retried on the next request instead of being
+    // cached as a permanently broken user.
+    slot.loaded = loading.catch((error) => {
+      slot.loaded = null;
+      throw error;
+    });
     return slot.loaded;
   }
 

@@ -59,9 +59,7 @@ async function onDisk(cache) {
   return { names, bytes };
 }
 
-test("concurrent evictions keep the byte total equal to the files that remain", {
-  todo: "cache.mjs enforce() subtracts an evicted entry's size once per concurrent run, so the in-memory total drifts below the disk",
-}, async (t) => {
+test("concurrent evictions keep the byte total equal to the files that remain", async (t) => {
   const dir = await tempDir();
   const source = await tempDir();
   t.after(async () => {

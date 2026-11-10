@@ -37,6 +37,35 @@ export function parseRange(header, size) {
   return { start, end: Math.min(end, size - 1) };
 }
 
+/**
+ * Parses a range before the total size is known. A suffix range cannot be
+ * resolved against a growing file, so it is reported as `{suffix: true}` and
+ * the caller waits for the fetch to finish first.
+ */
+export function parsePendingRange(header) {
+  if (header === undefined || header === null || header === "") return null;
+  if (typeof header !== "string") return { unsatisfiable: true };
+  const value = header.trim();
+  if (!value.toLowerCase().startsWith("bytes=")) return { unsatisfiable: true };
+  const spec = value.slice(6).trim();
+  if (spec.length === 0 || spec.includes(",")) return { unsatisfiable: true };
+  const match = /^(\d*)-(\d*)$/.exec(spec);
+  if (!match) return { unsatisfiable: true };
+  const [, startText, endText] = match;
+  if (startText === "" && endText === "") return { unsatisfiable: true };
+  if (startText === "") {
+    const suffix = Number(endText);
+    if (!Number.isSafeInteger(suffix) || suffix <= 0) return { unsatisfiable: true };
+    return { suffix };
+  }
+  const start = Number(startText);
+  if (!Number.isSafeInteger(start) || start < 0) return { unsatisfiable: true };
+  if (endText === "") return { start, end: null };
+  const end = Number(endText);
+  if (!Number.isSafeInteger(end) || end < start) return { unsatisfiable: true };
+  return { start, end };
+}
+
 export function contentRange(start, end, size) {
   return `bytes ${start}-${end}/${size}`;
 }
