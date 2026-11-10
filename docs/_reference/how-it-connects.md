@@ -139,7 +139,9 @@ public permalink, a Spotify track as the same song found by YouTube or SoundClou
 the download matcher (a saved match outranks a new search). Only public sources the
 edge accepts are sent, and a refusal, a timeout or a slow answer falls back to asking
 this computer as before. A YouTube song asks this computer first while it is online;
-without it the edge fetches the video's audio, so those songs play there too. A
+without it the edge is tried, and the page's normal "can't play here" state follows if
+that fails too. YouTube refuses the edge's server without a signed-in browser's cookies,
+which it doesn't use, so those songs normally need this computer. A
 SoundCloud link carrying a private `s-` path or a query string is never sent to the
 edge. Group links and anything else keep going through this computer. The phone also
 asks the edge to warm the next two songs ahead of time, instead of only looking up
