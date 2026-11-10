@@ -1748,6 +1748,16 @@ fn item_menu_at(
                 app.actions
                     .push(Action::Open(Page::Album(album.id.clone())));
             }
+            if super::row_tools::has_credits(&uri)
+                && menu_item(
+                    ui,
+                    &palette,
+                    Some(Icon::Info),
+                    &gettext(locale, "Show credits"),
+                )
+            {
+                super::row_tools::open_credits(ui.ctx(), &uri);
+            }
         }
         PlayableItem::Episode(episode) => {
             if let Some(show) = &episode.show

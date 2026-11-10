@@ -8,10 +8,10 @@ use serde_json::Value;
 
 use crate::model::Loadable;
 
-/// Verified in Spotify's public web-player bundles on 2026-10-30:
-/// xpui-root-dialogs.e544a0c2.js and xpui-routes-track-v2.755ee45c.js.
+/// Verified in Spotify's public web-player bundles on 2026-11-10:
+/// xpui-root-dialogs.1b7cd465.js (the hash changes when Spotify rebuilds it).
 pub const OPERATION: &str = "queryTrackCreditsGroupedModal";
-pub const HASH: &str = "f135fb9be58a72d041ab5d214d817021a272405d883860468e2627afb01a3ca9";
+pub const HASH: &str = "5c109593bca8ea4cb28104e178820ff035418fb4694d34d10c89cc755fe64694";
 pub const PAGE_SIZE: usize = 100;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
