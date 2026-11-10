@@ -1,10 +1,11 @@
 // The frame around every screen: the tabs, the mini player, and the back step.
 
 import { app, h, icon } from './dom.js';
-import { current, go, trail } from './navigation.js';
+import { current, go, moved, trail } from './navigation.js';
 import { hooks, openedAt, player, WAKE_MS } from './state.js';
 import { hasSpotify } from './spotify.js';
-import { buildMini, markPlaying, refreshPlayer, restoreHere } from './player.js';
+import { markPlaying, refreshPlayer, restoreHere } from './player.js';
+import { buildMini } from './playing.js';
 import { homeScreen } from './screens/home.js';
 import { searchScreen } from './screens/search.js';
 import { libraryScreen } from './screens/library.js';
@@ -13,16 +14,17 @@ import { listScreen } from './screens/list.js';
 import { artistScreen } from './screens/artist.js';
 import { sourceScreen } from './screens/source.js';
 import { sharedScreen } from './screens/shared.js';
+import { settingsScreen } from './screens/settings.js';
 
 export const TABS = [['home', 'Home', homeScreen], ['search', 'Search', searchScreen], ['library', 'Library', libraryScreen], ['group', 'Group', groupScreen]];
-export const SCREENS = { list: listScreen, artist: artistScreen, source: sourceScreen, shared: sharedScreen };
+export const SCREENS = { list: listScreen, artist: artistScreen, source: sourceScreen, shared: sharedScreen, settings: settingsScreen };
 
 /** A tab's page shows as it was left for this long, then reads again. */
 const TAB_KEEPS_MS = 3 * 60 * 1000;
 const tabViews = new Map();
 let screen = null;
+let tabsNode = null;
 let bannerSlot = null;
-let drawn = 0;
 let shownView = null;
 let tabOf = 'home';
 
@@ -32,19 +34,19 @@ export function keepPlace() {
 
 export function renderBanner() {
   if (!player.online && Date.now() - openedAt < WAKE_MS) {
-    bannerSlot?.replaceChildren(h('div', { class: 'banner' }, h('div', {}, h('b', { text: 'Connecting to your computer…' }), 'This can take a few seconds.')));
+    bannerSlot?.replaceChildren(h('div', { class: 'banner waking', role: 'status' }, h('span', { class: 'dot' }),
+      h('div', {}, h('b', { text: 'Connecting to your computer…' }), 'This can take a few seconds.')));
     setTimeout(renderBanner, WAKE_MS);
     return;
   }
   const telling = hasSpotify()
     ? 'Showing your Spotify, played on your Spotify devices. Open it for SoundCloud, YouTube and everything else.'
     : 'Open it to browse your library and play. Your group works from here either way.';
-  bannerSlot?.replaceChildren(...(player.online ? [] : [h('div', { class: 'banner' }, h('span', { class: 'dot' }),
+  bannerSlot?.replaceChildren(...(player.online ? [] : [h('div', { class: 'banner', role: 'status' }, h('span', { class: 'dot' }),
     h('div', {}, h('b', { text: "Encore isn't open on your computer" }), telling))]));
 }
 
 export function render(fresh = false) {
-  drawn++;
   const tab = TABS.find(([page]) => page === current.page);
   const holder = tab ? tabViews.get(current.page) : current.view;
   let view = !fresh && holder && (!tab || Date.now() - holder.at < TAB_KEEPS_MS) ? holder : null;
@@ -54,33 +56,59 @@ export function render(fresh = false) {
     if (tab) tabViews.set(current.page, view);
     else current.view = view;
   }
+  const same = shownView === view;
   shownView = view;
+  // The page arrives from the side it was reached from: forward, back, or a tab's plain fade.
+  view.node.className = `page${tab ? '' : ' pushed'}${same ? '' : ` enter-${moved}`}`;
   screen.replaceChildren(view.node);
   bannerSlot = view.node.querySelector('.banner-slot');
+  // The banner sits under a pushed page's bar, where it does not cover the way back.
+  const bar = view.node.querySelector(':scope > .bar');
+  if (bar && bannerSlot.previousElementSibling !== bar) bar.after(bannerSlot);
   renderBanner();
   screen.scrollTop = view.scroll;
+  watchBar();
   markPlaying();
-  document.querySelectorAll('nav.tabs button').forEach(button => {
-    if (button.dataset.page === (tab ? current.page : tabOf)) button.setAttribute('aria-current', 'page');
-    else button.removeAttribute('aria-current');
+  const shownTab = tab ? current.page : tabOf;
+  tabsNode.querySelectorAll('button').forEach((button, at) => {
+    if (button.dataset.page === shownTab) {
+      button.setAttribute('aria-current', 'page');
+      tabsNode.style.setProperty('--tab', String(at));
+    } else button.removeAttribute('aria-current');
   });
   if (tab) tabOf = current.page;
 }
 
+/** A pushed page's bar takes its glass, and its name, once the heading has gone under it. */
+let barFrame = 0;
+function watchBar() {
+  if (barFrame) return;
+  barFrame = requestAnimationFrame(() => {
+    barFrame = 0;
+    const bar = shownView?.node.querySelector(':scope > .bar');
+    if (!bar) return;
+    const title = shownView.node.querySelector('h1.title');
+    const under = bar.getBoundingClientRect().bottom;
+    bar.classList.toggle('scrolled', title ? title.getBoundingClientRect().bottom < under + 4 : screen.scrollTop > 24);
+  });
+}
+
 export function shell() {
   screen = h('main');
+  screen.addEventListener('scroll', watchBar, { passive: true });
   player.mini = buildMini();
-  const tabs = h('nav', { class: 'tabs', 'aria-label': 'Sections' }, TABS.map(([page, label]) => h('button', { 'data-page': page, onclick: () => {
-    // Pressed again it goes to the top, and pressed at the top it reads again.
-    if (current.page === page) {
-      if (screen.scrollTop > 0) screen.scrollTo({ top: 0, behavior: 'smooth' });
-      else render(true);
-      return;
-    }
-    trail.length = 0;
-    go({ page });
-  } }, icon(page), label)));
-  app.replaceChildren(screen, player.mini.node, tabs);
+  tabsNode = h('nav', { class: 'tabs', 'aria-label': 'Sections' }, h('span', { class: 'tab-pill', 'aria-hidden': 'true' }),
+    TABS.map(([page, label]) => h('button', { 'data-page': page, onclick: () => {
+      // Pressed again it goes to the top, and pressed at the top it reads again.
+      if (current.page === page) {
+        if (screen.scrollTop > 0) screen.scrollTo({ top: 0, behavior: 'smooth' });
+        else render(true);
+        return;
+      }
+      trail.length = 0;
+      go({ page }, true, 'tab');
+    } }, icon(page), h('span', { text: label }))));
+  app.replaceChildren(player.mini.glow, screen, h('div', { class: 'dock' }, player.mini.node, tabsNode));
   render();
   restoreHere();
   refreshPlayer();
