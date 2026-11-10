@@ -178,6 +178,35 @@ async fn credentials_are_bound_to_service_and_redirects_are_not_followed() {
     assert!(Client::new(Http::default(), "https://user:secret@remote.invalid/api").is_err());
 }
 
+#[tokio::test]
+async fn a_gateway_failure_blames_the_service_except_where_spotify_answers() {
+    let (client, task) = server(vec![
+        (502, json!({"error": "Bad gateway"})),
+        (502, json!({"error": "Bad gateway"})),
+    ])
+    .await;
+    let identity = Identity {
+        user_id: "a".into(),
+        secret: "a".repeat(64),
+        base_url: client.base_url().into(),
+    };
+    let feed = client.feed(&identity, None).await.unwrap_err();
+    assert!(
+        feed.contains("group service"),
+        "a failing group gateway is not Spotify's fault: {feed}"
+    );
+    let sign_in = client
+        .sign_in("token", "device", None)
+        .await
+        .err()
+        .expect("the sign-in is refused");
+    assert!(
+        sign_in.contains("Spotify"),
+        "only the sign-in call asks Spotify anything: {sign_in}"
+    );
+    task.await.unwrap();
+}
+
 #[test]
 fn optimistic_state_does_not_accept_stale_events_after_leave() {
     use super::state::Update;

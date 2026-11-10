@@ -137,6 +137,9 @@ not consume a queue row or restore an older queue saved on this computer.
    how it started: the song before it ended, you pressed Next, you
    clicked its queue row, or another device skipped to it. Only that
    occurrence leaves: another copy you queued remains until its own turn.
+   While the queue's own answer still names the song before it, the row at
+   the top that holds the song already playing is that occurrence, not the
+   next one, so the list leaves it out until the answer catches up.
 
 4. **Next removes the top row right away.** The app doesn't wait for
    Spotify to confirm it.

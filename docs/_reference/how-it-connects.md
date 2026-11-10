@@ -481,6 +481,12 @@ song details Spotify did not supply in full, hands the read to the Web API
 instead of caching rows without songs. A song Spotify no longer has, or
 withholds for legal reasons, is an empty row, as the Web API shows it.
 
+A player command (play, pause, seek, volume, shuffle, repeat, transfer) that
+loses its connection is sent again twice, 200 ms and 700 ms later, because the
+interface has already shown it as done; only after those tries does it fail.
+Next and previous are sent again only when the connection never opened, since
+repeating one that may have arrived would skip twice.
+
 While a shared grant is signed in, the playlist list and fallback Made for you
 searches go through it even when a personal app is set up, because a personal
 app's list leaves out Spotify's own playlists. Without one, they go to the
