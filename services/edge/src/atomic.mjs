@@ -67,6 +67,23 @@ export async function syncDir(dir) {
 }
 
 /**
+ * Flushes an existing file. Some platforms refuse fsync on a read-only handle;
+ * there the write path still produced the bytes, so the failure is skipped
+ * rather than turning into a failed cache write.
+ */
+export async function fsyncFile(file) {
+  let handle;
+  try {
+    handle = await fs.open(file, "r+");
+    await handle.sync();
+  } catch (error) {
+    if (!["EPERM", "EACCES", "EINVAL", "ENOTSUP", "ENOSYS"].includes(error?.code)) throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
  * Writes bytes to a fresh temp file in the same directory, fsyncs, renames
  * over the target and flushes the directory. A crash leaves the previous file
  * intact, and nothing half-written ever carries the final name.

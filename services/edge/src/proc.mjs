@@ -5,6 +5,10 @@
 // On POSIX a child is started in its own process group, so a cancelled job can
 // take down helpers it spawned as well. Windows has no process groups to signal
 // this way, so the direct child is terminated instead.
+//
+// Every child is supervised: a timeout, an abort signal, a cancelled waiter or
+// a shutdown all reach the same kill path, and the returned promise always
+// settles even when a grandchild keeps a pipe open.
 
 import { spawn as nodeSpawn } from "node:child_process";
 
@@ -35,12 +39,14 @@ export function spawnOptions({ stdio = ["ignore", "pipe", "pipe"], detached = tr
 }
 
 /** Terminates a child and, on POSIX, everything it started. */
-export function killTree(child) {
-  if (!child || typeof child.pid !== "number" || child.exitCode !== null) return;
-  if (process.platform !== "win32") {
+export function killTree(child, { platform = process.platform, kill } = {}) {
+  if (!child || typeof child.pid !== "number" || child.pid <= 0) return;
+  if (child.exitCode !== null || child.signalCode) return;
+  const signal = kill ?? process.kill.bind(process);
+  if (platform !== "win32") {
     try {
       // The child leads its own group, so the negative pid is the whole tree.
-      process.kill(-child.pid, "SIGKILL");
+      signal(-child.pid, "SIGKILL");
       return;
     } catch {
       // Fall through to the single process.
@@ -53,57 +59,105 @@ export function killTree(child) {
   }
 }
 
+function validateArgs(args) {
+  return Array.isArray(args) && !args.some((arg) => typeof arg !== "string");
+}
+
+/**
+ * Starts a child and returns `{ child, done }` immediately. `done` settles
+ * exactly once: on exit, on `timeoutMs`, on `signal` abort, or on a spawn
+ * error. On any failure the whole process tree is killed first, so a tool that
+ * ignores its direct child cannot pin the caller forever.
+ */
+export function startProcess(command, args, {
+  timeoutMs = 120_000,
+  spawn = nodeSpawn,
+  onSpawn,
+  signal,
+  stdio,
+} = {}) {
+  if (!validateArgs(args)) {
+    return { child: null, done: Promise.reject(new ProcessError("invalid_arguments")) };
+  }
+  let child;
+  try {
+    child = spawn(command, args, spawnOptions({ stdio }));
+  } catch {
+    return { child: null, done: Promise.reject(new ProcessError("spawn_failed")) };
+  }
+  let settled = false;
+  let timer = null;
+  let onAbort = null;
+  const done = new Promise((resolve, reject) => {
+    const cleanup = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      if (onAbort) signal?.removeEventListener("abort", onAbort);
+    };
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (error) reject(error);
+      else resolve({ code: child.exitCode, signal: child.signalCode });
+    };
+    onAbort = () => {
+      killTree(child);
+      finish(new ProcessError("cancelled"));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        onAbort();
+        return;
+      }
+      signal.addEventListener("abort", onAbort, { once: true });
+    }
+    timer = setTimeout(() => {
+      killTree(child);
+      finish(new ProcessError("timeout"));
+    }, timeoutMs);
+    timer.unref?.();
+    child.on("error", () => finish(new ProcessError("spawn_failed")));
+    child.on("close", (code, closeSignal) => {
+      if (closeSignal) finish(new ProcessError("terminated"));
+      else if (code === 0) finish(null);
+      else finish(new ProcessError(`exit_${code}`));
+    });
+  });
+  try {
+    onSpawn?.(child);
+  } catch {
+    // A registry callback must not change the outcome.
+  }
+  return { child, done };
+}
+
+/**
+ * Runs a child to completion and collects at most `maxStdoutBytes` of stdout.
+ * `maxStdoutBytes: 0` drains nothing into memory, which is what a job whose
+ * output only goes to a file or another pipe wants.
+ */
 export function runProcess(command, args, {
   timeoutMs = 120_000,
   maxStdoutBytes = DEFAULT_STDOUT_LIMIT,
   spawn = nodeSpawn,
   onSpawn,
+  signal,
 } = {}) {
-  if (!Array.isArray(args) || args.some((arg) => typeof arg !== "string")) {
-    return Promise.reject(new ProcessError("invalid_arguments"));
-  }
-  return new Promise((resolve, reject) => {
-    let child;
-    try {
-      child = spawn(command, args, spawnOptions());
-    } catch {
-      reject(new ProcessError("spawn_failed"));
-      return;
-    }
-    let stdout = "";
-    let stdoutBytes = 0;
-    let settled = false;
-    try {
-      onSpawn?.(child);
-    } catch {
-      // A registry callback must not change the outcome.
-    }
-    const finish = (error, value) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (error) reject(error);
-      else resolve(value);
-    };
-    const timer = setTimeout(() => {
-      killTree(child);
-      finish(new ProcessError("timeout"));
-    }, timeoutMs);
-    timer.unref?.();
-    child.stdout?.on("data", (chunk) => {
-      if (stdoutBytes >= maxStdoutBytes) return;
-      const remaining = maxStdoutBytes - stdoutBytes;
-      const text = chunk.toString("utf8", 0, Math.min(chunk.length, remaining));
-      stdout += text;
-      stdoutBytes += Buffer.byteLength(text);
-    });
-    // Drain stderr so a noisy tool cannot block on a full pipe.
-    child.stderr?.on("data", () => {});
-    child.on("error", () => finish(new ProcessError("spawn_failed")));
-    child.on("close", (code, signal) => {
-      if (signal) finish(new ProcessError("terminated"));
-      else if (code === 0) finish(null, { stdout, code });
-      else finish(new ProcessError(`exit_${code}`));
-    });
+  const { child, done } = startProcess(command, args, { timeoutMs, spawn, onSpawn, signal });
+  if (!child) return done;
+  let stdout = "";
+  let stdoutBytes = 0;
+  child.stdout?.on("data", (chunk) => {
+    if (stdoutBytes >= maxStdoutBytes) return;
+    const remaining = maxStdoutBytes - stdoutBytes;
+    const text = chunk.toString("utf8", 0, Math.min(chunk.length, remaining));
+    stdout += text;
+    stdoutBytes += Buffer.byteLength(text);
   });
+  // Drain stderr so a noisy tool cannot block on a full pipe.
+  child.stderr?.on("data", () => {});
+  return done.then((value) => ({ ...value, stdout }));
 }

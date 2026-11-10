@@ -58,13 +58,16 @@ test("rejects leading dashes, metacharacters, traversal and arbitrary URLs", () 
 });
 
 test("commands use argument arrays and end options before the URL", () => {
-  const args = buildYtDlpArgs({ url: "https://www.youtube.com/watch?v=abcdefghijk", outDir: "/tmp/x" });
+  const args = buildYtDlpArgs({ url: "https://www.youtube.com/watch?v=abcdefghijk" });
   assert.equal(args[args.length - 2], "--");
   assert.equal(args[args.length - 1], "https://www.youtube.com/watch?v=abcdefghijk");
   assert.equal(args.includes("bestaudio[ext=m4a]/140/bestaudio"), true);
-  const ffmpeg = buildFfmpegArgs({ input: "/tmp/in.m4a", output: "/tmp/out.m4a", format: "m4a" });
+  assert.equal(args[args.indexOf("--output") + 1], "-", "audio is streamed, not written twice");
+  const ffmpeg = buildFfmpegArgs({ format: "m4a" });
   assert.deepEqual(ffmpeg.slice(ffmpeg.indexOf("-c:a"), ffmpeg.indexOf("-c:a") + 2), ["-c:a", "copy"]);
-  assert.equal(ffmpeg[ffmpeg.length - 2], "ipod");
+  assert.equal(ffmpeg[ffmpeg.indexOf("-i") + 1], "pipe:0");
+  assert.equal(ffmpeg.at(-1), "pipe:1");
+  assert.equal(ffmpeg.includes("frag_keyframe+empty_moov+default_base_moof"), true);
 });
 
 async function resolveService({ env = {} } = {}) {
@@ -79,8 +82,7 @@ async function resolveService({ env = {} } = {}) {
   });
   const { spawn, state } = fakeSpawn({ env });
   const service = new ResolveService({ cache, config, logger: { warn() {} }, spawn });
-  return { dir, cache, config, service, state, spawn };
-}
+  return { dir, cache, config, service, state, spawn };}
 
 test("resolves a source through yt-dlp and ffmpeg, then serves the cache", async (t) => {
   const setup = await resolveService();
@@ -121,7 +123,9 @@ test("identical concurrent requests share one job, and at most two run at once",
 
   const many = await Promise.all(Array.from({ length: 5 }, (_, index) => setup.service.ensure("user-2", youtube(index + 1))));
   assert.equal(many.length, 5);
-  assert.ok(setup.state.maxActive <= 2, `max concurrent was ${setup.state.maxActive}`);
+  // Two jobs at a time, and each job runs yt-dlp and ffmpeg together.
+  assert.ok(setup.state.maxActive <= 4, `max concurrent was ${setup.state.maxActive}`);
+  assert.ok(setup.service.stats().running <= 2, `running jobs was ${setup.service.stats().running}`);
 });
 
 test("an MP3 source is remuxed as MP3, not transcoded", async (t) => {

@@ -247,7 +247,9 @@ either the old file or the new one, never half of one.
   port stays inside the Docker network.
 - `mem_limit: 420m` keeps a burst here from starving `vaultwarden` and the
   other containers on this 1 CPU, ~1 GB host. Check free memory before raising
-  it.
+  it. `memswap_limit: 420m` means the container is killed instead of swapping
+  the host's disk, and `NODE_OPTIONS=--max-old-space-size=224` leaves room for
+  yt-dlp and ffmpeg inside the same budget.
 - Use a different `EDGE_ADMIN_TOKEN` from the HMAC secret and from any group
   service credential. Keep `edge.env` readable only by root.
 - Media tokens are short-lived and bound to one user and one key, but a URL

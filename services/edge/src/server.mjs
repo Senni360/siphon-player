@@ -184,8 +184,9 @@ export async function createEdgeServer(config, {
     now,
   });
   await uploads.init();
-  const sync = new SyncStore({ dir: config.dataDir, userMaxBytes: config.syncUserMaxBytes, now });
+  const sync = new SyncStore({ dir: config.dataDir, userMaxBytes: config.syncUserMaxBytes, now, logger });
   const resolve = new ResolveService({ cache, config, logger, spawn });
+  await resolve.init();
   const matcher = new MatchService({ config, logger, spawn });
   const media = new MediaService({ cache, uploads, config, logger });
   const vault = new Vault({ dir: config.dataDir, key: config.vaultKey, now });
@@ -223,22 +224,27 @@ export async function createEdgeServer(config, {
         const status = Number.isSafeInteger(error?.status) ? error.status : 500;
         const code = typeof error?.code === "string" ? error.code : "internal";
         if (status >= 500) logger.error("request_failed", { code, route });
-        if (!res.headersSent) {
+        if (!res.headersSent && !res.destroyed && !res.writableEnded) {
           const origin = req.headers.origin;
           const headers = corsHeaders(config, origin);
           if (Number.isSafeInteger(error?.retryAfter) && error.retryAfter > 0) {
             headers["Retry-After"] = String(error.retryAfter);
           }
           // A missing vault key is a configuration state the phone can act on,
-          // so it keeps its code even though the status is 503. Other 5xx
-          // answers stay opaque.
-          const safe = status < 500 || code === "vault_not_configured";
+          // and a corrupt sync document is a state it must not overwrite.
+          const safe = status < 500 || code === "vault_not_configured" || code === "sync_corrupt";
           json(res, status, { v: 1, error: safe ? code : "internal" }, headers);
         } else {
           res.destroy();
         }
       });
   });
+  // A bounded number of sockets keeps one slow client from exhausting the
+  // container's file descriptors; Caddy pools upstream connections.
+  server.maxConnections = 256;
+  server.keepAliveTimeout = 30_000;
+  server.headersTimeout = 40_000;
+  server.requestTimeout = 300_000;
   const live = new LiveHub({ server, config, logger, now });
 
   async function close() {
@@ -247,7 +253,7 @@ export async function createEdgeServer(config, {
     await live.close();
     await resolve.close();
     await cache.close();
-    sync.close();
+    await sync.close();
     await new Promise((done) => {
       let finished = false;
       const finish = () => {
@@ -457,13 +463,26 @@ async function handle(req, res, services) {
     const claims = authenticate(req, url, { scope: "media" });
     const body = await readJson(req, 64 * 1024);
     if (typeof body.source !== "string") throw new HttpError("invalid_source", 400);
-    const entry = await resolve.ensure(claims.sub, body.source);
+    const job = resolve.acquire(claims.sub, body.source);
+    const release = () => job.release();
+    res.once("close", release);
+    let entry;
+    try {
+      entry = await job.started;
+    } finally {
+      // Before the first byte this drops the job; after it the download keeps
+      // going so the cache is ready for seeking.
+      release();
+      res.off("close", release);
+    }
+    if (res.destroyed || res.writableEnded) return "/v1/resolve";
     json(res, 200, {
       v: 1,
       key: entry.key,
       contentType: entry.contentType,
       size: entry.size,
       cached: entry.cached,
+      streaming: entry.streaming === true,
       url: media.urlFor(claims.sub, entry.key, { role: claims.role }),
     }, cors);
     return "/v1/resolve";
@@ -511,7 +530,7 @@ async function handle(req, res, services) {
   if (pathname.startsWith("/v1/media/")) {
     if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError("method_not_allowed", 405);
     const key = decodeKey(pathname, "/v1/media/");
-    media.serve(req, res, { key, token: tokenFrom(req, url), origin });
+    await media.serve(req, res, { key, token: tokenFrom(req, url), origin });
     return "/v1/media/:key";
   }
 

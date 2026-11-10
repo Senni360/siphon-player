@@ -26,10 +26,10 @@ test("status needs the admin token and reports only safe numbers", async (t) => 
   assert.equal(view.v, 1);
   assert.equal(typeof view.uptimeSeconds, "number");
   assert.ok(view.disk === null || (typeof view.disk.freeBytes === "number" && typeof view.disk.totalBytes === "number"));
-  assert.deepEqual(Object.keys(view.cache).sort(), ["bytes", "capBytes", "files"]);
+  assert.deepEqual(Object.keys(view.cache).sort(), ["bytes", "capBytes", "files", "pending", "pinned"]);
   assert.deepEqual(Object.keys(view.uploads).sort(), ["bytes", "files"]);
-  assert.deepEqual(Object.keys(view.queue).sort(), ["jobs", "queued", "running"]);
-  assert.deepEqual(Object.keys(view.connections).sort(), ["computer", "epoch", "phone", "rooms", "total"]);
+  assert.deepEqual(Object.keys(view.queue).sort(), ["jobs", "queued", "running", "warmQueued"]);
+  assert.deepEqual(Object.keys(view.connections).sort(), ["bufferBytes", "computer", "epoch", "phone", "rooms", "total"]);
   assert.equal(typeof view.sync.users, "number");
   const text = JSON.stringify(view);
   assert.equal(text.includes(ADMIN), false);
