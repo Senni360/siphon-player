@@ -7345,6 +7345,39 @@ impl App {
         }
     }
 
+    /// How many leading rows of the queue the player has already passed
+    /// while the queue still names another song. Spotify can answer one skip
+    /// behind the player, so its first row is then the occurrence that is
+    /// already playing, not the one that comes next. An anchored queue is
+    /// trusted as it is: a repeated song under it really is the next row.
+    pub fn stale_queue_lead(&self) -> usize {
+        // A queue restored at close is the upcoming rows of a queue whose
+        // current song is not live here; its first row is not a stale copy
+        // of the remembered one.
+        if self.resume_only() {
+            return 0;
+        }
+        let Loadable::Loaded(queue) = &self.queue else {
+            return 0;
+        };
+        let Some(current) = self.current_track_uri() else {
+            return 0;
+        };
+        if queue
+            .currently_playing
+            .as_ref()
+            .is_some_and(|item| item.uri() == current)
+        {
+            return 0;
+        }
+        usize::from(
+            queue
+                .queue
+                .first()
+                .is_some_and(|item| item.uri() == current),
+        )
+    }
+
     /// Whether the local player is the active target, so its queue can be
     /// rewritten directly. Neither the Web API nor librespot can reorder or
     /// insert into a live queue; the only way to change one is to clear it
@@ -20298,6 +20331,59 @@ mod tests {
             vec!["spotify:track:stale"],
             "the restored queue stays visible until the live queue arrives"
         );
+    }
+
+    /// Spotify's queue can answer one skip behind the player. Its first row
+    /// is then the occurrence that already started, not the next one, and
+    /// the list must not show the playing song twice.
+    #[test]
+    fn a_lagging_queue_does_not_show_the_playing_song_twice() {
+        let mut app = headless_app();
+        app.local.track = Some(crate::player::LocalTrack {
+            uri: "spotify:track:b".into(),
+            ..Default::default()
+        });
+        app.local.playback = Playback::Playing;
+        app.queue = Loadable::Loaded(Queue {
+            currently_playing: Some(queued_song("spotify:track:a")),
+            queue: vec![
+                queued_song("spotify:track:b"),
+                queued_song("spotify:track:c"),
+            ],
+        });
+        assert_eq!(app.stale_queue_lead(), 1, "b is already playing");
+        assert_eq!(app.queued_rows_len(), 0);
+
+        // Only the leading copy is the stale one; a real repeat stays.
+        app.queue = Loadable::Loaded(Queue {
+            currently_playing: Some(queued_song("spotify:track:a")),
+            queue: vec![
+                queued_song("spotify:track:b"),
+                queued_song("spotify:track:b"),
+            ],
+        });
+        assert_eq!(app.stale_queue_lead(), 1);
+
+        // An anchored queue is trusted: a second copy under the playing song
+        // really is the next occurrence.
+        app.queue = Loadable::Loaded(Queue {
+            currently_playing: Some(queued_song("spotify:track:b")),
+            queue: vec![
+                queued_song("spotify:track:b"),
+                queued_song("spotify:track:c"),
+            ],
+        });
+        assert_eq!(app.stale_queue_lead(), 0);
+
+        // A queue saved at close is upcoming rows only, so its first row is
+        // not a stale copy of the song the bar remembers.
+        app.local.track = None;
+        app.resume_track = Some("spotify:track:b".into());
+        app.queue = Loadable::Loaded(Queue {
+            currently_playing: None,
+            queue: vec![queued_song("spotify:track:b")],
+        });
+        assert_eq!(app.stale_queue_lead(), 0);
     }
 
     /// The queue can still disagree with librespot after an anchored skip.

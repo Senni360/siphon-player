@@ -655,10 +655,11 @@ fn queue_change(
 }
 
 fn up_next(app: &mut App, ui: &mut Ui) {
+    let lead = app.stale_queue_lead();
     let upcoming: Vec<PlayableItem> = app
         .queue
         .get()
-        .map(|queue| queue.queue.iter().take(8).cloned().collect())
+        .map(|queue| queue.queue.iter().skip(lead).take(8).cloned().collect())
         .unwrap_or_default();
     if upcoming.is_empty() {
         theme::text(
