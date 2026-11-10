@@ -607,6 +607,18 @@ fn default_beat_key_after_secs() -> Option<u8> {
     Some(10)
 }
 
+/// Copies a settings file this build cannot fully read beside it before the
+/// next save replaces it, so a downgrade or a hand edit never loses it outright.
+/// Only the first copy is kept: a later one would hold already-reset values.
+fn keep_unreadable(path: &Path) {
+    let copy = path.with_extension("json.unreadable");
+    if !copy.exists()
+        && let Err(error) = std::fs::copy(path, &copy)
+    {
+        log::warn!("unable to keep the unreadable settings: {error}");
+    }
+}
+
 impl Settings {
     /// The local files folder, when one is set.
     pub fn local_files_folder(&self) -> Option<std::path::PathBuf> {
@@ -730,7 +742,8 @@ impl Settings {
                 let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
                 let mut settings = serde_json::from_str(text).unwrap_or_else(|error| {
                     log::warn!("settings at {} are unreadable: {error}", path.display());
-                    Self::default()
+                    keep_unreadable(path);
+                    Self::salvage(text)
                 });
                 // The Connect device ID hashes this name. Even the previous
                 // factory name must survive an upgrade as the same device.
@@ -740,6 +753,23 @@ impl Settings {
             }
             Err(_) => Self::default(),
         }
+    }
+
+    /// Keeps every preference that still reads when one value does not, such
+    /// as a choice from a newer build: one bad value costs only itself.
+    fn salvage(text: &str) -> Self {
+        let Ok(serde_json::Value::Object(file)) = serde_json::from_str(text) else {
+            return Self::default();
+        };
+        let mut kept = serde_json::Map::new();
+        for (key, value) in file {
+            kept.insert(key.clone(), value);
+            if serde_json::from_value::<Self>(serde_json::Value::Object(kept.clone())).is_err() {
+                log::warn!("dropped the unreadable setting {key}");
+                kept.remove(&key);
+            }
+        }
+        serde_json::from_value(serde_json::Value::Object(kept)).unwrap_or_default()
     }
 
     /// The settings as their file holds them.
@@ -1373,6 +1403,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         assert_eq!(settings.volume, 12345);
         assert!(!settings.home.made_for_you.visible);
+    }
+
+    /// A value this build cannot read, such as a theme from a newer one, costs
+    /// only itself, and the file as it was is kept beside it.
+    #[test]
+    fn one_unreadable_setting_keeps_the_others_and_a_copy_of_the_file() {
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("spotifast-salvage-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("settings.json");
+        let text = r#"{"volume":12345,"theme":"from-a-newer-build","bitrate":160}"#;
+        std::fs::write(&path, text).unwrap();
+        let settings = Settings::load(&path);
+        let copy = std::fs::read_to_string(dir.join("settings.json.unreadable"));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(settings.volume, 12345);
+        assert_eq!(settings.bitrate, 160);
+        assert_eq!(settings.theme, Settings::default().theme);
+        assert_eq!(copy.unwrap(), text);
     }
 
     #[test]
