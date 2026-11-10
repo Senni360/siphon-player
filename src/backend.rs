@@ -840,6 +840,8 @@ pub enum Command {
     },
     StatsReport {
         period: crate::stats::Period,
+        /// Whether plays from Spotify's own apps count.
+        with_spotify: bool,
     },
     StatsImport {
         selected:
@@ -2765,13 +2767,22 @@ impl Worker {
                         }
                     });
                 }
-                Command::StatsReport { period } => {
+                Command::StatsReport {
+                    period,
+                    with_spotify,
+                } => {
                     let dir = self.dirs.listening_dir();
                     let events = self.events.clone();
                     let waker = self.waker.clone();
                     tokio::task::spawn_blocking(move || {
+                        let plays = crate::stats::read_all(&dir);
+                        let plays = if with_spotify {
+                            plays
+                        } else {
+                            crate::stats::heard_in_encore(plays)
+                        };
                         let report = crate::stats::report(
-                            crate::stats::read_all(&dir),
+                            plays,
                             period,
                             &crate::stats::read_genres(&dir),
                             &jiff::Zoned::now(),

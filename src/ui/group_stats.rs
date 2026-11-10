@@ -608,6 +608,34 @@ fn import_card(app: &App, ui: &mut Ui, actions: &mut Vec<Action>) {
     let locale = app.locale;
     ui.add_space(24.0);
     card(ui, &palette, |ui| {
+        let mut with_spotify = app.settings.stats_spotify_plays;
+        if super::widgets::switch_line(
+            ui,
+            &palette,
+            &gettext(locale, "Count plays from the Spotify app"),
+            &mut with_spotify,
+        )
+        .changed()
+        {
+            actions.push(Action::Stats(Stats::CountSpotify(with_spotify)));
+        }
+        ui.add_space(4.0);
+        ui.add(
+            egui::Label::new(
+                RichText::new(gettext(
+                    locale,
+                    "Off: only what you play in Encore counts. On: songs you play in Spotify's own apps count too.",
+                ))
+                .font(theme::regular(13.0))
+                .color(palette.secondary),
+            )
+            .wrap()
+            .selectable(false),
+        );
+        if !with_spotify {
+            return;
+        }
+        ui.add_space(16.0);
         theme::text(
             ui,
             gettext(locale, "Add your whole Spotify history"),

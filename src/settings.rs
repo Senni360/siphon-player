@@ -273,6 +273,9 @@ pub struct Settings {
     /// Whether the group sees what this listener plays. None until they have
     /// been asked: nothing is shared before they say so.
     pub group_sharing: Option<bool>,
+    /// Whether stats count what played in Spotify's own apps, from Spotify's
+    /// recent plays and an imported history. Off: only Encore's plays count.
+    pub stats_spotify_plays: bool,
     /// The group being looked at. An id only: what it means comes from the service.
     pub group_current: Option<String>,
     /// Whether Discord shows what plays here. Private SoundCloud links never show.
@@ -508,6 +511,7 @@ impl Default for Settings {
             normalisation: false,
             autoplay: true,
             group_sharing: None,
+            stats_spotify_plays: false,
             group_current: None,
             discord_presence: true,
             discord_notice_seen: false,

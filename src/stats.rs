@@ -63,6 +63,10 @@ pub struct Play {
     pub genre: Option<String>,
     #[serde(rename = "e", default, skip_serializing_if = "std::ops::Not::not")]
     pub estimated: bool,
+    /// Heard in Spotify's own apps rather than in Encore: from Spotify's
+    /// list of recent plays or from an imported history.
+    #[serde(rename = "s", default, skip_serializing_if = "std::ops::Not::not")]
+    pub spotify: bool,
 }
 
 impl Play {
@@ -95,6 +99,8 @@ pub enum Action {
     Tab(Tab),
     Period(Period),
     Import,
+    /// Whether plays from Spotify's own apps count.
+    CountSpotify(bool),
 }
 
 /// What the backend answers. An empty import error means none was chosen.
@@ -432,6 +438,13 @@ pub fn add_genres(
 
 /// One after another, a play and its near-copies become the best one: a real
 /// measurement over an estimate, then whichever knows more about the song.
+/// Only what was heard in Encore. Spotify's estimates count as heard
+/// elsewhere, including those logged before plays were marked by source.
+pub fn heard_in_encore(mut plays: Vec<Play>) -> Vec<Play> {
+    plays.retain(|play| !play.spotify && !play.estimated);
+    plays
+}
+
 fn merged(mut plays: Vec<Play>) -> Vec<Play> {
     plays.sort_by_key(|play| play.at);
     let mut last_of_song: HashMap<String, usize> = HashMap::new();
@@ -445,6 +458,8 @@ fn merged(mut plays: Vec<Play>) -> Vec<Play> {
                     earlier.ms = play.ms;
                     earlier.estimated = false;
                 }
+                // Spotify lists what Encore played too: heard here is heard here.
+                earlier.spotify &= play.spotify;
                 if earlier.art.is_none() {
                     earlier.art = play.art;
                 }
@@ -790,6 +805,7 @@ pub fn parse_history(bytes: &[u8]) -> Result<Vec<Play>, serde_json::Error> {
                 art: None,
                 genre: None,
                 estimated: false,
+                spotify: true,
             })
         })
         .collect())
@@ -901,6 +917,7 @@ mod tests {
             art: None,
             genre: None,
             estimated: false,
+            spotify: false,
         }
     }
 
@@ -1020,6 +1037,38 @@ mod tests {
             &now(),
         );
         assert_eq!(alone.estimated_percent, 100);
+    }
+
+    /// Only Encore's own plays count: Spotify's list and imported history are
+    /// left out, but a song Spotify also lists stays when Encore played it.
+    #[test]
+    fn only_what_encore_played_is_heard_in_encore() {
+        let encore = play("2026-11-10T10:00:00Z", "Here", "A", 3);
+        let mut listed = play("2026-11-10T10:00:30Z", "Here", "A", 3);
+        listed.estimated = true;
+        listed.spotify = true;
+        let mut elsewhere = play("2026-11-10T12:00:00Z", "Phone", "B", 3);
+        elsewhere.estimated = true;
+        elsewhere.spotify = true;
+        let mut imported = play("2026-11-09T12:00:00Z", "Old", "C", 3);
+        imported.spotify = true;
+        let mut unmarked_estimate = play("2026-11-08T12:00:00Z", "Older", "D", 3);
+        unmarked_estimate.estimated = true;
+        let kept = heard_in_encore(vec![encore, listed, elsewhere, imported, unmarked_estimate]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].title, "Here");
+        assert!(!kept[0].spotify);
+    }
+
+    #[test]
+    fn a_play_heard_in_encore_is_not_marked_spotify_when_spotify_lists_it_too() {
+        let mut listed = play("2026-11-10T10:00:00Z", "Here", "A", 3);
+        listed.estimated = true;
+        listed.spotify = true;
+        let encore = play("2026-11-10T10:00:30Z", "Here", "A", 3);
+        let kept = merged(vec![listed, encore]);
+        assert_eq!(kept.len(), 1);
+        assert!(!kept[0].spotify && !kept[0].estimated);
     }
 
     #[test]
