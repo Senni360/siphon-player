@@ -170,6 +170,16 @@ export class UploadStore {
     return this.#queue.run(ownerPrefix(sub), () => this.#store(sub, key, req, options));
   }
 
+  /** Recomputes one account's bytes from the files it actually has, so a
+   * concurrent removal is never overwritten by a stale projection. */
+  #recount(owner) {
+    let total = 0;
+    for (const entry of this.#entries.values()) {
+      if (entry.owner === owner) total += entry.size;
+    }
+    this.#usage.set(owner, total);
+  }
+
   async #store(sub, key, req, { contentLength } = {}) {
     if (!UPLOAD_KEY.test(key)) throw new UploadError("invalid_key", 400);
     if (await this.#diskIsLow(0)) throw new UploadError("disk_full", 507);
@@ -229,7 +239,7 @@ export class UploadStore {
         contentType: format.contentType,
       };
       this.#entries.set(identity, entry);
-      this.#usage.set(owner, projected);
+      this.#recount(owner);
       return entry;
     } catch (error) {
       if (handle) await handle.close().catch(() => {});
@@ -244,7 +254,7 @@ export class UploadStore {
     if (!entry) return false;
     await fs.unlink(entry.file).catch(() => {});
     this.#entries.delete(identity);
-    this.#usage.set(entry.owner, Math.max(0, (this.#usage.get(entry.owner) ?? entry.size) - entry.size));
+    this.#recount(entry.owner);
     return true;
   }
 

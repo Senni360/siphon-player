@@ -233,7 +233,9 @@ A compact album carries `id`, `uri`, `name`, `image`, `artists`, `release_date`,
   and `track_count`. If Spotify is not linked, the first page still returns the
   mixed rows with `"error": "spotify_not_linked"`.
 - `GET /v1/library/playlists/:id` returns `{v, playlist, items, next}`. An id
-  that is not a Spotify playlist falls back to the same mixed snapshot.
+  that is not a Spotify playlist falls back to the same mixed snapshot. A mixed
+  song carries the compact track shape above; a playlist local file also has
+  `upload`, the key its audio was stored under by `PUT /v1/upload/:key`.
 - `GET /v1/library/liked` and `/v1/library/albums` return Spotify saved items.
 - `GET /v1/library/artists` pages through followed artists with a `cursor`
   carrying Spotify's `after` value.
@@ -297,7 +299,11 @@ POST /v1/match    { "uri":"spotify:track:…", "name":"…", "durationMs":200000
 Only these sources are accepted: `youtube:video:<11 chars>`,
 `soundcloud:<artist>/<track>`, or an `https://soundcloud.com/...` URL with no
 query or fragment. Everything else is `400 invalid_source` before a child
-process exists. `yt-dlp` is invoked with an argument array, `--` before the
+process exists. A YouTube source the computer already uploaded under
+`yt-<video-id>` is answered from that upload before any tool starts, so a song
+this computer fetched plays while it is off. A playlist local file is asked for
+as `upload:<key>` and answered the same way, or `404 not_found` when it is not
+there. `yt-dlp` is invoked with an argument array, `--` before the
 URL, and no shell. It writes the chosen stream to stdout; `ffmpeg` remuxes it
 with `-c:a copy` (never transcoding) into a fragmented M4A, or MP3/Ogg/FLAC when
 the source is that format. At most two jobs run; identical requests share one

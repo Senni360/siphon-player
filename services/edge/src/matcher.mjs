@@ -37,12 +37,13 @@ export const BOILERPLATE = Object.freeze([
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 
-/** Rust `char::is_alphanumeric` with a Unicode split. */
+/** Rust `char::is_alphanumeric` with a Unicode split. Combining marks stay
+ * with their base letter, as Rust's Alphabetic property keeps them. */
 export function words(text) {
   if (typeof text !== "string") return new Set();
   return new Set(
     text
-      .split(/[^\p{L}\p{N}]+/u)
+      .split(/[^\p{L}\p{N}\p{M}]+/u)
       .filter((word) => word.length > 0)
       .map((word) => word.toLowerCase()),
   );

@@ -292,6 +292,9 @@ export class LiveHub {
     const room = conn.room;
     room.seq += 1;
     message.seq = room.seq;
+    // The server's clock travels with the frame, so a replay after a
+    // reconnect can be judged by its real age rather than arrival time.
+    message.at = this.#now();
     // The sender's role is server-stamped so replay is unambiguous even when
     // both roles send `state`.
     message.from = conn.role;

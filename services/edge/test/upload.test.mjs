@@ -55,6 +55,42 @@ test("rejects bytes that do not look like audio and leaves no file", async (t) =
   assert.equal((await fetch(`${ctx.base}/v1/media/not-audio?token=${encodeURIComponent(mediaToken)}`)).status, 404);
 });
 
+test("a fetched YouTube song resolves from the upload before any tool runs", async (t) => {
+  const ctx = await startEdge();
+  t.after(() => ctx.close());
+  await upload(ctx, "yt-abcdefghijk", MP4);
+  const answer = await request(ctx.base, "/v1/resolve", {
+    method: "POST",
+    token: computerToken(),
+    body: { source: "youtube:video:abcdefghijk" },
+  });
+  assert.equal(answer.status, 200);
+  const record = await answer.json();
+  assert.equal(record.key, "yt-abcdefghijk");
+  assert.equal(record.cached, true);
+  assert.equal(record.streaming, false);
+  assert.equal(record.size, MP4.length);
+  const media = await fetch(`${ctx.base}${record.url}`);
+  assert.equal(media.status, 200);
+  assert.deepEqual(Buffer.from(await media.arrayBuffer()), MP4);
+
+  // A playlist local file resolves the same way, and a missing one is final.
+  await upload(ctx, "local-resolve", MP3);
+  const playlist = await request(ctx.base, "/v1/resolve", {
+    method: "POST",
+    token: computerToken(),
+    body: { source: "upload:local-resolve" },
+  });
+  assert.equal(playlist.status, 200);
+  assert.equal((await playlist.json()).contentType, "audio/mpeg");
+  const missing = await request(ctx.base, "/v1/resolve", {
+    method: "POST",
+    token: computerToken(),
+    body: { source: "upload:local-missing" },
+  });
+  assert.equal(missing.status, 404);
+});
+
 test("rejects an empty body", async (t) => {
   const ctx = await startEdge();
   t.after(() => ctx.close());
