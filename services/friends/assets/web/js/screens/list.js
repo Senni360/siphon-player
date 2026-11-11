@@ -5,7 +5,7 @@ import { load } from '../load.js';
 import { current, topBar } from '../navigation.js';
 import { playFrom } from '../player.js';
 import { ask } from '../remote.js';
-import { rows, shuffled } from '../rows.js';
+import { findableSongs, shuffled } from '../rows.js';
 
 /** A list's cover: its own, or its first four different covers as one. */
 export function coverOf(image, songs) {
@@ -45,7 +45,7 @@ export function listScreen() {
     bar.setTitle(name);
     return [
       listHead(name, songs, { image: found.image }),
-      songs.length ? h('div', { class: 'upnext' }, rows(songs, 50)) : empty('Nothing here yet.'),
+      songs.length ? h('div', { class: 'upnext' }, findableSongs(songs)) : empty('Nothing here yet.'),
     ];
   }, body, 'list');
   return [bar, body];

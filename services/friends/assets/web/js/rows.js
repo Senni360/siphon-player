@@ -7,6 +7,7 @@ import { ownsQueue, playNext } from './player.js';
 import { api } from './service.js';
 import { choice, openPanel } from './sheet.js';
 import { hooks } from './state.js';
+import { matching, plain } from './words.js';
 import { act } from './remote.js';
 
 export { shuffled };
@@ -84,15 +85,18 @@ const PAGE = 50;
  * A list's rows. A long list draws a page at a time and adds the next as the
  * end comes near, so two hundred songs open as fast as twenty.
  */
-export function rows(list, limit) {
+export function rows(list, limit, found) {
   const box = h('div', { class: 'rows' });
+  // A found song plays in its place in the whole list it was found in.
+  const whole = found?.list ?? list;
+  const placeOf = at => (found ? found.at[at] : at);
   const short = limit !== undefined && limit < PAGE;
   let shown = 0;
   let watcher = null;
   const draw = upTo => {
     box.querySelector('.rows-end')?.remove();
     watcher?.disconnect();
-    box.append(...list.slice(shown, upTo).map((song, at) => row(song, list, shown + at)));
+    box.append(...list.slice(shown, upTo).map((song, at) => row(song, whole, placeOf(shown + at))));
     shown = Math.min(upTo, list.length);
     if (list.length <= shown) return;
     if (short) {
@@ -108,7 +112,41 @@ export function rows(list, limit) {
   return box;
 }
 
-export const heading = (title, note) => [h('h2', { class: 'section', text: title }), note ? h('p', { class: 'note', text: note }) : null];
+/** From this many on, a list gets a field to find something in it. */
+const FIND_FROM = 12;
+/**
+ * A long list under a field that narrows it to what is typed. `textOf` says
+ * what an item is found by, and `draw` shows the ones found, with where each
+ * sits in the whole list.
+ */
+export function findable(items, { label, textOf, draw }) {
+  const show = (found, at) => [draw(found, at)].flat();
+  const shown = h('div', {}, show(items, null));
+  if (items.length < FIND_FROM) return shown;
+  let texts = null;
+  const input = h('input', { type: 'search', placeholder: label, 'aria-label': label, enterkeyhint: 'search', autocapitalize: 'none', autocorrect: 'off', spellcheck: 'false' });
+  const narrow = () => {
+    const typed = input.value.trim();
+    clear.hidden = !input.value;
+    if (!typed) { shown.replaceChildren(...show(items, null)); return; }
+    texts ??= items.map(item => plain(textOf(item)));
+    const at = matching(texts, typed);
+    shown.replaceChildren(...(at.length ? show(at.map(index => items[index]), at)
+      : [h('p', { class: 'none-found', text: `Nothing here matches "${typed}".` })]));
+  };
+  const clear = h('button', { class: 'clear', type: 'button', 'aria-label': 'Clear', hidden: true, onclick: () => { input.value = ''; narrow(); input.focus(); } }, icon('close'));
+  input.addEventListener('input', narrow);
+  return h('div', { class: 'findable' },
+    h('form', { class: 'find', role: 'search', onsubmit: event => { event.preventDefault(); input.blur(); } }, icon('search'), input, clear), shown);
+}
+/** A list of songs that can be searched. A found song still plays within the whole list. */
+export const findableSongs = (list, label = 'Find in this list') => findable(list, {
+  label,
+  textOf: song => `${song.name} ${(song.artists ?? []).join(' ')}`,
+  draw: (songs, at) => rows(songs, PAGE, at ? { list, at } : undefined),
+});
+
+export const heading =(title, note) => [h('h2', { class: 'section', text: title }), note ? h('p', { class: 'note', text: note }) : null];
 
 export function section(title, list, note, limit = 5) {
   if (!list?.length) return null;

@@ -249,6 +249,16 @@ button.rows-end { height: auto; margin: 6px 0 0; pointer-events: auto; }
 
 /* ------------------------------------------------------------------ waiting, empty, wrong */
 /* Skeletons only show when the wait is long enough to notice. */
+/* A field over a long list, narrowing it to what is typed. */
+.find { position: relative; margin: 14px 0 8px; }
+.find input { width: 100%; height: 44px; border-radius: 22px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 0 44px; font-size: 16px; -webkit-appearance: none; appearance: none; transition: border-color .16s; }
+.find input::placeholder { color: var(--dim); }
+.find input:focus { border-color: rgb(255 255 255 / 34%); outline: none; }
+.find input::-webkit-search-cancel-button { display: none; }
+.find > svg { position: absolute; left: 15px; top: 13px; width: 18px; height: 18px; color: var(--dim); pointer-events: none; }
+.find .clear { position: absolute; right: 0; top: 0; width: 44px; height: 44px; display: grid; place-items: center; color: var(--secondary); }
+.find .clear svg { width: 16px; height: 16px; }
+.none-found { color: var(--secondary); text-align: center; padding: 40px 20px; overflow-wrap: anywhere; }
 .bones { animation: fade .2s linear .14s both; }
 .bone { display: block; position: relative; overflow: hidden; background: rgb(255 255 255 / 7%); border-radius: 8px; }
 .bone::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 6%), transparent); transform: translateX(-100%); animation: light 1.6s ease-in-out infinite; }
