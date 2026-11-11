@@ -10,11 +10,11 @@ import { toast, uuid } from './dom.js';
 import { answered, SignedOut } from './errors.js';
 import { api } from './service.js';
 import { hasSpotify, spotifySong, web } from './spotify.js';
-import { edge, edgeLive, edgePeer, edgeResolve, edgeSend, edgeSpotifyStream, edgeSoundcloudSource, edgeWarm, setEdgeSinks } from './edge.js';
+import { edge, edgeLive, edgePeer, edgeResolve, edgeSend, edgeSpotifyStream, edgeSoundcloudSource, edgeUpload, edgeWarm, setEdgeSinks } from './edge.js';
 import { act, ask } from './remote.js';
 import { lockScreenHandlers, lockScreenState, mediaSession } from './audio.js';
 import { shuffled } from './order.js';
-import { events, here, hooks, player, readyReplies, replyWaiters, told } from './state.js';
+import { events, here, hooks, noteFirstLook, player, readyReplies, replyWaiters, told } from './state.js';
 
 const TARGET_KEY = 'encore.target';
 const HERE_KEY = 'encore.here';
@@ -390,6 +390,11 @@ async function findStream(song) {
   const question = uri.startsWith('spotify:')
     ? { uri, name: song.name, artists: song.artists, duration_ms: song.duration_ms }
     : { uri };
+  // A mixed playlist's local file lives on the edge, so the edge answers first.
+  if (typeof song.upload === 'string' && song.upload) {
+    const found = await edgeUpload(song.upload).catch(() => null);
+    if (found) return found;
+  }
   if (uri.startsWith('youtube:')) {
     if (player.online) return await ask('stream', question);
     const found = await edgeResolve(uri).catch(() => null);
@@ -636,12 +641,14 @@ async function applyState(state, now) {
   // While a computer is on the edge, its newer word outranks an older relay look.
   if (state && Number.isFinite(state.at) && edgePeer() && state.at + 1000 < edge.stateAt) {
     player.online = true;
+    noteFirstLook();
     refreshPlayer();
     return;
   }
   const fresh = state && now - state.at < 30000;
   const wasOnline = player.online;
   player.online = !!fresh;
+  noteFirstLook();
   if (fresh) {
     const sought = player.sought;
     player.state = state;

@@ -152,6 +152,16 @@ asks the edge to warm the next two songs ahead of time, instead of only looking 
 their addresses. None of this shows an error by itself: if neither side can
 answer, the page takes its existing stuck state with a plain reason.
 
+The edge also answers the phone's own library while this computer is off: home from the
+recent plays and new releases, the playlist library, one playlist or mixed playlist,
+liked songs, albums, artists, search and SoundCloud likes. Its pages are followed up to a
+bound (200 playlists, or 500 songs) and carry the same shapes the computer answers with,
+so no screen changes. These questions are put to the edge only once the computer's first
+state has been read and found absent, so a computer that is there keeps answering; a
+missing vault (`503`), an expired token, a timeout or any other failure simply falls back
+to the relay, unchanged. A mixed playlist's local file that the edge holds plays from the
+edge: the phone asks `/v1/media-token` for its key and plays the address it answers.
+
 While the phone's page is open, it also keeps a WebSocket open to the edge's `/v1/live`
 room, reconnecting with backoff and replaying what it missed by sequence number, and
 tries again when the page becomes visible or the network returns. While a computer is
