@@ -197,7 +197,7 @@ test('home turns the recent plays into picks and the rest of jump back in', () =
 });
 
 test('home with nothing played is still an answer', () => {
-  assert.deepEqual(edgeHome({ v: 1, recently_played: [], new_releases: [] }), { picks: [], recent: [] });
+  assert.deepEqual(edgeHome({ v: 1, recently_played: [], new_releases: [] }), { picks: [], recent: [], releases: [] });
   assert.deepEqual(edgeHome({ v: 1, recently_played: Array.from({ length: 5 }, (_, at) => spotifyTrack({ uri: `spotify:track:${at}` })) }).recent, []);
   assert.equal(edgeHome({ v: 1 }), null);
   assert.equal(edgeHome(null), null);
@@ -227,4 +227,13 @@ test("a SoundCloud song keeps its own public page, which the edge plays it from"
   assert.equal(edgeSong(row).link, 'https://soundcloud.com/artist/public-song');
   assert.equal(edgeSong({ ...row, link: 'https://evil.example/x' }).link, undefined);
   assert.equal(edgeSong({ ...row, uri: 'spotify:track:abc' }).link, undefined);
+});
+
+test('a new release from the edge says what it is', async () => {
+  const { edgeRelease } = await import('../../assets/web/js/edge-library.js');
+  const album = { id: 'abc', uri: 'spotify:album:abc', name: 'Fragments', image: 'https://i.example/a.jpg', album_type: 'album', total_tracks: 12, artists: [{ id: 'x', name: 'Bonobo' }] };
+  assert.deepEqual(edgeRelease(album), { uri: 'spotify:album:abc', id: 'abc', name: 'Fragments', artists: ['Bonobo'], image: 'https://i.example/a.jpg', kind: 'album', songs: 12 });
+  assert.equal(edgeRelease({ ...album, album_type: 'single', total_tracks: 4 }).kind, 'ep');
+  assert.equal(edgeRelease({ ...album, album_type: 'single', total_tracks: 1 }).kind, 'single');
+  assert.equal(edgeRelease({ name: 'No id' }), null);
 });

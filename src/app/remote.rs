@@ -97,6 +97,32 @@ fn is_question(command: &Phone) -> bool {
     )
 }
 
+/// A new release as the phone shows it. An album or EP opens as a list by its
+/// id; a SoundCloud set by its URI; a song out on its own plays as that song.
+fn release(project: &crate::for_you::Project) -> Value {
+    let kind = match project.kind {
+        crate::for_you::Kind::Album => "album",
+        crate::for_you::Kind::Ep => "ep",
+        crate::for_you::Kind::Single => "single",
+    };
+    json!({
+        "uri": project.uri,
+        "id": project.uri.strip_prefix("spotify:album:"),
+        "name": project.name,
+        "artists": project
+            .artists
+            .iter()
+            .map(|artist| artist.name.as_str())
+            .collect::<Vec<_>>(),
+        "image": project.image(300),
+        "kind": kind,
+        "songs": project.songs,
+        "released": project.released,
+        "reason": project.reason,
+        "song": project.track.as_ref().map(crate::remote::Song::from),
+    })
+}
+
 /// Whether a question is about something a phone may ask about. Ids go into addresses
 /// here, so only plain ones get that far.
 pub(super) fn fair_question(command: &Phone) -> bool {
@@ -539,7 +565,7 @@ impl App {
     }
 
     /// The answer to a question, or None while it's still loading.
-    fn remote_answer(&mut self, question: &Phone) -> Option<Value> {
+    pub(super) fn remote_answer(&mut self, question: &Phone) -> Option<Value> {
         Some(match question {
             Phone::Home => {
                 let shown = self.for_you.get()?;
@@ -561,12 +587,22 @@ impl App {
                             .collect()
                     })
                     .unwrap_or_default();
+                // New releases, as Home's large card leads with them: albums,
+                // EPs and sets with what they are, or a song out on its own.
+                let releases: Vec<Value> = shown
+                    .projects
+                    .iter()
+                    .filter(|project| crate::for_you::project_allowed_on_home(project))
+                    .take(12)
+                    .map(release)
+                    .collect();
                 json!({
                     "picks": songs(shown.picks.iter().map(|pick| &pick.track)),
                     "following": songs(&shown.following),
                     "recent": songs(self.recents_view.iter().take(12).map(|play| &play.track)),
                     "news": songs(&self.artist_news),
                     "made_for_you": made,
+                    "releases": releases,
                 })
             }
             Phone::Lyrics => match &self.lyrics {

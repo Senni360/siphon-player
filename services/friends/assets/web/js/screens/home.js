@@ -6,7 +6,7 @@ import { load } from '../load.js';
 import { go } from '../navigation.js';
 import { playFrom } from '../player.js';
 import { ask } from '../remote.js';
-import { card, heading, rows, section, shelf } from '../rows.js';
+import { card, heading, releaseCard, rows, section, shelf } from '../rows.js';
 
 export function homeScreen() {
   const body = h('div');
@@ -22,6 +22,7 @@ export function homeScreen() {
           h('span', { class: `name ${sourceOf(first.uri)}`, text: first.name }),
           h('span', { class: 'by', text: first.artists.join(', ') })),
         h('span', { class: 'lead-play', 'aria-hidden': 'true' }, icon('play'))),
+      found.releases?.length ? [heading('New releases'), shelf(found.releases.slice(0, 12).map(releaseCard))] : null,
       rest.length ? [heading('For you'),
         shelf(rest.slice(0, 10).map((song, index) => card(song.name, song.artists.join(', '), song.image, () => playFrom(picks, index + 1), song.uri)))] : null,
       found.recent?.length ? [heading('Jump back in'), rows(found.recent, 5)] : null,

@@ -167,5 +167,34 @@ export function card(title, by, image, onclick, uri, round = false) {
     h('span', { class: `name${uri ? ` ${sourceOf(uri)}` : ''}`, text: title }), by && h('span', { class: 'by', text: by }));
 }
 
+const KIND_NAMES = { album: 'Album', ep: 'EP', single: 'Single' };
+
+/**
+ * A new release. An album or EP carries its record behind the cover, its own
+ * cover on the record's label, as Home's large card does on the computer; a
+ * single is the cover alone. Each says what it is under its name.
+ */
+export function releaseCard(release) {
+  const kind = KIND_NAMES[release.kind] ?? 'Album';
+  const by = [kind, (release.artists ?? []).join(', ')].filter(Boolean).join(' · ');
+  const frame = h('span', { class: 'release-art' });
+  if (release.kind !== 'single') {
+    const record = h('span', { class: 'record', 'aria-hidden': 'true' });
+    const cover = safeImage(release.image);
+    // Set from script: the page's policy refuses inline style attributes.
+    if (cover) record.style.setProperty('--cover', `url("${cover}")`);
+    frame.append(record);
+  }
+  frame.append(art(release.image, 'card-art'));
+  const open = () => {
+    if (release.song) return hooks.playFrom([release.song], 0);
+    if (release.id) return go({ page: 'list', kind: 'album', id: release.id });
+    if (String(release.uri ?? '').startsWith('soundcloud:')) return go({ page: 'list', kind: 'source', uri: release.uri });
+    return undefined;
+  };
+  return h('button', { class: `card release${release.kind === 'single' ? ' single' : ''}`, onclick: open },
+    frame, h('span', { class: `name ${sourceOf(release.uri)}`, text: release.name }), h('span', { class: 'by', text: by }));
+}
+
 /** Cards side by side, swiped along. Each snaps to the edge it is pulled to. */
 export const shelf = cards => h('div', { class: 'shelf' }, cards);

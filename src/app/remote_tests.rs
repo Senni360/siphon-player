@@ -314,3 +314,32 @@ fn the_phone_is_told_this_computer_can_download() {
     let told = serde_json::to_value(app.remote_snapshot()).unwrap();
     assert_eq!(told["can"], serde_json::json!(["download"]));
 }
+
+#[test]
+fn the_phones_home_carries_new_releases_as_what_they_are() {
+    let mut app = test_app("remote-releases");
+    app.for_you = Loadable::Loaded(crate::for_you::ForYou {
+        projects: vec![crate::for_you::Project {
+            uri: "spotify:album:abc".into(),
+            name: "Fragments".into(),
+            artists: vec![ArtistRef {
+                name: "Bonobo".into(),
+                ..Default::default()
+            }],
+            images: Vec::new(),
+            kind: crate::for_you::Kind::Album,
+            released: "2026-11-01".into(),
+            songs: Some(12),
+            track: None,
+            reason: "Out 10 days ago".into(),
+        }],
+        ..Default::default()
+    });
+    let answer = app.remote_answer(&PhoneCommand::Home).unwrap();
+    let release = &answer["releases"][0];
+    assert_eq!(release["id"], "abc");
+    assert_eq!(release["kind"], "album");
+    assert_eq!(release["songs"], 12);
+    assert_eq!(release["artists"][0], "Bonobo");
+    assert!(release["song"].is_null());
+}

@@ -139,7 +139,23 @@ export function edgeHome(answer) {
   if (!answer || typeof answer !== 'object') return null;
   if (!Array.isArray(answer.recently_played) && !Array.isArray(answer.new_releases)) return null;
   const played = edgeSongs(answer.recently_played);
-  return { picks: played.slice(0, 11), recent: played.slice(11, 23) };
+  const releases = (Array.isArray(answer.new_releases) ? answer.new_releases : []).map(edgeRelease).filter(Boolean);
+  return { picks: played.slice(0, 11), recent: played.slice(11, 23), releases };
+}
+
+/** A new album, EP or single from the edge, as Home's New releases shows one. */
+export function edgeRelease(album) {
+  if (!album || typeof album !== 'object' || !text(album.id)) return null;
+  const kind = album.album_type === 'single' ? (album.total_tracks > 1 ? 'ep' : 'single') : 'album';
+  return {
+    uri: text(album.uri) || `spotify:album:${album.id}`,
+    id: album.id,
+    name: text(album.name),
+    artists: (Array.isArray(album.artists) ? album.artists : []).map(artistName).filter(Boolean),
+    image: typeof album.image === 'string' ? album.image : null,
+    kind,
+    songs: Number.isFinite(album.total_tracks) ? album.total_tracks : null,
+  };
 }
 
 /**

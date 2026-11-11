@@ -987,6 +987,11 @@ export class PhoneServer {
           made_for_you: PLAYLISTS.map(list => ({ ...list, count: 60 })),
           news: soundcloudSongs.slice(0, 5),
           following: SONGS.slice(40, 45),
+          releases: [
+            { uri: 'spotify:album:release1', id: 'release1', name: 'Fragments', artists: ['Bonobo'], image: SONGS[3]!.image, kind: 'album', songs: 12 },
+            { uri: 'spotify:album:release2', id: 'release2', name: 'Low Hours', artists: ['Tycho'], image: SONGS[8]!.image, kind: 'ep', songs: 5 },
+            { uri: SONGS[12]!.uri, name: SONGS[12]!.name, artists: SONGS[12]!.artists, image: SONGS[12]!.image, kind: 'single', songs: 1, song: SONGS[12] },
+          ],
         };
       case 'library':
         return {
