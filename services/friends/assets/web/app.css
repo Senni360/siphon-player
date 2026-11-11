@@ -191,14 +191,28 @@ button.rows-end { height: auto; margin: 6px 0 0; pointer-events: auto; }
 /* A release: an album or EP carries its record behind the cover, its own cover
    on the label, as on the computer's Home; a single is the cover alone. */
 .release-art { position: relative; display: block; width: 100%; aspect-ratio: 1; }
-.release .card-art { position: absolute; z-index: 1; left: 0; top: 7%; width: 86%; height: auto; box-shadow: 4px 0 14px rgb(0 0 0 / 45%); }
+.release-art .card-art { position: absolute; z-index: 1; left: 0; top: 7%; width: 86%; height: auto; box-shadow: 4px 0 14px rgb(0 0 0 / 45%); }
 .record { position: absolute; top: 7%; right: 0; width: 86%; aspect-ratio: 1; border-radius: 50%;
   background: repeating-radial-gradient(circle, #222226 0 1.5px, #18181b 1.5px 3px);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 13%), 0 6px 14px rgb(0 0 0 / 35%); transition: transform .5s var(--ease); }
 .record::after { content: ""; position: absolute; inset: 34%; border-radius: 50%; background: var(--raised) var(--cover, none) center / cover;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 50%); }
 .record::before { content: ""; position: absolute; z-index: 1; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px; border-radius: 50%; background: var(--window); }
-.release:active .record { transform: translateX(6%); }
+.release:active .record, .upcoming:active .record { transform: translateX(6%); }
+/* An artist's upcoming release: its record, when it comes out, and Pre-save. */
+.upcoming { display: flex; align-items: center; gap: 14px; margin-top: 10px; padding: 12px; border-radius: 16px; background: var(--panel); border: 1px solid var(--line); }
+.upcoming .release-art { flex: none; width: 104px; }
+.upcoming-words { min-width: 0; display: grid; gap: 2px; justify-items: start; }
+.upcoming-words > small { font-size: 12.5px; font-weight: 500; color: var(--text); }
+.upcoming-words > b { font-size: 17px; font-weight: 600; letter-spacing: -.01em; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.upcoming-words > span { font-size: 13px; color: var(--secondary); }
+.upcoming-words .note { margin: 6px 0 0; }
+.presave { margin-top: 8px; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border-radius: 18px; background: var(--spotify); color: #000; font-size: 14px; font-weight: 600; transition: transform .16s var(--ease), background .2s, color .2s; }
+.presave svg { width: 16px; height: 16px; }
+.presave:active { transform: scale(.96); }
+.presave.done { background: var(--raised); color: var(--text); border: 1px solid var(--line-strong); }
+.presave.done svg { color: var(--spotify); }
+.presave:disabled { opacity: .5; }
 .card.circle { width: 112px; text-align: center; }
 .card.circle .card-art { border-radius: 50%; }
 .card .name, .card .by { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

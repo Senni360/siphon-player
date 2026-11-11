@@ -358,7 +358,7 @@ export class PhoneServer {
     volume: 62,
     device: 'Studio',
     next: SONGS.slice(1, 6),
-    can: ['download'],
+    can: ['download', 'presave'],
     at: Date.now(),
   };
 
@@ -380,6 +380,9 @@ export class PhoneServer {
   readonly noAudio = new Set<string>();
   /** Songs the phone asked the computer to download, in the order asked. */
   readonly downloads: Array<Record<string, unknown>> = [];
+  /** Pre-saves the phone sent, and whether the upcoming album is pre-saved. */
+  readonly presaves: Array<Record<string, unknown>> = [];
+  presaved = false;
   /** The next `/api/edge/token` names a media token that is already expired. */
   edgeExpireNext = false;
   /** What `/v1/match` answers. Null means no match. */
@@ -1021,6 +1024,7 @@ export class PhoneServer {
           followers: 184_000,
           popular: SONGS.slice(0, 10),
           albums: PLAYLISTS.map((list, index) => ({ id: `album-${index}`, name: list.name, year: String(2021 + index), image: list.image })),
+          upcoming: [{ uri: 'spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL', album_uri: 'spotify:album:5BYKG4MHfySZthe2W6r7n4', name: 'Afterglow', image: SONGS[7]!.image, release: Math.floor(Date.now() / 1000) + 9 * 86400 - 3600, kind: 'album', saved: this.presaved }],
           looking: false,
         };
       case 'search':
@@ -1071,6 +1075,10 @@ export class PhoneServer {
         return { ok: true };
       case 'like':
         this.setState({ liked: !this.state.liked });
+        return { ok: true };
+      case 'presave':
+        this.presaves.push(input);
+        this.presaved = input.saved === true;
         return { ok: true };
       case 'download':
         this.downloads.push(input);

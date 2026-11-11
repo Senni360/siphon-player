@@ -4,9 +4,9 @@ import { art, bones, count, failed, h, icon, safeImage, SOURCE_NAMES, toast } fr
 import { SignedOut } from '../errors.js';
 import { current, go, topBar } from '../navigation.js';
 import { playFrom } from '../player.js';
-import { act, ask } from '../remote.js';
+import { act, ask, tell } from '../remote.js';
 import { card, heading, section, shelf } from '../rows.js';
-import { hooks } from '../state.js';
+import { hooks, player } from '../state.js';
 
 /** Follow or unfollow, shown at once and put back if it doesn't go through. */
 function followButton(found) {
@@ -27,6 +27,58 @@ function followButton(found) {
   } });
   show();
   return button;
+}
+
+/** "Out in 9 days · Nov 20", "Out tomorrow", "Out today"; null once it is out. */
+export function releaseWords(release, now = Date.now()) {
+  const left = release * 1000 - now;
+  if (!Number.isFinite(left) || left <= 0) return null;
+  const days = Math.ceil(left / 86400000);
+  if (left < 43200000) return 'Out today';
+  if (days <= 1) return 'Out tomorrow';
+  const date = new Date(release * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return `Out in ${days} days · ${date}`;
+}
+
+/**
+ * The artist's upcoming release with Pre-save, as on the computer. The press
+ * shows at once; the computer makes it true, and a refusal puts it back.
+ */
+function upcomingCard(release) {
+  const words = releaseWords(release.release);
+  const can = player.online && player.state?.can?.includes?.('presave') && release.album_uri && release.saved != null;
+  const button = h('button', { class: 'presave', type: 'button' });
+  const show = () => {
+    const saved = release.saved === true;
+    button.replaceChildren(saved ? icon('check') : icon('plus'), h('span', { text: saved ? 'Pre-saved' : 'Pre-save' }));
+    button.classList.toggle('done', saved);
+    button.setAttribute('aria-pressed', String(saved));
+    button.disabled = !can;
+  };
+  button.addEventListener('click', async () => {
+    const was = release.saved === true;
+    release.saved = !was;
+    show();
+    toast(was ? 'Pre-save removed' : 'Pre-saved on Spotify');
+    try {
+      await tell('presave', { uri: release.album_uri, saved: !was });
+    } catch {
+      release.saved = was;
+      show();
+      toast("That didn't go through.");
+    }
+  });
+  show();
+  const record = h('span', { class: 'record', 'aria-hidden': 'true' });
+  const cover = safeImage(release.image);
+  if (cover) record.style.setProperty('--cover', `url("${cover}")`);
+  return h('div', { class: 'upcoming' },
+    h('span', { class: 'release-art' }, record, art(release.image, 'card-art')),
+    h('div', { class: 'upcoming-words' },
+      words && h('small', { text: words }),
+      h('b', { text: release.name }),
+      h('span', { text: release.kind === 'single' ? 'Single' : release.kind === 'ep' ? 'EP' : 'Album' }),
+      can ? button : h('p', { class: 'note', text: 'Pre-save works while Encore is open on your computer.' })));
 }
 
 export function artistScreen() {
@@ -50,6 +102,8 @@ export function artistScreen() {
             found.following != null && followButton(found)))),
       found.accounts?.length ? h('div', { class: 'chips' }, found.accounts.map(account => h('button', { class: 'chip', onclick: () => go({ page: 'list', kind: 'source', uri: account.uri }) },
         art(account.image, ''), h('span', {}, account.name, h('small', { class: account.source, text: SOURCE_NAMES[account.source] }))))) : null,
+      found.upcoming?.filter(release => release.release == null || releaseWords(release.release)).slice(0, 1)
+        .map(release => [heading('Upcoming'), upcomingCard(release)]),
       section('Popular', found.popular, ''),
       section('Not on Spotify', found.not_on_spotify),
       found.sets?.length ? [heading('Sets and mixtapes', 'On SoundCloud'), shelf(found.sets.slice(0, 10).map(set => card(set.name, set.songs ? `${set.songs} songs` : null, set.image, () => go({ page: 'list', kind: 'source', uri: set.uri }))))] : null,
