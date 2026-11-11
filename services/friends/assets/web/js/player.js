@@ -34,6 +34,14 @@ function hereAudio() {
   const audio = new Audio();
   audio.preload = 'auto';
   audio.addEventListener('ended', () => {
+    if (sleep.song) {
+      sleepAfter(null);
+      here.place = 0;
+      here.pausedByUser = true;
+      saveHere();
+      refreshPlayer();
+      return;
+    }
     const next = nextIndex(1, true);
     if (next < 0) { here.place = 0; saveHere(); refreshPlayer(); return; }
     playIndex(next);
@@ -63,9 +71,45 @@ function hereAudio() {
   for (const event of ['play', 'pause', 'seeked']) audio.addEventListener(event, () => tellComputer(true));
   for (const event of ['playing', 'timeupdate']) audio.addEventListener(event, () => clearTimeout(stallTimer));
   for (const event of ['stalled', 'waiting']) audio.addEventListener(event, stallSoon);
+  // A locked phone slows a page's timers down; the song's own clock keeps time.
+  audio.addEventListener('timeupdate', () => { if (sleep.until && Date.now() >= sleep.until) sleepNow(); });
   here.audio = audio;
   lockScreenHandlers();
   return audio;
+}
+
+// ---------------------------------------------------------------- the sleep timer
+// Only this phone's own player has one. A page that plays keeps running while
+// the phone is locked, which a page that only watches the computer does not.
+const sleep = { until: 0, song: false, timer: null };
+
+/** What the sleep timer is set to: `{ minutes }` still to go, `{ song: true }`, or null. */
+export function sleepSet() {
+  if (sleep.song) return { song: true };
+  return sleep.until > Date.now() ? { minutes: Math.max(1, Math.ceil((sleep.until - Date.now()) / 60000)) } : null;
+}
+
+/** Sets it: a number of minutes, 'song' for the end of this song, or null for off. */
+export function sleepAfter(when) {
+  clearTimeout(sleep.timer);
+  sleep.timer = null;
+  sleep.until = 0;
+  sleep.song = when === 'song';
+  if (typeof when === 'number' && when > 0) {
+    sleep.until = Date.now() + when * 60000;
+    sleep.timer = setTimeout(sleepNow, when * 60000);
+  }
+}
+
+/** Time is up: the music pauses where it is, as if the listener had pressed it. */
+function sleepNow() {
+  sleepAfter(null);
+  const audio = here.audio;
+  if (!here.active || !audio || audio.paused) return;
+  here.pausedByUser = true;
+  clearTimeout(retryTimer);
+  retryTimer = null;
+  audio.pause();
 }
 
 /** Stuck with nothing arriving: give it ten seconds, then start the same song again. */
@@ -132,6 +176,7 @@ export function stopHere() {
   clearTimeout(retryTimer);
   clearTimeout(stallTimer);
   retryTimer = null;
+  sleepAfter(null);
   here.seq++;
   here.audio?.pause();
   here.active = false;

@@ -10,7 +10,7 @@ import { findLyrics } from './lyrics.js';
 import { go, over, overClosed } from './navigation.js';
 import {
   chooseTarget, flipShuffle, likePlaying, ownsQueue, placeOf, playFrom, playOnComputer, playsHere, refreshPlayer,
-  seekTo, setVolume, shown, skip, skipTrouble, togglePlay, turnRepeat,
+  seekTo, setVolume, shown, skip, skipTrouble, sleepAfter, sleepSet, togglePlay, turnRepeat,
 } from './player.js';
 import { ask } from './remote.js';
 import { shareSong, songActions } from './rows.js';
@@ -230,6 +230,27 @@ function deviceSheet() {
       choice('computer', 'Your computer', pick('computer'), { pressed: !onPhone, note: player.online ? 'Encore is open there.' : "Encore isn't open there right now." }),
       // A phone's own volume is its side buttons; only the computer has one to set from here.
       !onPhone && player.online && h('div', { class: 'volume' }, icon('volume'), volume.node),
+    ],
+  });
+}
+
+// ---------------------------------------------------------------- the sleep timer
+
+const minutesText = minutes => (minutes === 60 ? '1 hour' : `${minutes} minutes`);
+/** What the timer is set to, in a few words; nothing when it is off. */
+const sleepNote = set => (!set ? null : set.song ? 'Stops after this song' : set.minutes === 1 ? 'Stops in a minute' : `Stops in ${set.minutes} minutes`);
+
+function sleepSheet() {
+  const set = sleepSet();
+  const pick = (when, told) => () => close(() => { sleepAfter(when); toast(told); });
+  const close = openPanel({
+    label: 'Sleep timer',
+    content: [
+      h('div', { class: 'about plain' }, h('div', {}, h('b', { text: 'Sleep timer' }),
+        h('span', { text: sleepNote(set) ?? 'Pauses the music on this phone by itself.' }))),
+      [15, 30, 45, 60].map(minutes => choice('clock', minutesText(minutes), pick(minutes, `Stops in ${minutesText(minutes)}`))),
+      choice('note', 'End of this song', pick('song', 'Stops after this song'), { pressed: !!set?.song }),
+      set && choice('close', 'Turn off', pick(null, 'Sleep timer off')),
     ],
   });
 }
@@ -511,7 +532,11 @@ export function openSheet() {
     sheet.classList.add('leaving');
     setTimeout(() => sheet.remove(), 280);
   }
-  const more = h('button', { class: 'icon-button', 'aria-label': 'More for this song', onclick: () => { const song = shown()?.song; if (song) songActions(song); } }, icon('more'));
+  const more = h('button', { class: 'icon-button', 'aria-label': 'More for this song', onclick: () => {
+    const song = shown()?.song;
+    // The sleep timer belongs to the phone's own player, so it shows while that plays.
+    if (song) songActions(song, ownsQueue() ? [['moon', 'Sleep timer', sleepSheet, { note: sleepNote(sleepSet()) }]] : []);
+  } }, icon('more'));
   const stage = h('div', { class: 'stage' }, cover, lyricsBox, queueBox);
   const sheet = h('div', { class: 'sheet', role: 'dialog', 'aria-label': 'Now playing', 'aria-modal': 'true', 'data-panel': 'cover' },
     h('div', { class: 'glow', 'aria-hidden': 'true' }),
