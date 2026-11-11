@@ -682,6 +682,7 @@ async function applyState(state, now) {
   }
   if (wasOnline !== player.online) {
     hooks.renderBanner?.();
+    if (player.online) hooks.clearWaiting?.();
     // Only Spotify's own answers differ from the computer's, so nothing else reloads.
     if (booted && hasSpotify()) hooks.reloadViews?.();
   }

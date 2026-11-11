@@ -63,6 +63,29 @@ export function shareSong(song) {
 /** The three small bars on the song that is playing. */
 const bars = () => h('span', { class: 'bars', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
 
+/**
+ * Songs that play only while the computer is on, because the edge has no copy
+ * of them yet. Their rows say so, quietly.
+ */
+export const waiting = new Set();
+const WAITING_NOTE = 'Needs your computer';
+
+/** The computer is back: every song plays again, so no row waits. */
+hooks.clearWaiting = () => { waiting.clear(); markWaiting(); document.querySelectorAll('.ready-note').forEach(note => { note.hidden = true; }); };
+
+/** Marks the rows on the page whose songs are waiting, and unmarks the rest. */
+export function markWaiting() {
+  document.querySelectorAll('.row[data-uri]').forEach(node => {
+    const on = waiting.has(node.dataset.uri);
+    if (node.classList.contains('waiting') === on) return;
+    node.classList.toggle('waiting', on);
+    const by = node.querySelector('.by');
+    if (!by) return;
+    by.querySelector('.waiting-note')?.remove();
+    if (on) by.prepend(h('span', { class: 'waiting-note', text: `${WAITING_NOTE} · ` }));
+  });
+}
+
 export function row(song, list, index) {
   const state = hooks.shown?.();
   const playing = state?.song?.uri === song.uri;
@@ -75,6 +98,10 @@ export function row(song, list, index) {
       h('span', { class: 'by', text: by + plays })),
     h('button', { class: 'more', 'aria-label': `More for ${song.name}`, onclick: () => songActions(song) }, icon('more')));
   onHold(node, () => songActions(song));
+  if (waiting.has(song.uri)) {
+    node.classList.add('waiting');
+    node.querySelector('.by').prepend(h('span', { class: 'waiting-note', text: `${WAITING_NOTE} · ` }));
+  }
   return node;
 }
 

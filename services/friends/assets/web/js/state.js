@@ -77,4 +77,6 @@ export const hooks = {
   markPlaying: null,
   /** Close the Now Playing sheet, if it is open. */
   closeSheet: null,
+  /** The computer is back: forget which songs were waiting for it. */
+  clearWaiting: null,
 };

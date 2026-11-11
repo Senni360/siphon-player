@@ -162,6 +162,10 @@ h2.section + .rows, h2.section + .shelf, h2.section + .row, h2.section + .group,
 .row .name, .row .by { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row .name { font-weight: 500; letter-spacing: -.005em; }
 .row .by { color: var(--secondary); font-size: 14px; }
+/* A song the phone can play only while the computer is on: quieter, and saying so. */
+.row.waiting .art, .row.waiting .name { opacity: .5; }
+.waiting-note { color: var(--warning); }
+.ready-note { margin: 12px 0 0; text-align: center; color: var(--secondary); }
 .row .more { flex: none; width: 40px; height: 44px; margin-right: -4px; display: grid; place-items: center; color: var(--dim); border-radius: 50%; }
 .row .more:active { background: var(--active); }
 .row .more svg { width: 22px; height: 22px; }

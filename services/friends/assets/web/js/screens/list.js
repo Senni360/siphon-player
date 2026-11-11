@@ -3,9 +3,11 @@
 import { art, empty, h, icon, plural, safeImage, SOURCE_NAMES, sourceOf, span } from '../dom.js';
 import { load } from '../load.js';
 import { current, topBar } from '../navigation.js';
-import { playFrom } from '../player.js';
+import { playFrom, playsHere } from '../player.js';
+import { edgeWaiting } from '../edge.js';
+import { player } from '../state.js';
 import { ask } from '../remote.js';
-import { findableSongs, shuffled } from '../rows.js';
+import { findableSongs, markWaiting, shuffled, waiting } from '../rows.js';
 
 /** A list's cover: its own, or its first four different covers as one. */
 export function coverOf(image, songs) {
@@ -34,6 +36,22 @@ export function listHead(name, songs, { image, note, round = false } = {}) {
       h('button', { class: 'play-all second', onclick: () => playFrom(shuffled(songs), 0) }, icon('shuffle'), 'Shuffle')) : null);
 }
 
+/**
+ * Marks the songs of this list that play only while the computer is on, and
+ * says how many, when this phone plays and the computer is off.
+ */
+async function showWaiting(songs, note) {
+  if (!playsHere() || player.online) return;
+  const uris = await edgeWaiting(songs).catch(() => null);
+  if (!uris?.length || player.online) return;
+  for (const uri of uris) waiting.add(uri);
+  markWaiting();
+  note.textContent = uris.length === 1
+    ? '1 song here plays only while your computer is on.'
+    : `${uris.length} songs here play only while your computer is on. Encore makes them ready as soon as it is.`;
+  note.hidden = false;
+}
+
 export function listScreen() {
   const body = h('div');
   const bar = topBar();
@@ -43,8 +61,11 @@ export function listScreen() {
     const songs = found.songs ?? [];
     const name = found.name ?? 'Songs';
     bar.setTitle(name);
+    // With the computer off, say which songs the edge has no copy of yet.
+    const note = h('p', { class: 'note ready-note', hidden: true });
+    showWaiting(songs, note);
     return [
-      listHead(name, songs, { image: found.image }),
+      listHead(name, songs, { image: found.image }), note,
       songs.length ? h('div', { class: 'upnext' }, findableSongs(songs)) : empty('Nothing here yet.'),
     ];
   }, body, 'list');

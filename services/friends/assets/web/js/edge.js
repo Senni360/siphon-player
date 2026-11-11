@@ -124,15 +124,31 @@ export function edgeSoundcloudSource(song) {
 
 /** Saved Spotify matches, read at most once a minute. */
 let savedMatches = { at: 0, data: null };
-export async function edgeSavedMatch(uri) {
+async function readMatches() {
   if (!savedMatches.data || Date.now() - savedMatches.at > 60000) {
     const doc = await edgeCall('/v1/sync/matches', 'sync', { method: 'GET' });
     if (doc) savedMatches = { at: Date.now(), data: doc.data && typeof doc.data === 'object' ? doc.data : {} };
   }
-  if (!savedMatches.data) return null;
-  const entry = savedMatches.data[uri];
+  return savedMatches.data;
+}
+const sourceIn = entry => {
   const source = typeof entry === 'string' ? entry : entry?.sourceUri ?? entry?.source;
   return typeof source === 'string' && source ? source : null;
+};
+export async function edgeSavedMatch(uri) {
+  const data = await readMatches();
+  return data ? sourceIn(data[uri]) : null;
+}
+
+/**
+ * Of these songs, the Spotify ones the edge has no copy of yet: they play only
+ * while the computer is on to find one. Null when the edge cannot say.
+ */
+export async function edgeWaiting(songs) {
+  const data = await readMatches();
+  if (!data) return null;
+  return songs.filter(song => String(song?.uri ?? '').startsWith('spotify:track:') && !sourceIn(data[song.uri]))
+    .map(song => song.uri);
 }
 
 /** A Spotify song as the same song on YouTube or SoundCloud, then that audio. */
