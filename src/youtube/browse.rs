@@ -258,6 +258,20 @@ fn followers(count: u64) -> String {
 /// The videos of a listing, without the live streams and upcoming premieres it
 /// mixes in, which have no length and cannot be played as audio.
 fn videos(listing: &Listing) -> Vec<Track> {
+    listed(listing)
+        .filter_map(|video| video.to_track().ok())
+        .collect()
+}
+
+/// The videos of a listing as YouTube names them, for the matcher, which must
+/// see "(Instrumental)" and the real channel rather than the tidied names.
+fn raw_videos(listing: &Listing) -> Vec<Track> {
+    listed(listing)
+        .filter_map(|video| video.listing_track().ok())
+        .collect()
+}
+
+fn listed(listing: &Listing) -> impl Iterator<Item = Video> + '_ {
     listing
         .entries
         .iter()
@@ -265,29 +279,24 @@ fn videos(listing: &Listing) -> Vec<Track> {
         .filter(|entry| {
             valid_id(&entry.id) && entry.duration.is_some() && entry.live_status.is_none()
         })
-        .filter_map(|entry| {
-            Video {
-                id: entry.id.clone(),
-                title: entry.title.clone().unwrap_or_default(),
-                channel: entry.channel.clone().or_else(|| listing.channel.clone()),
-                channel_id: entry
-                    .channel_id
-                    .clone()
-                    .or_else(|| listing.channel_id.clone()),
-                uploader: entry.uploader.clone(),
-                description: None,
-                duration: entry.duration,
-                upload_date: None,
-                view_count: entry.view_count,
-                thumbnails: entry.thumbnails.clone(),
-                is_live: false,
-                live_status: None,
-                availability: None,
-            }
-            .to_track()
-            .ok()
+        .map(|entry| Video {
+            id: entry.id.clone(),
+            title: entry.title.clone().unwrap_or_default(),
+            channel: entry.channel.clone().or_else(|| listing.channel.clone()),
+            channel_id: entry
+                .channel_id
+                .clone()
+                .or_else(|| listing.channel_id.clone()),
+            uploader: entry.uploader.clone(),
+            description: None,
+            duration: entry.duration,
+            upload_date: None,
+            view_count: entry.view_count,
+            thumbnails: entry.thumbnails.clone(),
+            is_live: false,
+            live_status: None,
+            availability: None,
         })
-        .collect()
 }
 
 fn channel_cards(listing: &Listing) -> Vec<SourceCard> {
@@ -539,6 +548,95 @@ pub async fn videos_for(resolver: &Resolver, query: &str) -> Result<Vec<Track>, 
     read.await
         .map(|listing: Listing| videos(&listing))
         .map_err(|error: Error| error.to_string())
+}
+
+/// The videos a search finds, as YouTube names them, for the matcher.
+pub async fn videos_listed(resolver: &Resolver, query: &str) -> Result<Vec<Track>, String> {
+    let read = async {
+        let url = results_url(query, VIDEOS).ok_or(Error::Metadata)?;
+        parse_listing(&resolver.listing(&url, 1, PAGE).await?)
+    };
+    read.await
+        .map(|listing: Listing| raw_videos(&listing))
+        .map_err(|error: Error| error.to_string())
+}
+
+/// How many of the albums YouTube Music finds are opened to look for the one
+/// asked for.
+const ALBUMS_OPENED: usize = 3;
+
+/// The songs of `album` by `artist` on YouTube Music: the official upload of
+/// every song, each with its exact length, from the artist's own channel. An
+/// album is only taken when its name is the one asked for; otherwise nothing.
+pub async fn album_songs(resolver: &Resolver, artist: &str, album: &str) -> Vec<Track> {
+    let wanted = album_key(album);
+    if wanted.is_empty() || artist.trim().is_empty() {
+        return Vec::new();
+    }
+    let Some(url) = music_search_url(&format!("{artist} {album}"), "albums") else {
+        return Vec::new();
+    };
+    let Ok(found) = async { parse_listing(&resolver.listing(&url, 1, 6).await?) }.await else {
+        return Vec::new();
+    };
+    let browse: Vec<String> = found
+        .entries
+        .iter()
+        .flatten()
+        .map(|entry| entry.id.clone())
+        .filter(|id| valid_album_browse(id))
+        .take(ALBUMS_OPENED)
+        .collect();
+    for id in browse {
+        let url = format!("https://music.youtube.com/browse/{id}");
+        let Ok(listing) = async { parse_listing(&resolver.listing(&url, 1, 200).await?) }.await
+        else {
+            continue;
+        };
+        if listing
+            .title
+            .as_deref()
+            .is_some_and(|title| album_key(album_title(title)) == wanted)
+        {
+            return raw_videos(&listing);
+        }
+    }
+    Vec::new()
+}
+
+/// YouTube Music names an album's page "Album - Name", "Single - Name" or
+/// "EP - Name".
+fn album_title(title: &str) -> &str {
+    ["Album - ", "Single - ", "EP - "]
+        .iter()
+        .find_map(|prefix| title.strip_prefix(prefix))
+        .unwrap_or(title)
+}
+
+/// An album name to compare by: letters and digits only, lowercase.
+fn album_key(name: &str) -> String {
+    name.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn valid_album_browse(id: &str) -> bool {
+    id.strip_prefix("MPREb_").is_some_and(|rest| {
+        !rest.is_empty()
+            && rest.len() <= 64
+            && rest
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    })
+}
+
+fn music_search_url(query: &str, kind: &str) -> Option<String> {
+    let mut url =
+        reqwest::Url::parse_with_params("https://music.youtube.com/search", &[("q", query)])
+            .ok()?;
+    url.set_fragment(Some(kind));
+    Some(url.into())
 }
 
 /// A search. A further page of videos leaves channels and playlists out.
@@ -938,5 +1036,55 @@ mod tests {
         );
         assert_eq!(tracks[1].play_count, Some(1200));
         assert_eq!(tracks[1].release_date.as_deref(), Some("2026-01-01"));
+    }
+}
+
+#[cfg(test)]
+mod album_tests {
+    use super::*;
+
+    #[test]
+    fn an_album_page_is_named_without_its_kind() {
+        assert_eq!(album_title("Album - star"), "star");
+        assert_eq!(album_title("Single - Raiider"), "Raiider");
+        assert_eq!(album_title("EP - ep 1"), "ep 1");
+        assert_eq!(album_title("Album"), "Album");
+        assert_eq!(
+            album_key("Hurry Up, We're Dreaming."),
+            "hurryupweredreaming"
+        );
+        assert_eq!(album_key("★"), "");
+    }
+
+    #[test]
+    fn only_a_youtube_music_album_is_opened() {
+        assert!(valid_album_browse("MPREb_vCogBYqpxeT"));
+        assert!(!valid_album_browse("MPREb_"));
+        assert!(!valid_album_browse("UCabc"));
+        assert!(!valid_album_browse("MPREb_../x"));
+    }
+
+    #[test]
+    fn an_albums_songs_keep_their_own_names_and_channel() {
+        let listing = parse_listing(
+            br#"{"title":"Album - star","entries":[
+                {"id":"Cx0dj7B61_o","title":"beginning (Instrumental)","duration":89,"channel":"2hollis"},
+                {"id":"zCEb83y2r7A","title":"flash","duration":165,"channel":"2hollis"}
+            ]}"#,
+        )
+        .unwrap();
+        let songs = raw_videos(&listing);
+        assert_eq!(songs.len(), 2);
+        assert_eq!(songs[0].name, "beginning (Instrumental)");
+        assert_eq!(songs[0].artists[0].name, "2hollis");
+        assert_eq!(songs[1].duration_ms, 165_000);
+    }
+
+    #[test]
+    fn a_music_search_names_its_shelf() {
+        assert_eq!(
+            music_search_url("2hollis star", "albums").as_deref(),
+            Some("https://music.youtube.com/search?q=2hollis+star#albums")
+        );
     }
 }

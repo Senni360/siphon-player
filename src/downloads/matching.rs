@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use serde::Deserialize;
 
-use crate::api::models::Track;
+use crate::api::models::{ArtistRef, Track};
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(crate) struct Candidate {
@@ -66,16 +66,45 @@ impl Searcher {
     }
 
     /// One search on YouTube and SoundCloud; the best listing entry that
-    /// passes [`score`] wins. None rather than a near miss. The query carries
-    /// the primary artist only: a feature joined into the query pulls that
-    /// artist's catalogue into the results and buries the right upload.
+    /// passes [`score`] wins. None rather than a near miss.
     pub async fn same_song(&self, wanted: &Track) -> Option<Match> {
+        self.same_song_except(wanted, &[]).await
+    }
+
+    /// The same song, leaving out every copy in `refused`: ones that were
+    /// found and then would not play. Three looks run at once, and only what
+    /// can play is weighed:
+    ///
+    /// - the album on YouTube Music, whose official uploads carry each song's
+    ///   exact length and the artist's own channel, so it finds a song that is
+    ///   too new or too plain-named for a search to put first;
+    /// - a YouTube search for "artist - title";
+    /// - a SoundCloud search, without previews and without copies SoundCloud
+    ///   only serves encrypted, which never play here.
+    ///
+    /// Every candidate is judged by the name its source gives it, never the
+    /// tidied name the app shows, so "(Instrumental)" and the real uploader
+    /// still count. The query carries the primary artist only: a feature
+    /// joined into it pulls that artist's catalogue in and buries the upload.
+    pub async fn same_song_except(&self, wanted: &Track, refused: &[String]) -> Option<Match> {
         let primary = wanted
             .artists
             .first()
             .map_or_else(String::new, |artist| artist.name.clone());
         let query = format!("{primary} - {}", wanted.name);
-        let video = crate::youtube::browse::videos_for(&self.catalogue.resolver, &query);
+        let album = wanted
+            .album
+            .as_ref()
+            .map(|album| album.name.clone())
+            .filter(|name| !name.trim().is_empty());
+        let resolver = &self.catalogue.resolver;
+        let video = crate::youtube::browse::videos_listed(resolver, &query);
+        let albums = async {
+            match &album {
+                Some(album) => crate::youtube::browse::album_songs(resolver, &primary, album).await,
+                None => Vec::new(),
+            }
+        };
         let sound = async {
             match &self.soundcloud {
                 Some(client) => client
@@ -84,16 +113,69 @@ impl Searcher {
                     .map(|page| {
                         page.collection
                             .iter()
-                            .filter(|track| !track.to_track(None).preview_only)
-                            .map(|track| track.to_track(None))
+                            .filter(|track| track.matchable())
+                            .map(|track| track.listing_track(None))
                             .collect::<Vec<_>>()
                     })
                     .unwrap_or_default(),
                 None => Vec::new(),
             }
         };
-        let (videos, sounds) = tokio::join!(video, sound);
-        pick(wanted, &videos.unwrap_or_default(), &sounds)
+        let (videos, albums, sounds) = tokio::join!(video, albums, sound);
+        let open = |tracks: Vec<Track>| -> Vec<Track> {
+            tracks
+                .into_iter()
+                .filter(|track| !refused.contains(&track.uri))
+                .collect()
+        };
+        let mut found = open(albums);
+        let videos = open(videos.unwrap_or_default());
+        found.extend(videos.iter().cloned());
+        if let Some(best) = pick(wanted, &found, &open(sounds)) {
+            return Some(best);
+        }
+        self.named_by_release_topic(wanted, &videos).await
+    }
+
+    /// YouTube files some official uploads under an unnamed "Release - Topic"
+    /// channel, which a search lists without the artist. Their own page names
+    /// the artist ("tell you (L2) · jacari"), so the few whose length already
+    /// fits are opened and judged by that, one request each.
+    async fn named_by_release_topic(&self, wanted: &Track, videos: &[Track]) -> Option<Match> {
+        let wanted_secs = f64::from(wanted.duration_ms) / 1000.0;
+        let fits = videos.iter().filter(|video| {
+            video
+                .artists
+                .first()
+                .is_some_and(|channel| channel.name.ends_with(" - Topic"))
+                && (f64::from(video.duration_ms) / 1000.0 - wanted_secs).abs() <= 2.0
+        });
+        for video in fits.take(TOPIC_PAGES_OPENED) {
+            let Some(id) = crate::youtube::video_id(&video.uri) else {
+                continue;
+            };
+            let Ok(page) = self.catalogue.resolver.metadata(id).await else {
+                continue;
+            };
+            let Some((title, artists)) = page.description.as_deref().and_then(topic_credits) else {
+                continue;
+            };
+            let named = Track {
+                name: title,
+                artists: artists
+                    .into_iter()
+                    .map(|name| ArtistRef {
+                        name,
+                        ..Default::default()
+                    })
+                    .collect(),
+                ..video.clone()
+            };
+            if let Some(found) = pick(wanted, &[named], &[]) {
+                return Some(found);
+            }
+        }
+        None
     }
 
     #[cfg(test)]
@@ -107,6 +189,29 @@ impl Searcher {
             soundcloud: None,
         }
     }
+}
+
+/// How many "Release - Topic" pages one search opens at most.
+const TOPIC_PAGES_OPENED: usize = 2;
+
+/// The title and artists an auto-generated upload's description names, on the
+/// line after "Provided to YouTube by …": "tell you (L2) · jacari".
+fn topic_credits(description: &str) -> Option<(String, Vec<String>)> {
+    let mut lines = description
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty());
+    lines
+        .next()?
+        .starts_with("Provided to YouTube by")
+        .then_some(())?;
+    let mut parts = lines.next()?.split(" · ").map(str::trim);
+    let title = parts.next().filter(|title| !title.is_empty())?.to_owned();
+    let artists: Vec<String> = parts
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect();
+    (!artists.is_empty()).then_some((title, artists))
 }
 
 /// The best of the listing entries both sources returned. SoundCloud entries
@@ -407,6 +512,8 @@ const BOILERPLATE: &[&str] = &[
 /// A title's identity and how it is tagged. Bracketed groups and ` - `
 /// separated parts are metadata unless they carry an identity marker.
 struct Parsed {
+    /// The title's own words in order, for the inflection rule.
+    tokens: Vec<String>,
     words: BTreeSet<String>,
     collapsed: String,
     versions: BTreeSet<&'static str>,
@@ -569,6 +676,7 @@ fn parse_wanted(name: &str) -> Parsed {
     Parsed {
         words: set(tokens.iter().cloned()),
         collapsed: collapsed(&tokens),
+        tokens,
         versions,
         soft: soft_tags(&all),
     }
@@ -618,6 +726,7 @@ fn parse_candidate(title: &str, wanted: &BTreeSet<String>, wanted_collapsed: &st
     Parsed {
         words: set(tokens.iter().cloned()),
         collapsed: collapsed(&tokens),
+        tokens,
         versions,
         soft: soft_tags(&all),
     }
@@ -691,6 +800,57 @@ fn secondary_evidence(candidate: &Candidate, title: &str) -> BTreeSet<String> {
     evidence
 }
 
+/// An inflected title scores this much below the same title spelled exactly.
+const INFLECTION_PENALTY: f64 = 0.01;
+
+/// Folded, with every space and punctuation mark taken out: "Playboi Carti"
+/// is "playboicarti".
+fn account_key(text: &str) -> String {
+    fold(text).chars().filter(|c| c.is_alphanumeric()).collect()
+}
+
+fn same_account(left: &str, right: &str) -> bool {
+    let key = account_key(left);
+    !key.is_empty() && key == account_key(right)
+}
+
+/// An uploader or credit that is the artist's name written without spaces:
+/// the account `playboicarti` is Playboi Carti. Equality only, so an account
+/// that merely contains the name is not the artist.
+fn artist_account(primary: &str, candidate: &Candidate) -> bool {
+    same_account(primary, &candidate.uploader)
+        || candidate
+            .credits
+            .iter()
+            .any(|credit| same_account(primary, credit))
+}
+
+/// One word inflected from another: "go" and "going", "love" and "loved". The
+/// shorter starts the longer, has two letters at least, and is at most three
+/// letters shorter.
+fn inflected_word(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let (shorter, longer) = if left.chars().count() <= right.chars().count() {
+        (left, right)
+    } else {
+        (right, left)
+    };
+    let (short, long) = (shorter.chars().count(), longer.chars().count());
+    short >= 2 && long - short <= 3 && longer.starts_with(shorter)
+}
+
+/// The same title with its words inflected. Another word count is another title.
+fn inflected_title(wanted: &[String], actual: &[String]) -> bool {
+    !wanted.is_empty()
+        && wanted.len() == actual.len()
+        && wanted
+            .iter()
+            .zip(actual)
+            .all(|(left, right)| inflected_word(left, right))
+}
+
 fn symbols_only_artist(wanted: &str, candidate: &Candidate) -> bool {
     let raw = fold(wanted).trim().to_owned();
     if raw.is_empty() {
@@ -727,6 +887,14 @@ fn evaluate(track: &Track, candidate: &Candidate) -> Option<Verdict> {
     if difference > 3.0 && !(isrc || (identity_exact && (candidate.verified || credited))) {
         return None;
     }
+    // The artist's own account spelling a title word inflected is the same
+    // song: "Never Going Down" is "Never Go Down". The uploader itself must be
+    // the artist, the lengths must agree within a second and a half, and the
+    // versions gate below still applies, so a remix, an instrumental or a fan
+    // upload cannot ride on it. It scores just under the title spelled exactly.
+    let inflected = same_account(primary_name, &candidate.uploader)
+        && difference <= 1.5
+        && inflected_title(&wanted.tokens, &parsed.tokens);
     let title_words: BTreeSet<String> = set(tokens_of(&candidate.title));
     let evidence = artist_evidence(candidate, &title_words);
     let all_artists = set(tokens_of(&track.artist_names()));
@@ -737,7 +905,7 @@ fn evaluate(track: &Track, candidate: &Candidate) -> Option<Verdict> {
             meaningful.remove(*word);
         }
     }
-    let precision = if identity_exact {
+    let precision = if identity_exact || inflected {
         1.0
     } else {
         coverage(&meaningful, &expected)
@@ -748,7 +916,10 @@ fn evaluate(track: &Track, candidate: &Candidate) -> Option<Verdict> {
     } else {
         0.0
     };
-    let score = 0.5 * precision + 0.35 * artist + 0.15 * duration_points;
+    let mut score = 0.5 * precision + 0.35 * artist + 0.15 * duration_points;
+    if inflected && !identity_exact {
+        score = (score - INFLECTION_PENALTY).max(0.0);
+    }
     let verdict = Verdict {
         score,
         isrc,
@@ -769,7 +940,8 @@ fn evaluate(track: &Track, candidate: &Candidate) -> Option<Verdict> {
             || coverage(
                 &set(secondary_tokens(primary_name)),
                 &secondary_evidence(candidate, &candidate.title),
-            ) >= 1.0;
+            ) >= 1.0
+            || artist_account(primary_name, candidate);
         if !named {
             return None;
         }
@@ -777,7 +949,7 @@ fn evaluate(track: &Track, candidate: &Candidate) -> Option<Verdict> {
     if parsed.versions != wanted.versions || !parsed.soft.is_subset(&wanted.soft) {
         return None;
     }
-    if !identity_exact && coverage(&wanted.words, &parsed.words) < 0.9 {
+    if !identity_exact && !inflected && coverage(&wanted.words, &parsed.words) < 0.9 {
         return None;
     }
     if precision < 0.75 {
@@ -816,7 +988,6 @@ pub(crate) fn best_match<'a>(track: &Track, candidates: &'a [Candidate]) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::models::ArtistRef;
 
     fn track() -> Track {
         Track {
@@ -839,6 +1010,134 @@ mod tests {
             url: "https://www.youtube.com/watch?v=abcdefghijk".into(),
             ..Default::default()
         }
+    }
+
+    fn song(name: &str, artist: &str, duration_ms: u32) -> Track {
+        Track {
+            uri: "spotify:track:abc".into(),
+            name: name.into(),
+            duration_ms,
+            artists: vec![ArtistRef {
+                name: artist.into(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    fn upload(title: &str, uploader: &str, credits: &[&str], duration: f64) -> Candidate {
+        Candidate {
+            title: title.into(),
+            uploader: uploader.into(),
+            credits: credits.iter().map(|credit| (*credit).to_owned()).collect(),
+            duration: Some(duration),
+            url: "https://soundcloud.com/someone/song".into(),
+            ..Default::default()
+        }
+    }
+
+    /// The owner's 2626 playlist, 2026-11-11: this instrumental was saved as
+    /// slayr's song, and slayr's own upload was turned away.
+    #[test]
+    fn an_instrumental_is_never_the_song_and_the_artists_own_upload_is() {
+        let wanted = song("Never Go Down", "slayr", 120_000);
+        let instrumental = upload(
+            "slayr - Never Go Down (Instrumental)",
+            "slayr",
+            &["NOVOX", "slayr"],
+            120.328,
+        );
+        assert_eq!(score(&wanted, &instrumental), None);
+        let own = upload("Never Going Down", "slayr", &["slayr"], 120.238);
+        assert!(score(&wanted, &own).is_some());
+        let remix = upload(
+            "never go down remix [slayr] prod. wa",
+            "scxba",
+            &["scxba"],
+            181.3,
+        );
+        assert_eq!(score(&wanted, &remix), None);
+    }
+
+    #[test]
+    fn an_inflected_title_needs_the_artists_own_account_and_the_same_length() {
+        let wanted = song("Never Go Down", "slayr", 120_000);
+        let exact = upload("Never Go Down", "slayr", &["slayr"], 120.2);
+        let inflected = upload("Never Going Down", "slayr", &["slayr"], 120.2);
+        assert!(score(&wanted, &exact).unwrap() > score(&wanted, &inflected).unwrap());
+        for (title, uploader, credits, length) in [
+            ("Never Going Down", "fan", &["fan", "slayr"][..], 120.2),
+            ("Never Going Down", "slayr", &["slayr"][..], 122.0),
+            ("Never Going Down Now", "slayr", &["slayr"][..], 120.2),
+            ("Never Go", "slayr", &["slayr"][..], 120.2),
+        ] {
+            assert_eq!(
+                score(&wanted, &upload(title, uploader, credits, length)),
+                None,
+                "{title} by {uploader}, {length} s"
+            );
+        }
+    }
+
+    #[test]
+    fn an_account_spelling_the_artist_without_spaces_is_the_artist() {
+        let wanted = song("DIFFERENT DAY", "Playboi Carti", 166_700);
+        let own = upload("DIFFERENT DAY", "playboicarti", &["playboicarti"], 166.726);
+        assert!(score(&wanted, &own).is_some());
+        for (title, uploader, length) in [
+            (
+                "PLAYBOI CARTI - UR THE MOON // DIFFERENT DAY",
+                "carti meatrider",
+                226.7,
+            ),
+            ("DIFFERENT DAY", "playboicartifan", 166.7),
+            (
+                "Playboi Carti Different day (Remix) ID",
+                "Brady (US)",
+                149.2,
+            ),
+            (
+                "Playboi Carti - Different Day [PITCH,SPED UP]",
+                "sahara2mil",
+                154.8,
+            ),
+            ("different day (remix) - playboi carti", "yevixx", 96.6),
+        ] {
+            assert_eq!(
+                score(&wanted, &upload(title, uploader, &[uploader], length)),
+                None,
+                "{title} by {uploader}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_album_route_takes_the_official_upload_by_its_length() {
+        let wanted = song("flash", "2hollis", 165_000);
+        assert_eq!(
+            score(&wanted, &upload("beginning", "2hollis", &["2hollis"], 89.0)),
+            None
+        );
+        assert!(score(&wanted, &upload("flash", "2hollis", &["2hollis"], 165.0)).is_some());
+    }
+
+    #[test]
+    fn an_auto_generated_upload_names_its_title_and_artists() {
+        let description = "Provided to YouTube by Create Music Group\n\ntell you (L2) · jacari\n\ntell you (L2)\n\n℗ jacari/watercolor\n\nAuto-generated by YouTube.";
+        assert_eq!(
+            topic_credits(description),
+            Some(("tell you (L2)".to_owned(), vec!["jacari".to_owned()]))
+        );
+        assert_eq!(
+            topic_credits("Provided to YouTube by X\n\nSong · A · B\n"),
+            Some(("Song".to_owned(), vec!["A".to_owned(), "B".to_owned()]))
+        );
+        assert_eq!(topic_credits("A video about tell you · jacari"), None);
+        assert_eq!(
+            topic_credits("Provided to YouTube by X\n\nJust a title"),
+            None
+        );
+        assert_eq!(topic_credits(""), None);
     }
 
     #[test]
@@ -1043,6 +1342,47 @@ mod tests {
     }
 
     /// The phone's Spotify songs are found this way on real YouTube:
+    /// The whole search against the real services, for a list of Spotify
+    /// songs saved as JSON (`[{uri, name, duration_ms, artists: [{name}],
+    /// album: {name}}]`). Prints what each would play, or that none was found.
+    ///
+    /// `SIPHON_MATCH_SONGS=songs.json cargo test --lib every_song_finds_a_copy_for_real -- --ignored --nocapture`
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "needs the helper, the network and a song list"]
+    async fn every_song_finds_a_copy_for_real() {
+        let Some(path) = std::env::var_os("SIPHON_MATCH_SONGS") else {
+            return;
+        };
+        let songs: Vec<Track> = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        let searcher = Searcher::new(
+            crate::youtube::Catalogue {
+                resolver: crate::youtube::Resolver::default(),
+                cache: std::env::temp_dir(),
+                links: std::sync::Arc::new(crate::youtube::Links::default()),
+            },
+            Some(crate::soundcloud::api::Client::new(
+                reqwest::Client::new(),
+                None,
+                None,
+            )),
+        );
+        let mut missing = 0;
+        for wanted in &songs {
+            let found = searcher.same_song(wanted).await;
+            if found.is_none() {
+                missing += 1;
+            }
+            println!(
+                "{} | {} | {} s => {}",
+                wanted.name,
+                wanted.artist_names(),
+                wanted.duration_ms / 1000,
+                found.map_or_else(|| "NO MATCH".to_owned(), |found| found.source)
+            );
+        }
+        println!("{} of {} found", songs.len() - missing, songs.len());
+    }
+
     /// `cargo test --lib same_song_is_found_on_youtube_for_real -- --ignored --nocapture`
     #[tokio::test(flavor = "multi_thread")]
     #[ignore = "needs the helper and the network"]

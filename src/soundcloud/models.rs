@@ -158,8 +158,34 @@ impl Track {
             })
     }
 
+    /// Whether a search result could be the copy that plays: not a preview,
+    /// not blocked, and with an unencrypted stream among its transcodings.
+    /// A listing that carries no transcodings says nothing and stays a
+    /// candidate, so the play itself decides. An encrypted-only track is
+    /// never one: it does not play here, and nothing breaks its encryption.
+    pub fn matchable(&self) -> bool {
+        let listed = self
+            .media
+            .as_ref()
+            .is_some_and(|media| !media.transcodings.is_empty());
+        !self.is_stub()
+            && !self.is_preview()
+            && self.streamable != Some(false)
+            && self.policy.as_deref() != Some("BLOCK")
+            && (!listed || self.is_playable())
+    }
+
     /// Preserve the full catalogue duration even when playback is a preview.
     pub fn to_track(&self, playlist: Option<&Playlist>) -> app::Track {
+        let mut track = self.listing_track(playlist);
+        crate::retitle::apply(&mut track);
+        crate::beats::apply(&mut track, self.description.as_deref());
+        track
+    }
+
+    /// The track as SoundCloud lists it, without the tidied title and artist
+    /// the app shows, for the matcher to judge.
+    pub fn listing_track(&self, playlist: Option<&Playlist>) -> app::Track {
         let artists = self
             .user
             .as_ref()
@@ -186,7 +212,7 @@ impl Track {
         if let Some(genre) = &self.genre {
             crate::stats::note_soundcloud_genre(&track_uri(self.id), genre);
         }
-        let mut track = app::Track {
+        app::Track {
             id: Some(self.id.to_string()),
             name: self.title.clone().unwrap_or_default(),
             uri: track_uri(self.id),
@@ -236,10 +262,7 @@ impl Track {
             verified: self.user.as_ref().is_some_and(|user| user.verified),
             external_urls: external_urls(self.permalink_url.as_deref()),
             ..Default::default()
-        };
-        crate::retitle::apply(&mut track);
-        crate::beats::apply(&mut track, self.description.as_deref());
-        track
+        }
     }
 }
 

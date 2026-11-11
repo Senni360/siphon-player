@@ -124,6 +124,17 @@ pub struct Video {
 
 impl Video {
     pub fn to_track(&self) -> Result<Track, Error> {
+        let mut track = self.listing_track()?;
+        crate::retitle::apply(&mut track);
+        crate::beats::apply(&mut track, self.description.as_deref());
+        Ok(track)
+    }
+
+    /// The video as YouTube lists it, without the tidied title and artist the
+    /// app shows. The matcher judges this: a tidy-up that drops
+    /// "(Instrumental)" or reads the artist out of the title would make another
+    /// recording look like the song.
+    pub fn listing_track(&self) -> Result<Track, Error> {
         if !valid_id(&self.id)
             || self.is_live
             || matches!(
@@ -169,7 +180,7 @@ impl Video {
                 }]
             })
             .unwrap_or_default();
-        let mut track = Track {
+        let track = Track {
             id: Some(self.id.clone()),
             uri: format!("youtube:video:{}", self.id),
             name: self.title.clone(),
@@ -208,8 +219,6 @@ impl Video {
             is_playable: Some(true),
             ..Default::default()
         };
-        crate::retitle::apply(&mut track);
-        crate::beats::apply(&mut track, self.description.as_deref());
         Ok(track)
     }
 }
