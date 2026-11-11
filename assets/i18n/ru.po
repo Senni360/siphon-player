@@ -1321,6 +1321,14 @@ msgstr ""
 "Устройство вывода звука не найдено. Подключи или включи его, затем снова "
 "нажми «Воспроизвести»."
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"Другое приложение использует твоё устройство вывода звука. "
+"Воспроизведение продолжится, когда оно освободится."
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

@@ -1320,6 +1320,14 @@ msgstr ""
 "Пристрій виведення звуку не знайдено. Під’єднайте або увімкніть його, а "
 "потім знову натисніть «Відтворити»."
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"Інший застосунок використовує ваш пристрій виведення звуку. "
+"Відтворення продовжиться, щойно він звільниться."
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

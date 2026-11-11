@@ -15824,7 +15824,11 @@ fn engine_error_text(locale: Locale, error: &str) -> String {
         .into_owned();
     }
     if error == crate::sink::OUTPUT_INTERRUPTED {
-        return gettext(locale, crate::sink::OUTPUT_INTERRUPTED).into_owned();
+        return gettext(
+            locale,
+            "Another app is using your audio device. Playback will continue when it is free.",
+        )
+        .into_owned();
     }
     error.to_owned()
 }
@@ -16022,6 +16026,42 @@ mod tests {
         let german = engine_error_text(Locale::German, crate::sink::OUTPUT_INTERRUPTED);
         assert_ne!(german, crate::sink::OUTPUT_INTERRUPTED);
         assert!(!german.is_empty());
+    }
+
+    /// An output another app took is a wait, not a failed song: the device
+    /// message is a toast, the song stays where it is, and no device menu
+    /// opens. Once the loss has been answered, a later one is news again.
+    #[test]
+    fn a_taken_audio_device_is_a_wait_not_a_skipped_song() {
+        let mut app = test_app("taken-audio-device");
+        app.locale = Locale::English;
+        let taken = || LocalState {
+            playback: Playback::Paused,
+            error: Some(crate::sink::OUTPUT_INTERRUPTED.into()),
+            track: Some(crate::player::LocalTrack {
+                uri: "spotify:track:a".into(),
+                duration_ms: 200_000,
+                ..crate::player::LocalTrack::default()
+            }),
+            position_ms: 30_000,
+            ..LocalState::default()
+        };
+        app.handle_local(taken());
+        assert_eq!(app.toasts.len(), 1);
+        assert_eq!(app.toasts[0].message, crate::sink::OUTPUT_INTERRUPTED);
+        assert!(!app.show_devices, "there is nothing to choose");
+        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
+
+        // The engine's retry answers the message when the device is back.
+        app.handle_local(LocalState {
+            error: None,
+            ..taken()
+        });
+        assert!(app.local.error.is_none());
+
+        // The same loss later is news again.
+        app.handle_local(taken());
+        assert_eq!(app.toasts.len(), 2);
     }
 
     #[test]

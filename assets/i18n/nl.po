@@ -1312,6 +1312,14 @@ msgstr ""
 "Er is geen audio-uitvoerapparaat gevonden. Sluit er een aan of schakel er "
 "een in en druk dan opnieuw op Afspelen."
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"Een andere app gebruikt je audio-uitvoerapparaat. De weergave gaat "
+"verder zodra het vrij is."
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

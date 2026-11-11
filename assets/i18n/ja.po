@@ -1301,6 +1301,13 @@ msgstr ""
 "音声出力デバイスが見つかりません。デバイスを接続するか有効にしてから、もう一"
 "度再生してください。"
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"別のアプリが音声デバイスを使用しています。空きしだい再生を続けます。"
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

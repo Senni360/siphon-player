@@ -1281,6 +1281,13 @@ msgid ""
 "again."
 msgstr "找不到音訊輸出裝置。請連接或啟用一個裝置，然後再按一次播放。"
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"另一個應用程式正在使用你的音訊輸出裝置。裝置閒置後會繼續播放。"
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

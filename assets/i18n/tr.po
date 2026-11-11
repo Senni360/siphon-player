@@ -1310,6 +1310,14 @@ msgstr ""
 "Hiçbir ses çıkış cihazı bulunamadı. Bir cihaz bağlayın veya etkinleştirin, "
 "ardından tekrar çala basın."
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"Başka bir uygulama ses çıkış cihazınızı kullanıyor. Cihaz boşaldığında "
+"çalma devam edecek."
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

@@ -1306,6 +1306,14 @@ msgstr ""
 "Ingen ljudutgång hittades. Anslut eller aktivera en och tryck sedan på Spela "
 "igen."
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"En annan app använder din ljudutgång. Uppspelningen fortsätter när den "
+"är ledig."
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."

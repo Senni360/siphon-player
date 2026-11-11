@@ -749,8 +749,6 @@ fn central(app: &mut App, ui: &mut egui::Ui) {
             if app.dialog.is_none() && page != Page::Settings {
                 if app.audio_key_banner {
                     audio_key_banner(app, ui);
-                } else if app.local.waiting_for_output {
-                    output_waiting(app, ui);
                 } else if app.slow_banner {
                     slow_banner(app, ui);
                 }
@@ -1116,42 +1114,6 @@ fn slow_banner(app: &mut App, ui: &mut egui::Ui) {
         ],
         Action::CloseSlowBanner,
     );
-}
-
-/// A strip under the top bar while another app holds the sound device in
-/// exclusive mode, or the device has gone and Windows is still finding
-/// another. Nothing plays and there is nothing to press: the engine opens the
-/// device again by itself and the song carries on from where it stopped, so
-/// the strip is a plain wait, not a failure.
-fn output_waiting(app: &App, ui: &mut egui::Ui) {
-    use crate::i18n::gettext;
-    let palette = app.palette;
-    Frame::new()
-        .outer_margin(Margin {
-            left: widgets::PAGE_PADDING as i8,
-            right: widgets::PAGE_PADDING as i8,
-            top: 0,
-            bottom: 8,
-        })
-        .fill(palette.surface)
-        .stroke(Stroke::new(1.0, palette.outline))
-        .corner_radius(CornerRadius::same(theme::RADIUS))
-        .inner_margin(Margin::symmetric(16, 12))
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width());
-            ui.horizontal(|ui| {
-                let (slot, _) = ui.allocate_exact_size(vec2(16.0, 16.0), egui::Sense::hover());
-                theme::paint_icon(ui, Icon::CircleAlert, slot, 16.0, palette.secondary);
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(gettext(app.locale, crate::sink::OUTPUT_INTERRUPTED))
-                            .font(theme::regular(13.0))
-                            .color(palette.secondary),
-                    )
-                    .wrap(),
-                );
-            });
-        });
 }
 
 /// A strip under the top bar after Spotify refused the key that decrypts a

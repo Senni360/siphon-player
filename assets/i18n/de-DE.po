@@ -1314,6 +1314,14 @@ msgstr ""
 "Kein Audioausgabegerät gefunden. Schließe eins an oder aktiviere eins und "
 "drücke dann erneut auf Wiedergabe."
 
+#: src/app.rs:15826
+msgid ""
+"Another app is using your audio device. Playback will continue when it is "
+"free."
+msgstr ""
+"Eine andere App benutzt dein Audiogerät. Die Wiedergabe läuft weiter, "
+"sobald es frei ist."
+
 #: src/app.rs:14499
 msgid ""
 "Spotify doesn't make this playlist's songs available to third-party apps."
