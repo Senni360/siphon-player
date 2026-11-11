@@ -243,7 +243,10 @@ pub async fn prerelease(
     uri: &str,
 ) -> anyhow::Result<crate::prerelease::Prerelease> {
     anyhow::ensure!(
-        crate::link::parse(uri).as_deref() == Some(uri) && uri.starts_with("spotify:prerelease:"),
+        crate::link::parse(uri).as_deref() == Some(uri)
+            && uri
+                .strip_prefix("spotify:prerelease:")
+                .is_some_and(valid_spotify_id),
         "invalid prerelease URI"
     );
     let mut request = BatchedEntityRequest::new();
@@ -496,24 +499,196 @@ pub async fn latest_releases(
     let id = artist
         .id
         .as_deref()
-        .filter(|id| id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        .filter(|id| valid_spotify_id(id))
         .ok_or_else(|| anyhow::anyhow!("not a Spotify artist"))?;
-    let login = session.login5().auth_token().await?;
-    let client_token = session.spclient().client_token().await?;
-    let query = serde_json::json!({
-        "operationName": "queryArtistOverview",
-        "variables": {"uri": format!("spotify:artist:{id}"), "locale": "", "includePrerelease": false},
-        "extensions": {
-            "persistedQuery": {"version": 1, "sha256Hash": ARTIST_OVERVIEW_HASH}
-        }
-    });
-    let body = web
-        .partner_request(&login.access_token, &client_token, &query)
-        .await?;
+    let body = artist_overview(session, web, id, false).await?;
     let discography = body
         .pointer("/data/artistUnion/discography")
         .ok_or_else(|| anyhow::anyhow!("Spotify answered without the artist's releases"))?;
     Ok(overview_releases(discography, artist))
+}
+
+/// One announced but unreleased album, as Spotify's own artist page shows it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Upcoming {
+    /// The countdown page's URI, `spotify:prerelease:`.
+    pub uri: String,
+    /// The album the countdown page resolves to, when Spotify names it.
+    pub album_uri: Option<String>,
+    pub name: String,
+    pub image: Option<String>,
+    /// The release instant, in Unix seconds.
+    pub release: Option<i64>,
+    /// `album`, `single`, or `ep`, lower case as Spotify's type reads.
+    pub kind: Option<String>,
+    pub artists: Vec<ArtistRef>,
+    /// Whether the account pre-saved `album_uri`; `None` when there is no
+    /// album to ask about or Spotify would not say.
+    pub saved: Option<bool>,
+    /// A pre-save write is on its way.
+    pub saving: bool,
+    pub save_error: Option<String>,
+    /// The app request whose answer settles `saving`.
+    pub save_request: Option<u64>,
+}
+
+/// An artist's upcoming releases, from the same overview Spotify's own artist
+/// page reads with `includePrerelease: true`. The countdown page names no
+/// album itself; the resolved album URI comes from the pinned pre-release
+/// when Spotify gives it. Each known album's pre-save state is read too, so
+/// the button starts in the right state. Nothing is written here.
+pub async fn upcoming_releases(
+    session: &Session,
+    web: &crate::api::ApiClient,
+    artist_id: &str,
+) -> anyhow::Result<Vec<Upcoming>> {
+    anyhow::ensure!(valid_spotify_id(artist_id), "not a Spotify artist");
+    let body = artist_overview(session, web, artist_id, true).await?;
+    anyhow::ensure!(
+        body.pointer("/data/artistUnion")
+            .is_some_and(serde_json::Value::is_object),
+        "Spotify answered without the artist's page"
+    );
+    let artist = ArtistRef {
+        id: Some(artist_id.to_owned()),
+        uri: Some(format!("spotify:artist:{artist_id}")),
+        name: body
+            .pointer("/data/artistUnion/profile/name")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_owned(),
+    };
+    let mut releases = upcoming_from(&body, &artist);
+    for release in &mut releases {
+        if let Some(album) = &release.album_uri {
+            release.saved = prerelease_saved(session, album).await.ok();
+        }
+    }
+    Ok(releases)
+}
+
+fn valid_spotify_id(id: &str) -> bool {
+    id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
+/// The artist page overview Spotify's own app requests, with or without the
+/// upcoming release.
+async fn artist_overview(
+    session: &Session,
+    web: &crate::api::ApiClient,
+    artist_id: &str,
+    include_prerelease: bool,
+) -> anyhow::Result<serde_json::Value> {
+    anyhow::ensure!(valid_spotify_id(artist_id), "not a Spotify artist");
+    let login = session.login5().auth_token().await?;
+    let client_token = session.spclient().client_token().await?;
+    let query = serde_json::json!({
+        "operationName": "queryArtistOverview",
+        "variables": {
+            "uri": format!("spotify:artist:{artist_id}"),
+            "locale": "",
+            "includePrerelease": include_prerelease,
+        },
+        "extensions": {
+            "persistedQuery": {"version": 1, "sha256Hash": ARTIST_OVERVIEW_HASH}
+        }
+    });
+    Ok(web
+        .partner_request(&login.access_token, &client_token, &query)
+        .await?)
+}
+
+/// The single pre-release Spotify puts on an artist's overview. Missing or
+/// malformed fields leave no item; they never turn the page into an error.
+fn upcoming_from(body: &serde_json::Value, artist: &ArtistRef) -> Vec<Upcoming> {
+    let Some(pre_release) = body
+        .pointer("/data/artistUnion/preRelease")
+        .filter(|value| value.is_object())
+    else {
+        return Vec::new();
+    };
+    let Some(uri) = pre_release
+        .get("uri")
+        .and_then(serde_json::Value::as_str)
+        .filter(|uri| {
+            crate::link::parse(uri).as_deref() == Some(*uri)
+                && uri
+                    .strip_prefix("spotify:prerelease:")
+                    .is_some_and(valid_spotify_id)
+        })
+    else {
+        return Vec::new();
+    };
+    let content = pre_release
+        .get("preReleaseContent")
+        .filter(|value| value.is_object());
+    let Some(name) = content
+        .and_then(|content| content.get("name"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|name| !name.is_empty())
+    else {
+        return Vec::new();
+    };
+    let images: Vec<Image> = content
+        .and_then(|content| content.pointer("/coverArt/sources"))
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|source| serde_json::from_value(source.clone()).ok())
+        .collect();
+    let image = crate::api::models::pick_image(&images, 300)
+        .filter(|url| url.starts_with(IMAGE_HOST))
+        .map(str::to_owned);
+    let release = pre_release
+        .pointer("/releaseDate/isoString")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|date| date.parse::<jiff::Timestamp>().ok())
+        .map(|date| date.as_second());
+    let kind = content
+        .and_then(|content| content.get("type"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_ascii_lowercase);
+    let album_uri = upcoming_album_uri(body.pointer("/data/artistUnion"), content, name);
+    vec![Upcoming {
+        uri: uri.to_owned(),
+        album_uri,
+        name: name.to_owned(),
+        image,
+        release,
+        kind,
+        artists: vec![artist.clone()],
+        ..Default::default()
+    }]
+}
+
+/// The album a pre-release resolves to. Spotify's overview gives it only when
+/// the countdown content itself or the artist's pinned pre-release names it.
+fn upcoming_album_uri(
+    artist_union: Option<&serde_json::Value>,
+    content: Option<&serde_json::Value>,
+    name: &str,
+) -> Option<String> {
+    let content_uri = content
+        .and_then(|content| content.get("uri"))
+        .and_then(serde_json::Value::as_str);
+    let pinned = artist_union
+        .and_then(|artist| artist.pointer("/profile/pinnedItem/itemV2/data"))
+        .filter(|data| {
+            data.get("__typename").and_then(serde_json::Value::as_str) == Some("PreReleaseAlbum")
+                && data
+                    .pointer("/preReleaseContent/name")
+                    .and_then(serde_json::Value::as_str)
+                    == Some(name)
+        })
+        .and_then(|data| data.get("uri"))
+        .and_then(serde_json::Value::as_str);
+    content_uri.into_iter().chain(pinned).find_map(album_uri)
+}
+
+fn album_uri(uri: &str) -> Option<String> {
+    let id = uri.strip_prefix("spotify:album:")?;
+    (valid_spotify_id(id) && crate::link::parse(uri).as_deref() == Some(uri))
+        .then(|| uri.to_owned())
 }
 
 /// How many of an artist's albums, and of their singles, are read besides the
@@ -2222,6 +2397,91 @@ mod tests {
         assert_eq!(found[0].album_type.as_deref(), Some("single"));
         assert_eq!(found[0].artists, vec![artist]);
         assert_eq!(found[2].release_date.as_deref(), Some("2026-03"));
+    }
+
+    /// The overview's shape as Spotify sent it on 2026-11-11, with the
+    /// pre-release playlist card Spotify's own artist page shows.
+    #[test]
+    fn an_artists_upcoming_release_comes_from_the_overview() {
+        let body: serde_json::Value =
+            serde_json::from_str(include_str!("testdata/artist-upcoming.json")).unwrap();
+        let artist = ArtistRef {
+            id: Some("15o7qdDTBzs6xWRUYUtZc1".into()),
+            uri: Some("spotify:artist:15o7qdDTBzs6xWRUYUtZc1".into()),
+            name: "Grand Theft Auto VI".into(),
+        };
+        let found = upcoming_from(&body, &artist);
+        let [release] = found.as_slice() else {
+            panic!("one upcoming release");
+        };
+        assert_eq!(release.uri, "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL");
+        assert_eq!(
+            release.album_uri.as_deref(),
+            Some("spotify:album:5BYKG4MHfySZthe2W6r7n4")
+        );
+        assert_eq!(release.name, "Grand Theft Auto VI: The Album");
+        assert_eq!(release.kind.as_deref(), Some("album"));
+        assert_eq!(release.release, Some(1_795_129_200));
+        assert_eq!(release.artists, vec![artist]);
+        assert_eq!(
+            release.image.as_deref(),
+            Some("https://i.scdn.co/image/ab67616d00001e02197fc499df23a7957415dffe")
+        );
+    }
+
+    #[test]
+    fn an_absent_or_malformed_upcoming_release_gives_no_item() {
+        let artist = ArtistRef {
+            id: Some("15o7qdDTBzs6xWRUYUtZc1".into()),
+            uri: Some("spotify:artist:15o7qdDTBzs6xWRUYUtZc1".into()),
+            name: "Grand Theft Auto VI".into(),
+        };
+        assert!(
+            upcoming_from(&serde_json::json!({"data": {"artistUnion": {}}}), &artist).is_empty()
+        );
+        let malformed = |uri: &str| {
+            serde_json::json!({"data": {"artistUnion": {"preRelease": {
+                "uri": uri,
+                "preReleaseContent": {"name": "Release", "type": "ALBUM"}
+            }}}})
+        };
+        assert!(
+            upcoming_from(&malformed("spotify:album:5BYKG4MHfySZthe2W6r7n4"), &artist).is_empty()
+        );
+        assert!(upcoming_from(&malformed("spotify:prerelease:short"), &artist).is_empty());
+        assert!(upcoming_from(&malformed("https://evil.example/prerelease"), &artist).is_empty());
+        // A pre-release Spotify names without a cover, an album or a release
+        // instant stays an item, with those fields left empty.
+        let bare = serde_json::json!({"data": {"artistUnion": {"preRelease": {
+            "uri": "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL",
+            "preReleaseContent": {"name": "Release", "type": "SINGLE"}
+        }}}});
+        let found = upcoming_from(&bare, &artist);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].album_uri, None);
+        assert_eq!(found[0].image, None);
+        assert_eq!(found[0].release, None);
+        assert_eq!(found[0].kind.as_deref(), Some("single"));
+    }
+
+    #[test]
+    fn a_different_pinned_album_does_not_become_the_upcoming_album() {
+        let artist = ArtistRef::default();
+        let body = serde_json::json!({"data": {"artistUnion": {
+            "profile": {"pinnedItem": {"itemV2": {"data": {
+                "__typename": "PreReleaseAlbum",
+                "uri": "spotify:album:0000000000000000000000",
+                "preReleaseContent": {"name": "Another release"}
+            }}}},
+            "preRelease": {
+                "uri": "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL",
+                "releaseDate": {"isoString": "2026-11-19T23:00:00Z"},
+                "preReleaseContent": {"name": "Release", "type": "ALBUM"}
+            }
+        }}});
+        let found = upcoming_from(&body, &artist);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].album_uri, None);
     }
 
     #[test]

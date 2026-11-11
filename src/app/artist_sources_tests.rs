@@ -15,6 +15,7 @@ fn artist_page_app(name: &str) -> App {
             }),
             top_tracks: Loadable::Loaded(Vec::new()),
             albums: [("album".to_string(), albums)].into(),
+            upcoming: Loadable::Loaded(Vec::new()),
             ..Default::default()
         },
     );

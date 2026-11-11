@@ -309,10 +309,61 @@ fn a_download_keeps_only_a_soundcloud_songs_own_page() {
 }
 
 #[test]
+fn a_phone_can_only_pre_save_a_resolved_album() {
+    let action = |uri: &str| {
+        super::remote::phone_action(&PhoneCommand::Presave {
+            uri: uri.into(),
+            saved: true,
+        })
+    };
+    let album = "spotify:album:5BYKG4MHfySZthe2W6r7n4";
+    assert!(matches!(
+        action(album),
+        Some(Action::SetUpcomingSaved { album_uri, saved: true }) if album_uri == album
+    ));
+    assert!(action("spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL").is_none());
+    assert!(action("spotify:track:5BYKG4MHfySZthe2W6r7n4").is_none());
+    assert!(action("spotify:album:short").is_none());
+    assert!(action("https://evil.example/album/5BYKG4MHfySZthe2W6r7n4").is_none());
+}
+
+#[test]
+fn an_artist_answer_carries_the_upcoming_release() {
+    let mut app = artist_page_app("remote-upcoming");
+    app.artist_pages.get_mut("art").unwrap().upcoming =
+        Loadable::Loaded(vec![crate::session_reads::Upcoming {
+            uri: "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL".into(),
+            album_uri: Some("spotify:album:5BYKG4MHfySZthe2W6r7n4".into()),
+            name: "Grand Theft Auto VI: The Album".into(),
+            image: Some("https://i.scdn.co/image/ab67616d00001e02197fc499df23a7957415dffe".into()),
+            release: Some(1_795_129_200),
+            kind: Some("album".into()),
+            saved: Some(false),
+            ..Default::default()
+        }]);
+    let answer = app
+        .remote_answer(&PhoneCommand::Artist { id: "art".into() })
+        .expect("answered");
+    assert_eq!(
+        answer["upcoming"][0]["uri"],
+        "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL"
+    );
+    assert_eq!(
+        answer["upcoming"][0]["album_uri"],
+        "spotify:album:5BYKG4MHfySZthe2W6r7n4"
+    );
+    assert_eq!(answer["upcoming"][0]["name"], "Grand Theft Auto VI: The Album");
+    assert_eq!(answer["upcoming"][0]["release"], 1_795_129_200);
+    assert_eq!(answer["upcoming"][0]["kind"], "album");
+    assert_eq!(answer["upcoming"][0]["saved"], false);
+    app.backend.shutdown();
+}
+
+#[test]
 fn the_phone_is_told_this_computer_can_download() {
     let app = test_app("remote-can");
     let told = serde_json::to_value(app.remote_snapshot()).unwrap();
-    assert_eq!(told["can"], serde_json::json!(["download"]));
+    assert_eq!(told["can"], serde_json::json!(["download", "presave"]));
 }
 
 #[test]

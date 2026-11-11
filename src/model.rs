@@ -1187,6 +1187,10 @@ pub struct ArtistPage {
     pub top_tracks: Loadable<Vec<Track>>,
     pub albums: HashMap<String, PagedList<Album>>,
     pub related: Loadable<Vec<Artist>>,
+    /// The artist's announced but unreleased release, with its pre-save state.
+    pub upcoming: Loadable<Vec<crate::session_reads::Upcoming>>,
+    /// The backend request whose answer may replace `upcoming`.
+    pub upcoming_generation: u64,
     pub filter: DiscographyFilter,
     pub show_all_top: bool,
     pub sources: ArtistSources,
@@ -1802,6 +1806,12 @@ pub enum Action {
     OpenUrl(String),
     SetPrereleaseSaved {
         uri: String,
+        saved: bool,
+    },
+    /// Pre-save an upcoming release, or remove its pre-save, by the resolved
+    /// album URI Spotify's collection names.
+    SetUpcomingSaved {
+        album_uri: String,
         saved: bool,
     },
     OpenInSpotify(String),

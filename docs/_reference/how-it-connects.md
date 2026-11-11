@@ -155,9 +155,15 @@ run of the app, a YouTube copy the edge already holds is not downloaded again, a
 nothing is fetched while **Play my local files on my phone** is off.
 
 A phone can also send a song here to download. This computer says it can in the
-state it publishes (`can: ["download"]`), the phone's command carries the song's
+state it publishes (`can: ["download", "presave"]`), the phone's command carries the song's
 address, name, artists and length, and the download then runs here exactly as one
 started on this computer.
+
+A phone can pre-save an artist's upcoming release, the same write this computer
+makes from the artist page. The artist answer carries its `upcoming` entries
+(`uri`, `album_uri`, `name`, `image`, `release`, `kind`, `saved`), and the
+phone's `presave` command names the resolved album URI with the state it wants.
+Any other URI is refused, so a phone cannot write anything else to the library.
 
 The phone reads lyrics itself for a song it plays, and for any song while this computer
 is off: it asks [lrclib.net](https://lrclib.net) with the song's title and artist, and
@@ -1074,6 +1080,17 @@ credentials. Failed confirmation leaves state unknown and offers a fresh read;
 it never automatically repeats a mutation. Requests have a 20-second deadline.
 Sign-out cancels work, stale session/page generations are ignored, and a new
 link or history navigation cannot be overwritten by an older response.
+
+An artist's page finds their upcoming release in the same Pathfinder
+`queryArtistOverview`, asked with `includePrerelease: true`. Its `preRelease`
+names the countdown page, cover, kind and release instant; the resolved album
+URI comes from the countdown content or the artist's pinned pre-release when
+Spotify gives it. Each known album's membership is read with the same
+`/collection/v2/contains` call, so the button starts in the right state. A
+release Spotify names without an album stays on the page but offers no
+pre-save. Opening an artist page reads only; a press writes, and a phone's
+`presave` command for a resolved album URI uses the same write, confirmation
+and stale-answer protection.
 
 ## Removing one copy of a repeated song
 

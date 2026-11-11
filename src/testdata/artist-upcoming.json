@@ -1,0 +1,45 @@
+{
+  "data": {
+    "artistUnion": {
+      "profile": {
+        "name": "Grand Theft Auto VI",
+        "pinnedItem": {
+          "itemV2": {
+            "data": {
+              "__typename": "PreReleaseAlbum",
+              "uri": "spotify:album:5BYKG4MHfySZthe2W6r7n4",
+              "name": "Grand Theft Auto VI: The Album",
+              "preReleaseContent": {
+                "__typename": "PreReleaseAlbum",
+                "name": "Grand Theft Auto VI: The Album",
+                "type": "ALBUM",
+                "coverArt": {
+                  "sources": [
+                    {"height": 300, "url": "https://i.scdn.co/image/ab67616d00001e02197fc499df23a7957415dffe", "width": 300},
+                    {"height": 64, "url": "https://i.scdn.co/image/ab67616d0000485197fc499df23a7957415dffe", "width": 64},
+                    {"height": 640, "url": "https://i.scdn.co/image/ab67616d0000b273197fc499df23a7957415dffe", "width": 640}
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "preRelease": {
+        "uri": "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL",
+        "releaseDate": {"isoString": "2026-11-19T23:00:00Z"},
+        "preReleaseContent": {
+          "name": "Grand Theft Auto VI: The Album",
+          "type": "ALBUM",
+          "coverArt": {
+            "sources": [
+              {"height": 300, "url": "https://i.scdn.co/image/ab67616d00001e02197fc499df23a7957415dffe", "width": 300},
+              {"height": 64, "url": "https://i.scdn.co/image/ab67616d0000485197fc499df23a7957415dffe", "width": 64},
+              {"height": 640, "url": "https://i.scdn.co/image/ab67616d0000b273197fc499df23a7957415dffe", "width": 640}
+            ]
+          }
+        }
+      }
+    }
+  }
+}
