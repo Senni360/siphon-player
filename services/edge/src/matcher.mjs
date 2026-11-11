@@ -7,7 +7,8 @@
 // A candidate passes only when its title is the same song and its version is
 // the one that was asked for. Credits, tags and spelling are metadata, never
 // identity: "Sky (Prod. By Art Dealer)" is "Sky", but "Sky (Live)" is another
-// recording. When the evidence is thin the answer is no match.
+// recording. An account that spells the artist's name with no spaces is that
+// artist. When the evidence is thin the answer is no match.
 
 /** Strong version words: they can only describe another recording. */
 export const QUALIFIERS = Object.freeze([
@@ -441,6 +442,28 @@ function symbolsOnlyArtist(wanted, candidate) {
   return credits.some((credit) => same(credit));
 }
 
+/** Folded and stripped of spaces and punctuation: "Playboi Carti" is "playboicarti". */
+function accountKey(text) {
+  return fold(text).replace(/[^\p{L}\p{N}\p{M}]+/gu, "");
+}
+
+function sameAccount(left, right) {
+  const key = accountKey(left);
+  return key.length > 0 && key === accountKey(right);
+}
+
+/**
+ * An uploader or credit that spells the artist with no spaces: the account
+ * `playboicarti` is Playboi Carti. Equality only, so an account that merely
+ * contains the name, or a one-word artist inside a longer handle, is not the
+ * artist.
+ */
+function artistAccount(primaryName, candidate) {
+  if (sameAccount(primaryName, candidate?.uploader ?? "")) return true;
+  const credits = Array.isArray(candidate?.credits) ? candidate.credits : [];
+  return credits.some((credit) => sameAccount(primaryName, credit));
+}
+
 function better(left, right) {
   if (left.score !== right.score) return left.score > right.score;
   if (left.isrc !== right.isrc) return left.isrc;
@@ -485,7 +508,8 @@ function evaluate(track, candidate) {
     if (!identityExact || !symbolsOnlyArtist(primaryName, candidate)) return null;
   } else {
     const named = coverage(primary, evidence) >= 1
-      || coverage(set(secondaryTokens(primaryName)), secondaryEvidence(candidate, candidate?.title ?? "")) >= 1;
+      || coverage(set(secondaryTokens(primaryName)), secondaryEvidence(candidate, candidate?.title ?? "")) >= 1
+      || artistAccount(primaryName, candidate);
     if (!named) return null;
   }
   if (!sameSet(parsed.versions, wantedTitle.versions)) return null;
@@ -506,7 +530,9 @@ function sameSet(left, right) {
  * Returns a score in [0, 1] or null. Every rejection is a gate: a missing
  * duration, a difference over five seconds without the released recording's
  * evidence, a live stream, a missing artist, a different title, a different
- * version, or a title that carries too much extra wording.
+ * version, or a title that carries too much extra wording. An artist's own
+ * account may drop the name's spaces; that reading stays narrow and is checked
+ * by its own tests.
  */
 export function score(track, candidate) {
   const verdict = evaluate(track, candidate);
