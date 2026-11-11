@@ -13,7 +13,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
-pub use crate::bpm_key::{Key, PITCHES, RATE, Reading, analyze};
+use crate::bpm_key::{RATE, Reading, analyze};
 
 /// The engine's interleaved stereo sample rate, what [`Collector::push`]
 /// receives.
