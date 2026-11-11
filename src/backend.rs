@@ -1187,6 +1187,12 @@ pub enum Command {
     /// Read Spotify's play counts for an album's songs or an artist's
     /// popular songs, by the album's or the artist's URI.
     PlayCounts(String),
+    /// Read an artist's announced but unreleased release, and its pre-save
+    /// state, through the streaming session.
+    UpcomingReleases {
+        artist_id: String,
+        generation: u64,
+    },
     /// Read what friends are listening to through the streaming session,
     /// for the app's request generation.
     FriendActivity(u64),
@@ -1503,6 +1509,13 @@ pub enum Event {
     PlayCounts {
         uri: String,
         result: Result<std::collections::HashMap<String, u64>, String>,
+    },
+    /// An artist's announced but unreleased releases, and the pre-save state
+    /// of each known album, answering the page's request `generation`.
+    UpcomingReleases {
+        artist_id: String,
+        generation: u64,
+        result: Result<Vec<session_reads::Upcoming>, String>,
     },
     /// Saved shows that Spotify's metadata marks as audiobooks. librespot
     /// cannot play them, so the Podcasts shelf leaves them out.
@@ -3937,6 +3950,10 @@ impl Worker {
                 }
                 Command::UserNames(ids) => self.fetch_user_names(ids),
                 Command::PlayCounts(uri) => self.fetch_play_counts(uri),
+                Command::UpcomingReleases {
+                    artist_id,
+                    generation,
+                } => self.fetch_upcoming_releases(artist_id, generation),
                 Command::FriendActivity(generation) => self.fetch_friend_activity(generation),
                 Command::LoadLikedSongsCache { generation } => {
                     if let Some(account) = self.api.account() {
@@ -5994,6 +6011,50 @@ impl Worker {
                 log::debug!("Play counts unavailable: {error}");
             }
             send(uri, result);
+        });
+    }
+
+    /// Ask Spotify, through the streaming session, which release an artist
+    /// has announced but not released, and whether the account already
+    /// pre-saved it. A page that cannot be read says so; it never writes.
+    fn fetch_upcoming_releases(&self, artist_id: String, generation: u64) {
+        let events = self.events.clone();
+        let waker = self.waker.clone();
+        let send = move |artist_id, result| {
+            let _ = events.send(Event::UpcomingReleases {
+                artist_id,
+                generation,
+                result,
+            });
+            waker.wake();
+        };
+        let Some(engine) = self.engine.clone() else {
+            return send(
+                artist_id,
+                Err("Upcoming releases need playback enabled.".into()),
+            );
+        };
+        let Some(web) = self.api.prerelease_http_client() else {
+            return send(
+                artist_id,
+                Err("Upcoming releases need a signed-in account.".into()),
+            );
+        };
+        let mut cancelled = self.session.subscribe();
+        tokio::spawn(async move {
+            let read = tokio::time::timeout(
+                RADIO_TIMEOUT,
+                session_reads::upcoming_releases(engine.session(), &web, &artist_id),
+            );
+            let result = tokio::select! {
+                biased;
+                // A later visit asks again.
+                _ = cancelled.changed() => Err("The playback session ended.".to_string()),
+                result = read => result
+                    .map_err(|_| "Spotify took too long to answer.".to_string())
+                    .and_then(|result| result.map_err(|error| format!("{error:#}"))),
+            };
+            send(artist_id, result);
         });
     }
 

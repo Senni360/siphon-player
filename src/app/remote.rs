@@ -9,7 +9,7 @@ use crate::api::models::{ArtistRef, ExternalUrls, PlayableItem, Track};
 use crate::backend::remote::{RemoteEvent, RemoteRequest};
 use crate::remote::{
     ANSWER_WITHIN, Command as Phone, Incoming, STATE_AT_LEAST, STATE_EVERY, STATE_LOOK, Snapshot,
-    allowed_uri, song_of, songs,
+    allowed_uri, presave_uri, song_of, songs,
 };
 
 /// How long a code stays usable, which is also how long it's shown.
@@ -127,6 +127,12 @@ pub(super) fn phone_action(command: &Phone) -> Option<Action> {
         Phone::Shuffle => Some(Action::ToggleShuffle),
         Phone::Repeat => Some(Action::CycleRepeat),
         Phone::Like { uri } if allowed_uri(uri) => Some(Action::ToggleSaved(uri.clone())),
+        // Only a resolved album URI: a phone may pre-save an upcoming album,
+        // never write another kind of thing to the library.
+        Phone::Presave { uri, saved } if presave_uri(uri) => Some(Action::SetUpcomingSaved {
+            album_uri: uri.clone(),
+            saved: *saved,
+        }),
         Phone::Play { uris, index } => {
             // The index is into what the phone sent, so it has to survive the filter.
             let wanted = uris.get(*index as usize)?;
@@ -539,7 +545,7 @@ impl App {
     }
 
     /// The answer to a question, or None while it's still loading.
-    fn remote_answer(&mut self, question: &Phone) -> Option<Value> {
+    pub(super) fn remote_answer(&mut self, question: &Phone) -> Option<Value> {
         Some(match question {
             Phone::Home => {
                 let shown = self.for_you.get()?;
@@ -707,6 +713,9 @@ impl App {
         if matches!(page.top_tracks, Loadable::NotLoaded | Loadable::Loading) {
             return None;
         }
+        if matches!(page.upcoming, Loadable::Loading) {
+            return None;
+        }
         let sources = &page.sources;
         let accounts: Vec<Value> = [
             ("soundcloud", sources.soundcloud.get()),
@@ -738,6 +747,26 @@ impl App {
                 })
             })
             .collect();
+        let upcoming: Vec<Value> = page
+            .upcoming
+            .get()
+            .map(|releases| {
+                releases
+                    .iter()
+                    .map(|release| {
+                        json!({
+                            "uri": release.uri,
+                            "album_uri": release.album_uri,
+                            "name": release.name,
+                            "image": release.image,
+                            "release": release.release,
+                            "kind": release.kind,
+                            "saved": release.saved,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         Some(json!({
             "name": artist.name,
             "uri": artist.uri,
@@ -745,6 +774,7 @@ impl App {
             "image": pick_image(&artist.images, 600),
             "followers": artist.followers.as_ref().map(|followers| followers.total),
             "popular": songs(page.top_tracks.get().map_or(&[][..], Vec::as_slice)),
+            "upcoming": upcoming,
             "not_on_spotify": songs(&sources.songs),
             "also_as": sources.alternates.iter().map(|account| &account.name).collect::<Vec<_>>(),
             "alternate": songs(&sources.alternate_songs),

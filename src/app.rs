@@ -3336,6 +3336,11 @@ impl App {
                     self.set_user_image(id, image);
                 }
                 Event::PlayCounts { uri, result } => self.receive_play_counts(uri, result),
+                Event::UpcomingReleases {
+                    artist_id,
+                    generation,
+                    result,
+                } => self.receive_upcoming(&artist_id, generation, result),
                 Event::AudiobookShows(uris) => {
                     self.audiobook_shows.extend(uris);
                 }
@@ -6180,6 +6185,7 @@ impl App {
                         self.backend.api(ApiRequest::Artist { id: id.clone() });
                     }
                     let filter = page.filter;
+                    let needs_upcoming = page.upcoming.needs_load();
                     self.load_artist_albums(&id, filter);
                     if page_related_needs_load(&self.artist_pages, &id) {
                         if let Some(page) = self.artist_pages.get_mut(&id) {
@@ -6187,6 +6193,18 @@ impl App {
                         }
                         self.backend
                             .api(ApiRequest::RelatedArtists { id: id.clone() });
+                    }
+                    if needs_upcoming {
+                        self.load_generation = self.load_generation.wrapping_add(1);
+                        let generation = self.load_generation;
+                        if let Some(page) = self.artist_pages.get_mut(&id) {
+                            page.upcoming = Loadable::Loading;
+                            page.upcoming_generation = generation;
+                        }
+                        self.backend.send(Command::UpcomingReleases {
+                            artist_id: id.clone(),
+                            generation,
+                        });
                     }
                     self.request_contains(vec![format!("spotify:artist:{id}")]);
                 }
@@ -10246,19 +10264,62 @@ impl App {
                 && data.saving
                 && data.saved == Some(saved)
             {
-                data.saving = false;
-                match result {
-                    Ok(()) => data.save_error = None,
-                    Err(error) => {
-                        // A timeout may have committed remotely. Unknown is
-                        // more honest than guessing or silently sending again.
-                        data.saved = None;
-                        data.save_error = Some(error);
-                    }
-                }
-                break;
+                settle_presave(
+                    &mut data.saved,
+                    &mut data.saving,
+                    &mut data.save_error,
+                    &result,
+                );
+                return;
             }
         }
+        // A pre-save pressed on an artist's upcoming release, answered for
+        // the action that sent it. An answer from before that action has
+        // another generation and leaves the shown state alone.
+        for page in self.artist_pages.values_mut() {
+            let Some(releases) = page.upcoming.get_mut() else {
+                continue;
+            };
+            for release in releases {
+                if release.save_request == Some(generation)
+                    && release.album_uri.as_deref() == Some(uri)
+                    && release.saving
+                    && release.saved == Some(saved)
+                {
+                    release.save_request = None;
+                    settle_presave(
+                        &mut release.saved,
+                        &mut release.saving,
+                        &mut release.save_error,
+                        &result,
+                    );
+                    return;
+                }
+            }
+        }
+    }
+
+    /// An artist page's upcoming release answer. A late answer for an older
+    /// request cannot replace what a newer visit asked for.
+    fn receive_upcoming(
+        &mut self,
+        artist_id: &str,
+        generation: u64,
+        result: Result<Vec<crate::session_reads::Upcoming>, String>,
+    ) {
+        let Some(page) = self.artist_pages.get_mut(artist_id) else {
+            return;
+        };
+        if page.upcoming_generation != generation {
+            return;
+        }
+        page.upcoming = match result {
+            Ok(releases) => Loadable::Loaded(releases),
+            Err(error) => {
+                log::debug!("upcoming releases unavailable for {artist_id}: {error}");
+                Loadable::Failed(error)
+            }
+        };
     }
 
     pub fn can_go_back(&self) -> bool {
@@ -14176,6 +14237,39 @@ impl App {
                     }
                 }
             }
+            Action::SetUpcomingSaved { album_uri, saved } => {
+                let target = self.artist_pages.values().any(|page| {
+                    page.upcoming.get().is_some_and(|releases| {
+                        releases
+                            .iter()
+                            .any(|release| can_presave(release, &album_uri))
+                    })
+                });
+                if self.local_ready && target {
+                    self.load_generation = self.load_generation.wrapping_add(1);
+                    let generation = self.load_generation;
+                    for page in self.artist_pages.values_mut() {
+                        let Some(releases) = page.upcoming.get_mut() else {
+                            continue;
+                        };
+                        if let Some(release) = releases
+                            .iter_mut()
+                            .find(|release| can_presave(release, &album_uri))
+                        {
+                            release.saved = Some(saved);
+                            release.saving = true;
+                            release.save_error = None;
+                            release.save_request = Some(generation);
+                            break;
+                        }
+                    }
+                    self.backend.send(Command::SetPrereleaseSaved {
+                        uri: album_uri,
+                        saved,
+                        generation,
+                    });
+                }
+            }
             Action::OpenUrl(url) => {
                 // Open links off the UI thread with the platform-specific
                 // launcher used elsewhere in the app.
@@ -15868,6 +15962,30 @@ fn artist_request(
             .collect(),
         fresh: false,
     }
+}
+
+/// The answer to one pre-save write, applied to the item whose request it
+/// answers. A timeout may have committed remotely, so its state is unknown.
+fn settle_presave(
+    saved: &mut Option<bool>,
+    saving: &mut bool,
+    save_error: &mut Option<String>,
+    result: &Result<(), String>,
+) {
+    *saving = false;
+    match result {
+        Ok(()) => *save_error = None,
+        Err(error) => {
+            *saved = None;
+            *save_error = Some(error.clone());
+        }
+    }
+}
+
+/// Whether this upcoming release can take a pre-save press now: Spotify named
+/// its album and the account's current pre-save state, and no write is open.
+fn can_presave(release: &crate::session_reads::Upcoming, album_uri: &str) -> bool {
+    release.album_uri.as_deref() == Some(album_uri) && release.saved.is_some() && !release.saving
 }
 
 fn page_related_needs_load(pages: &HashMap<String, ArtistPage>, id: &str) -> bool {
@@ -24731,6 +24849,100 @@ mod tests {
         assert_eq!(data.saved, None);
         assert!(!data.saving);
         assert_eq!(data.save_error.as_deref(), Some("confirmation timed out"));
+    }
+
+    fn upcoming_release() -> crate::session_reads::Upcoming {
+        crate::session_reads::Upcoming {
+            uri: "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL".into(),
+            album_uri: Some("spotify:album:5BYKG4MHfySZthe2W6r7n4".into()),
+            name: "Grand Theft Auto VI: The Album".into(),
+            release: Some(1_795_129_200),
+            kind: Some("album".into()),
+            saved: Some(false),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_artist_page_loads_its_upcoming_release_once() {
+        let mut app = artist_page_app("artist-upcoming-load");
+        app.auth = AuthStatus::Connected {
+            username: "alice".into(),
+        };
+        app.artist_pages.get_mut("art").unwrap().upcoming = Loadable::NotLoaded;
+        app.ensure_loaded(Page::Artist("art".into()));
+        let page = &app.artist_pages["art"];
+        assert!(matches!(page.upcoming, Loadable::Loading));
+        let generation = page.upcoming_generation;
+        assert_ne!(generation, 0);
+        app.receive_upcoming("art", generation, Ok(vec![upcoming_release()]));
+        assert_eq!(app.artist_pages["art"].upcoming.get().unwrap().len(), 1);
+        // An answer from another visit cannot replace this one.
+        app.receive_upcoming("art", generation.wrapping_sub(1), Ok(Vec::new()));
+        assert_eq!(app.artist_pages["art"].upcoming.get().unwrap().len(), 1);
+        app.backend.shutdown();
+    }
+
+    #[test]
+    fn pre_saving_an_upcoming_release_is_optimistic_and_a_late_answer_cannot_undo_it() {
+        let album = "spotify:album:5BYKG4MHfySZthe2W6r7n4";
+        let mut app = artist_page_app("artist-upcoming-presave");
+        app.local_ready = true;
+        app.artist_pages.get_mut("art").unwrap().upcoming =
+            Loadable::Loaded(vec![upcoming_release()]);
+        let ctx = egui::Context::default();
+        app.apply(
+            Action::SetUpcomingSaved {
+                album_uri: album.into(),
+                saved: true,
+            },
+            &ctx,
+        );
+        let release = &app.artist_pages["art"].upcoming.get().unwrap()[0];
+        assert_eq!(release.saved, Some(true), "shown pre-saved at once");
+        assert!(release.saving);
+        let generation = release.save_request.unwrap();
+
+        // An answer from before the press, and one for another state, leave
+        // what the listener did on screen.
+        app.receive_prerelease_saved(album, true, generation.wrapping_sub(1), Err("stale".into()));
+        assert_eq!(
+            app.artist_pages["art"].upcoming.get().unwrap()[0].saved,
+            Some(true)
+        );
+        app.receive_prerelease_saved(album, false, generation, Ok(()));
+        let release = &app.artist_pages["art"].upcoming.get().unwrap()[0];
+        assert_eq!(release.saved, Some(true));
+        assert!(release.saving);
+
+        app.receive_prerelease_saved(album, true, generation, Ok(()));
+        let release = &app.artist_pages["art"].upcoming.get().unwrap()[0];
+        assert_eq!(release.saved, Some(true));
+        assert!(!release.saving);
+        assert!(release.save_error.is_none());
+
+        // Pressing again removes the pre-save, shown at once too.
+        app.apply(
+            Action::SetUpcomingSaved {
+                album_uri: album.into(),
+                saved: false,
+            },
+            &ctx,
+        );
+        let release = &app.artist_pages["art"].upcoming.get().unwrap()[0];
+        assert_eq!(release.saved, Some(false));
+        assert!(release.saving);
+        app.receive_prerelease_saved(
+            album,
+            false,
+            release.save_request.unwrap(),
+            Err("timeout".into()),
+        );
+        let release = &app.artist_pages["art"].upcoming.get().unwrap()[0];
+        assert_eq!(release.saved, None, "unknown rather than a guessed state");
+        assert!(!release.saving);
+        assert_eq!(release.save_error.as_deref(), Some("timeout"));
+        app.backend.shutdown();
     }
 
     #[test]

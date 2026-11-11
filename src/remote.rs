@@ -88,6 +88,13 @@ pub enum Command {
         #[serde(rename = "target")]
         id: String,
     },
+    /// Pre-save an upcoming release, or remove its pre-save. `uri` is the
+    /// resolved album URI: Spotify's collection names albums, not the
+    /// countdown page that announces them.
+    Presave {
+        uri: String,
+        saved: bool,
+    },
     Source {
         uri: String,
     },
@@ -135,6 +142,15 @@ pub fn allowed_uri(uri: &str) -> bool {
             ]
             .iter()
             .any(|prefix| uri.starts_with(prefix)))
+}
+
+/// Whether `uri` is a resolved Spotify album URI, the only thing a phone may
+/// pre-save. A countdown page's URI names the release but is not what
+/// Spotify's collection stores, so it is refused.
+pub fn presave_uri(uri: &str) -> bool {
+    uri.strip_prefix("spotify:album:")
+        .is_some_and(|id| id.len() == 22 && id.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+        && crate::link::parse(uri).as_deref() == Some(uri)
 }
 
 /// A song as the phone shows it.
@@ -200,7 +216,7 @@ pub fn song_of(item: &PlayableItem) -> Option<Song> {
 
 /// What this computer does for a phone beyond playing. A phone only offers what
 /// is named here, so one linked to an older Encore never asks for it.
-pub const CAN: &[&str] = &["download"];
+pub const CAN: &[&str] = &["download", "presave"];
 
 /// How playback is going, for the phone.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -262,6 +278,15 @@ mod tests {
             read(&format!(r#"{{{id},"kind":"soundcloud_likes"}}"#)),
             Command::SoundcloudLikes
         );
+        assert_eq!(
+            read(&format!(
+                r#"{{{id},"kind":"presave","uri":"spotify:album:5BYKG4MHfySZthe2W6r7n4","saved":true}}"#
+            )),
+            Command::Presave {
+                uri: "spotify:album:5BYKG4MHfySZthe2W6r7n4".into(),
+                saved: true,
+            }
+        );
         // The message has an id of its own, so what it's about is called something else.
         let artist: Incoming =
             serde_json::from_str(r#"{"id":"1","kind":"artist","target":"art0"}"#).unwrap();
@@ -293,6 +318,18 @@ mod tests {
         assert!(!allowed_uri("spotify:user:abc"));
         assert!(!allowed_uri("local:track"));
         assert!(!allowed_uri(&format!("spotify:track:{}", "a".repeat(300))));
+    }
+
+    #[test]
+    fn only_a_resolved_spotify_album_may_be_pre_saved_from_a_phone() {
+        assert!(presave_uri("spotify:album:5BYKG4MHfySZthe2W6r7n4"));
+        assert!(!presave_uri("spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL"));
+        assert!(!presave_uri("spotify:track:5BYKG4MHfySZthe2W6r7n4"));
+        assert!(!presave_uri("spotify:album:short"));
+        assert!(!presave_uri("spotify:album:5BYKG4MHfySZthe2W6r7n4/extra"));
+        assert!(!presave_uri(
+            "https://evil.example/album/5BYKG4MHfySZthe2W6r7n4"
+        ));
     }
 
     #[test]

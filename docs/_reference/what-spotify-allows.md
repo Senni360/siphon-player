@@ -101,6 +101,13 @@ clients. Siphon uses its session for:
   playability; unpublished rows stay visible without entering playback. The
   session collection service reads pre-save state and writes it only after the
   user presses the button. No Web API grant implements this operation.
+- **Upcoming releases on an artist's page.** The same artist overview Spotify's
+  own page reads, asked with `includePrerelease: true`, supplies the countdown
+  page, cover, kind and release instant. The resolved album URI comes from the
+  pre-release content or the artist's pinned pre-release when Spotify names it.
+  Pre-save state and writes use the streaming session's collection service,
+  only after the listener presses the button; a phone may send the same write
+  for a resolved album URI.
 - **Display names and avatars** for the user IDs attached to songs in a
   playlist and for a playlist's owner, from the profile view Spotify's own
   clients read.
