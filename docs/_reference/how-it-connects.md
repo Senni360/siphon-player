@@ -135,6 +135,25 @@ SoundCloud or Google access, and none is sent from this computer to the phone.
 A Spotify sign-in made on the phone stays that phone's own. This connection only
 runs on a computer that has linked a phone.
 
+A Spotify song on the phone plays as the same song from YouTube or SoundCloud. This
+computer finds it with the download matcher, looking three ways at once: the song's
+album on YouTube Music (`music.youtube.com`, the official uploads with their exact
+lengths), a YouTube search and a SoundCloud search. Each candidate is judged by the
+name its source gives it, not the tidied name the app shows. A SoundCloud copy that
+is a preview, blocked or served only encrypted is never a candidate: it does not play
+here, and nothing breaks its encryption. When only an unnamed "Release - Topic" upload
+fits, its own YouTube page is read for the artist. A match is saved once it has played;
+one that will not play is set aside and the search runs again without it, three tries
+at most. Matches saved before this check are looked for again once.
+
+YouTube's audio address only works from this computer's own connection, and the edge
+cannot reach YouTube, so a YouTube match is downloaded here and uploaded to the edge,
+and the answer names the copy so the phone's next try asks the edge for it. While this
+computer is on and the edge is enabled, the Spotify songs of the mixed playlists are
+made ready the same way ahead of time: one song every few seconds, at most 1,000 per
+run of the app, a YouTube copy the edge already holds is not downloaded again, and
+nothing is fetched while **Play my local files on my phone** is off.
+
 A phone can also send a song here to download. This computer says it can in the
 state it publishes (`can: ["download"]`), the phone's command carries the song's
 address, name, artists and length, and the download then runs here exactly as one

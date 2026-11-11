@@ -28,6 +28,7 @@ use crate::http::Http;
 
 mod fetch;
 mod live;
+mod stock;
 pub mod sync;
 mod upload;
 mod vault;
@@ -304,6 +305,7 @@ impl Runtime {
     pub(crate) fn spawn(
         source: Arc<Source>,
         saved: Saved,
+        searcher: crate::downloads::matching::Searcher,
         temp: PathBuf,
         emit: Arc<dyn Fn(Event) + Send + Sync>,
     ) -> Self {
@@ -320,6 +322,17 @@ impl Runtime {
         let fetched = Arc::new(tokio::sync::Mutex::new(
             std::collections::HashSet::<String>::new(),
         ));
+        // The playlists are made ready beside everything else, from the newest
+        // synced snapshot, and stop with the runtime.
+        let (stock_tx, stock_rx) = tokio::sync::mpsc::unbounded_channel();
+        tasks.push(tokio::spawn(stock::run(
+            stock_rx,
+            searcher,
+            saved.clone(),
+            tx.clone(),
+            Arc::clone(&uploads_enabled),
+            Arc::clone(&fetches),
+        )));
         let uploads = upload::Uploads::new(Arc::clone(&source), Arc::clone(&uploads_enabled));
         let enabled = Arc::clone(&uploads_enabled);
         let finished = Arc::clone(&fetched);
@@ -383,7 +396,10 @@ impl Runtime {
             while let Some(request) = rx.recv().await {
                 match request {
                     Request::Enabled(_) => {}
-                    Request::SyncPlaylists(data) => writer.playlists(data).await,
+                    Request::SyncPlaylists(data) => {
+                        let _ = stock_tx.send(stock::songs_in(&data));
+                        writer.playlists(data).await;
+                    }
                     Request::SyncQueue(data) => writer.queue(data).await,
                     Request::Matches => writer.matches().await,
                     Request::Upload(jobs) => {
@@ -423,6 +439,11 @@ impl Runtime {
                                     continue;
                                 };
                                 if !fetched.lock().await.insert(key.clone()) {
+                                    continue;
+                                }
+                                // One the edge already holds is not downloaded
+                                // again: every start would fetch every song.
+                                if upload::on_edge(&source, &key).await {
                                     continue;
                                 }
                                 // A request that arrives while a song is

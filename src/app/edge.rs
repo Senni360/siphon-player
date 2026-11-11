@@ -218,6 +218,12 @@ impl App {
                                     crate::api::models::pick_image(&album.images, 300)
                                 })
                                 .map(str::to_owned),
+                            album: entry
+                                .track
+                                .album
+                                .as_ref()
+                                .map(|album| album.name.clone())
+                                .filter(|name| !name.trim().is_empty()),
                             upload: (self.settings.local_files_on_phone
                                 && uri.starts_with("spotify:local:"))
                             .then(|| edge::local_key(&uri)),

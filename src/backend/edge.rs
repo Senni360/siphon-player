@@ -53,9 +53,14 @@ impl Worker {
             waker.wake();
         });
         let temp = self.dirs.cache.join("edge-fetch");
+        let searcher = crate::downloads::matching::Searcher::new(
+            self.youtube_catalogue(),
+            self.soundcloud_client(),
+        );
         self.edge = Some(crate::edge::Runtime::spawn(
             source,
             self.saved_matches.clone(),
+            searcher,
             temp,
             emit,
         ));

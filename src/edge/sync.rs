@@ -31,6 +31,8 @@ pub struct MixedTrack {
     pub artists: Vec<String>,
     pub duration_ms: u32,
     pub image: Option<String>,
+    /// The album's name, which the matcher looks the song up by on YouTube Music.
+    pub album: Option<String>,
     /// The upload key of a playlist local file, so the phone can ask the edge
     /// for its audio. Nothing else sets it.
     pub upload: Option<String>,
@@ -98,7 +100,7 @@ pub fn playlists_doc(spotify: &[PlaylistSummary], mixed: &[MixedPlaylist]) -> Va
                             "name": track.name,
                             "artists": track.artists.iter().map(|name| json!({ "name": name })).collect::<Vec<_>>(),
                             "duration_ms": track.duration_ms,
-                            "album": track.image.as_ref().map(|url| json!({ "images": [{ "url": url }] })),
+                            "album": album_doc(track),
                         },
                     });
                     if let Some(link) = &track.link {
@@ -124,6 +126,22 @@ pub fn playlists_doc(spotify: &[PlaylistSummary], mixed: &[MixedPlaylist]) -> Va
         })
         .collect();
     json!({ "playlists": spotify, "mixed": mixed })
+}
+
+/// A mixed song's album: its cover and its name, whichever are known.
+fn album_doc(track: &MixedTrack) -> Value {
+    let mut album = serde_json::Map::new();
+    if let Some(url) = &track.image {
+        album.insert("images".into(), json!([{ "url": url }]));
+    }
+    if let Some(name) = &track.album {
+        album.insert("name".into(), json!(name));
+    }
+    if album.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(album)
+    }
 }
 
 /// The queue and where it is, with what plays first.
@@ -561,6 +579,7 @@ mod tests {
                         image: None,
                         upload: Some("local-abc".into()),
                         link: None,
+                        album: None,
                     },
                     MixedTrack {
                         id: "e2".into(),
@@ -571,6 +590,7 @@ mod tests {
                         image: Some("https://i.example/b".into()),
                         upload: None,
                         link: Some("https://soundcloud.com/b/cloud".into()),
+                        album: Some("Clouds".into()),
                     },
                 ],
             }],
@@ -580,6 +600,10 @@ mod tests {
             "https://soundcloud.com/b/cloud"
         );
         assert!(doc["mixed"][0]["tracks"][0]["track"].get("link").is_none());
+        assert_eq!(
+            doc["mixed"][0]["tracks"][1]["track"]["album"]["name"],
+            "Clouds"
+        );
         assert_eq!(doc["playlists"][0]["uri"], "spotify:playlist:abc");
         assert_eq!(doc["playlists"][0]["track_count"], 3);
         let mixed = &doc["mixed"][0];
@@ -620,6 +644,7 @@ mod tests {
             source: "https://www.youtube.com/watch?v=abcdefghijk".into(),
             uri: "youtube:video:abcdefghijk".into(),
             at: 10,
+            ..Default::default()
         };
         assert_eq!(
             saved_entry(&saved),
@@ -631,6 +656,7 @@ mod tests {
             source: "https://soundcloud.com/artist/song".into(),
             uri: "soundcloud:track:12345".into(),
             at: 0,
+            ..Default::default()
         };
         assert_eq!(
             saved_entry(&cloud),
@@ -640,6 +666,7 @@ mod tests {
             source: "https://soundcloud.com/artist/song/s-AbCdEf?si=secret".into(),
             uri: String::new(),
             at: 0,
+            ..Default::default()
         };
         // A private `s-` path never leaves this computer, and the query is
         // never sent either.
@@ -648,12 +675,14 @@ mod tests {
             source: String::new(),
             uri: "soundcloud:artist/song/s-AbCdEf".into(),
             at: 0,
+            ..Default::default()
         };
         assert_eq!(saved_entry(&private_uri), None);
         let queried = SavedMatch {
             source: "https://soundcloud.com/artist/song?si=public".into(),
             uri: String::new(),
             at: 0,
+            ..Default::default()
         };
         assert_eq!(
             saved_entry(&queried),
@@ -663,6 +692,7 @@ mod tests {
             source: String::new(),
             uri: "soundcloud:track:12345".into(),
             at: 0,
+            ..Default::default()
         };
         assert_eq!(saved_entry(&numeric), None);
         assert_eq!(
@@ -670,6 +700,7 @@ mod tests {
                 source: "https://example.com/x".into(),
                 uri: "https://example.com/x".into(),
                 at: 0,
+                ..Default::default()
             }),
             None
         );
@@ -684,6 +715,7 @@ mod tests {
                 source: "https://www.youtube.com/watch?v=abcdefghijk".into(),
                 uri: "youtube:video:abcdefghijk".into(),
                 at: 20,
+                ..Default::default()
             },
         );
         let doc = matches_doc(&saved);
@@ -698,6 +730,7 @@ mod tests {
                 source: "https://www.youtube.com/watch?v=abcdefghijk".into(),
                 uri: "youtube:video:abcdefghijk".into(),
                 at: i64::MAX,
+                ..Default::default()
             },
         );
         assert_eq!(

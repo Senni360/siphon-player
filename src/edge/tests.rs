@@ -219,6 +219,7 @@ async fn turning_uploads_off_stops_a_waiting_local_file() {
     let runtime = crate::edge::Runtime::spawn(
         source,
         crate::downloads::saved::Saved::new(root.join("matches.json")),
+        crate::downloads::matching::Searcher::no_network(),
         root.join("fetch"),
         Arc::new(|_| {}),
     );

@@ -147,6 +147,25 @@ impl Uploads {
     }
 }
 
+/// Whether the edge already holds `key`, asked the way an upload asks first.
+/// Not knowing counts as no: the upload itself asks once more.
+pub(super) async fn on_edge(source: &Source, key: &str) -> bool {
+    let Ok((tokens, token)) = source.token(Scope::Media).await else {
+        return false;
+    };
+    let Ok(client) = source.http().client() else {
+        return false;
+    };
+    client
+        .post(format!("{}/v1/media-token", tokens.url))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "key": key }))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .is_ok_and(|response| response.status().is_success())
+}
+
 /// One file, a piece at a time, with a pause so the network is shared. Turning
 /// the setting off ends the stream at the next piece; the edge then refuses the
 /// short body and keeps nothing.
