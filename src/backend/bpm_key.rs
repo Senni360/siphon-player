@@ -278,9 +278,7 @@ fn answer(mono: &[f32], rate: u32, cancel: &AtomicBool) -> Result<crate::bpm_key
         return Err(crate::bpm_key::CANCELLED.into());
     }
     if rate == 0 || mono.len() < (f64::from(rate) * MIN_SECS) as usize {
-        return Err(
-            "There wasn't enough sound to hear a beat. Play more of the song and try again.".into(),
-        );
+        return Err("There wasn't enough sound to hear a beat in this audio.".into());
     }
     match crate::bpm_key::analyze_cancellable(mono, rate, cancel) {
         Some(reading) => Ok(reading),
