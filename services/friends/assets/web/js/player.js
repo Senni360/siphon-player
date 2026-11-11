@@ -52,6 +52,8 @@ function hereAudio() {
     here.tries = 0;
     here.pending = false;
     here.pausedByUser = false;
+    // Something plays, so every song is worth trying again.
+    here.dead.clear();
     clearTimeout(stallTimer);
     lockScreenHandlers();
     lockScreenState();
@@ -112,6 +114,8 @@ function playHere(list, index, tap = false) {
   here.trouble = null;
   here.tries = 0;
   here.place = 0;
+  // A tap is the listener asking again, whatever failed last time.
+  here.dead.clear();
   if (tap) {
     const audio = hereAudio();
     const known = streams.get(list[index]?.uri)?.url;
@@ -202,7 +206,7 @@ async function loadHere(fresh = false) {
     await audio.play();
   } catch (error) {
     if (here.seq !== mine || !here.active) return;
-    if (error?.answered) return stuckHere(song, error.message);
+    if (error?.answered) return deadHere(song, error.message);
     retryHere();
   }
 }
@@ -243,6 +247,21 @@ function stuckHere(song, reason) {
   refreshPlayer();
   tellComputer(true);
   saveHere();
+}
+
+/**
+ * The service answered that this song has no audio here. That answer will not
+ * change by asking again, so the song after it plays: nobody on a bike wants
+ * to be asked, and the music stopping is the one thing worse than a missing
+ * song. With nothing left to play, the reason stays on screen instead.
+ */
+function deadHere(song, reason) {
+  here.dead.add(song.uri);
+  const next = nextIndex(1);
+  const after = next >= 0 ? here.list[next] : null;
+  if (!after || here.dead.has(after.uri)) return stuckHere(song, reason);
+  toast(`Skipped ${song.name}: no audio for it`);
+  return playIndex(next);
 }
 
 /** How the phone's own playback shows, in the shape the player already uses. */

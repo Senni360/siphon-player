@@ -12,6 +12,8 @@ export const player = { state: null, online: false, direct: false, at: 0, held: 
 export const here = {
   audio: null, list: [], index: -1, active: false, trouble: null, shuffle: false, repeat: 'off',
   seq: 0, tries: 0, place: 0, likedUri: null, liked: false, pausedByUser: false, playingUri: null, pending: false,
+  /** Songs the service had no audio for, so one dead song cannot loop the queue. */
+  dead: new Set(),
 };
 
 /** The computer's event stream, while this page is in front. */
