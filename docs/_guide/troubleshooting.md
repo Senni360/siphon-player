@@ -1,11 +1,30 @@
 ---
 title: When Something Goes Wrong
-description: "What \"Spotify refused the audio key\" and \"Spotify is being slow\" mean, and what you can do about them."
+description: "What \"Skipped a song Spotify plays only in its own player\", \"Spotify refused the audio key\" and \"Spotify is being slow\" mean, and what you can do about them."
 nav_order: 8
 ---
 
 Each section starts with the words you see in Siphon or in its log, so you
 can search this page for them.
+
+## Skipped a song Spotify plays only in its own player {#own-player}
+
+You may see this once after Siphon skips a song, often every song of a new
+album:
+
+> **Skipped a song Spotify plays only in its own player, as it does many new
+> releases. Soloist plays them here.**
+
+The log says `Track should be available, but no alternatives found`.
+
+Spotify no longer lists the audio of many newly released songs where librespot
+reads it, and refuses librespot the key for them where it does. Only Spotify's
+own players can play them. Siphon skips such a song and plays the next, and
+does not restart the session, which would not help.
+
+To play them here, turn on [Spotify Soloist](/soloist/), Spotify's own player,
+from **Set up Soloist** in that message or **Settings → Playback**. On a linked
+phone these songs still play, as the same song from YouTube or SoundCloud.
 
 ## Spotify refused the audio key {#audio-key}
 

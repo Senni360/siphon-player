@@ -36404,6 +36404,46 @@ mod tests {
         assert!(three, "three in a row are the session's fault");
     }
 
+    /// A new release Spotify lists no audio for here plays only in Spotify's
+    /// own player. A run of them is not a broken session, so the session is
+    /// left alone, and the listener is told once where such songs play.
+    #[test]
+    fn songs_only_spotifys_own_player_plays_point_to_soloist_once() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        let tag = app.hybrid_tag().unwrap();
+        app.handle_hybrid_event(
+            tag,
+            crate::player::HybridEvent::Failed(crate::player::SPOTIFY_TRACK_UNAVAILABLE.into()),
+        );
+        // The rest of an album of them.
+        for _ in 0..3 {
+            app.note_own_player_only();
+        }
+        let told: Vec<_> = app
+            .toasts
+            .iter()
+            .filter(|toast| toast.message.contains("Soloist plays them here"))
+            .collect();
+        assert_eq!(told.len(), 1, "said once, not per song");
+        assert!(matches!(
+            told[0].action,
+            Some((_, Action::OpenSoloistSetup))
+        ));
+        assert!(
+            app.hybrid.last_refusal_reconnect.is_none(),
+            "no fresh session for songs no session can play"
+        );
+        // With Soloist on there is nothing to point to.
+        let mut app2 = hybrid_fixture();
+        start_hybrid_fixture(&mut app2);
+        app2.settings.soloist_enabled = true;
+        app2.note_own_player_only();
+        app.backend.shutdown();
+        app2.backend.shutdown();
+        assert!(app2.toasts.is_empty());
+    }
+
     #[test]
     fn playback_setup_prompt_keeps_hybrid_selection_for_retry() {
         let mut app = hybrid_fixture();

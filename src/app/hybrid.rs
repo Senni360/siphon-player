@@ -80,6 +80,9 @@ pub(super) struct HybridPlayback {
     // session's audio-key service gone bad, so the session is started again.
     pub(super) refused_at: Vec<Instant>,
     pub(super) last_refusal_reconnect: Option<Instant>,
+    /// Whether this run of the app has said once why a song only Spotify's own
+    /// player can play was skipped.
+    pub(super) told_own_player: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -111,6 +114,7 @@ impl Default for HybridPlayback {
             last_added: HashMap::new(),
             refused_at: Vec::new(),
             last_refusal_reconnect: None,
+            told_own_player: false,
         }
     }
 }
@@ -1536,7 +1540,15 @@ impl App {
                     || error == crate::player::SPOTIFY_TRACK_UNAVAILABLE;
                 if refused {
                     log::info!("skipping a song Spotify refused: {error}");
-                    self.note_spotify_refusal();
+                    // A track Spotify lists no audio for here is one it only
+                    // plays in its own player, which new releases now are; a
+                    // fresh session does not change that, so only a refused
+                    // key counts toward one.
+                    if error == crate::player::SPOTIFY_TRACK_UNAVAILABLE {
+                        self.note_own_player_only();
+                    } else {
+                        self.note_spotify_refusal();
+                    }
                 } else {
                     self.toast_error(error);
                 }
@@ -1597,6 +1609,24 @@ impl App {
     /// problem and is skipped; three within twenty seconds mean the session's
     /// audio-key service is gone, which leaves librespot feeding the decoder
     /// nothing it can read. A fresh session cures that, at most once a minute.
+    /// Says once per run of the app why such a song was skipped, and where to
+    /// make it play: Soloist is Spotify's own player. With Soloist on there is
+    /// nothing to add.
+    pub(super) fn note_own_player_only(&mut self) {
+        if self.hybrid.told_own_player || self.settings.soloist_enabled {
+            return;
+        }
+        self.hybrid.told_own_player = true;
+        self.toast_with(
+            gettext(
+                self.locale,
+                "Skipped a song Spotify plays only in its own player, as it does many new releases. Soloist plays them here.",
+            ),
+            gettext(self.locale, "Set up Soloist"),
+            Action::OpenSoloistSetup,
+        );
+    }
+
     pub(super) fn note_spotify_refusal(&mut self) {
         let now = Instant::now();
         self.hybrid
