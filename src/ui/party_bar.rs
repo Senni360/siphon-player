@@ -28,8 +28,7 @@ fn live_dot(ui: &mut Ui, palette: &Palette) {
     let breath = 0.65 + 0.35 * (time * 2.2).sin().abs();
     ui.painter()
         .circle_filled(rect.center(), 4.0, palette.accent.gamma_multiply(breath));
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_millis(120));
+    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(120));
 }
 
 fn line(ui: &mut Ui, text: String, font: egui::FontId, color: egui::Color32) {

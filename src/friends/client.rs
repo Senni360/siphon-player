@@ -332,7 +332,14 @@ impl Client {
                 400 | 413 | 415 => {
                     "Check the name, link and note. The service rejected this request."
                 }
-                502 => "Spotify isn't answering right now. Try again in a moment.",
+                // Signing in is the one request whose 502 is Spotify's: the
+                // service only says 502 after Spotify refused to answer it.
+                // Everywhere else the 502 is the group's own gateway, and
+                // blaming Spotify sent people looking in the wrong place.
+                502 if path == "/auth/spotify" => {
+                    "Spotify isn't answering right now. Try again in a moment."
+                }
+                502 => "The group service isn't answering. Try again in a moment.",
                 _ => "Friends is unavailable. Try again later.",
             }
             .into());
@@ -408,6 +415,38 @@ impl Client {
             )
             .await?;
         Ok(started.code)
+    }
+
+    /// Five-minute tokens for the always-on edge, one per scope, minted by the
+    /// group service with the same HMAC secret the edge verifies. The group
+    /// service never stores them, and no token is ever logged here.
+    pub async fn edge_tokens(&self, id: &Identity) -> Result<EdgeGrant, String> {
+        #[derive(Deserialize)]
+        struct Minted {
+            url: String,
+            live: String,
+            media: String,
+            sync: String,
+        }
+        let minted: Minted = self
+            .request(
+                Method::POST,
+                "/edge/token",
+                Some(id),
+                Some(serde_json::json!({ "role": "computer" })),
+                None,
+            )
+            .await?;
+        let url = minted.url.trim_end_matches('/').to_owned();
+        if !(url.starts_with("https://") || url.starts_with("http://127.0.0.1:")) {
+            return Err("The group service returned an invalid edge address.".into());
+        }
+        Ok(EdgeGrant {
+            url,
+            live: minted.live,
+            media: minted.media,
+            sync: minted.sync,
+        })
     }
 
     /// What a linked phone has left, and whether it's there to hurry for.
@@ -663,6 +702,17 @@ pub(super) fn valid_id(id: &str) -> Result<(), String> {
         return Err("Invalid post id.".into());
     }
     Ok(())
+}
+
+/// The tokens the group service mints for the always-on edge. Deliberately
+/// has no `Debug`: three usable bearers live here, and no log line may name
+/// them. [`crate::edge`] gives its own redacted wrapper.
+#[derive(Clone)]
+pub struct EdgeGrant {
+    pub url: String,
+    pub live: String,
+    pub media: String,
+    pub sync: String,
 }
 
 /// What the service holds for this computer from a linked phone.

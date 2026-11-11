@@ -1,82 +1,127 @@
-// Rows, cards, sections, and what a song's own menu does.
+// Rows, cards, shelves, sections, and what a song's own menu does.
 
-import { art, count, h, icon, safeImage, SOURCE_NAMES, sourceOf, toast } from './dom.js';
-import { go, over, overClosed } from './navigation.js';
-import { act } from './remote.js';
+import { art, count, h, icon, onHold, safeImage, SOURCE_NAMES, sourceOf, toast } from './dom.js';
+import { go } from './navigation.js';
+import { shuffled } from './order.js';
+import { ownsQueue, playNext } from './player.js';
 import { api } from './service.js';
+import { choice, openPanel } from './sheet.js';
 import { hooks } from './state.js';
+import { act } from './remote.js';
 
-export function songActions(song) {
-  const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); panel.remove(); overClosed(); };
-  const choose = (label, run) => h('button', { onclick: () => { close(); run(); } , text: label });
-  const panel = h('div', { class: 'actions', role: 'menu' },
-    h('div', { class: 'about' }, h('b', { text: song.name, class: sourceOf(song.uri) }), h('span', { text: song.artists.join(', ') })),
-    choose('Play next', () => act('queue', { uri: song.uri }).then(() => toast('Added to the queue'))),
-    choose('Like', () => act('like', { uri: song.uri }).then(() => toast('Done'))),
-    song.link && choose('Share with the group', () => shareSong(song)),
-    song.artist_id && choose('Go to artist', () => go({ page: 'artist', id: song.artist_id })),
-    choose('Cancel', () => {}));
-  document.body.append(scrim, panel);
-  over();
+export { shuffled };
+
+/** The song a sheet is about, at its top. */
+export const about = song => h('div', { class: 'about' }, art(song.image),
+  h('div', {}, h('b', { text: song.name, class: sourceOf(song.uri) }), h('span', { text: (song.artists ?? []).join(', ') })));
+
+/**
+ * Everything one song offers, in the same order wherever it is opened from.
+ * `extra` adds choices that only make sense in one place (the queue's Remove).
+ */
+export function songActions(song, extra = []) {
+  const run = work => () => close(work);
+  const close = openPanel({
+    label: `More for ${song.name}`,
+    content: [
+      about(song),
+      choice('next_up', 'Play next', run(() => playNext(song).then(() => toast('Playing next'), error => toast(error.message)))),
+      ownsQueue() && choice('last', 'Add to queue', run(() => { hooks.hereActs.last({ song }); toast('Added to the queue'); })),
+      choice('heart', 'Like', run(() => Promise.resolve(act('like', { uri: song.uri })).then(() => toast('Liked'), () => toast("That didn't go through.")))),
+      song.link && choice('share', 'Share with the group', run(() => shareSong(song))),
+      song.artist_id && choice('person', 'Go to artist', run(() => { hooks.closeSheet?.(); go({ page: 'artist', id: song.artist_id }); })),
+      extra.map(([name, label, work, options]) => choice(name, label, run(work), options)),
+    ],
+  });
 }
+
 /** Shares a song with the group, with a note if there's something to say. */
 export function shareSong(song) {
   const note = h('input', { type: 'text', placeholder: 'Say something (optional)', 'aria-label': 'Note', maxlength: 280, enterkeyhint: 'send' });
-  const scrim = h('div', { class: 'scrim', onclick: () => close() });
-  const close = () => { scrim.remove(); panel.remove(); overClosed(); };
-  const panel = h('form', { class: 'actions share', onsubmit: async event => {
-    event.preventDefault();
-    close();
-    try {
-      await api('/posts', 'POST', { url: song.link, source: sourceOf(song.uri), title: song.name, artists: song.artists.slice(0, 20), artwork_url: safeImage(song.image), duration_ms: song.duration_ms ?? 0, note: note.value.trim() });
-      hooks.forgetGroup?.();
+  const close = openPanel({
+    label: 'Share with the group', className: 'share', form: true,
+    onsubmit: event => {
+      event.preventDefault();
+      const said = note.value.trim();
+      close();
+      // Shown as sent straight away; a failure says so.
       toast('Shared with the group');
-    } catch (error) { toast(error.message); }
-  } },
-    h('div', { class: 'about' }, h('b', { text: song.name, class: sourceOf(song.uri) }), h('span', { text: song.artists.join(', ') })),
-    note,
-    h('button', { class: 'send-share', type: 'submit', text: 'Share with the group' }));
-  document.body.append(scrim, panel);
-  over();
-  note.focus();
+      api('/posts', 'POST', { url: song.link, source: sourceOf(song.uri), title: song.name, artists: song.artists.slice(0, 20), artwork_url: safeImage(song.image), duration_ms: song.duration_ms ?? 0, note: said })
+        .then(() => hooks.forgetGroup?.(), error => toast(error.message));
+    },
+    content: [about(song), note, h('button', { class: 'primary', type: 'submit', text: 'Share with the group' })],
+  });
 }
 
+/** The three small bars on the song that is playing. */
+const bars = () => h('span', { class: 'bars', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'));
+
 export function row(song, list, index) {
-  const playing = hooks.shown?.()?.song?.uri === song.uri;
-  const by = song.artists.join(', ');
+  const state = hooks.shown?.();
+  const playing = state?.song?.uri === song.uri;
+  const by = (song.artists ?? []).join(', ');
   const plays = song.plays ? ` · ${count(song.plays)} plays` : '';
-  return h('div', { class: `row${playing ? ' playing' : ''}`, 'data-uri': song.uri },
-    art(song.image),
+  const node = h('div', { class: `row${playing ? ' playing' : ''}${playing && !state.playing ? ' paused' : ''}`, 'data-uri': song.uri },
+    h('span', { class: 'art-box' }, art(song.image), bars()),
     h('button', { class: 'words', onclick: () => hooks.playFrom(list, index) },
       h('span', { class: `name ${sourceOf(song.uri)}`, text: song.name }),
       h('span', { class: 'by', text: by + plays })),
     h('button', { class: 'more', 'aria-label': `More for ${song.name}`, onclick: () => songActions(song) }, icon('more')));
+  onHold(node, () => songActions(song));
+  return node;
 }
+
+/** A place rather than a song: a playlist, an album, someone's likes. */
+export function place(title, image, by, onclick, mark) {
+  const picture = mark ? h('div', { class: `art tile ${mark.source ?? ''}` }, icon(mark.icon)) : art(image);
+  return h('div', { class: 'row place' }, picture,
+    h('button', { class: 'words', onclick }, h('span', { class: 'name', text: title }), by && h('span', { class: 'by', text: by })),
+    h('span', { class: 'chevron', 'aria-hidden': 'true' }, icon('forward')));
+}
+
+const PAGE = 50;
+/**
+ * A list's rows. A long list draws a page at a time and adds the next as the
+ * end comes near, so two hundred songs open as fast as twenty.
+ */
 export function rows(list, limit) {
-  const box = h('div');
-  const draw = shown => {
-    box.replaceChildren(...list.slice(0, shown).map((song, index) => row(song, list, index)));
-    if (list.length > shown) box.append(h('button', { class: 'see-more', text: 'See more', onclick: () => draw(shown + 20) }));
+  const box = h('div', { class: 'rows' });
+  const short = limit !== undefined && limit < PAGE;
+  let shown = 0;
+  let watcher = null;
+  const draw = upTo => {
+    box.querySelector('.rows-end')?.remove();
+    watcher?.disconnect();
+    box.append(...list.slice(shown, upTo).map((song, at) => row(song, list, shown + at)));
+    shown = Math.min(upTo, list.length);
+    if (list.length <= shown) return;
+    if (short) {
+      box.append(h('button', { class: 'pill rows-end', text: `Show ${Math.min(20, list.length - shown)} more`, onclick: () => draw(shown + 20) }));
+      return;
+    }
+    const end = h('div', { class: 'rows-end', 'aria-hidden': 'true' });
+    box.append(end);
+    watcher = new IntersectionObserver(seen => { if (seen.some(entry => entry.isIntersecting)) draw(shown + PAGE); }, { rootMargin: '600px 0px' });
+    watcher.observe(end);
   };
-  draw(limit ?? list.length);
+  draw(limit ?? PAGE);
   return box;
 }
+
+export const heading = (title, note) => [h('h2', { class: 'section', text: title }), note ? h('p', { class: 'note', text: note }) : null];
+
 export function section(title, list, note, limit = 5) {
   if (!list?.length) return null;
   const from = {};
   for (const song of list) from[sourceOf(song.uri)] = (from[sourceOf(song.uri)] ?? 0) + 1;
   const told = note ?? Object.entries(from).map(([source, amount]) => `${amount} on ${SOURCE_NAMES[source]}`).join(' · ');
-  return [h('h2', { class: 'section', text: title }), h('p', { class: 'note', text: told }), rows(list, limit)];
+  return [heading(title, told), rows(list, limit)];
 }
-export function card(title, by, image, onclick, uri) {
-  return h('button', { class: 'card', onclick }, art(image, ''), h('span', { class: `name${uri ? ` ${sourceOf(uri)}` : ''}`, text: title }), by && h('span', { class: 'by', text: by }));
+
+export function card(title, by, image, onclick, uri, round = false) {
+  return h('button', { class: `card${round ? ' circle' : ''}`, onclick }, art(image, 'card-art'),
+    h('span', { class: `name${uri ? ` ${sourceOf(uri)}` : ''}`, text: title }), by && h('span', { class: 'by', text: by }));
 }
-export function shuffled(list) {
-  const out = [...list];
-  for (let at = out.length - 1; at > 0; at--) {
-    const other = Math.floor(Math.random() * (at + 1));
-    [out[at], out[other]] = [out[other], out[at]];
-  }
-  return out;
-}
+
+/** Cards side by side, swiped along. Each snaps to the edge it is pulled to. */
+export const shelf = cards => h('div', { class: 'shelf' }, cards);

@@ -1,7 +1,7 @@
 [package]
 name = "siphon"
 default-run = "siphon"
-version = "0.15.0-pre.21"
+version = "0.15.0-pre.24"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
@@ -145,7 +145,7 @@ rodio = { version = "0.21", default-features = false }
 # update checks. HTTP proxies work without it. `system-proxy` reads the OS
 # proxy on macOS and Windows when the mode is System; Linux uses environment
 # variables either way.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "gzip", "http2", "blocking", "socks", "system-proxy"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "gzip", "http2", "blocking", "socks", "system-proxy", "stream"] }
 # Same System-proxy matcher reqwest uses, so local playback follows the same
 # HTTP proxy (environment, and the OS proxy on macOS and Windows).
 hyper-util = { version = "0.1", default-features = false, features = ["client-proxy", "client-proxy-system"] }
@@ -158,8 +158,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"
 # Stops a Soloist an earlier run left holding its data folder (`soloist/mod.rs`).
 # Already in the tree through librespot, with the same features.
 sysinfo = { version = "0.36", default-features = false, features = ["system"] }
-# Soloist's loopback control API. Both already arrive through librespot.
-tokio-tungstenite = "0.28"
+# Soloist's loopback control API. Both already arrive through librespot. The
+# always-on edge's realtime socket is the same crate with the rustls roots
+# reqwest already compiles, so a wss connection adds no new crate.
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 futures-util = { version = "0.3", features = ["sink"] }
 # Extract only the executable and notices from Spotify's official Soloist builds.
 tar = { version = "0.4", default-features = false }

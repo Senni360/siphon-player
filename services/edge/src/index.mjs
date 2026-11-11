@@ -42,7 +42,7 @@ async function shutdown(signal) {
   const timer = setTimeout(() => {
     logger.error("stop_timeout");
     process.exit(1);
-  }, 10_000);
+  }, 8_000);
   timer.unref?.();
   try {
     await edge.close();

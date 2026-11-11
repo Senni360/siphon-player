@@ -359,6 +359,10 @@ pub struct Track {
     /// and Spotify responses omit this field.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub preview_only: bool,
+    /// The source verified the uploading account. Evidence that a match is the
+    /// released recording, never identity on its own.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub verified: bool,
     #[serde(default)]
     pub popularity: Option<u8>,
     #[serde(default)]

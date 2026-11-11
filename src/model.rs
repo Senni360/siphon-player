@@ -1874,6 +1874,9 @@ pub enum Action {
     ToggleSidebar,
     ToggleQueuePanel,
     ToggleLyricsPanel,
+    /// The Lyrics tab in Now playing is open: fetch this song's words there,
+    /// without opening the side panel.
+    RequestLyrics,
     /// Show or hide what friends are listening to, in the right panel.
     ToggleFriendsPanel,
     SetLyricsFullscreen(bool),

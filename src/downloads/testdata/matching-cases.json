@@ -1,0 +1,3551 @@
+{
+  "v": 1,
+  "cases": [
+    {
+      "id": "sky-exact",
+      "track": {
+        "uri": "spotify:track:sky-exact",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-exact",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 196.2,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-label-account",
+      "track": {
+        "uri": "spotify:track:sky-label-account",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-label-account",
+          "title": "Sky",
+          "uploader": "OPIUM",
+          "credits": [
+            "OPIUM",
+            "Playboi Carti"
+          ],
+          "duration": 196.2,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-label-with-artist",
+      "track": {
+        "uri": "spotify:track:sky-label-with-artist",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-label-with-artist",
+          "title": "Sky",
+          "uploader": "OPIUM",
+          "credits": [
+            "OPIUM",
+            "Playboi Carti"
+          ],
+          "duration": 196.2,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-prod-paren",
+      "track": {
+        "uri": "spotify:track:sky-prod-paren",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-prod-paren",
+          "title": "Sky (Prod. By Art Dealer)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-prod-bare",
+      "track": {
+        "uri": "spotify:track:sky-prod-bare",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-prod-bare",
+          "title": "Playboi Carti - Sky prod by Art Dealer",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-prod-at",
+      "track": {
+        "uri": "spotify:track:sky-prod-at",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-prod-at",
+          "title": "Sky (prod. by @artdealer)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-official-audio",
+      "track": {
+        "uri": "spotify:track:sky-official-audio",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-official-audio",
+          "title": "Sky (Official Audio)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 196,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-official-video",
+      "track": {
+        "uri": "spotify:track:sky-official-video",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-official-video",
+          "title": "Playboi Carti - Sky (Official Video)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 196,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-lyrics-fan",
+      "track": {
+        "uri": "spotify:track:sky-lyrics-fan",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-lyrics-fan",
+          "title": "Sky (Lyrics)",
+          "uploader": "LyricVault",
+          "credits": [
+            "LyricVault"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "sky-lyrics-artist",
+      "track": {
+        "uri": "spotify:track:sky-lyrics-artist",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-lyrics-artist",
+          "title": "Playboi Carti - Sky (Lyrics)",
+          "uploader": "LyricVault",
+          "credits": [
+            "LyricVault"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-og",
+      "track": {
+        "uri": "spotify:track:sky-og",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-og",
+          "title": "Sky *OG*",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "sky-leak-reupload",
+      "track": {
+        "uri": "spotify:track:sky-leak-reupload",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-leak-reupload",
+          "title": "Playboi Carti - Sky [LEAK] (Prod. Pierre Bourne)",
+          "uploader": "UNRELEASED MUSIC",
+          "credits": [
+            "UNRELEASED MUSIC"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "sky-dur-3_2",
+      "track": {
+        "uri": "spotify:track:sky-dur-3_2",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-dur-3_2",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 199.1,
+          "live": false,
+          "verified": true,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-dur-2_6",
+      "track": {
+        "uri": "spotify:track:sky-dur-2_6",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-dur-2_6",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 198.5,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sky-dur-4_6",
+      "track": {
+        "uri": "spotify:track:sky-dur-4_6",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-dur-4_6",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 201.5,
+          "live": false,
+          "verified": true,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "sky-preview",
+      "track": {
+        "uri": "spotify:track:sky-preview",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-preview",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 30,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "sky-noduration",
+      "track": {
+        "uri": "spotify:track:sky-noduration",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sky-noduration",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": null,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "typebeat-long",
+      "track": {
+        "uri": "spotify:track:typebeat-long",
+        "name": "Let It All Work Out",
+        "duration_ms": 300000,
+        "artists": [
+          {
+            "name": "Lil Wayne"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/typebeat-long",
+          "title": "Lil Wayne - Let It All Work Out Type Beat",
+          "uploader": "SomeProducer",
+          "credits": [
+            "SomeProducer"
+          ],
+          "duration": 300,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "typebeat-short",
+      "track": {
+        "uri": "spotify:track:typebeat-short",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/typebeat-short",
+          "title": "Playboi Carti Type Beat - Sky",
+          "uploader": "SomeProducer",
+          "credits": [
+            "SomeProducer"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "apostrophe-title",
+      "track": {
+        "uri": "spotify:track:apostrophe-title",
+        "name": "Don't Play",
+        "duration_ms": 180000,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/apostrophe-title",
+          "title": "Dont Play",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 180,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "apostrophe-artist",
+      "track": {
+        "uri": "spotify:track:apostrophe-artist",
+        "name": "Can't Tell",
+        "duration_ms": 180000,
+        "artists": [
+          {
+            "name": "Chief Keef"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/apostrophe-artist",
+          "title": "Cant Tell",
+          "uploader": "Chief Keef",
+          "credits": [
+            "Chief Keef"
+          ],
+          "duration": 180,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "apostrophe-both",
+      "track": {
+        "uri": "spotify:track:apostrophe-both",
+        "name": "Don't Play",
+        "duration_ms": 180000,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/apostrophe-both",
+          "title": "Don't Play",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 180,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "asap-mismatch",
+      "track": {
+        "uri": "spotify:track:asap-mismatch",
+        "name": "Peso",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "A$AP Rocky"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/asap-mismatch",
+          "title": "Peso",
+          "uploader": "ASAP Rocky",
+          "credits": [
+            "ASAP Rocky"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "asap-both",
+      "track": {
+        "uri": "spotify:track:asap-both",
+        "name": "Peso",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "A$AP Rocky"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/asap-both",
+          "title": "Peso",
+          "uploader": "A$AP Rocky",
+          "credits": [
+            "A$AP Rocky"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "suicideboys-dollars",
+      "track": {
+        "uri": "spotify:track:suicideboys-dollars",
+        "name": "Paris",
+        "duration_ms": 130000,
+        "artists": [
+          {
+            "name": "$uicideboy$"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/suicideboys-dollars",
+          "title": "Paris",
+          "uploader": "Suicideboys",
+          "credits": [
+            "Suicideboys"
+          ],
+          "duration": 130,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "suicideboys-reverse",
+      "track": {
+        "uri": "spotify:track:suicideboys-reverse",
+        "name": "Paris",
+        "duration_ms": 130000,
+        "artists": [
+          {
+            "name": "Suicideboys"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/suicideboys-reverse",
+          "title": "Paris",
+          "uploader": "$UICIDEBOY$",
+          "credits": [
+            "$UICIDEBOY$"
+          ],
+          "duration": 130,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "symbols-only-artist",
+      "track": {
+        "uri": "spotify:track:symbols-only-artist",
+        "name": "Carnival",
+        "duration_ms": 240000,
+        "artists": [
+          {
+            "name": "¥$"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/symbols-only-artist",
+          "title": "Carnival",
+          "uploader": "¥$",
+          "credits": [
+            "¥$"
+          ],
+          "duration": 240,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "diacritic",
+      "track": {
+        "uri": "spotify:track:diacritic",
+        "name": "Jóga",
+        "duration_ms": 197000,
+        "artists": [
+          {
+            "name": "Björk"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/diacritic",
+          "title": "BJORK - JOGA",
+          "uploader": "Bjork",
+          "credits": [
+            "Bjork"
+          ],
+          "duration": 197,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "diacritic-both",
+      "track": {
+        "uri": "spotify:track:diacritic-both",
+        "name": "Jóga",
+        "duration_ms": 197000,
+        "artists": [
+          {
+            "name": "Björk"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/diacritic-both",
+          "title": "BJÖRK - JÓGA",
+          "uploader": "Björk",
+          "credits": [
+            "Björk"
+          ],
+          "duration": 197,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "fullwidth",
+      "track": {
+        "uri": "spotify:track:fullwidth",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/fullwidth",
+          "title": "ＳＫＹ",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "emoji",
+      "track": {
+        "uri": "spotify:track:emoji",
+        "name": "NOSTYLIST",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Destroy Lonely"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/emoji",
+          "title": "🖤 NOSTYLIST 🔥",
+          "uploader": "Destroy Lonely",
+          "credits": [
+            "Destroy Lonely"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "spaced-letters",
+      "track": {
+        "uri": "spotify:track:spaced-letters",
+        "name": "NOSTYLIST",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Destroy Lonely"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/spaced-letters",
+          "title": "N O S T Y L I S T",
+          "uploader": "Destroy Lonely",
+          "credits": [
+            "Destroy Lonely"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "camelcase",
+      "track": {
+        "uri": "spotify:track:camelcase",
+        "name": "ILoveUIHateU",
+        "duration_ms": 155000,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/camelcase",
+          "title": "I Love U I Hate U",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 155,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "feat-extra",
+      "track": {
+        "uri": "spotify:track:feat-extra",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Artist"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/feat-extra",
+          "title": "Artist - Song (feat. Friend)",
+          "uploader": "Artist",
+          "credits": [
+            "Artist"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "feat-in-spotify-name",
+      "track": {
+        "uri": "spotify:track:feat-in-spotify-name",
+        "name": "Song (feat. Y)",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/feat-in-spotify-name",
+          "title": "Song",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "feat-both",
+      "track": {
+        "uri": "spotify:track:feat-both",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          },
+          {
+            "name": "Y"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/feat-both",
+          "title": "X - Song (ft. Y)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "feat-two-unknown",
+      "track": {
+        "uri": "spotify:track:feat-two-unknown",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/feat-two-unknown",
+          "title": "X - Song (feat. Y & Z)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "with-credit",
+      "track": {
+        "uri": "spotify:track:with-credit",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/with-credit",
+          "title": "X - Song (with Y)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "explicit-tag",
+      "track": {
+        "uri": "spotify:track:explicit-tag",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/explicit-tag",
+          "title": "Song (Explicit)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "explicit-official",
+      "track": {
+        "uri": "spotify:track:explicit-official",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/explicit-official",
+          "title": "Song (Explicit) [Official Audio]",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "clean-tag",
+      "track": {
+        "uri": "spotify:track:clean-tag",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/clean-tag",
+          "title": "Song (Clean)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "radio-edit",
+      "track": {
+        "uri": "spotify:track:radio-edit",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/radio-edit",
+          "title": "Song (Radio Edit)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "deluxe",
+      "track": {
+        "uri": "spotify:track:deluxe",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/deluxe",
+          "title": "Song (Deluxe)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "year",
+      "track": {
+        "uri": "spotify:track:year",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/year",
+          "title": "Song (2023)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "hq",
+      "track": {
+        "uri": "spotify:track:hq",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/hq",
+          "title": "Song (HQ)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "bitrate",
+      "track": {
+        "uri": "spotify:track:bitrate",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/bitrate",
+          "title": "Song [320 kbps]",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "cdq",
+      "track": {
+        "uri": "spotify:track:cdq",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/cdq",
+          "title": "Song (CDQ)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "bonus",
+      "track": {
+        "uri": "spotify:track:bonus",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/bonus",
+          "title": "Song (Bonus Track)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "out-now",
+      "track": {
+        "uri": "spotify:track:out-now",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/out-now",
+          "title": "Song (Out Now)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "free",
+      "track": {
+        "uri": "spotify:track:free",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/free",
+          "title": "Song (FREE)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "soundtrack-paren",
+      "track": {
+        "uri": "spotify:track:soundtrack-paren",
+        "name": "All The Stars",
+        "duration_ms": 230000,
+        "artists": [
+          {
+            "name": "Kendrick Lamar"
+          },
+          {
+            "name": "SZA"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/soundtrack-paren",
+          "title": "All The Stars (From Black Panther)",
+          "uploader": "Kendrick Lamar",
+          "credits": [
+            "Kendrick Lamar"
+          ],
+          "duration": 230,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "soundtrack-tag",
+      "track": {
+        "uri": "spotify:track:soundtrack-tag",
+        "name": "All The Stars",
+        "duration_ms": 230000,
+        "artists": [
+          {
+            "name": "Kendrick Lamar"
+          },
+          {
+            "name": "SZA"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/soundtrack-tag",
+          "title": "All The Stars (Black Panther Soundtrack)",
+          "uploader": "Kendrick Lamar",
+          "credits": [
+            "Kendrick Lamar"
+          ],
+          "duration": 230,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "acapella-long",
+      "track": {
+        "uri": "spotify:track:acapella-long",
+        "name": "All The Stars",
+        "duration_ms": 230000,
+        "artists": [
+          {
+            "name": "Kendrick Lamar"
+          },
+          {
+            "name": "SZA"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/acapella-long",
+          "title": "Kendrick Lamar - All The Stars (Acapella)",
+          "uploader": "Kendrick Lamar",
+          "credits": [
+            "Kendrick Lamar"
+          ],
+          "duration": 230,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "acapella-short",
+      "track": {
+        "uri": "spotify:track:acapella-short",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/acapella-short",
+          "title": "Song (Acapella)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "live-title-false-accept",
+      "track": {
+        "uri": "spotify:track:live-title-false-accept",
+        "name": "Live Forever",
+        "duration_ms": 280000,
+        "artists": [
+          {
+            "name": "Oasis"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/live-title-false-accept",
+          "title": "Live Forever (Live)",
+          "uploader": "Oasis",
+          "credits": [
+            "Oasis"
+          ],
+          "duration": 280,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "live-title-clean",
+      "track": {
+        "uri": "spotify:track:live-title-clean",
+        "name": "Live Forever",
+        "duration_ms": 280000,
+        "artists": [
+          {
+            "name": "Oasis"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/live-title-clean",
+          "title": "Live Forever",
+          "uploader": "Oasis",
+          "credits": [
+            "Oasis"
+          ],
+          "duration": 280,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "live-version",
+      "track": {
+        "uri": "spotify:track:live-version",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/live-version",
+          "title": "Sky (Live from Atlanta)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "remix-both",
+      "track": {
+        "uri": "spotify:track:remix-both",
+        "name": "Song (Remix)",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/remix-both",
+          "title": "Song (Remix)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "remix-only",
+      "track": {
+        "uri": "spotify:track:remix-only",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/remix-only",
+          "title": "Song (Remix)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "slowed",
+      "track": {
+        "uri": "spotify:track:slowed",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/slowed",
+          "title": "Song (Slowed + Reverb)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "chopped",
+      "track": {
+        "uri": "spotify:track:chopped",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/chopped",
+          "title": "Song (Chopped Not Slopped)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "8d",
+      "track": {
+        "uri": "spotify:track:8d",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/8d",
+          "title": "Song (8D Audio)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "bass-boosted",
+      "track": {
+        "uri": "spotify:track:bass-boosted",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/bass-boosted",
+          "title": "Song (Bass Boosted)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "instrumental",
+      "track": {
+        "uri": "spotify:track:instrumental",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/instrumental",
+          "title": "Song (Instrumental)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "instrumental-both",
+      "track": {
+        "uri": "spotify:track:instrumental-both",
+        "name": "Song (Instrumental)",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/instrumental-both",
+          "title": "Song (Instrumental)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "acoustic",
+      "track": {
+        "uri": "spotify:track:acoustic",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/acoustic",
+          "title": "Song (Acoustic)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "remaster-mismatch",
+      "track": {
+        "uri": "spotify:track:remaster-mismatch",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/remaster-mismatch",
+          "title": "Song - Remastered 2011",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "spotify-remaster-suffix",
+      "track": {
+        "uri": "spotify:track:spotify-remaster-suffix",
+        "name": "Song - Remastered 2011",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/spotify-remaster-suffix",
+          "title": "Song",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "compilation",
+      "track": {
+        "uri": "spotify:track:compilation",
+        "name": "Northern Lights",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Aurora"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/compilation",
+          "title": "Northern Lights Full Album Compilation",
+          "uploader": "Aurora",
+          "credits": [
+            "Aurora"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "the-sky",
+      "track": {
+        "uri": "spotify:track:the-sky",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/the-sky",
+          "title": "The Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "dash-both",
+      "track": {
+        "uri": "spotify:track:dash-both",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/dash-both",
+          "title": "Playboi Carti - Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "label-with-artist-title",
+      "track": {
+        "uri": "spotify:track:label-with-artist-title",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/label-with-artist-title",
+          "title": "Playboi Carti - Sky",
+          "uploader": "Interscope Records",
+          "credits": [
+            "Interscope Records"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "label-title-only",
+      "track": {
+        "uri": "spotify:track:label-title-only",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/label-title-only",
+          "title": "Sky",
+          "uploader": "Interscope Records",
+          "credits": [
+            "Interscope Records",
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "abbrev-uploader",
+      "track": {
+        "uri": "spotify:track:abbrev-uploader",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/abbrev-uploader",
+          "title": "Sky",
+          "uploader": "Carti",
+          "credits": [
+            "Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "collab-x",
+      "track": {
+        "uri": "spotify:track:collab-x",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Ken Carson"
+          },
+          {
+            "name": "Destroy Lonely"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/collab-x",
+          "title": "Ken Carson x Destroy Lonely - Song",
+          "uploader": "Ken Carson x Destroy Lonely",
+          "credits": [
+            "Ken Carson x Destroy Lonely"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "collab-amp",
+      "track": {
+        "uri": "spotify:track:collab-amp",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Boldy James"
+          },
+          {
+            "name": "The Alchemist"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/collab-amp",
+          "title": "Boldy James & The Alchemist - Song",
+          "uploader": "Boldy James",
+          "credits": [
+            "Boldy James"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "plain-collab",
+      "track": {
+        "uri": "spotify:track:plain-collab",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Ken Carson"
+          },
+          {
+            "name": "Destroy Lonely"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/plain-collab",
+          "title": "Ken Carson, Destroy Lonely - Song",
+          "uploader": "Ken Carson",
+          "credits": [
+            "Ken Carson"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "wrong-artist",
+      "track": {
+        "uri": "spotify:track:wrong-artist",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/wrong-artist",
+          "title": "Sky",
+          "uploader": "Kid Cudi",
+          "credits": [
+            "Kid Cudi"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "wrong-song",
+      "track": {
+        "uri": "spotify:track:wrong-song",
+        "name": "Northern Lights",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "Aurora"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/wrong-song",
+          "title": "Southern Lights",
+          "uploader": "Aurora",
+          "credits": [
+            "Aurora"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "empty-uploader",
+      "track": {
+        "uri": "spotify:track:empty-uploader",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/empty-uploader",
+          "title": "Sky",
+          "uploader": "",
+          "credits": [],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "empty-uploader-artist",
+      "track": {
+        "uri": "spotify:track:empty-uploader-artist",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/empty-uploader-artist",
+          "title": "Sky",
+          "uploader": "",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "album-name",
+      "track": {
+        "uri": "spotify:track:album-name",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/album-name",
+          "title": "Whole Lotta Red",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "full-album",
+      "track": {
+        "uri": "spotify:track:full-album",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/full-album",
+          "title": "Whole Lotta Red (Full Album)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "wrong-duration",
+      "track": {
+        "uri": "spotify:track:wrong-duration",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/wrong-duration",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 150,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "score-092",
+      "track": {
+        "uri": "spotify:track:score-092",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/score-092",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 197.4,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "verified-vs-cover",
+      "track": {
+        "uri": "spotify:track:verified-vs-cover",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/verified-vs-cover",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": true,
+          "isrc": null
+        },
+        {
+          "url": "https://soundcloud.com/example/verified-vs-cover",
+          "title": "Playboi Carti - Sky",
+          "uploader": "CoverKing",
+          "credits": [
+            "CoverKing"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match",
+        "index": 0
+      }
+    },
+    {
+      "id": "dupe-fan-account",
+      "track": {
+        "uri": "spotify:track:dupe-fan-account",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/dupe-fan-account",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.9,
+          "live": false,
+          "verified": true,
+          "isrc": null
+        },
+        {
+          "url": "https://soundcloud.com/example/dupe-fan-account",
+          "title": "Sky",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 195.85,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match",
+        "index": 0
+      }
+    },
+    {
+      "id": "isrc-identity",
+      "track": {
+        "uri": "spotify:track:isrc-identity",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": "USUM72100001"
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/isrc-identity",
+          "title": "SKY",
+          "uploader": "PLAYBOI CARTI",
+          "credits": [
+            "PLAYBOI CARTI"
+          ],
+          "duration": 196,
+          "live": false,
+          "verified": false,
+          "isrc": "USUM72100001"
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "isrc-vs-og",
+      "track": {
+        "uri": "spotify:track:isrc-vs-og",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": "USUM72100001"
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/isrc-vs-og",
+          "title": "Sky OG (prod. Art Dealer)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 196,
+          "live": false,
+          "verified": false,
+          "isrc": "USUM72100001"
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "isrc-other",
+      "track": {
+        "uri": "spotify:track:isrc-other",
+        "name": "Sky",
+        "duration_ms": 195900,
+        "artists": [
+          {
+            "name": "Playboi Carti"
+          }
+        ],
+        "external_ids": {
+          "isrc": "USUM72100001"
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/isrc-other",
+          "title": "Sky (Extended Mix)",
+          "uploader": "Playboi Carti",
+          "credits": [
+            "Playboi Carti"
+          ],
+          "duration": 260,
+          "live": false,
+          "verified": false,
+          "isrc": "USUM72100001"
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "topic-channel",
+      "track": {
+        "uri": "spotify:track:topic-channel",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/topic-channel",
+          "title": "Song",
+          "uploader": "X - Topic",
+          "credits": [
+            "X - Topic"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "cover-tagged",
+      "track": {
+        "uri": "spotify:track:cover-tagged",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/cover-tagged",
+          "title": "Song (Cover)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "cover-in-title",
+      "track": {
+        "uri": "spotify:track:cover-in-title",
+        "name": "Cover Me",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/cover-in-title",
+          "title": "Cover Me",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "live-in-title",
+      "track": {
+        "uri": "spotify:track:live-in-title",
+        "name": "Live and Let Die",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/live-in-title",
+          "title": "Live and Let Die",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "sped-bare",
+      "track": {
+        "uri": "spotify:track:sped-bare",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/sped-bare",
+          "title": "Song Sped Up",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "slowed-bare",
+      "track": {
+        "uri": "spotify:track:slowed-bare",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/slowed-bare",
+          "title": "Song Slowed",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "nightcore",
+      "track": {
+        "uri": "spotify:track:nightcore",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/nightcore",
+          "title": "Song (Nightcore)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "snippet",
+      "track": {
+        "uri": "spotify:track:snippet",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/snippet",
+          "title": "Song [Snippet]",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "vip",
+      "track": {
+        "uri": "spotify:track:vip",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/vip",
+          "title": "Song (VIP Mix)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "bootleg",
+      "track": {
+        "uri": "spotify:track:bootleg",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/bootleg",
+          "title": "Song (Bootleg)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "freestyle",
+      "track": {
+        "uri": "spotify:track:freestyle",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/freestyle",
+          "title": "Song (Freestyle)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "type-beat-bare",
+      "track": {
+        "uri": "spotify:track:type-beat-bare",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/type-beat-bare",
+          "title": "Song Type Beat",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "part-two-both",
+      "track": {
+        "uri": "spotify:track:part-two-both",
+        "name": "Song (Pt. 2)",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/part-two-both",
+          "title": "Song (Pt. 2)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    },
+    {
+      "id": "part-two-other",
+      "track": {
+        "uri": "spotify:track:part-two-other",
+        "name": "Song",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/part-two-other",
+          "title": "Song (Pt. 2)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "part-two-missing",
+      "track": {
+        "uri": "spotify:track:part-two-missing",
+        "name": "Song (Pt. 2)",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/part-two-missing",
+          "title": "Song",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "none"
+      }
+    },
+    {
+      "id": "remaster-both",
+      "track": {
+        "uri": "spotify:track:remaster-both",
+        "name": "Song (Remastered 2011)",
+        "duration_ms": 200000,
+        "artists": [
+          {
+            "name": "X"
+          }
+        ],
+        "external_ids": {
+          "isrc": null
+        }
+      },
+      "candidates": [
+        {
+          "url": "https://soundcloud.com/example/remaster-both",
+          "title": "Song (Remastered 2011)",
+          "uploader": "X",
+          "credits": [
+            "X"
+          ],
+          "duration": 200,
+          "live": false,
+          "verified": false,
+          "isrc": null
+        }
+      ],
+      "expect": {
+        "result": "match"
+      }
+    }
+  ]
+}

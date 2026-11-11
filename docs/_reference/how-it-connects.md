@@ -115,14 +115,16 @@ app using that port, then choose **Try again**. Since 0.13.2, playback setup
 does the same with its port, 8898: if another app holds it, Settings shows the
 error, the browser stays closed, and a saved playback approval is kept.
 
-A phone can use this computer through `encore.senni.dev`, once linked with a code shown
-in the group panel. The code makes the phone another device of the same group account,
-with a secret of its own that can be signed out alone. Its commands then wait with the
-group service for this computer, which looks every fifteen seconds until a phone is
-watching. Answers (songs, names and pictures, and possibly private links in them) pass
-through the same way and expire within a minute. No sign-in ever leaves this computer:
-the phone doesn't hold Spotify, SoundCloud or Google access. This connection only runs
-on a computer that has linked a phone.
+A phone can use this computer through `encore.senni.dev`, once linked with a one-time
+code from **Settings > Devices > Your phone**. The code makes that phone or browser
+another device of the same account, with a secret of its own that can be signed out
+alone. Each code works once, so more than one phone or browser can be linked, each
+with its own code. Its commands then wait with the group service for this computer,
+which looks every fifteen seconds until a phone is watching. Answers (songs, names and pictures, and possibly private links in them) pass
+through the same way and expire within a minute. The link carries no Spotify,
+SoundCloud or Google access, and none is sent from this computer to the phone.
+A Spotify sign-in made on the phone stays that phone's own. This connection only
+runs on a computer that has linked a phone.
 
 The always-on edge at `edge.encore.senni.dev` is the phone's second answer, for while
 this computer is off. It is spoken to directly and is entirely optional. The phone asks
@@ -138,10 +140,12 @@ the download matcher (a saved match outranks a new search). Only public sources 
 edge accepts are sent, and a refusal, a timeout or a slow answer falls back to asking
 this computer as before. A YouTube song asks this computer first while it is online;
 without it the edge is tried, and the page's normal "can't play here" state follows if
-that fails too. The edge currently cannot produce YouTube audio, so those songs end up
-at this computer. Group links and anything else keep going through this computer. The
-phone also asks the edge to warm the next two songs ahead of time, instead of only
-looking up their addresses. None of this shows an error by itself: if neither side can
+that fails too. YouTube refuses the edge's server without a signed-in browser's cookies,
+which it doesn't use, so those songs normally need this computer. A
+SoundCloud link carrying a private `s-` path or a query string is never sent to the
+edge. Group links and anything else keep going through this computer. The phone also
+asks the edge to warm the next two songs ahead of time, instead of only looking up
+their addresses. None of this shows an error by itself: if neither side can
 answer, the page takes its existing stuck state with a plain reason.
 
 While the phone's page is open, it also keeps a WebSocket open to the edge's `/v1/live`
@@ -151,8 +155,53 @@ in that room, the phone's commands travel over it and its state comes back the s
 way, so the two agree at once. The phone sends a command down one path only: with no
 computer in the room, or with the socket down, everything keeps using the group
 service's relay and event stream described below, unchanged, and a down socket is never
-shown as an error. The desktop app does not use the edge yet; it keeps its existing
-group-service connection.
+shown as an error.
+
+This computer is the other side of that room once a phone is linked. It asks the same
+group route (`POST /api/edge/token`) for its own five-minute tokens, with the role
+`computer`, and keeps `/v1/live` open the same way: it sends its playback picture at
+least every eight seconds and whenever something changes, which is how the phone knows
+a computer is there. Its pause, play and seek reach the phone at once, and a command or
+a question from the phone is carried out here and answered on the same socket, with the
+relay answering too when it is open. A command seen on both paths is acted on once, by
+its id. An answer too large for the socket's 64 KiB frame, such as a long library
+page, is replaced by a small word there and asked for again over the relay, which
+carries it whole. Its token is replaced shortly before it expires and the socket is
+opened again with the fresh one, resuming from the last sequence number. Nothing
+about the edge is shown when it is unreachable: the relay goes on exactly as
+before, and reconnects wait 1, 2, 4, 8, 16 and then 30 seconds.
+
+While a phone is linked, this computer also keeps the edge's small per-account store
+current: the playlist rows and the mixed playlists with their songs, the queue and
+where it is, and the saved Spotify-to-YouTube/SoundCloud matches. Each document is
+offered on its own, so a moving queue does not rewrite the playlists; a change waits
+three seconds, then the snapshot is offered with the revision the edge last returned.
+A `409` means a phone wrote first, so the stored revision is read and the snapshot
+offered once more. A snapshot the edge does not accept because it is unreachable is
+kept and offered again with backoff, so a computer that starts without a network still
+fills the store; one the edge can never accept, such as a document over its 4 MiB
+per-account limit, is dropped until something changes. The queue's position is stored
+to ten seconds; the exact one travels over the socket. The edge's automatic matches
+come back here too, so a later play still finds them when the edge is unreachable; a
+hand-chosen match on the edge outranks an automatic one and is never overwritten.
+
+Playlist local files are uploaded one at a time (`PUT /v1/upload/:key`) under a key
+derived from their URI, and the synced song names that key so the edge can answer
+`upload:<key>` for it; a file the edge already holds is skipped, a protected M4P
+file never leaves this computer, and a fetched file is deleted here once the edge
+has it. The music a phone plays from YouTube is also fetched here, because the
+edge has no signed-in browser of its own; the edge then answers that song's
+`youtube:video:` address from the upload before trying YouTube itself. Only a
+public SoundCloud permalink is sent: a private `s-` path or a query string never
+leaves this computer. If the listener allows it, this computer also keeps its
+Spotify and SoundCloud sign-ins in the edge's encrypted vault
+(`PUT /v1/vault/:provider`); turning that off deletes them there, and a delete that
+fails is tried again. `Settings > Devices > Your phone` has a switch for the server
+connection, one for playlist local files, and one for the sign-ins, whose default is
+on for the group's owner and off for everyone else. Turning the server connection off
+stops the socket, the uploads and the vault writes, and leaves the phone's group
+connection exactly as it was. No token, no address carrying one, and no sign-in is ever
+logged.
 
 While the phone's page is open, the phone and this computer each also keep an event
 stream open to the group service (`/live/remote/events`), which hears through Redis
@@ -178,7 +227,9 @@ song is looked up by artist, title and length on YouTube and SoundCloud with the
 download matcher, and the first match is remembered on disk, so a later play or
 download searches no more. The edge keeps its own saved matches and is preferred over
 a new search there. Without a match the page says so, with Skip and Play on computer:
-the phone never hands playback to another app or leaves the page.
+the phone never hands playback to another app or leaves the page. A failure the page
+can mend itself, such as a dropped address or a stall, is retried at the same place
+rather than skipped: after 1, 2 and 4 seconds, then every 8 seconds.
 
 An artist's page also reads what they have elsewhere, so it can list what Spotify
 doesn't have. It searches SoundCloud's and YouTube's public listings for the artist's
@@ -475,6 +526,12 @@ song details Spotify did not supply in full, hands the read to the Web API
 instead of caching rows without songs. A song Spotify no longer has, or
 withholds for legal reasons, is an empty row, as the Web API shows it.
 
+A player command (play, pause, seek, volume, shuffle, repeat, transfer) that
+loses its connection is sent again twice, 200 ms and 700 ms later, because the
+interface has already shown it as done; only after those tries does it fail.
+Next and previous are sent again only when the connection never opened, since
+repeating one that may have arrived would skip twice.
+
 While a shared grant is signed in, the playlist list and fallback Made for you
 searches go through it even when a personal app is set up, because a personal
 app's list leaves out Spotify's own playlists. Without one, they go to the
@@ -563,18 +620,11 @@ playing it plays the songs on screen without them, as a filtered playlist
 does, so Shuffle and Repeat follow the shown songs. Hiding needs local
 playback; without it the menu entry is not offered.
 
-## Podcasts on Home
+## Podcasts
 
-Since 0.10.0, Home's **Your podcasts** shelf reads the first page of
-saved shows, the same request the library's Podcasts shelf makes, if it has
-not been read yet. It then asks for the five newest episodes of each of the
-eight most recently saved shows, all at once within the Web API session's
-concurrency limit, through the normal personal/shared app routing. Spotify includes each episode's resume point in
-those answers. Play uses that position so an in-progress episode continues
-rather than starting over. Shows known to be audiobooks are not asked for. These requests
-run when Home refreshes: on opening Home, at most once every ten minutes, and
-on a manual refresh. A rate limit, exhausted quota or expired sign-in stops the
-remaining shows for that refresh; the shelf keeps what it showed before.
+Podcasts and audiobooks are not in the library and have no shelf on Home.
+Spotify's podcast search results still open their show page, and episodes play
+and continue from Spotify's saved position.
 
 ## Album queueing
 
@@ -858,7 +908,7 @@ connector. The change adds no destination or background polling.
 
 ## Proxy
 
-Since 0.9.0, Settings → Proxy has four modes:
+Since 0.9.0, **Settings → Network** has four proxy modes:
 
 - **Off**: a direct connection. Environment proxy variables are ignored.
 - **System**: `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`, and on macOS and
@@ -931,11 +981,13 @@ reveal only the songs asked about. Neither service gets plays from Encore, so it
 recommendations on its own site aren't changed by listening here, only by likes and
 follows on a connected account.
 
-Home recommends only music from YouTube. For each video it would show, from a mix's
+Home recommends only beats from YouTube. For each video it would show, from a mix's
 seed or a followed channel's feed, it asks YouTube's player endpoint
 (`www.youtube.com/youtubei/v1/player`, without a sign-in) which category the uploader
-filed it under, and keeps those filed under Music. Each answer is remembered until
-Encore closes. A video YouTube gives no answer about is left out.
+filed it under, and keeps those filed under Music. The upload must also read as a
+beat: a beat word, a producer's channel or a beat's genre in its title or channel,
+and a length between 45 seconds and 10 minutes when YouTube gives one. Each answer
+is remembered until Encore closes. A video YouTube gives no answer about is left out.
 
 Home's new albums, EPs and singles come from up to 64 of the artists you play and
 like most, shared out among the sources by how much of your listening each gets, so

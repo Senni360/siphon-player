@@ -648,6 +648,7 @@ pub(super) fn stats(app: &mut crate::app::App) {
                 art: None,
                 genre: None,
                 estimated: day < 3 && slot == 0,
+                spotify: false,
             });
         }
     }

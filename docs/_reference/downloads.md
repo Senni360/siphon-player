@@ -60,10 +60,11 @@ The installed helper owns yt-dlp, FFmpeg, extraction, leading-silence trimming,
 metadata, cover art, BPM/key analysis, filename suffixes, and file writes. The
 player does not bundle or duplicate that pipeline.
 
-Settings, under **Downloads**, offers a folder, a format (MP3, M4A, Opus, FLAC or
-WAV) and a quality for lossy formats (320, 256, 192 or 128 kbps), plus whether a
-finished file is offered to the helper's drag tray. A choice left alone sends
-nothing, so the helper's factory defaults apply: **MP3 at 320 kbps**, metadata and
+Settings, under **Downloads & files**, offers a folder, a format (MP3, M4A, Opus,
+FLAC or WAV) and a quality for lossy formats (320, 256, 192 or 128 kbps), plus
+whether a finished file is offered to the helper's drag tray
+(**Show downloads in the drag tray**). A choice left alone sends nothing, so the
+helper's factory defaults apply: **MP3 at 320 kbps**, metadata and
 cover art, leading-silence trimming, BPM/key analysis and tags, and a filename
 suffix such as `[120 BPM Am]`. Files go to the helper's default folder, normally
 `%USERPROFILE%\Music\Siphon`, unless a folder is chosen; SoundCloud sets use the

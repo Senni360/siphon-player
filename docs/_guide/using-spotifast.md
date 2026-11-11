@@ -24,13 +24,24 @@ on **Middle-click autoscroll** under **Settings > Appearance**. It is off by
 default, because Linux desktops usually paste the primary selection on middle
 click. macOS retains its existing middle-click behavior.
 
-## Scrolling shelves
+## Home
 
-The tiles at the top of Home show what you played most recently, as
-Spotify's Home does: the playlists, albums, artists and podcasts you played
-from, Liked Songs, and songs you played on their own, newest first. A tile
-opens its page, and its play button starts it again; a song's tile plays the
-song and opens its album. Until Spotify's play history arrives, or when it
+Home opens with a greeting and one large pick: the best new album, EP or
+single from the artists you play and like most, or a song picked for you,
+with why it is there and the next few beside it. What is new from the group
+comes next, then recent places, **New releases**, **More for you**,
+**Beats for you**, and, when shown, **Made for you** and **Your top mixes**.
+**Recently played** follows, then **Your top artists** and **Your top songs**.
+
+Nothing on Home scrolls sideways: each row holds what fits. Elsewhere a shelf
+pages with the arrows at its ends, in whole cards, and the wheel keeps
+scrolling the page. Holding `Shift` while turning the wheel also moves a
+shelf sideways.
+
+**Recently played** shows the playlists, albums, artists and podcasts you
+played from, Liked Songs, and songs you played on their own, newest first. A
+tile opens its page, and its play button starts it again; a song's tile plays
+the song and opens its album. Until Spotify's play history arrives, or when it
 holds fewer than eight, Liked Songs and the first playlists in your Library
 fill the rest.
 
@@ -49,15 +60,19 @@ the same personalized read and has no fallback: the shelf appears once
 local playback has read it, and stays hidden for accounts Spotify gives no
 top mixes. If a refresh fails, the mixes already on screen remain.
 
-**New releases** shows the latest albums, EPs and singles from the artists
-you follow, newest first. A card opens its release. The shelf's title opens
-the **New releases** page, which lists every song of those releases, newest
-release first, with Play and Shuffle as on a playlist. The releases come
-from the feed behind the bell in Spotify's own apps when local playback is
-set up; reading it there does not mark anything as seen in Spotify. Without
-local playback, or when that feed cannot be read, the shelf asks the Web API
-for the newest albums and singles of up to 50 of the artists you follow
-instead. The shelf stays hidden when there are no releases.
+**New releases** gathers albums, EPs and singles just out from the artists
+you play and like most, across Spotify and SoundCloud, plus new uploads from
+artists and channels you follow. The newest is on the large card, and the
+rest follow in the shelf. A card opens its release; a single plays. A release
+scores by how much its artists are played, halved for every five days since
+it came out, so anything older than six weeks is left out. One copy of a
+release shows, from the source you use more, and no artist appears more than
+twice.
+
+**More for you** are songs across all three sources related to what you play,
+and **Beats for you** keeps the beats apart, mostly from YouTube. What you
+played just now gives way, no artist fills the page, and each source gets
+about its share of your listening.
 
 In Discover Weekly and Spotify's other playlists, a song's menu offers
 **Hide in this playlist**, as Spotify's apps do. A hidden song stays in the
@@ -65,21 +80,11 @@ list, greyed out, and is skipped when the playlist plays; **Show in this
 playlist** brings it back. Spotify keeps the choice, so it carries over to
 its other apps. This needs local playback.
 
-Point at a horizontal shelf, such as Made for you or Recently played on
-Home, and hold `Shift` while turning the mouse wheel. The shelf moves while
-the surrounding page stays put. Release `Shift` to scroll the page normally.
+## Podcasts
 
-## Podcasts on Home
-
-Since 0.10.0, Home has a **Your podcasts** shelf below Recently
-played. It lists episodes you have started and not finished, with the time
-left, followed by each podcast's newest episode if it came out in the last 30
-days and you have not started it, marked **New**. It covers the eight podcasts
-you saved most recently and the five newest episodes of each. Audiobooks are
-left out. The shelf is hidden when there is nothing to show. Click a card to
-open the podcast, or use its play button to play the episode. An episode you
-have started continues from where you left it. The same is true of Play on a
-podcast page, a saved episode, or a search result.
+Podcasts are not in the library and have no shelf on Home. Spotify's podcast
+and episode results still appear in Search, and open and play from there. An
+episode you have started continues from where you left it.
 
 ## Dragging beyond the visible list
 
@@ -205,8 +210,8 @@ stay until the new list arrives.
 
 ## Playing from the sidebar
 
-Double-click a playlist, Liked Songs, album, artist, or podcast row in the
-Library sidebar to start playing it. A single click still opens the row's page.
+Double-click a playlist, Liked Songs, album or artist row in the Library
+sidebar to start playing it. A single click still opens the row's page.
 Pointing at a row's cover art also shows a play button, but only when the
 sidebar is not in compact mode.
 
@@ -218,9 +223,8 @@ not queued after it.
 
 ## Search from a launcher
 
-**In development, not included in 0.8.0:** a Spotify search link opens Search
-and fills the box without starting playback. To try it in a development build,
-set a launcher or keyboard shortcut to run:
+A Spotify search link opens Search and fills the box without starting playback.
+Set a launcher or keyboard shortcut to run:
 
 ```sh
 siphon 'https://open.spotify.com/search/here%20comes%20the%20sun'
@@ -230,9 +234,7 @@ This starts the app if needed or opens its existing window. When signed out,
 the latest search link waits for sign-in. Use `https://open.spotify.com/search`
 without a query to open an empty, focused search box.
 
-On Linux, `playerctl --player=siphon open` accepts the same search link
-when the app is running. Links to songs, albums, and playlists still start
-playback as before.
+Links to songs, albums, and playlists still start playback as before.
 
 ## Finding a setting
 
@@ -285,7 +287,6 @@ Unmodified letter shortcuts still yield to the focused control.
 
 This is the first part of screen-reader support. Windows testing with NVDA
 remains tracked in [#262](https://github.com/crmne/spotifast/issues/262).
-Winamp skins do not yet have equivalent accessibility coverage.
 
 ## Keyboard shortcuts
 
@@ -310,7 +311,6 @@ Winamp skins do not yet have equivalent accessibility coverage.
 | `Ctrl+A` | Select every song in a playlist, album or Liked Songs |
 | `Ctrl+C` / `Ctrl+V` | Copy the selected songs' links / add copied song links to your playlist |
 | `Ctrl+X` | Copy the selected songs' links and remove the songs from your playlist |
-| `Ctrl+M` | Winamp mini player |
 | `Ctrl+,` | Settings |
 | `Ctrl+/` or `?` | All shortcuts |
 | `Ctrl+Q` | Quit |
@@ -373,31 +373,22 @@ random token). Use the command rather than the channel itself.
 
 ## Updates
 
-The Windows installer, Mac app, AppImage, and portable Windows and Linux
-downloads update from inside Siphon. Click the green update button to download a
-release, then choose when to restart and install it. Settings can enable
-automatic background downloads; restarting always waits for your click.
+The Windows copy updates from inside Encore. Click the update button to
+download a release, then choose when to restart and install it. Settings can
+enable automatic background downloads; restarting always waits for your click.
 Closing the update window keeps a download running. You can also check for a
-new release from Settings, or on macOS from the application menu.
-**Release notes** in **Settings > About** opens the GitHub release page of
-the version you are running, to read what changed.
+new release from Settings. **Release notes** in **Settings > Updates** opens
+the GitHub release page of the version you are running, to read what changed.
 
-Siphon checks each download before installing it. An interrupted or damaged
-download leaves the running app alone, and a failed startup restores the
-previous installation. Updates keep your settings and sign-ins. On macOS,
-move Siphon to Applications before updating it.
+Encore checks each download's signature before installing it. An interrupted
+or damaged download leaves the running app alone, and a failed startup restores
+the previous installation. Updates keep your settings and sign-ins.
 
-Package-managed installations update through their package manager,
-including Homebrew, Flatpak, apt, dnf, pacman, Nix, and Cargo. Other
-installations use the [Download page](/download/). Portable archives
-identify themselves with `siphon-portable.txt`. On Windows, a portable
-copy keeps its settings, state and caches in the `siphon-data` folder
-next to it, which updates leave as it is (see
-[portable copies](/settings-and-files/#portable-copies)). The AppImage
-updates itself when you own it and can write to its folder, such as
-`~/Applications`; one in a system folder or someone else's says so and
-links to the release instead. AppImage updaters such as AppImageUpdate and
-Gear Lever work as well, from the update information inside it.
+A portable copy, one with `siphon-data` beside `siphon.exe`, updates the same
+way and keeps that folder as it is (see
+[portable copies](/settings-and-files/#portable-copies)).
+[Private Siphon Updates](/private-updates/) covers the signing and release
+rules.
 
 ## Library order
 
@@ -412,8 +403,7 @@ additional Spotify requests.
 
 Since 0.8.0, the menu below the Library filters selects an order
 for each section. **Name** and **Recently played** are available throughout.
-Albums and podcasts also offer **Recently added**, using their actual save
-dates. Spotify does not supply equivalent dates for followed playlists or
+Albums also offer **Recently added**, using their actual save dates. Spotify does not supply equivalent dates for followed playlists or
 artists, so those sections do not offer that choice. Entries with missing save
 dates come last.
 
@@ -502,20 +492,8 @@ and raises Siphon. Use **Show or hide Siphon** in the tray menu to hide
 it again.
 
 Closing to the tray removes the window and its preview. Reopening the main
-window or switching to the Winamp window creates its controls again. Media
-keys and the system's now-playing controls continue working while the window
-is closed.
-
-For the Winamp mini player, turn off **Show in taskbar** in its options menu.
-The choice survives restarts. The mini player stays visible; the skin logo and
-launching Siphon again remain ways to reach
-the app. Returning to the main window always restores its taskbar button.
-Changing the option while the mini player is open replaces that window while
-playback continues. This setting is available on Windows and in Linux X11
-sessions, where it hides the mini player from panels and task switchers that
-follow the window manager's skip-taskbar state. Wayland has no standard way
-for an app to leave the taskbar, so the option is not offered there; use your
-desktop's window rules instead. It does not change the macOS Dock.
+window creates its controls again. Media keys and the system's now-playing
+controls continue working while the window is closed.
 
 A window saved on a display that is no longer connected opens on the
 primary display instead: on Windows and X11 it moves to the middle of the
@@ -529,8 +507,8 @@ position left on an unplugged display.
 Click Siphon's menu-bar icon to open its menu. From there you can show or
 hide the window, control playback, or quit Siphon. The menu opens from
 either a primary or secondary click, as other macOS menu-bar items do.
-It stays available with the main window open, with the Winamp mini player,
-and after closing the window to the menu bar.
+It stays available with the main window open and after closing the window to
+the menu bar.
 
 Siphon also shows its Dock icon when run directly through Cargo, without
 an installed app bundle.
@@ -555,16 +533,6 @@ Finder or Launchpad also brings the window back. Turn the setting on to put
 Siphon back in the Dock. The choice survives restarts, and Siphon
 starts without the Dock icon; the Dock may show it for a moment as the app
 launches. This option is only on macOS.
-
-## Keeping the mini player above other windows
-
-**Always on top** works on Windows, macOS and X11. On Wayland the app's
-controls are unavailable, because your desktop manages which windows stay above
-others.
-Use your desktop's window rule or shortcut instead. In KDE Plasma, configure
-**Keep Window Above Others** under **Settings > Keyboard > Shortcuts >
-Window Management**. Your saved preference remains available when you use
-Siphon on Windows, macOS, or X11 again.
 
 Since 0.8.0, the top bar reserves room for the device and update
 badges beside Search. In narrow windows those badges show only their icons.
@@ -732,8 +700,7 @@ does not take over HTTP or HTTPS associations.
 
 ## Playlist covers
 
-**In development, not included in 0.8.0:** open a playlist you own and choose
-**Edit details → Change cover**. Select a
+Open a playlist you own and choose **Edit details → Change cover**. Select a
 JPEG or PNG, check the preview, then choose **Upload cover**. Cancelling the
 picker leaves your previous selection intact. An upload error keeps the
 preview so you can try again. Uploading the cover is separate from **Save**,

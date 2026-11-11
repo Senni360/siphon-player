@@ -23,6 +23,7 @@ pub mod device_history;
 pub mod discord;
 pub mod downloads;
 pub mod drag_out;
+pub mod edge;
 pub mod emoji;
 pub mod eq;
 pub mod extension_bridge;

@@ -64,6 +64,7 @@ impl App {
             art: now.art_small.clone().or_else(|| now.art_url.clone()),
             genre: crate::stats::soundcloud_genre(&now.uri),
             estimated: false,
+            spotify: false,
         })
     }
 
@@ -131,6 +132,7 @@ impl App {
                         .map(str::to_owned),
                     genre: None,
                     estimated: true,
+                    spotify: true,
                 })
             })
             .collect();
@@ -159,6 +161,13 @@ impl App {
                     self.backend.choose_stats_import();
                 }
             }
+            Stats::CountSpotify(on) => {
+                if self.settings.stats_spotify_plays != on {
+                    self.settings.stats_spotify_plays = on;
+                    self.mark_settings_dirty();
+                    self.stats_all_changed();
+                }
+            }
         }
     }
 
@@ -172,7 +181,10 @@ impl App {
             return;
         }
         self.stats.asked.insert(period, Instant::now());
-        self.backend.send(Command::StatsReport { period });
+        self.backend.send(Command::StatsReport {
+            period,
+            with_spotify: self.settings.stats_spotify_plays,
+        });
     }
 
     /// Everything changed: ask for what is on show again.

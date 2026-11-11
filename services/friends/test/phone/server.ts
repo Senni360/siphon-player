@@ -285,6 +285,8 @@ export class PhoneServer {
   edgeComputerPresent = false;
   /** Sources `/v1/resolve` refuses. */
   readonly edgeRefused = new Set<string>();
+  /** Songs the computer has no audio for, as a Spotify-only match would be. */
+  readonly noAudio = new Set<string>();
   /** The next `/api/edge/token` names a media token that is already expired. */
   edgeExpireNext = false;
   /** What `/v1/match` answers. Null means no match. */
@@ -808,6 +810,9 @@ export class PhoneServer {
       case 'lyrics':
         return { uri: this.state.song?.uri ?? null, lines: [], synced: false, instrumental: true };
       case 'stream':
+        // A song the computer has nothing for answers with a reason instead:
+        // the phone treats that as final, not as something to retry.
+        if (this.noAudio.has(String(input.uri))) return { error: 'No audio for this song.' };
         return { url: `https://media.example.test/${encodeURIComponent(String(input.uri))}.mp3`, hls: false };
       case 'play': {
         const uris = Array.isArray(input.uris) ? input.uris.map(String) : [];

@@ -6,6 +6,9 @@ import { api } from '../service.js';
 import { spotifyPanel } from '../spotify-panel.js';
 import { hooks } from '../state.js';
 
+const logo = () => h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 56, height: 56 });
+const door = (...content) => h('div', { class: 'door-page' }, ...content);
+
 /** A code in a /link address's fragment: a fragment never reaches the server. */
 function linkingCode() {
   if (location.pathname !== '/link') return null;
@@ -28,9 +31,8 @@ export async function claimCode(code) {
 export async function linkFromAddress() {
   const code = linkingCode();
   if (!code) return false;
-  app.replaceChildren(h('div', { class: 'door-page' }, h('div', { class: 'door', role: 'status' },
-    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
-    h('h1', { text: 'Encore' }), h('p', { text: 'Linking this phone…' }))));
+  app.replaceChildren(door(h('div', { class: 'door', role: 'status' }, logo(),
+    h('h1', { text: 'Encore' }), h('p', { class: 'working', text: 'Linking this phone…' }))));
   try {
     await claimCode(code);
   } catch (error) {
@@ -39,9 +41,8 @@ export async function linkFromAddress() {
     linkScreen(error.message);
     return true;
   }
-  app.replaceChildren(h('div', { class: 'door-page' }, h('div', { class: 'door', role: 'status' },
-    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
-    h('h1', { text: 'This phone is linked' }), h('p', { text: 'Opening your music…' }))));
+  app.replaceChildren(door(h('div', { class: 'door', role: 'status' }, logo(),
+    h('h1', { text: 'This phone is linked' }), h('p', { class: 'working', text: 'Opening your music…' }))));
   history.replaceState(null, '', '/');
   setTimeout(() => hooks.restart?.(), 700);
   return true;
@@ -49,8 +50,7 @@ export async function linkFromAddress() {
 
 /** A phone whose device secret the service no longer accepts. */
 export function signedOutScreen() {
-  app.replaceChildren(h('div', { class: 'door-page' }, h('div', { class: 'door' },
-    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
+  app.replaceChildren(door(h('div', { class: 'door' }, logo(),
     h('h1', { text: 'This phone was signed out' }),
     h('p', { text: 'Encore on your computer removed this phone, or its sign-in was cleared. Your other devices are still signed in.' }),
     h('p', { class: 'small', text: 'To link it again, open Encore on your computer, go to Group, then People, and press Link a phone. Open the link it shows on this phone, or type the code below.' }),
@@ -60,11 +60,12 @@ export function signedOutScreen() {
 
 export function linkScreen(problemText) {
   const problem = h('p', { class: 'problem', role: 'alert', hidden: !problemText, text: problemText ?? '' });
-  const input = h('input', { class: 'code', 'aria-label': 'Code from your computer', maxlength: 9, autocapitalize: 'characters', autocorrect: 'off', autocomplete: 'one-time-code', spellcheck: 'false', enterkeyhint: 'go', required: true });
+  const input = h('input', { class: 'code', 'aria-label': 'Code from your computer', placeholder: 'XXXX XXXX', maxlength: 9, autocapitalize: 'characters', autocorrect: 'off', autocomplete: 'one-time-code', spellcheck: 'false', enterkeyhint: 'go', required: true });
   const button = h('button', { class: 'primary', type: 'submit', text: 'Link this phone' });
   const form = h('form', { class: 'door', onsubmit: async event => {
     event.preventDefault();
     button.disabled = true;
+    button.textContent = 'Linking…';
     problem.hidden = true;
     try {
       await claimCode(input.value);
@@ -73,14 +74,18 @@ export function linkScreen(problemText) {
       problem.textContent = error.message;
       problem.hidden = false;
       button.disabled = false;
+      button.textContent = 'Link this phone';
     }
   } },
-    h('img', { class: 'logo', src: '/icon.svg', alt: '', width: 64, height: 64 }),
+    logo(),
     h('h1', { text: 'Encore' }),
-    h('p', { text: 'Use your own account on this phone: your library, your groups, and playback on your computer.' }),
-    h('p', { class: 'small', text: 'On your computer, open Encore, go to Group, then People, and press Link a phone. Type the code here, or open the link it shows.' }),
+    h('p', { text: 'Your library, your group and your queue, on this phone.' }),
+    h('ol', { class: 'steps' },
+      h('li', { text: 'On your computer, open Encore and go to Group, then People.' }),
+      h('li', { text: 'Press Link a phone.' }),
+      h('li', { text: 'Open the link it shows on this phone, or type its code here.' })),
     input, problem, button,
     h('button', { class: 'quiet', type: 'button', text: 'Sign in with Spotify instead', onclick: spotifyPanel }));
-  app.replaceChildren(h('div', { class: 'door-page' }, form));
+  app.replaceChildren(door(form));
   input.focus();
 }

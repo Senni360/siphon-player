@@ -38,8 +38,55 @@ export async function ensureDir(dir) {
 }
 
 /**
- * Writes bytes to a fresh temp file in the same directory, fsyncs, then
- * renames over the target. A crash leaves the previous file intact.
+ * A document that exists but is not valid JSON. It is never treated as
+ * "absent": that would silently reset somebody's state to revision 0.
+ */
+export class CorruptJsonError extends Error {
+  constructor(file) {
+    super("corrupt_json");
+    this.name = "CorruptJsonError";
+    this.code = "corrupt_json";
+    this.file = file;
+  }
+}
+
+/**
+ * Flushes a directory entry so a rename survives a power cut. Some platforms
+ * refuse to open a directory; there it is skipped rather than failing a write.
+ */
+export async function syncDir(dir) {
+  let handle;
+  try {
+    handle = await fs.open(dir, "r");
+    await handle.sync();
+  } catch {
+    // Not supported here, or already durable enough.
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * Flushes an existing file. Some platforms refuse fsync on a read-only handle;
+ * there the write path still produced the bytes, so the failure is skipped
+ * rather than turning into a failed cache write.
+ */
+export async function fsyncFile(file) {
+  let handle;
+  try {
+    handle = await fs.open(file, "r+");
+    await handle.sync();
+  } catch (error) {
+    if (!["EPERM", "EACCES", "EINVAL", "ENOTSUP", "ENOSYS"].includes(error?.code)) throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+/**
+ * Writes bytes to a fresh temp file in the same directory, fsyncs, renames
+ * over the target and flushes the directory. A crash leaves the previous file
+ * intact, and nothing half-written ever carries the final name.
  */
 export async function atomicWriteFile(target, bytes, { mode = 0o600 } = {}) {
   const dir = path.dirname(target);
@@ -53,6 +100,7 @@ export async function atomicWriteFile(target, bytes, { mode = 0o600 } = {}) {
     await handle.close();
     handle = undefined;
     await fs.rename(temp, target);
+    await syncDir(dir);
   } catch (error) {
     if (handle) await handle.close().catch(() => {});
     await fs.unlink(temp).catch(() => {});
@@ -64,6 +112,11 @@ export async function atomicWriteJson(target, value) {
   await atomicWriteFile(target, Buffer.from(`${JSON.stringify(value)}\n`, "utf8"));
 }
 
+/**
+ * Reads JSON. A missing file returns the fallback; a file that exists but does
+ * not parse throws, so the caller can preserve it instead of inventing empty
+ * data.
+ */
 export async function readJsonFile(file, fallback) {
   let text;
   try {
@@ -75,10 +128,34 @@ export async function readJsonFile(file, fallback) {
   try {
     return JSON.parse(text);
   } catch {
-    return fallback;
+    throw new CorruptJsonError(file);
   }
 }
 
 export function byteLength(value) {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+/** Removes files matching `pattern` inside `dir`; used for abandoned temp files. */
+export async function removeMatching(dir, pattern, { maxAgeMs = 0, now = Date.now } = {}) {
+  const names = await fs.readdir(dir).catch((error) => {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  });
+  let removed = 0;
+  for (const name of names) {
+    if (!pattern.test(name)) continue;
+    const file = path.join(dir, name);
+    try {
+      if (maxAgeMs > 0) {
+        const stat = await fs.stat(file);
+        if (now() - stat.mtimeMs <= maxAgeMs) continue;
+      }
+      await fs.unlink(file);
+      removed += 1;
+    } catch {
+      // Already gone or still busy; the next start sweeps it.
+    }
+  }
+  return removed;
 }

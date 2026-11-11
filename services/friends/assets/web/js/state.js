@@ -12,6 +12,8 @@ export const player = { state: null, online: false, direct: false, at: 0, held: 
 export const here = {
   audio: null, list: [], index: -1, active: false, trouble: null, shuffle: false, repeat: 'off',
   seq: 0, tries: 0, place: 0, likedUri: null, liked: false, pausedByUser: false, playingUri: null, pending: false,
+  /** Songs the service had no audio for, so one dead song cannot loop the queue. */
+  dead: new Set(),
 };
 
 /** The computer's event stream, while this page is in front. */
@@ -55,4 +57,10 @@ export const hooks = {
   signedOut: null,
   /** Start the app again from the top. */
   restart: null,
+  /** Whether sound comes out of this phone (`playsHere`). */
+  playsHere: null,
+  /** Mark the playing song's row wherever it is listed (`markPlaying`). */
+  markPlaying: null,
+  /** Close the Now Playing sheet, if it is open. */
+  closeSheet: null,
 };

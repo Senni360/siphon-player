@@ -58,10 +58,14 @@ or any other container.
 | `EDGE_UPLOAD_USER_MAX_BYTES` | `5368709120` (5 GiB) | one user's uploads, never evicted |
 | `EDGE_SYNC_USER_MAX_BYTES` | `4194304` (4 MiB) | all three sync documents per user |
 | `EDGE_MEDIA_TOKEN_TTL_SECONDS` | `3600` | media URL lifetime |
+| `EDGE_MEDIA_IDLE_TIMEOUT_MS` | `120000` | a media reader that stops reading is disconnected |
 | `EDGE_WS_RATE_PER_SECOND` | `40` | per-connection message rate |
 | `EDGE_WS_RATE_BURST` | `80` | per-connection burst |
 | `EDGE_LIVE_BUFFER_MS` | `120000` | replay window |
+| `EDGE_LIVE_BUFFER_BYTES` | `1048576` | replay bytes per room, whichever cap is reached first |
+| `EDGE_LIVE_ENVELOPE_MAX_BYTES` | `16384` | one `state`/`phone` envelope |
 | `EDGE_RESOLVE_CONCURRENCY` | `2` | capped at 2 by the service |
+| `EDGE_WARM_QUEUE_MAX` | `4` | prefetches waiting behind foreground resolves |
 | `EDGE_RESOLVE_TIMEOUT_MS` | `180000` | one yt-dlp job |
 | `EDGE_FFMPEG_TIMEOUT_MS` | `120000` | one remux |
 | `EDGE_SEARCH_TIMEOUT_MS` | `45000` | one search |
@@ -229,7 +233,9 @@ A compact album carries `id`, `uri`, `name`, `image`, `artists`, `release_date`,
   and `track_count`. If Spotify is not linked, the first page still returns the
   mixed rows with `"error": "spotify_not_linked"`.
 - `GET /v1/library/playlists/:id` returns `{v, playlist, items, next}`. An id
-  that is not a Spotify playlist falls back to the same mixed snapshot.
+  that is not a Spotify playlist falls back to the same mixed snapshot. A mixed
+  song carries the compact track shape above; a playlist local file also has
+  `upload`, the key its audio was stored under by `PUT /v1/upload/:key`.
 - `GET /v1/library/liked` and `/v1/library/albums` return Spotify saved items.
 - `GET /v1/library/artists` pages through followed artists with a `cursor`
   carrying Spotify's `after` value.
@@ -293,13 +299,23 @@ POST /v1/match    { "uri":"spotify:track:…", "name":"…", "durationMs":200000
 Only these sources are accepted: `youtube:video:<11 chars>`,
 `soundcloud:<artist>/<track>`, or an `https://soundcloud.com/...` URL with no
 query or fragment. Everything else is `400 invalid_source` before a child
-process exists. `yt-dlp` is invoked with an argument array, `--` before the
-URL, and no shell. The result is remuxed with `ffmpeg -c:a copy` to M4A, or to
-MP3 when the source was MP3. It is never transcoded. At most two jobs run;
-identical requests share one job.
+process exists. A YouTube source the computer already uploaded under
+`yt-<video-id>` is answered from that upload before any tool starts, so a song
+this computer fetched plays while it is off. A playlist local file is asked for
+as `upload:<key>` and answered the same way, or `404 not_found` when it is not
+there. `yt-dlp` is invoked with an argument array, `--` before the
+URL, and no shell. It writes the chosen stream to stdout; `ffmpeg` remuxes it
+with `-c:a copy` (never transcoding) into a fragmented M4A, or MP3/Ogg/FLAC when
+the source is that format. At most two jobs run; identical requests share one
+job.
 
-The first byte waits for the whole job: the resolver does not stream a
-partially downloaded file. `warm` still hides most of that delay.
+`POST /v1/resolve` answers as soon as the first bytes exist, with
+`"streaming": true` and a media URL that is already playable. The download keeps
+running while the phone reads. `cached: true` and `"streaming": false` come from
+a second resolve after the file is complete. A client that disconnects before
+the first byte kills its tools and frees the slot; a prefetch (`warm`) never
+holds the slot against a real tap and is dropped once `EDGE_WARM_QUEUE_MAX` is
+reached.
 
 ### Media
 
@@ -309,11 +325,17 @@ partially downloaded file. `warm` still hides most of that delay.
   (`bytes=-4`) are supported;
 - multiple ranges, reversed ranges and ranges beyond the end answer `416`
   with `Content-Range: bytes */size`;
+- a file that is still being fetched is served from its `.part` file: a whole
+  request is chunked with no `Content-Length`, and a single range waits for the
+  bytes it asked for and answers `206` (with `/*` while the total is unknown);
 - `Accept-Ranges: bytes`, `Content-Length`, a strong `ETag`, no
   `Content-Encoding`, `Cache-Control: private, max-age=3600`;
 - CORS names only a configured origin and exposes `Content-Range`,
   `Accept-Ranges`, `Content-Length` and `ETag`;
-- the token must match both the user and the exact key.
+- the token must match both the user and the exact key;
+- a reader pins its cache entry, so eviction never deletes a file mid-stream;
+  a reader that stops reading is disconnected after
+  `EDGE_MEDIA_IDLE_TIMEOUT_MS`.
 
 ### Upload
 
@@ -364,7 +386,8 @@ The server sends an unsolicited `hello` on connect:
   per user. Clients remember the last `seq` they saw.
 - On reconnect, send `hello` with `since: <lastSeq>` (or put `since=` in the
   URL). Every buffered message after it is replayed before normal traffic.
-  `reset: true` means the server restarted or the client is ahead: reload
+  `reset: true` means the server restarted, the client is ahead, or the byte
+  cap (`EDGE_LIVE_BUFFER_BYTES`) forced the oldest messages out: reload
   authoritative data from `/v1/sync/*`.
 - Messages from one role are relayed only to the other role's connections.
   `hello`, `ping` and `pong` are not relayed.
@@ -376,7 +399,8 @@ The server sends an unsolicited `hello` on connect:
 - Bad input answers
   `{"v":1,"t":"reply","id":"…","ok":false,"error":"invalid_json"}` (or
   `invalid_envelope`, `invalid_id`, `rate_limited`, `binary_not_supported`).
-  It never closes the process. A frame over 64 KiB closes only that socket.
+  It never closes the process. A frame over 64 KiB closes only that socket,
+  and a `state`/`phone` body over `EDGE_LIVE_ENVELOPE_MAX_BYTES` is refused.
 - Native WebSocket pings run every 15 s; a client that misses one is
   terminated. Application `ping` is answered with `pong`.
 - Each connection has a token bucket (`EDGE_WS_RATE_PER_SECOND` /
@@ -391,14 +415,18 @@ $EDGE_DATA_DIR/
   sync/<user-hash>/matches.json
   vault/<user-hash>.json
   cache/<key>.m4a|mp3|ogg|flac|wav
+  cache/<key>.<ext>.part        (a fetch in progress; swept on start)
   cache/last-played.json
   uploads/<owner-prefix>/<key>.<ext>
 ```
 
 Every JSON and every cache index is written to a temp file, fsynced, then
-renamed. Deleted or corrupt cache files are rebuilt from the directory on
-start; sync documents are loaded lazily from disk. Uploads are indexed from
-disk on start.
+renamed. A cache file only gets its final name after the bytes are fsynced; a
+crash leaves a `.part` file that is removed on start. Deleted or corrupt cache
+files are rebuilt from the directory on start; sync documents are loaded lazily
+from disk, and a corrupt one is kept as `.corrupt-<time>` and answered with
+`500 sync_corrupt` rather than silently reset to revision 0. Uploads are
+indexed from disk on start.
 
 ## Logging
 

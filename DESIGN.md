@@ -159,11 +159,11 @@ No blur, no rotated text, no shaders per frame.
 - **Budget**: during an animation a frame should stay under a few
   milliseconds of CPU. The demo build gets frame-time logging to check it.
 
-## What is built (30 October, evening)
+## What was built (30 October, evening)
 
-The sections above are the target. This is what the native app does
-today, on `claude/focused-rubin-pxfk32`; the handoff in
-`docs/_reference/siphon-frontend-handoff.md` has the commits.
+The sections above are the target. This was the native app's state on 30
+October; the dated sections below record what changed since. The handoff in
+`docs/_reference/siphon-frontend-handoff.md` has the commits of that work.
 
 | Piece | State |
 | --- | --- |
@@ -177,8 +177,8 @@ today, on `claude/focused-rubin-pxfk32`; the handoff in
 | Group feed and composer | The backend's friends panel; not restyled. |
 | Toasts, banners | Existing ones in the new palette; not rebuilt. |
 | Motion built | Island swipes, Now playing grow and title wipe, Up next moving up one place on Next (and in afresh when the queue is replaced), tab selection slide, row tool reveal, sidebar slide and handle, group shares arriving in turn, hearts popping when given (rows and group cards), new toasts rising 12 px into place, the library highlight gliding to the page just opened, a band of light crossing the row that starts playing, and an unplayable song shaking its title when asked to play. All respect reduced motion. |
-| Motion not built | Flying thumbnail, download burst, BPM copy float, nudge, search link unfold. |
-| Glass and grain | Not built: panels are flat fills. |
+| Motion not built | The BPM/key value does not float up when copied, and a pasted search link resolves without unfolding. Flying covers, the download burst and the arrow nudge came later. |
+| Glass and grain | Glass cards and the island's frosted backdrop were built on 5 November. Grain is not. |
 | Geist | Not bundled; Inter remains. |
 
 ## What changed (31 October)
@@ -203,7 +203,8 @@ so the sections above are read with them:
   rows enter a beat apart after navigation, the floating sidebar comes out
   in steps, nav and library highlights glide, the Group badge pops and
   bumps, hover light and presses ease on every shared button, the play
-  disc cross-grows Play and Pause, Previous and Next lean, Shuffle and
+  disc stays where it is and Play and Pause reshape into each other,
+  Previous and Next change their icons in place, Shuffle and
   Repeat grow a state dot, sliders thicken and glide to a click, hearts
   burst, covers fly to the playlist or Group row they were sent to,
   downloads drop into a ring and burst into a check, dialogs grow in,

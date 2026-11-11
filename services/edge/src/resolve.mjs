@@ -1,14 +1,19 @@
-// Source allowlist and two-job resolver. A source is only ever one of
+// Source allowlist and streaming resolver. A source is only ever one of
 //   youtube:video:<11 chars>
 //   soundcloud:<artist>/<track>
 //   https://soundcloud.com/<artist>/<track>
 // Anything else is refused before a child process exists. Commands use
 // argument arrays and end options with "--"; no shell is involved.
+//
+// yt-dlp writes the chosen audio stream to stdout, ffmpeg remuxes it (copy
+// only, never transcode) into a fragmented file, and that file is written into
+// the cache as `.part` while phones can already read it. The finished file is
+// fsynced and renamed into place, so a crash leaves no valid-looking fragment.
 
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { runProcess } from "./proc.mjs";
+import { pipeline } from "node:stream/promises";
+import { killTree, ProcessError, startProcess } from "./proc.mjs";
 
 export const MAX_SOURCE_LENGTH = 512;
 const YOUTUBE_SOURCE = /^youtube:video:([A-Za-z0-9_-]{11})$/;
@@ -17,11 +22,12 @@ const SOUNDCLOUD_HOSTS = new Set(["soundcloud.com", "www.soundcloud.com", "m.sou
 const SOUNDCLOUD_PATH = /^\/([A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*){0,4})\/?$/;
 
 export class ResolveError extends Error {
-  constructor(code, status = 400) {
+  constructor(code, status = 400, cause) {
     super(code);
     this.name = "ResolveError";
     this.code = code;
     this.status = status;
+    if (cause !== undefined) this.cause = cause;
   }
 }
 
@@ -95,7 +101,7 @@ export function parseSource(source) {
 }
 
 /** Argument list for yt-dlp. "--" ends options before the URL. */
-export function buildYtDlpArgs({ url, outDir }) {
+export function buildYtDlpArgs({ url }) {
   if (typeof url !== "string" || !url.startsWith("https://")) throw new ResolveError("invalid_source");
   return [
     "--no-playlist",
@@ -105,51 +111,111 @@ export function buildYtDlpArgs({ url, outDir }) {
     "--no-part",
     "--no-cache-dir",
     "--no-mtime",
-    "--force-overwrites",
     "-f",
     "bestaudio[ext=m4a]/140/bestaudio",
     "--output",
-    path.join(outDir, "source.%(ext)s"),
+    "-",
     "--",
     url,
   ];
 }
 
-/** Remux only: -c:a copy. The container follows the source's MP3-ness. */
-export function buildFfmpegArgs({ input, output, format }) {
-  if (typeof input !== "string" || typeof output !== "string") throw new ResolveError("invalid_source");
-  if (format !== "m4a" && format !== "mp3") throw new ResolveError("invalid_source");
+const AUDIO_KINDS = Object.freeze({
+  m4a: {
+    contentType: "audio/mp4",
+    // Fragmented MP4 puts the moov atom first, so the first chunk is playable.
+    args: ["-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4"],
+  },
+  mp3: { contentType: "audio/mpeg", args: ["-f", "mp3"] },
+  ogg: { contentType: "audio/ogg", args: ["-f", "ogg"] },
+  flac: { contentType: "audio/flac", args: ["-f", "flac"] },
+});
+
+/** Remux only: -c:a copy. The container follows the source's own audio. */
+export function buildFfmpegArgs({ format }) {
+  const kind = AUDIO_KINDS[format];
+  if (!kind) throw new ResolveError("invalid_source");
   return [
     "-nostdin",
     "-hide_banner",
     "-loglevel",
     "error",
-    "-y",
     "-i",
-    input,
+    "pipe:0",
     "-map",
     "0:a:0",
     "-vn",
     "-c:a",
     "copy",
-    "-f",
-    format === "mp3" ? "mp3" : "ipod",
-    output,
+    ...kind.args,
+    "pipe:1",
   ];
 }
 
-const AUDIO_EXT = new Set(["m4a", "mp3", "webm", "ogg", "opus", "flac", "wav", "aac"]);
-
-async function findDownloaded(dir) {
-  const names = await fs.readdir(dir).catch(() => []);
-  for (const name of names) {
-    const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-    if (name.startsWith("source.") && AUDIO_EXT.has(ext)) {
-      return { file: path.join(dir, name), ext };
-    }
+/** Maps the first bytes of the download to a container ffmpeg can copy into. */
+export function audioFromHead(head) {
+  const bytes = Buffer.isBuffer(head) ? head : Buffer.alloc(0);
+  if (bytes.length >= 8 && bytes.toString("latin1", 4, 8) === "ftyp") return "m4a";
+  if (bytes.length >= 3 && bytes.toString("latin1", 0, 3) === "ID3") return "mp3";
+  if (bytes.length >= 2 && bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) return "mp3";
+  if (bytes.length >= 4 && bytes.toString("latin1", 0, 4) === "OggS") return "ogg";
+  if (bytes.length >= 4 && bytes.toString("latin1", 0, 4) === "fLaC") return "flac";
+  // WebM/Matroska (usually Opus): an Ogg container is playable everywhere this
+  // service is used.
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
+    return "ogg";
   }
-  return null;
+  return "m4a";
 }
+
+function readHead(stream, size) {
+  return new Promise((resolve, reject) => {
+    let buffer = Buffer.alloc(0);
+    let done = false;
+    const cleanup = () => {
+      stream.off("data", onData);
+      stream.off("end", onEnd);
+      stream.off("error", onError);
+    };
+    const onData = (chunk) => {
+      if (done) return;
+      buffer = Buffer.concat([buffer, chunk]);
+      if (buffer.length < size) return;
+      done = true;
+      cleanup();
+      stream.pause();
+      const extra = buffer.subarray(size);
+      if (extra.length > 0) stream.unshift(extra);
+      resolve(buffer.subarray(0, size));
+    };
+    const onEnd = () => {
+      if (done) return;
+      done = true;
+      cleanup();
+      resolve(buffer);
+    };
+    const onError = (error) => {
+      if (done) return;
+      done = true;
+      cleanup();
+      reject(error);
+    };
+    stream.on("data", onData);
+    stream.once("end", onEnd);
+    stream.once("error", onError);
+  });
+}
+
+async function writeAll(handle, chunk) {
+  let offset = 0;
+  while (offset < chunk.length) {
+    const { bytesWritten } = await handle.write(chunk, offset, chunk.length - offset);
+    if (bytesWritten <= 0) throw new Error("short_write");
+    offset += bytesWritten;
+  }
+}
+
+const CANCELED = () => new ResolveError("cancelled", 499);
 
 export class ResolveService {
   #cache;
@@ -157,58 +223,256 @@ export class ResolveService {
   #logger;
   #spawn;
   #jobs = new Map();
-  #pending = [];
+  #foreground = [];
+  #background = [];
+  #running = new Set();
   #active = 0;
   #children = new Set();
   #closing = false;
+  #warmMax;
 
   constructor({ cache, config, logger, spawn }) {
     this.#cache = cache;
     this.#config = config;
     this.#logger = logger;
     this.#spawn = spawn;
+    this.#warmMax = config.warmQueueMax ?? 4;
   }
 
   get concurrency() {
     return Math.min(2, this.#config.resolveConcurrency ?? 2);
   }
 
-  stats() {
-    return { running: this.#active, queued: this.#pending.length, jobs: this.#jobs.size };
+  /** Removes abandoned temp directories from an older, pre-streaming build. */
+  async init() {
+    const dir = path.join(this.#config.dataDir, "tmp");
+    await fs.mkdir(dir, { recursive: true, mode: 0o750 }).catch(() => {});
+    const names = await fs.readdir(dir).catch(() => []);
+    const now = Date.now();
+    for (const name of names) {
+      if (!name.startsWith("encore-edge-")) continue;
+      const target = path.join(dir, name);
+      try {
+        const stat = await fs.stat(target);
+        if (now - stat.mtimeMs > 60 * 60 * 1000) {
+          await fs.rm(target, { recursive: true, force: true });
+        }
+      } catch {
+        // Already gone or busy; the next start sweeps it.
+      }
+    }
+    return this;
   }
 
-  /** Resolves a source, sharing one job between identical requests. */
-  async ensure(sub, source) {
-    if (this.#closing) throw new ResolveError("shutting_down", 503);
-    const parsed = parseSource(source);
-    const key = this.#cache.keyFor(sub, parsed.sourceUri);
-    const existing = this.#cache.get(key);
-    if (existing) {
-      this.#cache.touch(key);
-      return Promise.resolve(this.#view(existing, true));
-    }
-    const running = this.#jobs.get(key);
-    if (running) return running.promise;
-    const job = {};
-    job.promise = new Promise((resolve, reject) => {
-      job.resolve = resolve;
-      job.reject = reject;
-    });
-    // A warm request or a closed socket can leave a rejection unobserved.
-    job.promise.catch(() => {});
-    job.key = key;
-    job.sub = sub;
-    job.parsed = parsed;
-    this.#jobs.set(key, job);
-    this.#pending.push(job);
-    this.#pump();
-    return job.promise;
+  stats() {
+    return {
+      running: this.#active,
+      queued: this.#foreground.length + this.#background.length,
+      warmQueued: this.#background.length,
+      jobs: this.#jobs.size,
+    };
   }
 
   /**
-   * Starts resolving up to two distinct upcoming sources without waiting.
-   * Invalid sources are counted, never retried and never passed to a tool.
+   * Starts (or joins) a resolve and returns immediately. `started` settles when
+   * the `.part` file exists and can be served; `done` settles when the file is
+   * complete. `release` drops this caller's interest: a job with no other
+   * caller is killed, so a phone that skips a track does not hold the slot.
    */
+  acquire(sub, source, { signal } = {}) {
+    if (this.#closing) throw new ResolveError("shutting_down", 503);
+    const parsed = parseSource(source);
+    const key = this.#cache.keyFor(sub, parsed.sourceUri);
+    const finished = this.#cache.get(key);
+    if (finished) {
+      this.#cache.touch(key);
+      const view = this.#view(finished, true);
+      return { started: Promise.resolve(view), done: Promise.resolve(view), release() {} };
+    }
+    let job = this.#jobs.get(key);
+    if (!job) {
+      job = this.#newJob(key, sub, parsed);
+      this.#jobs.set(key, job);
+      this.#foreground.push(job);
+      this.#maybePreempt();
+      this.#pump();
+    } else if (job.background) {
+      // A user tap turns an in-flight prefetch into foreground work.
+      job.background = false;
+      this.#maybePreempt();
+    }
+    return this.#attach(job, signal);
+  }
+
+  /** Resolves a source completely, sharing one job between identical requests. */
+  ensure(sub, source, options) {
+    const handle = this.acquire(sub, source, options);
+    // Only `done` is awaited here; a cancellation before the first byte must
+    // not surface as an unhandled rejection on the unused `started` promise.
+    handle.started.catch(() => {});
+    return handle.done.finally(() => handle.release());
+  }
+
+  #newJob(key, sub, parsed) {
+    const job = {
+      key,
+      sub,
+      parsed,
+      background: false,
+      clients: 0,
+      started: false,
+      startedView: null,
+      streaming: false,
+      settled: false,
+      cancelled: false,
+      controller: new AbortController(),
+      startedWaiters: new Set(),
+      doneWaiters: new Set(),
+    };
+    return job;
+  }
+
+  #attach(job, signal) {
+    job.clients += 1;
+    let startedSettled = false;
+    let doneSettled = false;
+    let released = false;
+    const local = {
+      started: null,
+      done: null,
+    };
+    const settleStarted = (value, error) => {
+      if (startedSettled) return;
+      startedSettled = true;
+      job.startedWaiters.delete(startedWaiter);
+      if (error) local.startedReject(error);
+      else local.startedResolve(value);
+    };
+    const settleDone = (value, error) => {
+      if (doneSettled) return;
+      doneSettled = true;
+      job.doneWaiters.delete(doneWaiter);
+      if (error) local.doneReject(error);
+      else local.doneResolve(value);
+    };
+    const startedWaiter = (value, error) => settleStarted(value, error);
+    const doneWaiter = (value, error) => settleDone(value, error);
+    local.started = new Promise((resolve, reject) => {
+      local.startedResolve = resolve;
+      local.startedReject = reject;
+    });
+    local.done = new Promise((resolve, reject) => {
+      local.doneResolve = resolve;
+      local.doneReject = reject;
+    });
+    job.startedWaiters.add(startedWaiter);
+    job.doneWaiters.add(doneWaiter);
+    local.started.catch(() => {});
+    local.done.catch(() => {});
+    if (job.startedView) settleStarted(job.startedView);
+
+    const release = () => {
+      if (released) return;
+      released = true;
+      job.clients -= 1;
+      // A streaming URL has been handed out: the download must finish so the
+      // cache is ready for seeking, even if this response has already closed.
+      if (job.clients <= 0 && !job.streaming) this.#cancel(job);
+    };
+    const onAbort = () => {
+      const error = CANCELED();
+      settleStarted(null, error);
+      settleDone(null, error);
+      release();
+    };
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }
+    return { started: local.started, done: local.done, release };
+  }
+
+  #jobStarted(job, view) {
+    if (job.settled || job.cancelled) return;
+    job.started = true;
+    job.startedView = view;
+    job.streaming = true;
+    for (const waiter of [...job.startedWaiters]) {
+      try {
+        waiter(view, null);
+      } catch {
+        // The caller is gone.
+      }
+    }
+    job.startedWaiters.clear();
+  }
+
+  #jobSucceeded(job, value) {
+    if (job.settled) return;
+    job.settled = true;
+    this.#running.delete(job);
+    if (this.#jobs.get(job.key) === job) this.#jobs.delete(job.key);
+    for (const waiter of [...job.doneWaiters]) {
+      try {
+        waiter(value, null);
+      } catch {
+        // The caller is gone.
+      }
+    }
+    job.doneWaiters.clear();
+    this.#pump();
+  }
+
+  #jobFailed(job, error) {
+    if (job.settled) return;
+    job.settled = true;
+    this.#running.delete(job);
+    if (this.#jobs.get(job.key) === job) this.#jobs.delete(job.key);
+    for (const waiter of [...job.startedWaiters]) {
+      try {
+        waiter(null, error);
+      } catch {
+        // The caller is gone.
+      }
+    }
+    job.startedWaiters.clear();
+    for (const waiter of [...job.doneWaiters]) {
+      try {
+        waiter(null, error);
+      } catch {
+        // The caller is gone.
+      }
+    }
+    job.doneWaiters.clear();
+    this.#pump();
+  }
+
+  #cancel(job) {
+    if (job.settled || job.cancelled) return;
+    job.cancelled = true;
+    job.controller.abort();
+    this.#removeQueued(job);
+    this.#jobFailed(job, CANCELED());
+  }
+
+  #removeQueued(job) {
+    const foreground = this.#foreground.indexOf(job);
+    if (foreground >= 0) this.#foreground.splice(foreground, 1);
+    const background = this.#background.indexOf(job);
+    if (background >= 0) this.#background.splice(background, 1);
+  }
+
+  #maybePreempt() {
+    if (this.#foreground.length === 0) return;
+    for (const job of this.#running) {
+      if (job.background && !job.streaming && !job.cancelled) {
+        this.#cancel(job);
+        if (this.concurrency === 1) return;
+      }
+    }
+  }
+
+  /** Joins (or starts) a prefetch without waiting for it. */
   warm(sub, sources) {
     if (!Array.isArray(sources)) throw new ResolveError("invalid_sources");
     const warmed = [];
@@ -226,70 +490,134 @@ export class ResolveService {
       if (seen.has(parsed.sourceUri)) continue;
       seen.add(parsed.sourceUri);
       const key = this.#cache.keyFor(sub, parsed.sourceUri);
-      if (this.#cache.has(key)) {
+      if (this.#cache.get(key)) {
         this.#cache.touch(key);
         warmed.push({ key, state: "cached" });
         continue;
       }
-      const pending = this.ensure(sub, parsed.sourceUri);
-      pending.then(() => {}, () => {});
+      if (this.#background.length >= this.#warmMax) {
+        warmed.push({ key, state: "dropped" });
+        continue;
+      }
+      let job = this.#jobs.get(key);
+      if (!job) {
+        job = this.#newJob(key, sub, parsed);
+        job.background = true;
+        this.#jobs.set(key, job);
+        this.#background.push(job);
+        this.#pump();
+      }
       warmed.push({ key, state: "queued" });
     }
     return { warmed, rejected: rejected.length };
   }
 
   #view(entry, cached) {
-    return { key: entry.key, contentType: entry.contentType, size: entry.size, cached };
+    return {
+      key: entry.key,
+      contentType: entry.contentType,
+      size: entry.size,
+      cached,
+      streaming: entry.complete === false,
+    };
   }
 
   #pump() {
-    while (!this.#closing && this.#active < this.concurrency && this.#pending.length > 0) {
-      const job = this.#pending.shift();
+    while (!this.#closing && this.#active < this.concurrency) {
+      const job = this.#nextJob();
+      if (!job) break;
+      if (job.cancelled || job.settled) continue;
       this.#active += 1;
-      this.#run(job)
-        .then((value) => job.resolve(value), (error) => job.reject(error))
-        .finally(() => {
-          this.#active -= 1;
-          this.#jobs.delete(job.key);
-          this.#pump();
-        });
+      this.#running.add(job);
+      this.#run(job).then(
+        (value) => this.#jobSucceeded(job, value),
+        (error) => this.#jobFailed(job, error),
+      ).finally(() => {
+        this.#active -= 1;
+        this.#running.delete(job);
+        this.#pump();
+      });
     }
   }
 
+  #nextJob() {
+    return this.#foreground.shift() ?? this.#background.shift() ?? null;
+  }
+
   async #run(job) {
-    const temp = await fs.mkdtemp(path.join(os.tmpdir(), "encore-edge-"));
+    const signal = job.controller.signal;
+    let pending = null;
+    let handle;
+    let downloader = null;
+    let remuxer = null;
     try {
-      const args = buildYtDlpArgs({ url: job.parsed.url, outDir: temp });
-      await runProcess(this.#config.ytdlpBin, args, {
+      downloader = startProcess(this.#config.ytdlpBin, buildYtDlpArgs({ url: job.parsed.url }), {
         timeoutMs: this.#config.resolveTimeoutMs,
         spawn: this.#spawn,
+        signal,
         onSpawn: (child) => this.#trackChild(child),
       });
-      const downloaded = await findDownloaded(temp);
-      if (!downloaded) throw new ResolveError("resolve_failed", 502);
-      const format = downloaded.ext === "mp3" ? "mp3" : "m4a";
-      const output = path.join(temp, `remuxed.${format}`);
-      await runProcess(this.#config.ffmpegBin, buildFfmpegArgs({
-        input: downloaded.file,
-        output,
-        format,
-      }), {
+      if (!downloader.child) throw new ResolveError("resolve_failed", 502);
+      downloader.done.catch(() => {});
+      const ended = Symbol("ended");
+      const head = await Promise.race([
+        readHead(downloader.child.stdout, 12),
+        downloader.done.then(() => ended, (error) => Promise.reject(error)),
+      ]);
+      if (head === ended || head.length === 0) {
+        await downloader.done.catch(() => {});
+        throw new ResolveError("resolve_failed", 502);
+      }
+      const format = audioFromHead(head);
+      // A partial file from a cancelled job can never be resumed; start clean.
+      if (this.#cache.pending(job.key)) await this.#cache.abort(job.key);
+      pending = await this.#cache.begin(job.key, { contentType: AUDIO_KINDS[format].contentType });
+      // The file exists before any URL is handed out, so the first media read
+      // only has to wait for bytes, never for a name.
+      handle = await fs.open(pending.file, "wx", 0o600);
+      this.#jobStarted(job, this.#view({ ...pending, size: 0 }, false));
+
+      remuxer = startProcess(this.#config.ffmpegBin, buildFfmpegArgs({ format }), {
         timeoutMs: this.#config.ffmpegTimeoutMs,
         spawn: this.#spawn,
+        signal,
+        stdio: ["pipe", "pipe", "pipe"],
         onSpawn: (child) => this.#trackChild(child),
       });
-      const stat = await fs.stat(output).catch(() => null);
-      if (!stat?.isFile() || stat.size === 0) throw new ResolveError("resolve_failed", 502);
-      const contentType = format === "mp3" ? "audio/mpeg" : "audio/mp4";
-      const entry = await this.#cache.put(job.key, output, { contentType });
-      if (!entry) throw new ResolveError("cache_full", 507);
+      if (!remuxer.child) throw new ResolveError("resolve_failed", 502);
+      remuxer.done.catch(() => {});
+      remuxer.child.stdin.on("error", () => {});
+      // The sniffed bytes are part of the stream too: ffmpeg sees them before
+      // the rest of stdout is piped in.
+      remuxer.child.stdin.write(head);
+      const copied = pipeline(downloader.child.stdout, remuxer.child.stdin).catch(() => {});
+
+      let written = 0;
+      for await (const chunk of remuxer.child.stdout) {
+        await writeAll(handle, chunk);
+        written += chunk.length;
+        this.#cache.progress(job.key, written);
+      }
+      await handle.sync();
+      await handle.close();
+      handle = undefined;
+      const results = await Promise.allSettled([downloader.done, remuxer.done, copied]);
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed) throw failed.reason;
+      if (written === 0) throw new ResolveError("resolve_failed", 502);
+      const entry = await this.#cache.complete(job.key);
       return this.#view(entry, false);
     } catch (error) {
+      await handle?.close().catch(() => {});
+      killTree(downloader?.child);
+      killTree(remuxer?.child);
+      if (pending) await this.#cache.abort(job.key, error).catch(() => {});
+      if (signal.aborted || error instanceof ProcessError && error.code === "cancelled") {
+        throw CANCELED();
+      }
       if (error instanceof ResolveError) throw error;
       this.#logger?.warn("resolve_failed", { code: error?.code ?? "error" });
-      throw new ResolveError("resolve_failed", 502);
-    } finally {
-      await fs.rm(temp, { recursive: true, force: true }).catch(() => {});
+      throw new ResolveError("resolve_failed", 502, error);
     }
   }
 
@@ -301,14 +629,14 @@ export class ResolveService {
   async close() {
     this.#closing = true;
     const error = new ResolveError("shutting_down", 503);
-    for (const job of this.#pending.splice(0)) job.reject(error);
-    for (const child of this.#children) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-        // Already gone.
-      }
+    for (const job of [...this.#jobs.values()]) {
+      job.cancelled = true;
+      job.controller.abort();
+      this.#jobFailed(job, error);
     }
+    this.#foreground.splice(0);
+    this.#background.splice(0);
+    for (const child of this.#children) killTree(child);
     this.#children.clear();
   }
 }

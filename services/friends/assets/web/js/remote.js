@@ -29,9 +29,13 @@ export async function ask(kind, args = {}, patience = 45000) {
   if (!player.online && hasSpotify() && DIRECT[kind]) return DIRECT[kind](args);
   // Past the time the computer takes to notice, it isn't coming: say so straight away.
   if (!player.online && Date.now() - openedAt > WAKE_MS) throw new Error("Encore isn't open on your computer.");
-  // A computer on the edge answers there, in one round trip.
+  // A computer on the edge answers there, in one round trip. An answer too
+  // large for its socket comes back as a small error; the relay carries it.
   const overEdge = edgeAsk(kind, args, patience);
-  if (overEdge) return overEdge;
+  if (overEdge) {
+    try { return await overEdge; }
+    catch (error) { if (error?.message !== 'answer_too_large') throw error; }
+  }
   const id = uuid();
   await api('/live/remote/send', 'POST', { id, kind, ...args });
   const until = Date.now() + patience;

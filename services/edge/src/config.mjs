@@ -21,9 +21,13 @@ export const DEFAULTS = Object.freeze({
   wsHeartbeatMs: 15_000,
   liveBufferMs: 120_000,
   liveBufferMessages: 500,
+  liveBufferBytes: 1 * MIB,
+  liveEnvelopeMaxBytes: 16 * 1024,
   resolveConcurrency: 2,
+  warmQueueMax: 4,
   resolveTimeoutMs: 180_000,
   ffmpegTimeoutMs: 120_000,
+  mediaIdleTimeoutMs: 120_000,
   searchTimeoutMs: 45_000,
   maxJsonBytes: 8 * MIB,
   allowedOrigins: "https://encore.senni.dev,http://localhost:5173,http://127.0.0.1:5173",
@@ -134,12 +138,27 @@ export function loadConfig(env = process.env) {
       max: 10_000,
       name: "EDGE_LIVE_BUFFER_MESSAGES",
     }),
+    liveBufferBytes: bytes(env.EDGE_LIVE_BUFFER_BYTES, DEFAULTS.liveBufferBytes, {
+      min: 16 * 1024,
+      max: 64 * MIB,
+      name: "EDGE_LIVE_BUFFER_BYTES",
+    }),
+    liveEnvelopeMaxBytes: bytes(env.EDGE_LIVE_ENVELOPE_MAX_BYTES, DEFAULTS.liveEnvelopeMaxBytes, {
+      min: 1024,
+      max: 64 * 1024,
+      name: "EDGE_LIVE_ENVELOPE_MAX_BYTES",
+    }),
     // A hard ceiling: two encoders, never more, keeps a small box predictable.
     resolveConcurrency: Math.min(2, integer(env.EDGE_RESOLVE_CONCURRENCY, DEFAULTS.resolveConcurrency, {
       min: 1,
       max: 2,
       name: "EDGE_RESOLVE_CONCURRENCY",
     })),
+    warmQueueMax: integer(env.EDGE_WARM_QUEUE_MAX, DEFAULTS.warmQueueMax, {
+      min: 0,
+      max: 32,
+      name: "EDGE_WARM_QUEUE_MAX",
+    }),
     resolveTimeoutMs: integer(env.EDGE_RESOLVE_TIMEOUT_MS, DEFAULTS.resolveTimeoutMs, {
       min: 1000,
       name: "EDGE_RESOLVE_TIMEOUT_MS",
@@ -147,6 +166,11 @@ export function loadConfig(env = process.env) {
     ffmpegTimeoutMs: integer(env.EDGE_FFMPEG_TIMEOUT_MS, DEFAULTS.ffmpegTimeoutMs, {
       min: 1000,
       name: "EDGE_FFMPEG_TIMEOUT_MS",
+    }),
+    mediaIdleTimeoutMs: integer(env.EDGE_MEDIA_IDLE_TIMEOUT_MS, DEFAULTS.mediaIdleTimeoutMs, {
+      min: 250,
+      max: 60 * 60_000,
+      name: "EDGE_MEDIA_IDLE_TIMEOUT_MS",
     }),
     searchTimeoutMs: integer(env.EDGE_SEARCH_TIMEOUT_MS, DEFAULTS.searchTimeoutMs, {
       min: 1000,

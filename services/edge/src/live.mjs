@@ -93,6 +93,7 @@ export class LiveHub {
         sub,
         seq: 0,
         buffer: [],
+        bufferBytes: 0,
         seen: new Map(),
         lastState: { phone: null, computer: null },
         phones: new Set(),
@@ -210,6 +211,12 @@ export class LiveHub {
       if (since < room.seq && (oldest === undefined || since < oldest - 1)) reset = true;
       for (const entry of room.buffer) {
         if (entry.seq > since) {
+          if (conn.ws.bufferedAmount > 1_000_000) {
+            // A phone that is not draining must reload from /v1/sync/* rather
+            // than make the server hold the rest of the buffer in its heap.
+            reset = true;
+            break;
+          }
           if (send(conn.ws, entry.text)) replayed += 1;
         }
       }
@@ -225,18 +232,19 @@ export class LiveHub {
       epoch: this.epoch,
       reset,
       replayed,
-      state: room.lastState[this.#opposite(conn.role)],
-      heartbeatMs: this.#config.wsHeartbeatMs,
+      state: this.#stateView(room.lastState[this.#opposite(conn.role)]),      heartbeatMs: this.#config.wsHeartbeatMs,
       bufferMs: this.#config.liveBufferMs,
     }));
   }
 
   #message(conn, data, isBinary) {
+    // A flood of binary frames must spend the same rate-limit tokens as JSON,
+    // or it becomes a free way to keep a socket busy.
+    if (!this.#takeToken(conn)) return;
     if (isBinary) {
       this.#error(conn, "", "binary_not_supported");
       return;
     }
-    if (!this.#takeToken(conn)) return;
     let message;
     try {
       message = JSON.parse(data.toString("utf8"));
@@ -275,28 +283,51 @@ export class LiveHub {
       send(conn.ws, JSON.stringify({ v: 1, t: "reply", id: message.id, ok: true, duplicate: true, seq: conn.room.seq }));
       return;
     }
+    if ((message.t === "state" || message.t === "phone")
+      && data.length > (this.#config.liveEnvelopeMaxBytes ?? 16 * 1024)) {
+      this.#error(conn, message.id, "invalid_envelope");
+      return;
+    }
 
     const room = conn.room;
     room.seq += 1;
     message.seq = room.seq;
+    // The server's clock travels with the frame, so a replay after a
+    // reconnect can be judged by its real age rather than arrival time.
+    message.at = this.#now();
     // The sender's role is server-stamped so replay is unambiguous even when
     // both roles send `state`.
     message.from = conn.role;
     const text = JSON.stringify(message);
     const entry = { seq: room.seq, at: this.#now(), text, role: conn.role, type: message.t };
     room.buffer.push(entry);
-    if (room.buffer.length > this.#config.liveBufferMessages) room.buffer.shift();
+    room.bufferBytes += Buffer.byteLength(text);
+    const capBytes = this.#config.liveBufferBytes ?? 1024 * 1024;
+    while (room.buffer.length > this.#config.liveBufferMessages || room.bufferBytes > capBytes) {
+      const dropped = room.buffer.shift();
+      if (!dropped) break;
+      room.bufferBytes -= Buffer.byteLength(dropped.text);
+    }
     room.lastAt = this.#now();
     if (message.t === "state" || message.t === "phone") {
-      room.lastState[conn.role] = { t: message.t, seq: message.seq, body: message };
+      // Reuse the already serialised text instead of a second copy of the body.
+      room.lastState[conn.role] = { t: message.t, seq: message.seq, text };
     }
     for (const target of this.#roleSet(room, this.#opposite(conn.role))) {
       send(target.ws, text);
     }
   }
 
-  #seen(room, id) {
-    const at = this.#now();
+  #stateView(entry) {
+    if (!entry) return null;
+    try {
+      return { t: entry.t, seq: entry.seq, body: JSON.parse(entry.text) };
+    } catch {
+      return null;
+    }
+  }
+
+  #seen(room, id) {    const at = this.#now();
     if (room.seen.has(id)) return true;
     room.seen.set(id, at);
     if (room.seen.size > MAX_SEEN) {
@@ -364,7 +395,10 @@ export class LiveHub {
     const now = this.#now();
     for (const room of this.#rooms.values()) {
       const cutoff = now - this.#config.liveBufferMs;
-      while (room.buffer.length > 0 && room.buffer[0].at < cutoff) room.buffer.shift();
+      while (room.buffer.length > 0 && room.buffer[0].at < cutoff) {
+        const dropped = room.buffer.shift();
+        room.bufferBytes -= Buffer.byteLength(dropped.text);
+      }
       if (room.phones.size === 0 && room.computers.size === 0 && room.buffer.length === 0
         && now - room.lastAt > this.#config.liveBufferMs) {
         this.#rooms.delete(room.sub);
@@ -385,7 +419,16 @@ export class LiveHub {
       if (conn.role === "phone") phones += 1;
       else computers += 1;
     }
-    return { phone: phones, computer: computers, total: phones + computers, rooms: this.#rooms.size, epoch: this.epoch };
+    let bufferBytes = 0;
+    for (const room of this.#rooms.values()) bufferBytes += room.bufferBytes;
+    return {
+      phone: phones,
+      computer: computers,
+      total: phones + computers,
+      rooms: this.#rooms.size,
+      bufferBytes,
+      epoch: this.epoch,
+    };
   }
 
   async close() {

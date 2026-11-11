@@ -254,7 +254,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
                 (ui.input(|input| input.time) * 0.55).fract() as f32,
                 palette.text.gamma_multiply(0.05),
             );
-            ui.ctx().request_repaint();
+            theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(16));
         }
         return;
     };
@@ -439,8 +439,7 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
                     );
                 }
                 if playing {
-                    ui.ctx()
-                        .request_repaint_after(std::time::Duration::from_millis(50));
+                    theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(50));
                 }
             }
             let left = art_rect.right() + 10.0;

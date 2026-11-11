@@ -481,10 +481,15 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
         theme::ROW_HEIGHT
     };
     let queue_len = app.queue.get().map(|queue| queue.queue.len()).unwrap_or(0);
+    // While Spotify's queue lags one skip behind the player, its first row is
+    // the song that already started, not the next one. Neither section draws
+    // that row, so the playing song never appears twice.
+    let lead = app.stale_queue_lead().min(queue_len);
     // The user's own songs get their own section on top; the playing
     // context's rows follow under the usual heading. One numbering runs
     // through both, because that is the order things play.
-    let queued_len = app.queued_rows_len().min(queue_len);
+    let queued_rows = app.queued_rows_len().min(queue_len);
+    let queued_len = queued_rows.saturating_sub(lead);
     if queued_len > 0 {
         // The trash sits with the songs it removes: only this section is
         // the user's to clear, the context below plays itself.
@@ -546,7 +551,7 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
                 },
                 crate::motion::seconds(ui.ctx(), 0.12),
             );
-            queue_row(app, ui, index, compact, shift);
+            queue_row(app, ui, lead + index, compact, shift);
             ui.allocate_space(egui::vec2(width, gap));
         });
         if let Some(slot) = move_slot {
@@ -556,6 +561,9 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
                 y,
                 egui::Stroke::new(2.0, palette.accent),
             );
+            // Display slots start below the hidden stale row; the queue
+            // actions count from the user's own first row.
+            let target = slot + lead;
             if ui.input(|input| input.pointer.button_released(egui::PointerButton::Primary))
                 && let Some(track) = egui::DragAndDrop::take_payload::<DragTrack>(ui.ctx())
             {
@@ -575,16 +583,16 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
                         };
                         // A row dropped back on its own edges moves nothing.
                         if let Some(from) = from
-                            && slot != from
-                            && slot != from + 1
+                            && target != from
+                            && target != from + 1
                         {
-                            app.actions.push(Action::MoveInQueue { from, to: slot });
+                            app.actions.push(Action::MoveInQueue { from, to: target });
                         }
                     }
                     _ => {
                         app.actions.push(Action::InsertInQueue {
                             items: track.items.clone(),
-                            position: slot,
+                            position: target,
                         });
                     }
                 }
@@ -595,7 +603,8 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
     // With Playing next empty, the panel holds no drop target at all: every
     // row on it belongs to Next up, which plays from the context and is never
     // rewritten. The player bar's Queue button still takes the drop.
-    if queue_len > queued_len {
+    let next_up_start = queued_rows.max(lead);
+    if queue_len > next_up_start {
         theme::text(
             ui,
             gettext(
@@ -607,8 +616,8 @@ fn contents(app: &mut App, ui: &mut egui::Ui, compact: bool) {
             palette.text,
         );
         ui.add_space(4.0);
-        widgets::virtual_rows(ui, queue_len - queued_len, row_height, |ui, index| {
-            queue_row(app, ui, queued_len + index, compact, 0.0);
+        widgets::virtual_rows(ui, queue_len - next_up_start, row_height, |ui, index| {
+            queue_row(app, ui, next_up_start + index, compact, 0.0);
         });
     }
 }

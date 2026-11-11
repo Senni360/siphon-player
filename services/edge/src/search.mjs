@@ -7,6 +7,7 @@ import { runProcess } from "./proc.mjs";
 
 const MAX_QUERY = 300;
 const MEMO_LIMIT = 500;
+const NEGATIVE_MEMO_MS = 15 * 60 * 1000;
 const MAX_SEARCHES = 1;
 const MAX_WAITING_SEARCHES = 8;
 
@@ -21,7 +22,7 @@ export class MatchError extends Error {
 
 function cleanQuery(text) {
   if (typeof text !== "string") return "";
-  return text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, MAX_QUERY);
+  return text.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, MAX_QUERY).toWellFormed();
 }
 
 export function buildYtSearchUrl(query) {
@@ -29,7 +30,7 @@ export function buildYtSearchUrl(query) {
 }
 
 export function buildSoundCloudSearchUrl(query) {
-  return `scsearch8:${cleanQuery(query)}`;
+  return `scsearch30:${cleanQuery(query)}`;
 }
 
 export function buildSearchArgs(url) {
@@ -93,20 +94,29 @@ export function candidatesFromProbe(value, provider) {
     const sourceUri = provider === "soundcloud" ? soundcloudSource(web) : youtubeSource(web);
     if (!sourceUri) continue;
     const duration = parseDuration(entry.duration);
+    const uploader = typeof entry.uploader === "string"
+      ? entry.uploader
+      : typeof entry.channel === "string"
+        ? entry.channel
+        : typeof entry.artist === "string"
+          ? entry.artist
+          : "";
+    // yt-dlp exposes SoundCloud's publisher artist as `artists`, which is the
+    // only field naming the artist on a label, collective or fan account.
+    const credited = Array.isArray(entry.artists)
+      ? entry.artists.map((artist) => (typeof artist === "string" ? artist : artist?.name ?? "")).filter((name) => name.length > 0)
+      : [];
     candidates.push({
       source: provider,
       sourceUri,
       url: sourceUri.startsWith("youtube:video:") ? youtubeUrl(`https://www.youtube.com/watch?v=${sourceUri.slice(14)}`) : undefined,
       title,
-      uploader: typeof entry.uploader === "string"
-        ? entry.uploader
-        : typeof entry.channel === "string"
-          ? entry.channel
-          : typeof entry.artist === "string"
-            ? entry.artist
-            : "",
+      uploader,
+      credits: [...new Set([uploader, ...credited].filter((name) => name.length > 0))],
       duration,
-      live: entry.is_live === true || entry.live_status === "is_live",
+      live: entry.is_live === true || ["is_live", "was_live", "post_live"].includes(entry.live_status),
+      verified: entry.channel_is_verified === true || entry.verified === true,
+      isrc: typeof entry.isrc === "string" && entry.isrc.length > 0 ? entry.isrc : null,
     });
   }
   return candidates;
@@ -116,14 +126,16 @@ export class MatchService {
   #config;
   #logger;
   #spawn;
+  #now;
   #memo = new Map();
   #running = 0;
   #waiting = [];
 
-  constructor({ config, logger, spawn }) {
+  constructor({ config, logger, spawn, now = Date.now }) {
     this.#config = config;
     this.#logger = logger;
     this.#spawn = spawn;
+    this.#now = now;
   }
 
   /** One search at a time on this small machine, with a short line behind it. */
@@ -154,9 +166,13 @@ export class MatchService {
     try {
       parsed = JSON.parse(stdout);
     } catch {
-      return [];
+      // A truncated or empty dump is a failed search, not an empty result.
+      // Throwing keeps match() from remembering it as "no SoundCloud copy".
+      throw new MatchError("search_failed", 502);
     }
-    return Array.isArray(parsed) ? parsed : [parsed];
+    if (Array.isArray(parsed)) return parsed;
+    if (!parsed || typeof parsed !== "object") throw new MatchError("search_failed", 502);
+    return [parsed];
   }
 
   /**
@@ -168,20 +184,29 @@ export class MatchService {
     if (!wanted.name || !Number.isFinite(wanted.durationMs) || wanted.durationMs <= 0 || wanted.artists.length === 0) {
       throw new MatchError("invalid_track");
     }
-    const id = wanted.uri || `${wanted.name}\0${wanted.durationMs}`;
+    const id = wanted.uri ? `${wanted.uri}\0${wanted.durationMs}\0${wanted.name}` : `${wanted.name}\0${wanted.durationMs}`;
     const memoKey = `${sub}\0${id}`;
     const remembered = this.#memo.get(memoKey);
-    if (remembered) return remembered;
+    if (remembered) {
+      if (remembered.expiresAt === 0 || remembered.expiresAt > this.#now()) return remembered.result;
+      this.#memo.delete(memoKey);
+    }
 
-    const query = `${wanted.artists.map((artist) => (typeof artist === "string" ? artist : artist?.name ?? "")).join(", ")} - ${wanted.name}`;
+    const primary = wanted.artists[0];
+    const primaryName = typeof primary === "string" ? primary : primary?.name ?? "";
+    // The primary artist only: a feature joined into the query pulls that
+    // artist's catalogue into the results and buries the right upload.
+    const query = `${primaryName} - ${wanted.name}`;
     // SoundCloud only. YouTube's audio is refused from a server, so a YouTube
     // match couldn't play here anyway, and its search takes many seconds.
     // The computer finds and seeds those matches instead.
     const urls = [buildSoundCloudSearchUrl(query)];
     const results = await Promise.allSettled(urls.map((url) => this.#search(url)));
     const candidates = [];
+    let failed = false;
     for (const result of results) {
       if (result.status === "rejected") {
+        failed = true;
         this.#logger?.warn("search_failed", { provider: "soundcloud", code: result.reason?.code ?? "error" });
         continue;
       }
@@ -204,11 +229,18 @@ export class MatchService {
         }
       : { match: null };
 
-    // Remembered for the life of the process, as the desktop app does.
-    this.#memo.set(memoKey, result);
-    if (this.#memo.size > MEMO_LIMIT) {
-      const oldest = this.#memo.keys().next().value;
-      if (oldest !== undefined) this.#memo.delete(oldest);
+    // A match is remembered for the life of the process. A real miss expires,
+    // so an upload that appears later can still be found. A failed search says
+    // nothing about the song, so it is not remembered at all.
+    if (!failed) {
+      this.#memo.set(memoKey, {
+        result,
+        expiresAt: result.match ? 0 : this.#now() + NEGATIVE_MEMO_MS,
+      });
+      if (this.#memo.size > MEMO_LIMIT) {
+        const oldest = this.#memo.keys().next().value;
+        if (oldest !== undefined) this.#memo.delete(oldest);
+      }
     }
     return result;
   }

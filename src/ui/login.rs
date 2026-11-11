@@ -226,7 +226,7 @@ fn sign_in_column(app: &mut App, ui: &mut egui::Ui, connecting: bool, beside: Op
                 palette.text.gamma_multiply(0.5),
             );
         }
-        ctx.request_repaint();
+        theme::animation_frame(&ctx, std::time::Duration::from_millis(16));
     }
     theme::logo(ui, logo.center(), logo_size * (0.6 + 0.4 * arrived));
     theme::text(

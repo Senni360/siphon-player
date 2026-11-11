@@ -11,6 +11,21 @@ services:
     environment:
       EDGE_RESOLVE_CONCURRENCY: "1"
     mem_limit: 420m
+    # The default is 2x mem_limit when swap accounting is on; deterministic OOM
+    # is better than making the whole droplet's disk thrash.
+    memswap_limit: 420m
+    cpu_shares: 256
+    pids_limit: 128
+    init: true
+    stop_grace_period: 25s
+    ulimits:
+      nofile: 4096
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "5", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 25s
+      retries: 3
     # A small disk shared with other containers: keep this container's logs
     # bounded so a chatty day cannot fill it.
     logging:

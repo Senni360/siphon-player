@@ -219,7 +219,7 @@ pub fn equalizer(ui: &egui::Ui, rect: egui::Rect, color: egui::Color32) {
         x += bar + gap;
     }
     if moving {
-        crate::theme::repaint_after(ui.ctx(), std::time::Duration::from_millis(66));
+        crate::theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(66));
     }
 }
 
@@ -348,16 +348,12 @@ pub fn glide_along(ctx: &Context, id: Id, overflow: f32, active: bool) -> f32 {
         if elapsed < 0.0 {
             0.0
         } else if place < travel {
-            ctx.request_repaint();
             (place * PACE) as f32
         } else if place < travel + WAIT {
-            ctx.request_repaint();
             overflow
         } else if place < travel * 2.0 + WAIT {
-            ctx.request_repaint();
             overflow - ((place - travel - WAIT) * PACE) as f32
         } else {
-            ctx.request_repaint();
             0.0
         }
     } else {
@@ -365,7 +361,10 @@ pub fn glide_along(ctx: &Context, id: Id, overflow: f32, active: bool) -> f32 {
         0.0
     };
     if active {
-        ctx.request_repaint();
+        // The title reads along at 40 px a second, so a frame every 33 ms moves
+        // it by barely a pixel: asking at the display's rate would redraw the
+        // whole window to no visible end.
+        crate::theme::animation_frame(ctx, std::time::Duration::from_millis(16));
         spring_jump(ctx, id, target);
         target
     } else {

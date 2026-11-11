@@ -32,20 +32,22 @@ test("remasters are compared in both directions", () => {
   assert.equal(score(track(), candidate("Aurora - Northern Lights (Remastered)", "Aurora", 200)), null);
   // remaster and remastered are different qualifiers, so they do not stand in for each other.
   assert.equal(score(track({ name: "Northern Lights (Remaster)" }), candidate("Aurora - Northern Lights (Remastered)", "Aurora", 200)), null);
-  // A remaster title with extra wording is too wordy for the precision gate.
-  assert.equal(score(remastered, candidate("Aurora - Northern Lights (Remastered 2011 Deluxe Edition)", "Aurora", 200)), null);
+  // Release tags are metadata, so the same recording still matches.
+  assert.notEqual(score(remastered, candidate("Aurora - Northern Lights (Remastered 2011 Deluxe Edition)", "Aurora", 200)), null);
 });
 
-test("feature credits count only when the track names that artist", () => {
+test("feature credits never decide identity", () => {
   const withFeature = track({ name: "Song", artists: [{ name: "A" }, { name: "B" }] });
   assert.notEqual(score(withFeature, candidate("A - Song (feat. B)", "A", 200)), null);
-  // A feature credit the track does not carry is extra wording.
-  assert.equal(score(track({ name: "Song", artists: [{ name: "A" }] }), candidate("A - Song (feat. B)", "A", 200)), null);
-  // The bare title form loses the artist prefix and leaves "feat" as noise.
-  assert.equal(score(withFeature, candidate("Song (feat. B)", "A", 200)), null);
-  // One extra credit word sits exactly on the 0.75 precision boundary.
+  // A credit for an artist the track does not carry is metadata, not wording.
+  assert.notEqual(score(track({ name: "Song", artists: [{ name: "A" }] }), candidate("A - Song (feat. B)", "A", 200)), null);
+  // The bare title form still names the artist through the uploader.
+  assert.notEqual(score(withFeature, candidate("Song (feat. B)", "A", 200)), null);
+  // Extra credits are dropped before precision, whatever their count.
   assert.notEqual(score(withFeature, candidate("A - Song ft. B", "A", 200)), null);
-  assert.equal(score(withFeature, candidate("A - Song (feat. B & C)", "A", 200)), null);
+  assert.notEqual(score(withFeature, candidate("A - Song (feat. B & C)", "A", 200)), null);
+  // A feature does not replace the primary artist.
+  assert.equal(score(withFeature, candidate("Song (feat. B)", "B", 200)), null);
 });
 
 test("empty or wordless artists cannot pass the primary-artist gate", () => {
@@ -54,23 +56,44 @@ test("empty or wordless artists cannot pass the primary-artist gate", () => {
   }
   assert.notEqual(score(track({ artists: ["Aurora"] }), candidate("Northern Lights", "Aurora", 200)), null);
   assert.equal(score(track({ artists: [{ name: "Aurora" }], name: "" }), candidate("Northern Lights", "Aurora", 200)), null);
+  // An ISRC cannot stand in for the artist that identifies the recording.
+  const isrc = "USUM72100001";
+  assert.equal(
+    score(track({ artists: [], isrc }), candidate("Northern Lights", "Aurora", 200, { isrc })),
+    null,
+  );
 });
 
-test("unicode names keep their case-insensitive match", () => {
+test("unicode names fold case, accents and width", () => {
   assert.notEqual(score(track({ name: "Jóga", artists: [{ name: "Björk" }] }), candidate("BJÖRK - JÓGA", "Björk", 197)), null);
   assert.notEqual(score(track({ name: "Песня", artists: [{ name: "Артист" }] }), candidate("АРТИСТ - ПЕСНЯ", "Артист", 200)), null);
   assert.notEqual(score(track({ name: "夜に駆ける", artists: [{ name: "YOASOBI" }] }), candidate("YOASOBI - 夜に駆ける", "YOASOBI", 200)), null);
-  // Accents are letters, not decoration: an unaccented title is a different title.
-  assert.equal(score(track({ name: "Café", artists: [{ name: "Aurora" }] }), candidate("Aurora - Cafe", "Aurora", 200)), null);
+  // An upload that drops the accent is still the same title.
+  assert.notEqual(score(track({ name: "Café", artists: [{ name: "Aurora" }] }), candidate("Aurora - Cafe", "Aurora", 200)), null);
+  // Folding spelling never rescues a different title.
+  assert.equal(score(track({ name: "Café", artists: [{ name: "Aurora" }] }), candidate("Aurora - Caff", "Aurora", 200)), null);
 });
 
-test("combining marks are part of a word, as Rust's is_alphanumeric treats them", {
-  todo: "matcher.mjs words() splits on [^\\p{L}\\p{N}], so Unicode combining marks (Mc/Mn, e.g. Devanagari matras) are dropped; Rust's char::is_alphanumeric keeps them",
-}, () => {
+test("combining marks are part of a word, as Rust's is_alphanumeric treats them", () => {
   // Two different Devanagari words that differ only in the vowel sign.
   assert.notDeepEqual([...words("कि")], [...words("की")]);
   assert.equal(score(track({ name: "कि", artists: [{ name: "क" }] }), candidate("की", "क", 200)), null);
   assert.notEqual(score(track({ name: "कि", artists: [{ name: "क" }] }), candidate("कि", "क", 200)), null);
+});
+
+test("letters without a diacritic still fold like Rust's accent table", () => {
+  const cases = [
+    ["ØZI", "OZI"],
+    ["Straße", "Strasse"],
+    ["Łódź", "Lodz"],
+    ["Æther", "Aether"],
+    ["Þorn", "Thorn"],
+  ];
+  for (const [name, upload] of cases) {
+    assert.notEqual(score(track({ name, artists: [{ name: "Aurora" }] }), candidate(upload, "Aurora", 200)), null, name);
+  }
+  // A final Greek sigma lowercases to σ, not the contextual ς.
+  assert.notEqual(score(track({ name: "ΟΣ", artists: [{ name: "Aurora" }] }), candidate("οσ", "Aurora", 200)), null);
 });
 
 test("boilerplate is dropped but a meaningful extra word is not", () => {
@@ -87,10 +110,46 @@ test("boilerplate is dropped but a meaningful extra word is not", () => {
   assert.equal(score(track({ name: "Northern Lights (Live)" }), candidate("Aurora - Northern Lights", "Aurora", 200)), null);
 });
 
+test("a version word in the main title is an edit, not part of the song", () => {
+  const stars = track({ name: "All The Stars", durationMs: 230_000, artists: [{ name: "Kendrick Lamar" }] });
+  for (const title of [
+    "All The Stars Remix",
+    "All The Stars Live",
+    "All The Stars Cover",
+    "All The Stars Acoustic",
+    "All The Stars Remastered",
+    "All The Stars (Remix",
+  ]) {
+    assert.equal(score(stars, candidate(title, "Kendrick Lamar", 230)), null, title);
+  }
+  // A title that really contains the word stays the song.
+  const live = track({ name: "Live Forever", durationMs: 280_000, artists: [{ name: "Oasis" }] });
+  assert.notEqual(score(live, candidate("Live Forever", "Oasis", 280)), null);
+  assert.equal(score(live, candidate("Live Forever Live", "Oasis", 280)), null);
+});
+
+test("a part or version marker cannot hide behind a long title", () => {
+  const stars = track({ name: "All The Stars", durationMs: 230_000, artists: [{ name: "Kendrick Lamar" }] });
+  for (const title of ["All The Stars (Pt. 2)", "All The Stars Part 2", "All The Stars V2", "All The Stars Intro"]) {
+    assert.equal(score(stars, candidate(title, "Kendrick Lamar", 230)), null, title);
+  }
+  const part = track({ name: "All The Stars (Pt. 2)", durationMs: 230_000, artists: [{ name: "Kendrick Lamar" }] });
+  assert.notEqual(score(part, candidate("All The Stars Pt 2", "Kendrick Lamar", 230)), null);
+});
+
+test("a bare feature credit in the wanted title is metadata, not wording", () => {
+  const feat = track({ name: "Song feat. Y", artists: [{ name: "X" }] });
+  assert.notEqual(score(feat, candidate("Song", "X", 200)), null);
+  assert.notEqual(score(feat, candidate("Song (feat. Y)", "X", 200)), null);
+  // "Producer" is an ordinary title word, not a credit marker, on this side.
+  const producer = track({ name: "The Producer Song", artists: [{ name: "X" }] });
+  assert.equal(score(producer, candidate("The Producer", "X", 200)), null);
+});
+
 test("bestMatch keeps the documented tie rules and the SoundCloud window", () => {
   const exact = candidate("Northern Lights", "Aurora", 200.0);
   const equal = candidate("Northern Lights", "Aurora", 200.0, { url: "https://www.youtube.com/watch?v=bbbbbbbbbbb" });
-  assert.equal(bestMatch(track(), [exact, equal]), equal, "the last equal score wins");
+  assert.equal(bestMatch(track(), [exact, equal]), exact, "the first equal score wins");
 
   const youtube = candidate("Northern Lights", "Aurora", 200.0, { source: "youtube" });
   const soundcloud = candidate("Northern Lights", "Aurora", 200.3, { source: "soundcloud", url: "https://soundcloud.com/a/b" });
@@ -114,7 +173,7 @@ test("providerOf reads the listing's own source and the permalink host", () => {
 });
 
 test("normalizeTrack accepts the phone's camelCase and the Rust snake_case", () => {
-  assert.deepEqual(normalizeTrack({ name: "N", duration_ms: 1, artists: ["A"] }), { uri: "", name: "N", durationMs: 1, artists: ["A"] });
+  assert.deepEqual(normalizeTrack({ name: "N", duration_ms: 1, artists: ["A"] }), { uri: "", name: "N", durationMs: 1, artists: ["A"], isrc: null });
   assert.equal(normalizeTrack({ duration_ms: "200000" }).durationMs, 200_000);
   assert.throws(() => normalizeTrack(null), /invalid_track/);
   assert.equal(normalizeTrack({ artists: "Aurora" }).artists.length, 0);
@@ -130,6 +189,6 @@ test("YouTube URLs are canonical only, and search uses the same artist list", ()
   ]) {
     assert.equal(youtubeUrl(url), null, url);
   }
-  assert.equal(searchUrl(track({ artists: [{ name: "A" }, { name: "B" }] })), "https://www.youtube.com/results?search_query=A%2C%20B%20-%20Northern%20Lights");
+  assert.equal(searchUrl(track({ artists: [{ name: "A" }, { name: "B" }] })), "https://www.youtube.com/results?search_query=A%20-%20Northern%20Lights");
   assert.equal(searchUrl(track({ artists: [] })), "https://www.youtube.com/results?search_query=%20-%20Northern%20Lights");
 });

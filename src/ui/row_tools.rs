@@ -68,6 +68,22 @@ pub fn forget(ctx: &egui::Context) {
     ctx.data_mut(|data| data.remove::<LastPlaylist>(last_id()));
 }
 
+/// Whether `uri` is a song whose source has credits to show.
+pub fn has_credits(uri: &str) -> bool {
+    crate::util::uri_kind(uri) == Some("track") || crate::soundcloud::is_track_uri(uri)
+}
+
+fn credits_asked_id() -> Id {
+    egui::Id::new("row-tools-credits-asked")
+}
+
+/// Opens the credits of `uri` under its row's Credits button, as if it had
+/// been pressed: for the track menu, which has no button of its own.
+pub fn open_credits(ctx: &egui::Context, uri: &str) {
+    ctx.data_mut(|data| data.insert_temp(credits_asked_id(), uri.to_owned()));
+    ctx.request_repaint();
+}
+
 /// Draws the tools for `item` in `cell`. `shown` is whether the row asks for
 /// them now (hovered, focused, playing); they slide in and out with it.
 pub fn show(
@@ -81,6 +97,14 @@ pub fn show(
     let ctx = ui.ctx().clone();
     let uri = item.uri().to_string();
     let id = ui.id().with(("row-tools", &uri));
+    let asked = ctx.data(|data| data.get_temp::<String>(credits_asked_id()));
+    if asked.as_deref() == Some(uri.as_str()) {
+        ctx.data_mut(|data| {
+            data.remove::<String>(credits_asked_id());
+            data.insert_temp(id.with("open"), Tool::Credits);
+        });
+        app.actions.push(Action::RequestCredits(uri.clone()));
+    }
     let open = ctx.data(|data| data.get_temp::<Tool>(id.with("open")));
     let reveal = ctx.animate_bool_with_time(
         id.with("reveal"),

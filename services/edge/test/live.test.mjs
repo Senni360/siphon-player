@@ -90,6 +90,9 @@ test("keeps the latest state for each role and hands it to a reconnecting client
   computer.send({ v: 1, t: "state", id: "state-1", playing: true, position: 12 });
   const state = await phone.next((m) => m.t === "state" && m.id === "state-1");
   const stateSeq = state.seq;
+  // The server's clock travels with the frame, so a replay can be aged.
+  assert.equal(Number.isSafeInteger(state.at), true);
+  assert.ok(state.at > 0);
   await phone.close();
   computer.send({ v: 1, t: "state", id: "state-2", playing: false, position: 40 });
   await wait(80);
@@ -97,6 +100,7 @@ test("keeps the latest state for each role and hands it to a reconnecting client
   t.after(() => phoneAgain.close());
   const hello = await phoneAgain.next((m) => m.t === "hello");
   assert.equal(hello.state.body.id, "state-2");
+  assert.equal(Number.isSafeInteger(hello.state.body.at), true);
   assert.equal(hello.replayed, 1);
 });
 
