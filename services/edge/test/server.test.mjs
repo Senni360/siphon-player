@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createLogger, redact, safeUrl } from "../src/log.mjs";
 import { ADMIN, SECRET, request, startEdge } from "./helpers/context.mjs";
+import { fakeSpawn } from "./helpers/fakes.mjs";
 import { mintToken } from "../src/tokens.mjs";
 
 test("health is public and minimal", async (t) => {
@@ -89,6 +90,33 @@ test("logger scrubbers keep URLs and text safe as a last resort", () => {
   logger.info("event", { note: "https://x.test/y?token=abc", count: 2, secret: undefined });
   assert.equal(lines[0].includes("abc"), false);
   assert.equal(lines[0].includes("\"count\":2"), true);
+});
+
+test("a marked unplayable source is refused without starting yt-dlp", async () => {
+  const { spawn, state } = fakeSpawn();
+  const ctx = await startEdge({ spawn });
+  const token = mintToken({ sub: "phone-user", role: "phone", scope: "media", ttlSeconds: 120 }, SECRET);
+  await ctx.edge.unplayable.add("soundcloud:artist/track", "drm_protected");
+  try {
+    const resolved = await request(ctx.base, "/v1/resolve", {
+      method: "POST",
+      token,
+      body: { source: "soundcloud:artist/track" },
+    });
+    assert.equal(resolved.status, 409);
+    assert.deepEqual(await resolved.json(), { v: 1, error: "drm_protected" });
+
+    const warm = await request(ctx.base, "/v1/warm", {
+      method: "POST",
+      token,
+      body: { sources: ["soundcloud:artist/track"] },
+    });
+    assert.equal(warm.status, 202);
+    assert.equal((await warm.json()).rejected, 1);
+    assert.equal(state.calls.length, 0, "no tool ran for a marked source");
+  } finally {
+    await ctx.close();
+  }
 });
 
 test("close is idempotent and stops accepting requests", async () => {

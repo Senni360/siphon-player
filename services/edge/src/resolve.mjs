@@ -217,11 +217,33 @@ async function writeAll(handle, chunk) {
 
 const CANCELED = () => new ResolveError("cancelled", 499);
 
+const STDERR_TAIL_BYTES = 8 * 1024;
+const DRM_PROTECTED = /drm protected/i;
+
+/**
+ * Drains a tool's stderr and keeps only its tail in memory: a failure can be
+ * classified, and no link or token from it is ever logged or returned.
+ */
+function collectStderr(stream) {
+  let text = "";
+  stream?.on("data", (chunk) => {
+    text += chunk.toString("utf8");
+    if (text.length > STDERR_TAIL_BYTES) text = text.slice(-STDERR_TAIL_BYTES);
+  });
+  return () => text;
+}
+
+/** SoundCloud serves some tracks only as DRM protected audio; yt-dlp refuses. */
+function isDrmProtected(stderr) {
+  return typeof stderr === "string" && DRM_PROTECTED.test(stderr);
+}
+
 export class ResolveService {
   #cache;
   #config;
   #logger;
   #spawn;
+  #unplayable;
   #jobs = new Map();
   #foreground = [];
   #background = [];
@@ -231,11 +253,12 @@ export class ResolveService {
   #closing = false;
   #warmMax;
 
-  constructor({ cache, config, logger, spawn }) {
+  constructor({ cache, config, logger, spawn, unplayable = null }) {
     this.#cache = cache;
     this.#config = config;
     this.#logger = logger;
     this.#spawn = spawn;
+    this.#unplayable = unplayable;
     this.#warmMax = config.warmQueueMax ?? 4;
   }
 
@@ -282,6 +305,7 @@ export class ResolveService {
   acquire(sub, source, { signal } = {}) {
     if (this.#closing) throw new ResolveError("shutting_down", 503);
     const parsed = parseSource(source);
+    this.#refuseUnplayable(parsed.sourceUri);
     const key = this.#cache.keyFor(sub, parsed.sourceUri);
     const finished = this.#cache.get(key);
     if (finished) {
@@ -489,6 +513,10 @@ export class ResolveService {
       }
       if (seen.has(parsed.sourceUri)) continue;
       seen.add(parsed.sourceUri);
+      if (this.#unplayable?.has(parsed.sourceUri)) {
+        rejected.push(true);
+        continue;
+      }
       const key = this.#cache.keyFor(sub, parsed.sourceUri);
       if (this.#cache.get(key)) {
         this.#cache.touch(key);
@@ -510,6 +538,11 @@ export class ResolveService {
       warmed.push({ key, state: "queued" });
     }
     return { warmed, rejected: rejected.length };
+  }
+
+  #refuseUnplayable(sourceUri) {
+    const entry = this.#unplayable?.get(sourceUri);
+    if (entry) throw new ResolveError(entry.reason, 409);
   }
 
   #view(entry, cached) {
@@ -550,14 +583,17 @@ export class ResolveService {
     let handle;
     let downloader = null;
     let remuxer = null;
+    let stderr = () => "";
     try {
       downloader = startProcess(this.#config.ytdlpBin, buildYtDlpArgs({ url: job.parsed.url }), {
         timeoutMs: this.#config.resolveTimeoutMs,
         spawn: this.#spawn,
         signal,
+        stdio: ["ignore", "pipe", "pipe"],
         onSpawn: (child) => this.#trackChild(child),
       });
       if (!downloader.child) throw new ResolveError("resolve_failed", 502);
+      stderr = collectStderr(downloader.child.stderr);
       downloader.done.catch(() => {});
       const ended = Symbol("ended");
       const head = await Promise.race([
@@ -614,6 +650,13 @@ export class ResolveService {
       if (pending) await this.#cache.abort(job.key, error).catch(() => {});
       if (signal.aborted || error instanceof ProcessError && error.code === "cancelled") {
         throw CANCELED();
+      }
+      // A DRM protected copy is not a playable copy and nothing here tries to
+      // remove the protection. Remember the source so the next resolve is
+      // refused before a tool starts.
+      if (isDrmProtected(stderr())) {
+        await this.#unplayable?.add(job.parsed.sourceUri, "drm_protected");
+        throw new ResolveError("drm_protected", 409, error);
       }
       if (error instanceof ResolveError) throw error;
       this.#logger?.warn("resolve_failed", { code: error?.code ?? "error" });

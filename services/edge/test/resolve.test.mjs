@@ -6,6 +6,7 @@ import { CacheStore } from "../src/cache.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { buildFfmpegArgs, buildYtDlpArgs, parseSource, ResolveService } from "../src/resolve.mjs";
 import { MatchService } from "../src/search.mjs";
+import { UnplayableStore } from "../src/unplayable.mjs";
 import { fakeSpawn } from "./helpers/fakes.mjs";
 import { SECRET, request, startEdge, tempDir } from "./helpers/context.mjs";
 import { mintToken } from "../src/tokens.mjs";
@@ -70,7 +71,7 @@ test("commands use argument arrays and end options before the URL", () => {
   assert.equal(ffmpeg.includes("frag_keyframe+empty_moov+default_base_moof"), true);
 });
 
-async function resolveService({ env = {} } = {}) {
+async function resolveService({ env = {}, unplayable = false } = {}) {
   const dir = await tempDir();
   const cache = new CacheStore({ dir, maxBytes: 10 * 1024 * 1024, now: Date.now });
   await cache.init();
@@ -81,9 +82,14 @@ async function resolveService({ env = {} } = {}) {
     EDGE_FFMPEG_BIN: "ffmpeg",
   });
   const { spawn, state } = fakeSpawn({ env });
-  const service = new ResolveService({ cache, config, logger: { warn() {} }, spawn });
-  return { dir, cache, config, service, state, spawn };}
-
+  let store = null;
+  if (unplayable) {
+    store = new UnplayableStore({ dir, logger: { warn() {} } });
+    await store.init();
+  }
+  const service = new ResolveService({ cache, config, logger: { warn() {} }, spawn, unplayable: store });
+  return { dir, cache, config, service, state, spawn, unplayable: store };
+}
 test("resolves a source through yt-dlp and ffmpeg, then serves the cache", async (t) => {
   const setup = await resolveService();
   t.after(async () => {
@@ -172,6 +178,65 @@ test("a tool failure is a resolve error, never a crash", async (t) => {
     await fs.rm(setup.dir, { recursive: true, force: true });
   });
   await assert.rejects(setup.service.ensure("user-1", SOURCE), (error) => error.code === "resolve_failed" && error.status === 502);
+});
+
+test("a DRM protected source is classified, remembered and refused without a tool", async (t) => {
+  const setup = await resolveService({
+    env: { FAKE_STDERR: "ERROR: [soundcloud] 123: This video is DRM protected" },
+    unplayable: true,
+  });
+  t.after(async () => {
+    await setup.service.close();
+    await fs.rm(setup.dir, { recursive: true, force: true });
+  });
+  await assert.rejects(
+    setup.service.ensure("user-1", "soundcloud:artist/track"),
+    (error) => error.code === "drm_protected" && error.status === 409,
+  );
+  const entry = setup.unplayable.get("soundcloud:artist/track");
+  assert.equal(entry.reason, "drm_protected");
+  assert.equal(typeof entry.at, "number");
+
+  const calls = setup.state.calls.length;
+  assert.throws(
+    () => setup.service.ensure("user-1", "soundcloud:artist/track"),
+    (error) => error.code === "drm_protected" && error.status === 409,
+  );
+  assert.equal(setup.state.calls.length, calls, "no tool starts for a known unplayable source");
+
+  const warmed = setup.service.warm("user-1", ["soundcloud:artist/track", "soundcloud:artist/other"]);
+  assert.deepEqual(warmed.warmed.map((item) => item.state), ["queued"]);
+  assert.equal(warmed.rejected, 1);
+});
+
+test("a failure that is not DRM keeps the generic resolve classification", async (t) => {
+  const setup = await resolveService({
+    env: { FAKE_STDERR: "ERROR: Unsupported URL: https://soundcloud.com/artist/track", FAKE_EXIT_CODE: "1" },
+    unplayable: true,
+  });
+  t.after(async () => {
+    await setup.service.close();
+    await fs.rm(setup.dir, { recursive: true, force: true });
+  });
+  await assert.rejects(
+    setup.service.ensure("user-1", "soundcloud:artist/track"),
+    (error) => error.code === "resolve_failed" && error.status === 502,
+  );
+  assert.equal(setup.unplayable.has("soundcloud:artist/track"), false);
+});
+
+test("a marked source is refused before yt-dlp starts", async (t) => {
+  const setup = await resolveService({ unplayable: true });
+  t.after(async () => {
+    await setup.service.close();
+    await fs.rm(setup.dir, { recursive: true, force: true });
+  });
+  await setup.unplayable.add(SOURCE, "drm_protected");
+  assert.throws(
+    () => setup.service.ensure("user-1", SOURCE),
+    (error) => error.code === "drm_protected" && error.status === 409,
+  );
+  assert.equal(setup.state.calls.length, 0);
 });
 
 test("search finds a match, prefers a SoundCloud tie, and never guesses", async () => {

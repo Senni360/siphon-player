@@ -14,6 +14,7 @@ import { SoundCloudClient } from "./soundcloud.mjs";
 import { SpotifyClient } from "./spotify.mjs";
 import { SYNC_DOCS, SyncStore } from "./sync.mjs";
 import { TokenError, sameSecret, verifyToken } from "./tokens.mjs";
+import { UnplayableStore } from "./unplayable.mjs";
 import { UploadError, UploadStore } from "./uploads.mjs";
 import { Vault } from "./vault.mjs";
 
@@ -185,9 +186,11 @@ export async function createEdgeServer(config, {
   });
   await uploads.init();
   const sync = new SyncStore({ dir: config.dataDir, userMaxBytes: config.syncUserMaxBytes, now, logger });
-  const resolve = new ResolveService({ cache, config, logger, spawn });
+  const unplayable = new UnplayableStore({ dir: config.dataDir, now, logger });
+  await unplayable.init();
+  const resolve = new ResolveService({ cache, config, logger, spawn, unplayable });
   await resolve.init();
-  const matcher = new MatchService({ config, logger, spawn });
+  const matcher = new MatchService({ config, logger, spawn, now, unplayable });
   const media = new MediaService({ cache, uploads, config, logger });
   const vault = new Vault({ dir: config.dataDir, key: config.vaultKey, now });
   const spotify = new SpotifyClient({
@@ -288,6 +291,7 @@ export async function createEdgeServer(config, {
     spotify,
     soundcloud,
     library,
+    unplayable,
     logger,
     close,
     async listen({ port = config.port, host = config.host } = {}) {

@@ -296,6 +296,13 @@ POST /v1/match    { "uri":"spotify:track:…", "name":"…", "durationMs":200000
 → { "v":1, "match": null }        // below the conservative threshold
 ```
 
+An artist's own account may spell the name with no spaces (`playboicarti` is
+Playboi Carti), and that account's own upload may inflect one title word
+(`Never Going Down` is `Never Go Down`) within 1.5 seconds; a title spelled
+exactly scores slightly higher. Both readings are exact, so a fan account, a
+credit on someone else's upload, an extra or missing word, or a remix is still
+no match.
+
 Only these sources are accepted: `youtube:video:<11 chars>`,
 `soundcloud:<artist>/<track>`, or an `https://soundcloud.com/...` URL with no
 query or fragment. Everything else is `400 invalid_source` before a child
@@ -316,6 +323,15 @@ a second resolve after the file is complete. A client that disconnects before
 the first byte kills its tools and frees the slot; a prefetch (`warm`) never
 holds the slot against a real tap and is dropped once `EDGE_WARM_QUEUE_MAX` is
 reached.
+
+SoundCloud serves some tracks only as DRM protected audio. yt-dlp refuses
+those, and this service does not try to remove the protection: the answer is
+`409 drm_protected`, and the source is remembered in the unplayable set. Later
+`/v1/resolve` and `/v1/warm` calls refuse that source at once with the same
+code (`warm` counts it in `rejected`) without starting a tool, and `/v1/match`
+leaves it out of its candidates and drops a remembered match for it. A song
+whose only copy is unplayable answers `{ "match": null }`, so the phone asks the
+computer, which can use YouTube.
 
 ### Media
 
@@ -417,6 +433,7 @@ $EDGE_DATA_DIR/
   cache/<key>.m4a|mp3|ogg|flac|wav
   cache/<key>.<ext>.part        (a fetch in progress; swept on start)
   cache/last-played.json
+  unplayable.json               (source URI -> reason and time)
   uploads/<owner-prefix>/<key>.<ext>
 ```
 
@@ -428,13 +445,18 @@ from disk, and a corrupt one is kept as `.corrupt-<time>` and answered with
 `500 sync_corrupt` rather than silently reset to revision 0. Uploads are
 indexed from disk on start.
 
+`unplayable.json` holds at most 5000 sources, drops the oldest entry past that,
+and forgets an entry after thirty days so a track that becomes available is
+found again. A missing or corrupt file starts an empty set rather than failing
+start-up.
+
 ## Logging
 
 Log lines are JSON with an event name and small fields: method, route
 template, status, duration, counts, error codes. Request URLs, query strings,
 tokens, admin tokens, source links, media keys and user file names are never
-logged. Child-process stderr is drained but never read into a response or a
-log line.
+logged. Child-process stderr is drained; a bounded tail is kept in memory only
+to recognise a DRM refusal, and it is never read into a response or a log line.
 
 ## Not done
 
