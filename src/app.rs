@@ -15100,16 +15100,19 @@ impl App {
     }
 
     /// Hands the encoded cache to the file writer. Encoding happens here,
-    /// the disk write on the writer's own thread.
+    /// the disk write on the writer's own thread. A cache that will not
+    /// encode is not written at all, so the file that is there keeps what it
+    /// holds.
     fn save_bpm_key_cache(&self) {
         let Some(path) = self.bpm_key_cache.path().map(std::path::Path::to_path_buf) else {
             return;
         };
-        self.files.write(
-            &path,
-            self.bpm_key_cache.encode(),
-            fastframe_file::Access::Private,
-        );
+        let Some(bytes) = self.bpm_key_cache.encode() else {
+            log::warn!("Could not encode the BPM and key cache; keeping the file already there");
+            return;
+        };
+        self.files
+            .write(&path, bytes, fastframe_file::Access::Private);
     }
 
     /// The file a song downloaded to this session, by its URI or by the link

@@ -963,6 +963,7 @@ impl Cache {
             .readings
             .into_iter()
             .filter(|(uri, reading)| !uri.is_empty() && reading.bpm > 0)
+            .map(|(uri, reading)| (uri, named_key(reading)))
             .collect();
         Self {
             path: Some(path),
@@ -981,7 +982,7 @@ impl Cache {
         if uri.is_empty() || reading.bpm == 0 || uri.starts_with("spotify:local:") {
             return;
         }
-        self.readings.insert(uri.to_owned(), reading);
+        self.readings.insert(uri.to_owned(), named_key(reading));
     }
 
     pub fn readings(&self) -> impl Iterator<Item = (&String, &Reading)> {
@@ -996,14 +997,26 @@ impl Cache {
         self.path.as_deref()
     }
 
-    /// The bytes to hand to the writer.
-    pub fn encode(&self) -> Vec<u8> {
+    /// The bytes to hand to the writer, or [`None`] when the readings cannot
+    /// be written at all. Nothing is written then, so a file that is already
+    /// there keeps what it holds.
+    pub fn encode(&self) -> Option<Vec<u8>> {
         let file = CacheFile {
             version: CACHE_VERSION,
             readings: self.readings.clone(),
         };
-        serde_json::to_vec(&file).unwrap_or_default()
+        serde_json::to_vec(&file).ok()
     }
+}
+
+/// `reading` with a key that cannot be named dropped: a pitch class outside
+/// the twelve, or a confidence that is not a number, can only come from a
+/// damaged cache file, and naming one would index past the pitch names.
+fn named_key(reading: Reading) -> Reading {
+    let key = reading
+        .key
+        .filter(|(key, confidence)| key.tonic < 12 && confidence.is_finite());
+    Reading { key, ..reading }
 }
 
 #[cfg(test)]
@@ -1363,7 +1376,7 @@ mod tests {
         );
         // Local files are not cached: their path outlives the file behind it.
         cache.insert("spotify:local:A:B:C:1", reading(120));
-        std::fs::write(&path, cache.encode()).unwrap();
+        std::fs::write(&path, cache.encode().expect("the cache encodes")).unwrap();
         let reopened = Cache::load(path.clone());
         assert_eq!(
             reopened
@@ -1384,6 +1397,40 @@ mod tests {
             Cache::load(older).get("soundcloud:track:2").map(|r| r.bpm),
             Some(87)
         );
+
+        // A damaged file cannot name its key: the tempo is still worth
+        // keeping, so the reading stays and only the key is dropped. Naming
+        // pitch class 200 would read past the names.
+        let damaged = root.join("damaged-key.json");
+        std::fs::write(
+            &damaged,
+            br#"{"version":1,"readings":{"soundcloud:track:4":{"bpm":128,"key":[{"tonic":200,"minor":true},0.7]}}}"#,
+        )
+        .unwrap();
+        let loaded = Cache::load(damaged);
+        assert_eq!(loaded.get("soundcloud:track:4").map(|r| r.bpm), Some(128));
+        assert_eq!(loaded.get("soundcloud:track:4").and_then(|r| r.key), None);
+
+        // The same on the way in, so a reading the analysis could not name is
+        // never written where naming it would panic.
+        let mut unnamed = Cache::default();
+        unnamed.insert(
+            "soundcloud:track:5",
+            Reading {
+                bpm: 90,
+                key: Some((
+                    Key {
+                        tonic: 12,
+                        minor: false,
+                    },
+                    0.0,
+                )),
+            },
+        );
+        let written: CacheFile =
+            serde_json::from_slice(&unnamed.encode().expect("the cache encodes")).unwrap();
+        assert_eq!(written.readings["soundcloud:track:5"].key, None);
+        assert_eq!(written.readings["soundcloud:track:5"].bpm, 90);
 
         // Corrupt and newer files read as empty and are left untouched.
         for (name, body) in [
