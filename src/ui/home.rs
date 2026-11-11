@@ -6,7 +6,7 @@ use egui::{CornerRadius, Rect, Sense, Vec2, pos2, vec2};
 
 use crate::api::models::{PlayableItem, Playlist, pick_image};
 use crate::app::App;
-use crate::i18n::gettext;
+use crate::i18n::{gettext, ngettext};
 use crate::model::{Action, Loadable, Page, RowContext, TopPeriod};
 use crate::theme::{self, Icon};
 
@@ -137,6 +137,10 @@ struct Feature {
     play: Action,
     /// Whether it plays as a context, an album or a set, rather than as a song.
     context: bool,
+    /// What kind of release it is, for an album, EP or single; none for a song.
+    kind: Option<crate::for_you::Kind>,
+    /// How many songs the release holds, when Spotify says.
+    songs: Option<u32>,
 }
 
 impl Feature {
@@ -201,6 +205,8 @@ fn project_features(app: &App, projects: &[crate::for_you::Project]) -> Vec<Feat
                 beat_line: None,
                 play,
                 context,
+                kind: Some(project.kind),
+                songs: project.songs,
             }
         })
         .collect()
@@ -226,6 +232,8 @@ fn song_features(app: &App, picks: &[crate::for_you::Pick]) -> Vec<Feature> {
                 index: index as u32,
             },
             context: false,
+            kind: None,
+            songs: None,
         })
         .collect()
 }
@@ -283,6 +291,26 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
         egui::pos2(rect.left() + 28.0 + 106.0, rect.center().y),
         egui::Vec2::splat(212.0),
     );
+    // A release carries its record behind the cover; a song is the cover alone.
+    let first_playing = first.is_current(app) && app.believed_playing();
+    let reach = if first.kind.is_some() {
+        let out = motion::toward(
+            ui.ctx(),
+            ui.id().with(("featured-record", &first.uri)),
+            first_playing,
+            0.6,
+        );
+        paint_record(
+            ui,
+            &palette,
+            cover,
+            tint.gamma_multiply(0.9).to_opaque(),
+            RECORD_OUT + (RECORD_OUT_PLAYING - RECORD_OUT) * out,
+            first_playing,
+        )
+    } else {
+        0.0
+    };
     widgets::paint_shadow(ui, &palette, cover, 12.0);
     widgets::paint_cover(
         ui,
@@ -294,8 +322,14 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
         Some(app.backend.art()),
     );
     let side = if width > 1000.0 { 320.0 } else { 0.0 };
+    // The words keep clear of the record at its furthest.
+    let clear = if first.kind.is_some() {
+        cover.height() * (RECORD_OUT_PLAYING + 0.47 - 0.5)
+    } else {
+        reach
+    };
     let words = egui::Rect::from_min_max(
-        egui::pos2(cover.right() + 28.0, rect.top() + 34.0),
+        egui::pos2(cover.right() + clear + 28.0, rect.top() + 34.0),
         egui::pos2(rect.right() - side - 24.0, rect.bottom() - 24.0),
     );
     let mut block = ui.new_child(egui::UiBuilder::new().max_rect(words));
@@ -326,6 +360,23 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
         theme::regular(14.0),
         palette.text,
     );
+    // A release says what it is and how much of it there is: "Album · 12 songs".
+    if let Some(kind) = first.kind {
+        let mut what = kind_label(app, kind).into_owned();
+        if let Some(songs) = first.songs.filter(|songs| *songs > 1) {
+            what = format!(
+                "{what} · {}",
+                ngettext(app.locale, "{count} song", "{count} songs", songs)
+                    .replace("{count}", &songs.to_string())
+            );
+        }
+        theme::text(
+            &mut block,
+            what,
+            theme::medium(13.0),
+            palette.text.gamma_multiply(0.82),
+        );
+    }
     theme::text(
         &mut block,
         first.reason.as_str(),
@@ -452,8 +503,19 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
                 .artists
                 .first()
                 .map_or("", |artist| artist.name.as_str());
-            let by =
-                widgets::ellipsized(ui, artist, theme::regular(12.0), palette.secondary, room, 1);
+            // A release says what it is here too: "Album · Nils Frahm".
+            let artist = match feature.kind {
+                Some(kind) => format!("{} · {artist}", kind_label(app, kind)),
+                None => artist.to_owned(),
+            };
+            let by = widgets::ellipsized(
+                ui,
+                &artist,
+                theme::regular(12.0),
+                palette.secondary,
+                room,
+                1,
+            );
             ui.painter().galley(
                 egui::pos2(left, row.center().y + 2.0),
                 by,
@@ -472,6 +534,76 @@ fn featured(app: &mut App, ui: &mut egui::Ui, features: &[Feature]) {
 
 /// The new projects past the featured card's: albums, EPs and singles just out
 /// from the artists played most, from Spotify and SoundCloud together.
+/// How far an album's record stands out from behind its cover, as a share of
+/// the cover's side; it slides a little further while the album plays.
+const RECORD_OUT: f32 = 0.33;
+const RECORD_OUT_PLAYING: f32 = 0.41;
+
+/// The record an album, EP or set carries behind its cover, so a release reads
+/// as a release at a glance and a song stays a bare cover. Grooves, a label in
+/// the cover's own colour, and a reflection that turns while it plays. Returns
+/// how far it reaches past the cover's right edge.
+fn paint_record(
+    ui: &egui::Ui,
+    palette: &theme::Palette,
+    cover: egui::Rect,
+    label: egui::Color32,
+    out: f32,
+    playing: bool,
+) -> f32 {
+    let radius = cover.height() * 0.47;
+    let center = egui::pos2(cover.center().x + cover.width() * out, cover.center().y);
+    let painter = ui.painter();
+    painter.circle_filled(
+        center + egui::vec2(0.0, 6.0),
+        radius,
+        egui::Color32::from_black_alpha(70),
+    );
+    painter.circle_filled(center, radius, egui::Color32::from_rgb(24, 24, 27));
+    // Fine grooves, lit a little more toward the rim.
+    for ring in 1..=6 {
+        let at = radius * (0.48 + ring as f32 * 0.08);
+        painter.circle_stroke(
+            center,
+            at,
+            egui::Stroke::new(0.7, egui::Color32::from_white_alpha(5 + ring as u8)),
+        );
+    }
+    painter.circle_stroke(
+        center,
+        radius - 0.5,
+        egui::Stroke::new(1.2, egui::Color32::from_white_alpha(34)),
+    );
+    // The reflection: two short arcs opposite each other, which turn slowly
+    // while the album plays and rest when it doesn't.
+    let turn = if playing && !crate::motion::reduced(ui.ctx()) {
+        theme::animation_frame(ui.ctx(), std::time::Duration::from_millis(33));
+        (ui.input(|input| input.time) as f32 * 0.9) % std::f32::consts::TAU
+    } else {
+        -0.6
+    };
+    for side in [0.0, std::f32::consts::PI] {
+        let points: Vec<egui::Pos2> = (0..=16)
+            .map(|step| {
+                let angle = turn + side + (step as f32 / 16.0 - 0.5) * 0.9;
+                center + radius * 0.78 * egui::vec2(angle.cos(), angle.sin())
+            })
+            .collect();
+        painter.add(egui::Shape::line(
+            points,
+            egui::Stroke::new(radius * 0.22, egui::Color32::from_white_alpha(10)),
+        ));
+    }
+    painter.circle_filled(center, radius * 0.3, label);
+    painter.circle_stroke(
+        center,
+        radius * 0.3,
+        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(60)),
+    );
+    painter.circle_filled(center, 3.0, palette.panel);
+    (center.x + radius - cover.right()).max(0.0)
+}
+
 fn new_for_you(app: &mut App, ui: &mut egui::Ui, projects: &[crate::for_you::Project]) {
     let rest: Vec<_> = projects.iter().skip(FEATURED).cloned().collect();
     if rest.is_empty() {
