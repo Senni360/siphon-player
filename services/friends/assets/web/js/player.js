@@ -406,7 +406,9 @@ async function findStream(song) {
     const found = source ? await edgeResolve(source).catch(() => null) : null;
     if (found) return found;
   } else if (uri.startsWith('spotify:')) {
-    const found = await edgeSpotifyStream(song).catch(() => null);
+    const copy = foundCopies.get(uri);
+    const found = (copy ? await edgeResolve(copy).catch(() => null) : null)
+      ?? await edgeSpotifyStream(song).catch(() => null);
     if (found) return found;
   } else {
     // Group links and anything else keep asking the computer, exactly as today.
@@ -416,11 +418,22 @@ async function findStream(song) {
 }
 
 /**
+ * The copy the computer found for a Spotify song, by song. A YouTube address
+ * from the computer only plays on the computer's own connection, so a retry
+ * asks the edge for that same copy, which the computer is putting there.
+ */
+const foundCopies = new Map();
+
+/**
  * The computer's answer, or the page's plain stuck state when it is not there
  * either. A timeout while it is online still retries as before.
  */
 async function askComputer(question) {
-  try { return await ask('stream', question); }
+  try {
+    const found = await ask('stream', question);
+    if (typeof found?.source === 'string' && found.source) foundCopies.set(question.uri, found.source);
+    return found;
+  }
   catch (error) {
     if (!player.online && !(error instanceof SignedOut) && !error?.answered) {
       throw answered("This song can't play on this phone right now.");

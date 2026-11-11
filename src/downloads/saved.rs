@@ -24,6 +24,23 @@ pub(crate) struct SavedMatch {
     /// Unix seconds, when the match was found.
     #[serde(default)]
     pub at: i64,
+    /// The matcher that found it and saw it play: [`CHECKED`], or 0 for a match
+    /// saved before matches were checked, or taken from the edge. A match from
+    /// an older matcher is a hint, looked for again once, never trusted
+    /// outright: some were encrypted SoundCloud copies or another recording.
+    #[serde(default)]
+    pub checked: u32,
+}
+
+/// The matcher whose matches are trusted as they are: it only weighs copies
+/// that can play, judges their own titles, and saves a match after it played.
+pub(crate) const CHECKED: u32 = 2;
+
+impl SavedMatch {
+    /// Whether this match came from the current matcher and played.
+    pub fn trusted(&self) -> bool {
+        self.checked >= CHECKED
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -108,6 +125,7 @@ impl Saved {
         found.uri.starts_with("https://").then_some(found.uri)
     }
 
+    /// Saves a match that has just played, as the current matcher's.
     pub async fn remember(&self, spotify: &str, found: &matching::Match) {
         if !spotify.starts_with("spotify:track:") {
             return;
@@ -121,6 +139,7 @@ impl Saved {
                     source: found.source.clone(),
                     uri: found.uri.clone(),
                     at: now(),
+                    checked: CHECKED,
                 },
             );
         }
@@ -156,6 +175,7 @@ impl Saved {
                         source: found.source,
                         uri: found.uri,
                         at,
+                        checked: 0,
                     },
                 );
             }

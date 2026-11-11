@@ -325,29 +325,34 @@ impl Worker {
         async move {
             if let Some(wanted) = wanted.filter(|_| uri.starts_with("spotify:track:")) {
                 let spotify_uri = uri;
-                let mut next = saved
-                    .get(&spotify_uri)
-                    .await
-                    .and_then(|found| (!found.uri.trim().is_empty()).then_some(found.uri));
+                let searcher = crate::downloads::matching::Searcher::new(
+                    catalogue.clone(),
+                    soundcloud.clone(),
+                );
+                // A match saved by the current matcher is tried first. One saved
+                // before matches were checked is only a hint: it is searched for
+                // again, and kept if it is still the best copy that plays.
+                let saved_match = saved.get(&spotify_uri).await;
+                let mut next = saved_match
+                    .as_ref()
+                    .filter(|found| found.trusted() && !found.uri.trim().is_empty())
+                    .map(|found| crate::downloads::matching::Match {
+                        uri: found.uri.clone(),
+                        source: found.source.clone(),
+                    });
                 let mut from_saved = next.is_some();
-                loop {
+                let mut refused: Vec<String> = Vec::new();
+                let mut failure = "This song isn't on YouTube or SoundCloud.".to_owned();
+                for _ in 0..MATCH_ROUNDS {
                     let found = match next.take() {
                         Some(found) => found,
-                        None => {
-                            let found = crate::downloads::matching::Searcher::new(
-                                catalogue.clone(),
-                                soundcloud.clone(),
-                            )
-                            .same_song(&wanted)
-                            .await
-                            .ok_or("This song isn't on YouTube or SoundCloud.")?;
-                            saved.remember(&spotify_uri, &found).await;
-                            let _ = commands.send(Command::Edge(crate::edge::Request::Matches));
-                            found.uri
-                        }
+                        None => match searcher.same_song_except(&wanted, &refused).await {
+                            Some(found) => found,
+                            None => break,
+                        },
                     };
                     match stream_target(
-                        &found,
+                        &found.uri,
                         None,
                         &catalogue,
                         soundcloud.as_ref(),
@@ -356,16 +361,42 @@ impl Worker {
                     )
                     .await
                     {
-                        Ok(value) => return Ok(value),
-                        // A saved match can stop playing, for example when a
-                        // video is removed. Search once more.
-                        Err(_) if from_saved => {
-                            saved.forget(&spotify_uri).await;
-                            from_saved = false;
+                        Ok(mut value) => {
+                            // The phone asks the edge for this copy by name when
+                            // the address here does not reach it.
+                            if let Some(source) = crate::edge::sync::match_source(&found.uri) {
+                                value["source"] = serde_json::Value::String(source.1);
+                            }
+                            // Only a match that has just played is saved, and the
+                            // edge gets it with the others.
+                            if !from_saved {
+                                saved.remember(&spotify_uri, &found).await;
+                                let _ = commands.send(Command::Edge(crate::edge::Request::Matches));
+                            }
+                            // YouTube's address only works from this computer's
+                            // own connection, and the edge cannot reach YouTube:
+                            // the audio is put there, so the phone plays it from
+                            // the edge on any network, now and with this computer off.
+                            if crate::youtube::is_track_uri(&found.uri) {
+                                let _ = commands.send(Command::Edge(crate::edge::Request::Fetch(
+                                    vec![found.uri.clone()],
+                                )));
+                            }
+                            return Ok(value);
                         }
-                        Err(error) => return Err(error),
+                        // A copy that will not play is set aside, and the search
+                        // runs again without it.
+                        Err(error) => {
+                            if from_saved {
+                                saved.forget(&spotify_uri).await;
+                                from_saved = false;
+                            }
+                            refused.push(found.uri);
+                            failure = error;
+                        }
                     }
                 }
+                return Err(failure);
             }
             stream_target(
                 &uri,
@@ -476,6 +507,10 @@ impl Worker {
 /// Resolves one URI to the stream the phone can play: a YouTube link, a
 /// shared group song, or a SoundCloud track. Spotify URIs reach here only
 /// when nothing could be matched.
+/// How many copies of one Spotify song are tried before the phone is told
+/// there is none: the saved one, then the best two a search finds after it.
+const MATCH_ROUNDS: usize = 3;
+
 async fn stream_target(
     uri: &str,
     share_url: Option<&str>,
