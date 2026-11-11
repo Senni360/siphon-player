@@ -766,6 +766,32 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
             gettext(locale, "Linked devices"),
             gettext(locale, "Other phones and browsers signed in to your account."),
         ),
+        RowText::new(
+            gettext(locale, "Use my server while this computer is off"),
+            gettext(
+                locale,
+                "Your phone keeps your playlists, queue and saved matches on your server, and pause, play and seek reach it at once. Off: your phone works only while this computer is on.",
+            ),
+        ),
+        RowText::new(
+            gettext(locale, "Play my local files on my phone"),
+            gettext(
+                locale,
+                "Songs from your playlists are stored on your server so your phone can play them while this computer is off.",
+            ),
+        )
+        .when(app.settings.edge_enabled),
+        RowText::new(
+            gettext(
+                locale,
+                "Keep my sign-ins on my server so my phone works when this computer is off",
+            ),
+            gettext(
+                locale,
+                "Your Spotify and SoundCloud sign-ins are stored encrypted on your server. Off: they stay only on this computer.",
+            ),
+        )
+        .when(app.settings.edge_enabled),
     ];
     if section_matches(&needle, &devices, &devices_rows) {
         any_visible = true;
@@ -916,7 +942,10 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 }
             });
             let phone_visible = devices_rows[7].matches(&needle, &devices)
-                || devices_rows[8].matches(&needle, &devices);
+                || devices_rows[8].matches(&needle, &devices)
+                || devices_rows[9].matches(&needle, &devices)
+                || devices_rows[10].matches(&needle, &devices)
+                || devices_rows[11].matches(&needle, &devices);
             if phone_visible {
                 subheading(ui, &palette, &phone);
                 theme::text(
@@ -930,6 +959,51 @@ pub fn show(app: &mut App, ui: &mut egui::Ui) {
                 super::group_account::link_a_phone(app, ui, &mut actions);
                 super::group_account::linked_devices(app, ui, &mut actions);
                 app.actions.extend(actions);
+                filtered_row(ui, &palette, &needle, &devices, &devices_rows[9], |ui| {
+                    if widgets::switch(
+                        ui,
+                        &palette,
+                        &gettext(locale, "Use my server while this computer is off"),
+                        &mut app.settings.edge_enabled,
+                    )
+                    .changed()
+                    {
+                        changed = true;
+                        // Switched off: forget the replies half-done, since
+                        // nothing is waiting to hear them any more.
+                        app.edge.vault = None;
+                        app.edge.uploads = None;
+                    }
+                });
+                filtered_row(ui, &palette, &needle, &devices, &devices_rows[10], |ui| {
+                    if widgets::switch(
+                        ui,
+                        &palette,
+                        &gettext(locale, "Play my local files on my phone"),
+                        &mut app.settings.local_files_on_phone,
+                    )
+                    .changed()
+                    {
+                        changed = true;
+                    }
+                });
+                let mut vault_signins = app.vault_signins_enabled().unwrap_or(false);
+                filtered_row(ui, &palette, &needle, &devices, &devices_rows[11], |ui| {
+                    if widgets::switch(
+                            ui,
+                            &palette,
+                            &gettext(
+                                locale,
+                                "Keep my sign-ins on my server so my phone works when this computer is off",
+                            ),
+                            &mut vault_signins,
+                        )
+                        .changed()
+                        {
+                            changed = true;
+                            app.settings.vault_signins = Some(vault_signins);
+                        }
+                });
             }
         });
     }

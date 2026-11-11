@@ -3,6 +3,7 @@
 // phone's existing sync snapshot, so they keep working without Spotify.
 
 import { TtlCache } from "./ttlcache.mjs";
+import { UPLOAD_KEY } from "./uploads.mjs";
 
 const MAX_LIMIT = 50;
 const SEARCH_PAGE = 10;
@@ -235,14 +236,31 @@ export class LibraryService {
       if (String(playlist.id ?? "") !== id) continue;
       const items = mixedEntries(playlist)
         .map((entry) => {
-          if (typeof entry === "string") return { uri: entry };
+          if (typeof entry === "string") {
+            return {
+              source: "mixed", uri: entry, name: "", artists: [], album: null,
+              image: null, duration_ms: null,
+            };
+          }
           if (!entry || typeof entry !== "object") return null;
-          // The desktop mixed store wraps each row as { id, track, permalink }.
+          // The desktop mixed store wraps each row as { id, track, upload }.
           const value = entry.track && typeof entry.track === "object" ? entry.track : entry;
+          const artists = Array.isArray(value.artists)
+            ? value.artists
+              .filter((artist) => artist && typeof artist === "object")
+              .map((artist) => ({ id: artist.id ?? null, name: typeof artist.name === "string" ? artist.name : "" }))
+            : [];
+          const upload = entry.upload ?? value.upload;
           return {
+            source: "mixed",
             uri: typeof value.uri === "string" ? value.uri
               : typeof value.sourceUri === "string" ? value.sourceUri : null,
-            name: typeof value.name === "string" ? value.name : null,
+            name: typeof value.name === "string" ? value.name : "",
+            artists,
+            album: null,
+            image: pickImage(value.album?.images),
+            duration_ms: Number.isFinite(value.duration_ms) ? value.duration_ms : null,
+            ...(typeof upload === "string" && UPLOAD_KEY.test(upload) ? { upload } : {}),
           };
         })
         .filter(Boolean);

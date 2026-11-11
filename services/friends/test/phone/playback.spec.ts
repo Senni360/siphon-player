@@ -1,5 +1,23 @@
 import { test, expect } from './fixtures.js';
 
+test('a song with no audio here is skipped, so the music keeps going', async ({ phone, server }) => {
+  await phone.open();
+  await phone.openMix();
+
+  const first = phone.row(1);
+  const firstUri = (await first.getAttribute('data-uri'))!;
+  const next = (await phone.row(2).locator('.name').innerText()).trim();
+  server.noAudio.add(firstUri);
+
+  // Tapped directly: the helper waits for that very song to sound, and this one never does.
+  await phone.row(1).locator('button.words').click();
+
+  // Nothing is asked and nothing stops: the song after it plays.
+  await expect(phone.page.locator('.mini .name')).toHaveText(next);
+  await expect(phone.page.locator('.toast')).toContainText('no audio');
+  await expect.poll(async () => (await phone.audio())?.paused).toBe(false);
+});
+
 test('opens a playlist and plays a song on this phone', async ({ phone, server }) => {
   await phone.open();
   await phone.openMix();
@@ -44,6 +62,7 @@ test('next and previous move through the playlist', async ({ phone }) => {
   await expect(phone.page.locator('.sheet .big')).toHaveText(first);
 
   // And the queue is the list around it.
+  await phone.openQueue();
   await expect(phone.page.locator('.sheet .upnext .row .name').first()).toHaveText(second);
   await expect(phone.page.locator('.sheet .upnext .row .name').nth(1)).toHaveText(third);
 });

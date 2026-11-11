@@ -39,8 +39,11 @@ Siphon connects only to the services below.
 - **GitHub** for update checks and downloads.
 - **The group service** (`siphon-friends.vercel.app`) when you join a group: the
   shares, replies, hearts and listening state you choose to send.
-- **The phone edge** (`edge.encore.senni.dev`) only when you link a phone: the
-  account id, the phone's commands, what it plays, and the audio it fetches.
+- **The phone edge** (`edge.encore.senni.dev`) only when you link a phone and
+  leave the switch in Settings on: the account id, your playlist rows and mixed
+  playlists, the queue and its position, saved Spotify matches, playlist local
+  files you offer, and audio fetched for a YouTube song. Only if you allow it,
+  your Spotify and SoundCloud sign-ins are kept there encrypted.
 - **Spotify Soloist's server** (`soloist-builds.spotifycdn.com`) only if you
   enable Soloist, to download its player.
 

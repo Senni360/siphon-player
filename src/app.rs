@@ -1,6 +1,7 @@
 //! The application: state, event handling, and the actions views ask for.
 
 mod download_actions;
+mod edge;
 mod extension_bridge;
 mod group;
 mod hybrid;
@@ -560,6 +561,7 @@ pub struct App {
     for_you_inputs: Option<ForYouInputs>,
     /// A linked phone's connection.
     pub phone: remote::Remote,
+    pub edge: edge::Edge,
     /// Which artist each SoundCloud and YouTube account page leads back to.
     pub artist_links: HashMap<String, (String, String)>,
     artist_links_asked: bool,
@@ -1311,6 +1313,7 @@ impl App {
             for_you_serial: 0,
             for_you_inputs: None,
             phone: remote::Remote::default(),
+            edge: edge::Edge::default(),
             artist_links: HashMap::new(),
             artist_links_asked: false,
             artist_news: Vec::new(),
@@ -3187,6 +3190,7 @@ impl App {
                     self.artist_news = news;
                 }
                 Event::Remote(event) => self.remote_event(event),
+                Event::Edge(event) => self.edge_event(event),
                 Event::ForYou(shown) => {
                     let tracks: Vec<Track> = shown
                         .picks
@@ -4750,6 +4754,7 @@ impl App {
 
     fn tick(&mut self, ctx: &egui::Context) {
         self.remote_tick(ctx);
+        self.edge_tick();
         // The group is read while something shows it: its page, Home's
         // shelf, the friends panel, or the sidebar's unread count.
         let feed_visible = (self.show_friends_panel
@@ -36295,7 +36300,7 @@ mod tests {
     }
 
     #[test]
-    fn hybrid_audio_key_refusal_pauses_without_consuming_mixed_successors() {
+    fn a_song_spotify_refuses_is_skipped_without_stopping_the_queue() {
         let mut app = hybrid_fixture();
         let ctx = egui::Context::default();
         start_hybrid_fixture(&mut app);
@@ -36307,25 +36312,37 @@ mod tests {
             &ctx,
         );
         let tag = app.hybrid_tag().unwrap();
-        let queue = queue_uris(&app);
         app.backend.take_hybrid_commands();
         app.handle_hybrid_event(
             tag,
             crate::player::HybridEvent::Failed(crate::player::AUDIO_KEY_REFUSED.into()),
         );
-        assert_eq!(app.current_track_uri().as_deref(), Some("spotify:track:a"));
-        assert_eq!(queue_uris(&app), queue);
-        assert!(app.hybrid_tag().is_none());
-        assert!(!app.now_playing().unwrap().playing);
-        assert!(!app.now_playing().unwrap().loading);
-        assert!(app.show_devices);
-        assert!(app.backend.take_hybrid_commands().is_empty());
-        app.apply(Action::TogglePlay, &ctx);
-        assert!(matches!(app.backend.take_hybrid_commands().first(),
-            Some(crate::backend::HybridCommand::Load { tag: retry, play: true, .. })
-                if retry.occurrence == tag.occurrence && retry.generation > tag.generation
-        ));
+        let commands = app.backend.take_hybrid_commands();
         app.backend.shutdown();
+        // The next row plays on: no pause, no device menu, nothing to answer.
+        assert!(
+            commands.iter().any(|command| matches!(command,
+                crate::backend::HybridCommand::Load { track, play: true, .. }
+                    if track.uri != "spotify:track:a"
+            )),
+            "a refused audio key must skip to the next song: {commands:?}"
+        );
+        assert!(!app.show_devices);
+        assert!(app.hybrid_tag().is_some());
+    }
+
+    #[test]
+    fn a_run_of_refused_audio_keys_starts_a_fresh_session() {
+        let mut app = hybrid_fixture();
+        start_hybrid_fixture(&mut app);
+        app.note_spotify_refusal();
+        app.note_spotify_refusal();
+        let two = app.hybrid.last_refusal_reconnect.is_some();
+        app.note_spotify_refusal();
+        let three = app.hybrid.last_refusal_reconnect.is_some();
+        app.backend.shutdown();
+        assert!(!two, "two songs are those songs' own fault");
+        assert!(three, "three in a row are the session's fault");
     }
 
     #[test]

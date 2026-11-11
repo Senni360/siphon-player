@@ -127,6 +127,42 @@ impl Saved {
         self.persist().await;
     }
 
+    /// Every saved match, for the always-on edge's match document.
+    pub async fn all(&self) -> BTreeMap<String, SavedMatch> {
+        self.ready().await;
+        self.inner
+            .as_ref()
+            .and_then(|inner| inner.matches.lock().ok().map(|held| held.clone()))
+            .unwrap_or_default()
+    }
+
+    /// Adds several matches with one write. A set taken from the edge can hold
+    /// thousands of songs, and one file write per song would stall it.
+    pub async fn remember_all(&self, found: Vec<(String, matching::Match)>) {
+        if found.is_empty() {
+            return;
+        }
+        self.ready().await;
+        let Some(inner) = &self.inner else { return };
+        let at = now();
+        if let Ok(mut held) = inner.matches.lock() {
+            for (spotify, found) in found {
+                if !spotify.starts_with("spotify:track:") {
+                    continue;
+                }
+                held.insert(
+                    spotify,
+                    SavedMatch {
+                        source: found.source,
+                        uri: found.uri,
+                        at,
+                    },
+                );
+            }
+        }
+        self.persist().await;
+    }
+
     pub async fn forget(&self, spotify: &str) {
         self.ready().await;
         let Some(inner) = &self.inner else { return };
