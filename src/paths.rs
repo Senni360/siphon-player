@@ -314,6 +314,12 @@ impl AppDirs {
         self.cache.join("local-files.json")
     }
 
+    /// BPM and key readings worked out from audio, so each song is analysed
+    /// once. Disposable: a lost file only means measuring again.
+    pub fn bpm_key_cache_file(&self) -> PathBuf {
+        self.cache.join("bpm-key.json")
+    }
+
     pub fn art_cache_dir(&self) -> PathBuf {
         self.cache.join("art")
     }

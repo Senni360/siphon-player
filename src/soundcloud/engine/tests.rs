@@ -1098,3 +1098,29 @@ async fn paused_preload_waits_for_play_and_hls_does_not_look_ahead() {
     .await
     .unwrap();
 }
+
+/// The on-demand analyser hears the same stream playback does, without
+/// claiming the output or touching the engine.
+#[tokio::test]
+async fn a_stream_can_be_sampled_for_analysis_without_playing() {
+    let server = Server::new().await;
+    let stream = server.stream("/tone.mp3", Protocol::Progressive, 1200);
+    let handle = tokio::runtime::Handle::current();
+    let http = crate::http::Http::new(reqwest::Client::builder().no_proxy().build().unwrap());
+    let mono = tokio::task::spawn_blocking(move || {
+        crate::soundcloud::engine::sample(
+            &http,
+            handle,
+            &stream,
+            2.0,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+    })
+    .await
+    .unwrap()
+    .expect("the tone decodes");
+    assert!(!mono.is_empty());
+    assert!(mono.iter().any(|sample| sample.abs() > 0.01));
+    // Two seconds of a tone is a bounded read, not the whole track.
+    assert!(mono.len() <= 44_100 * 2 + 4_000, "{} samples", mono.len());
+}

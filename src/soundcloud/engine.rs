@@ -233,6 +233,47 @@ impl Drop for Engine {
     }
 }
 
+/// Reads up to `seconds` of `stream` as mono 44.1 kHz, for the BPM and key
+/// analyser. Nothing is played and nothing is claimed: this is a second,
+/// private read of the same URL.
+///
+/// Blocking, because the decoder parks on its own runtime between packets.
+/// Call it from a thread that is not one of the runtime's workers, such as
+/// `tokio::task::spawn_blocking` or a plain `std::thread`.
+pub fn sample(
+    http: &crate::http::Http,
+    runtime: Handle,
+    stream: &Stream,
+    seconds: f64,
+    cancel: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<f32>, String> {
+    let fetch = Fetch {
+        http: http.clone(),
+        runtime,
+        interrupt: Arc::new(Interrupt::default()),
+        revision: Arc::new(AtomicU64::new(0)),
+        cancel: Arc::new(Interrupt::default()),
+    };
+    let mut decoder = Decoder::open(fetch, stream, 0).map_err(|error| error.to_string())?;
+    let wanted = (seconds.max(0.0) * 44_100.0) as usize;
+    let mut mono = Vec::with_capacity(wanted);
+    while mono.len() < wanted {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(crate::bpm_key::CANCELLED.to_string());
+        }
+        match decoder.next() {
+            Ok(Some(pcm)) => {
+                for frame in pcm.as_chunks::<2>().0 {
+                    mono.push(((frame[0] + frame[1]) * 0.5) as f32);
+                }
+            }
+            Ok(None) => break,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Ok(mono)
+}
+
 /// Narrow test seam. The production implementation always writes through
 /// the shared output, never opens an independent device or bypasses EQ.
 trait Output: Send {

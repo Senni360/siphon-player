@@ -88,7 +88,9 @@ and cards 12 to 14, island 22, covers 8 (rows) to 18 (now playing).
   - Download: click downloads with the remembered format; right-click opens
     format (WAV, MP3 320, FLAC), stems and DAW naming. While running the
     button is a progress ring with a stop square; click to cancel.
-  - BPM/key: click copies "124 BPM · A minor". Pending shows "Analysing…".
+  - BPM/key: click measures the song from its own audio and opens the
+    reading with Copy; while it runs the tooltip says "Finding this song's
+    audio…" or "Listening for the beat…".
   - Credits: a popover on the row. It never changes what is playing.
   - Add to last-used playlist: right-click picks another playlist.
 - **Toasts** rise out of the island and leave after 2.6 s. They carry at
@@ -171,7 +173,7 @@ October; the dated sections below record what changed since. The handoff in
 | Top bar | The existing Spotifast bar in the new palette. The mark, the link-aware search and the helper dot are not built. |
 | Floating sidebar | Built: docked card, or edge handle and slide-out when hidden. The narrow rail is the existing compact sidebar. Group item and badge are not built. |
 | Player island | Built with every existing control, the three queue tiles and the Replace, Next and Previous swipes. It is up to 1,120 px wide (the existing controls need the room), not 760. BPM and key, share and the bottom progress line are not on it. |
-| Row tools | Built in song lists (not the compact queue rows): Download, BPM/key (off, with its reason), Credits popover, Add to last-used playlist (this session and account only; right-click picks another playlist). Download formats, stems and DAW naming on right-click are not built. |
+| Row tools | Built in song lists (not the compact queue rows): Download, BPM/key (measured from the song's own audio, with the reason for a source Encore cannot hear), Credits popover, Add to last-used playlist (this session and account only; right-click picks another playlist). Download formats, stems and DAW naming on right-click are not built. |
 | Now playing | Built: grows out of the island, title wipe, pills, Up next, Lyrics and Credits tabs with a sliding selection. No grain, no transport of its own (the island stays below it). |
 | Home | The group's newest shares first, with join, error, loading and empty lines; Spotify's shelves after. New releases and blended For you need backend data first. |
 | Group feed and composer | The backend's friends panel; not restyled. |

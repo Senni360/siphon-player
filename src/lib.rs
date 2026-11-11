@@ -6,12 +6,14 @@ pub mod app;
 #[cfg(target_os = "linux")]
 pub mod appearance;
 pub mod artist_sources;
+pub mod audio_probe;
 pub mod auth;
 pub mod autoscroll;
 pub mod backend;
 pub mod beat_analysis;
 pub mod beats;
 pub mod bidi;
+pub mod bpm_key;
 pub mod brand;
 pub mod cast;
 pub mod credentials;

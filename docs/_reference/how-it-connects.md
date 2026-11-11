@@ -29,6 +29,15 @@ SoundCloud's public listings. No Spotify audio or account grant goes to the
 helper, and playback is unchanged.
 See [Downloads](/downloads/) for requests, defaults and network access.
 
+A row's **BPM and key** tool reads the song's own audio, never Spotify's:
+a downloaded or local file needs no network, and a SoundCloud or YouTube
+song uses the same stream playback would. A Spotify song is measured only
+from a download the app already has or from the download matcher's saved
+match; with neither, the tool says why instead of substituting a source.
+The reading is cached in `bpm-key.json` in the profile's cache folder, so a
+song is measured once. No audio leaves this computer and no credentials are
+sent to the audio host.
+
 Siphon uses separate credentials for Web API access and local playback:
 
 1. **Your own Spotify app**, the personal app, carries the Web API: account,
