@@ -88,7 +88,7 @@ impl Key {
 /// One track's tempo and key, as the analysis heard them.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Reading {
-    /// Whole beats per minute, folded into 70–180.
+    /// Whole beats per minute, folded into 68–182.
     #[serde(default)]
     pub bpm: u16,
     /// The key with the Pearson correlation of the track's chroma against
@@ -1178,7 +1178,7 @@ mod tests {
 
     #[test]
     fn a_boom_bap_pocket_with_sixteenth_hats_is_not_doubled() {
-        // The bench's worst case: a 85ÔÇô90 BPM pocket under 16th hats used to
+        // The bench's worst case: a 85–90 BPM pocket under 16th hats used to
         // come back as an exact doubling.
         for bpm in [85.0, 87.0, 90.0] {
             let reading = analyze(&drum_pattern(16.0, bpm, 4), RATE)
