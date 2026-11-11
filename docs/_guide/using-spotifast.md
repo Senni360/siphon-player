@@ -609,6 +609,13 @@ in `settings.json`, by the device's own id, so it survives renames and
 reordering. While a saved output is unplugged, music plays through the system
 default, and the output stays listed so you can see and change the choice.
 
+When another app takes the output for itself, such as a music program using an
+exclusive or ASIO driver, or the output is unplugged while music plays, the
+song waits where it stopped and Siphon says so once. It opens the output again
+by itself, at the same place in the song, as soon as the other app lets go or
+another output becomes the default, so there is nothing to press. Pausing or
+playing while it waits is kept: music carries on only if you still want it to.
+
 On Linux, Siphon plays through PipeWire when it is running, otherwise
 through a PulseAudio server, and otherwise straight to ALSA. The picker lists
 that sound system's outputs. Siphon 0.13.3 and earlier saved an output by

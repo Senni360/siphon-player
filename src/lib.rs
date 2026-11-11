@@ -7,6 +7,7 @@ pub mod app;
 pub mod appearance;
 pub mod artist_sources;
 pub mod audio_probe;
+pub mod audio_recovery;
 pub mod auth;
 pub mod autoscroll;
 pub mod backend;

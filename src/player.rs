@@ -8,7 +8,7 @@
 //! is doing.
 
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow};
@@ -39,6 +39,7 @@ use librespot_playback::{
 use sha1::{Digest, Sha1};
 
 use crate::api::models::ArtistRef;
+use crate::audio_recovery::Wanted;
 use crate::sink::{AudioControl, DeviceHook, ErrorHook, RodioSink};
 use crate::vis::{AudioTap, Tapped};
 
@@ -467,6 +468,10 @@ pub struct Engine {
     /// The player came from a dropped session and still plays what that
     /// session left it, until something is loaded through this one.
     carrying: std::sync::atomic::AtomicBool,
+    /// How this engine tells the interface what it is doing, for the states
+    /// no librespot event brings: the device coming back, or a pause that
+    /// ends the wait for it.
+    notify: Notify,
 }
 
 impl Engine {
@@ -569,6 +574,14 @@ impl Engine {
             "Spotify playback: session connected; decoder_ready={}",
             audio.external_output().is_some()
         );
+        // A device taken by another app pauses the song, and librespot never
+        // writes again, so this task is what brings the music back.
+        spawn_device_recovery(
+            Arc::downgrade(&player),
+            Arc::clone(&audio),
+            Arc::clone(&state),
+            Arc::clone(&notify),
+        );
         Ok(Self {
             hybrid_events: Mutex::new(None),
             player,
@@ -582,6 +595,7 @@ impl Engine {
             closing,
             audio,
             carrying: std::sync::atomic::AtomicBool::new(carrying),
+            notify,
         })
     }
 
@@ -950,6 +964,9 @@ impl Engine {
         // autoplay when SessionConfig enables it. Keep Spirc detached and
         // give the decoder exactly this list's sole track instead.
         self.audio.inhibit_spotify(false);
+        // The row's own answer for whether the song plays when the device
+        // that was taken comes back.
+        self.note_output_choice(Wanted::playing(spec.play));
         log::info!(
             "Spotify playback: loading hybrid child generation={}",
             tag.generation
@@ -971,6 +988,9 @@ impl Engine {
     }
 
     pub fn hybrid_transport(&self, playing: bool) {
+        // The listener chose: Spotify's device wait follows their answer, and
+        // the output message has been answered.
+        self.note_output_choice(Wanted::playing(playing));
         if playing {
             self.player.play();
         } else {
@@ -987,7 +1007,29 @@ impl Engine {
         Ok(())
     }
 
+    /// The listener's choice reaches the output wait, which a device that was
+    /// taken may be holding: a pause stops the retries, a play keeps them, and
+    /// the loss that showed the device message has been answered, so the next
+    /// one speaks again.
+    fn note_output_choice(&self, wanted: Wanted) {
+        self.audio.choose_output(wanted);
+        forget_output_message(&self.state, &self.notify);
+    }
+
     fn send_command(&self, command: PlayerCommand) -> Result<()> {
+        match &command {
+            PlayerCommand::Toggle => {
+                let playing = self
+                    .state
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .playback
+                    == Playback::Playing;
+                self.note_output_choice(Wanted::playing(!playing));
+            }
+            PlayerCommand::Load(spec) => self.note_output_choice(Wanted::playing(spec.play)),
+            _ => {}
+        }
         let spirc = &self.spirc;
         match command {
             PlayerCommand::Toggle => spirc.play_pause()?,
@@ -1180,6 +1222,9 @@ fn sink_builder(
                 RodioSink::new(device, report, volume, buffer_ms, Arc::clone(&audio))
                     .on_device(saved),
             ));
+            // The engine's retry opens this output itself after a loss,
+            // without waiting for librespot to write again.
+            audio.watch_output(&sink);
             let external = crate::sink::ExternalPcm {
                 sink: Arc::clone(&sink),
                 control: Arc::clone(&audio),
@@ -1211,6 +1256,95 @@ fn sink_builder(
         }),
         Box::new(NoOpVolume),
     )
+}
+
+/// Spawns the task that brings the music back after a device goes away,
+/// taking over from the session's own so two do not open the device at once.
+fn spawn_device_recovery(
+    player: Weak<Player>,
+    audio: Arc<AudioControl>,
+    state: Arc<Mutex<LocalState>>,
+    notify: Notify,
+) {
+    let task = tokio::spawn(device_recovery(player, Arc::clone(&audio), state, notify));
+    audio.own_recovery(task.abort_handle());
+}
+
+/// Waits for the output device to come back, then plays on from where the
+/// music stopped.
+///
+/// A write that finds the device gone pauses librespot, which is what the
+/// song needs: it would otherwise run on silently to its end. But nothing
+/// would try the device again, because the sink only opens it while librespot
+/// is writing, so this task owns the retries: quickly at first, then every
+/// few seconds, until the app that took the speakers lets go or Windows moves
+/// the default output to another device. Every attempt runs off the runtime,
+/// because asking the sound system waits, and sleeps in between, so nothing
+/// spins.
+async fn device_recovery(
+    player: Weak<Player>,
+    audio: Arc<AudioControl>,
+    state: Arc<Mutex<LocalState>>,
+    notify: Notify,
+) {
+    loop {
+        audio.wait_for_output_loss().await;
+        while let Some(delay) = audio.next_output_attempt() {
+            tokio::time::sleep(delay).await;
+            if !audio.output_waiting() {
+                // The listener paused, or the sink opened the device itself
+                // while librespot was still being written to.
+                break;
+            }
+            let attempt = Arc::clone(&audio);
+            match tokio::task::spawn_blocking(move || attempt.reopen_output()).await {
+                Ok(Ok(())) => {}
+                // Still busy: said once already, and the schedule goes on.
+                Ok(Err(error)) => {
+                    log::debug!("the audio output is still not available: {error}");
+                    continue;
+                }
+                // Opening panicked. Retrying cannot help, and holding the
+                // song would spin this loop.
+                Err(error) => {
+                    log::error!("opening the audio output again failed: {error}");
+                    break;
+                }
+            }
+            // Opening asks the sound system and takes a moment: the listener
+            // may have paused, or another engine taken the output, since.
+            let play = audio.recovered_output() && !audio.spotify_inhibited();
+            forget_output_message(&state, &notify);
+            if play && let Some(player) = player.upgrade() {
+                // librespot paused for the lost write: the song carries on
+                // from the position it stopped at.
+                player.play();
+            }
+            break;
+        }
+        // Whatever ended the wait, the next failure starts a fresh schedule
+        // and wakes this loop again.
+        audio.end_output_wait();
+    }
+}
+
+/// The loss has been answered: the interface stops showing the device
+/// message, so a later loss says so again.
+fn forget_output_message(state: &Mutex<LocalState>, notify: &Notify) {
+    let snapshot = {
+        let mut current = state.lock().unwrap_or_else(|p| p.into_inner());
+        if !current.error.as_deref().is_some_and(is_output_message) {
+            return;
+        }
+        current.error = None;
+        current.clone()
+    };
+    notify(EngineEvent::State(snapshot));
+}
+
+/// Whether an engine error is about the output device rather than a song.
+fn is_output_message(error: &str) -> bool {
+    error == crate::sink::NO_DEVICE || error == crate::sink::OUTPUT_INTERRUPTED
 }
 
 /// What an engine is heard at, for the engine that replaces it.
@@ -1284,6 +1418,10 @@ async fn run_events(
             _ => {}
         }
         audio.handle_player_event(&event);
+        // The retry that opens a taken device follows the decoder too: a song
+        // that plays again carries on when the device is back, and a pause
+        // from elsewhere ends the waiting.
+        audio.note_output_event(&event);
         let snapshot = {
             let mut current = state.lock().unwrap_or_else(|p| p.into_inner());
             if apply_event(&mut current, event) {
@@ -2676,5 +2814,40 @@ mod tests {
     fn an_engine_is_heard_at_the_level_set_last() {
         let set_here = 3276;
         assert_eq!(Heard::at(set_here).level(), set_here);
+    }
+
+    /// A device loss is said once. The engine retires the message when the
+    /// loss is answered, so a later one speaks again, and a song's own
+    /// failure is not the device's to retire.
+    #[test]
+    fn the_output_message_is_retired_so_a_later_loss_speaks_again() {
+        let state = Mutex::new(LocalState {
+            error: Some(crate::sink::OUTPUT_INTERRUPTED.into()),
+            ..LocalState::default()
+        });
+        let seen: Arc<Mutex<Vec<Option<String>>>> = Arc::default();
+        let store = Arc::clone(&seen);
+        let notify: Notify = Arc::new(move |event| {
+            if let EngineEvent::State(state) = event {
+                store
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .push(state.error);
+            }
+        });
+        forget_output_message(&state, &notify);
+        assert!(state.lock().unwrap().error.is_none());
+        assert_eq!(seen.lock().unwrap().as_slice(), [None]);
+
+        let state = Mutex::new(LocalState {
+            error: Some(AUDIO_KEY_REFUSED.into()),
+            ..LocalState::default()
+        });
+        forget_output_message(&state, &notify);
+        assert_eq!(
+            state.lock().unwrap().error.as_deref(),
+            Some(AUDIO_KEY_REFUSED)
+        );
+        assert_eq!(seen.lock().unwrap().len(), 1, "nothing new was said");
     }
 }
