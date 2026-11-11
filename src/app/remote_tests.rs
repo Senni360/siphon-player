@@ -363,7 +363,10 @@ fn an_artist_answer_carries_the_upcoming_release() {
 fn the_phone_is_told_this_computer_can_download() {
     let app = test_app("remote-can");
     let told = serde_json::to_value(app.remote_snapshot()).unwrap();
-    assert_eq!(told["can"], serde_json::json!(["download", "presave"]));
+    assert_eq!(
+        told["can"],
+        serde_json::json!(["download", "presave", "add_to_playlist"])
+    );
 }
 
 #[test]

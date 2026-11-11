@@ -737,11 +737,10 @@ impl App {
                             .get()
                             .into_iter()
                             .flatten()
-                            .filter_map(|list| {
-                                self.can_edit_playlist(list).then(
-                                    || json!({ "id": list.id, "name": list.name, "mixed": false }),
-                                )
-                            }),
+                            .filter(|list| self.can_edit_playlist(list))
+                            .map(
+                                |list| json!({ "id": list.id, "name": list.name, "mixed": false }),
+                            ),
                     )
                     .collect();
                 json!({
