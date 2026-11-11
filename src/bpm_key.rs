@@ -325,6 +325,19 @@ fn comb(autocorrelation: &[f32], lag: f64) -> f32 {
 /// as well at twice the beat as at the beat itself. From there one climb
 /// lands on that period's own peak.
 fn best_period(envelope: &[f32], env_rate: f64, cancel: &AtomicBool) -> Option<f64> {
+    best_period_near(envelope, env_rate, 0.97, cancel)
+}
+
+/// As [`best_period`], with the share of the best score a slower period must
+/// keep to still count. The combined envelope uses a looser share so a fast
+/// subdivision is not mistaken for the beat; a single band keeps the strict
+/// one so an accent two beats apart is not taken for the beat.
+fn best_period_near(
+    envelope: &[f32],
+    env_rate: f64,
+    near_share: f32,
+    cancel: &AtomicBool,
+) -> Option<f64> {
     const SLOWEST_BPM: f64 = 40.0;
     const FASTEST_BPM: f64 = 240.0;
     if envelope.len() < 32 || envelope.iter().all(|value| value.abs() < 1.0e-6) {
@@ -344,9 +357,10 @@ fn best_period(envelope: &[f32], env_rate: f64, cancel: &AtomicBool) -> Option<f
     if !best.is_finite() {
         return None;
     }
-    // 0.97 rather than the old 0.8: an accent two beats apart should not be
-    // mistaken for the beat itself just because its harmonics line up.
-    let near = 0.97 * best;
+    // The old 0.8 was a subdivision bias; even 0.97 is too eager on a single
+    // band, where an accent two beats apart lines its harmonics up with the
+    // beat.
+    let near = near_share * best;
     let mut found = slowest;
     let mut lag = fastest;
     while lag <= slowest {
@@ -482,16 +496,20 @@ fn tempo(mono: &[f32], cancel: &AtomicBool) -> Option<f32> {
             .map(|i| broad[i] + 0.8 * low[i] + 0.8 * mid[i] + 0.25 * high[i])
             .collect::<Vec<f32>>(),
     );
-    let all_period = best_period(&all, env_rate, cancel)?;
+    let all_period = best_period_near(&all, env_rate, 0.9, cancel)?;
     let low_period = best_period(low, env_rate, cancel);
     let mid_period = best_period(mid, env_rate, cancel);
     let close = |left: f64, right: f64| (left / right - 1.0).abs() < 0.08;
     // A click on the beat with a hat between: the low band keeps the beat
     // while the mids follow the subdivision. That is an accent, not a
-    // second beat, so the low band's period wins. A band with no sound at
-    // all has no period and cannot make that claim.
-    let chosen = match (low_period, mid_period) {
-        (Some(low), Some(mid)) if close(low, 2.0 * all_period) && close(mid, all_period) => low,
+    // second beat, so the low band's period wins. When the mids also sit at
+    // half the combined rate, as a kick and snare alternating on the beat
+    // do, the two bands are filling each other's gaps and the combined
+    // period is the beat itself.
+    let low_is_half = low_period.is_some_and(|low| close(low, 2.0 * all_period));
+    let mid_is_half = mid_period.is_some_and(|mid| close(mid, 2.0 * all_period));
+    let chosen = match low_period {
+        Some(low) if low_is_half && !mid_is_half => low,
         _ => all_period,
     };
     let refined = refine_grid(&all, chosen, cancel).unwrap_or(chosen);
@@ -1117,9 +1135,8 @@ mod tests {
     #[test]
     fn a_hi_hat_subdivision_does_not_double_the_beat() {
         // 16th hats over a boom-bap pocket used to read as an exact
-        // doubling; the 140 pattern uses 8th hats so the test asks for the
-        // beat it was written at.
-        for (bpm, division) in [(70.0, 4), (87.0, 4), (140.0, 2)] {
+        // doubling; a fast 140 pattern with them used to read as 70.
+        for (bpm, division) in [(70.0, 4), (87.0, 4), (140.0, 2), (140.0, 4)] {
             let reading = analyze(&clicks_with_hats(16.0, bpm, division), RATE)
                 .expect("a click track has an answer");
             assert!(
