@@ -32,11 +32,18 @@ export function keepPlace() {
   if (shownView) shownView.scroll = screen.scrollTop;
 }
 
+/** A computer that is there says so within a moment. Only a longer wait is worth a word. */
+const QUIET_MS = 1500;
+let bannerTimer = null;
+
 export function renderBanner() {
-  if (!player.online && Date.now() - openedAt < WAKE_MS) {
-    bannerSlot?.replaceChildren(h('div', { class: 'banner waking', role: 'status' }, h('span', { class: 'dot' }),
-      h('div', {}, h('b', { text: 'Connecting to your computer…' }), 'This can take a few seconds.')));
-    setTimeout(renderBanner, WAKE_MS);
+  clearTimeout(bannerTimer);
+  const waited = Date.now() - openedAt;
+  if (!player.online && waited < WAKE_MS) {
+    const quiet = waited < QUIET_MS;
+    bannerSlot?.replaceChildren(...(quiet ? [] : [h('div', { class: 'banner waking', role: 'status' }, h('span', { class: 'dot' }),
+      h('div', {}, h('b', { text: 'Connecting to your computer…' }), 'This can take a few seconds.'))]));
+    bannerTimer = setTimeout(renderBanner, (quiet ? QUIET_MS : WAKE_MS) - waited);
     return;
   }
   const telling = hasSpotify()
