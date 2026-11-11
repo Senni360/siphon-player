@@ -706,6 +706,17 @@ pub fn populate(app: &mut App) {
         artist: Loadable::Loaded(artist(0)),
         top_tracks: Loadable::Loaded(tracks.iter().take(10).cloned().collect()),
         related: Loadable::Loaded((1..8).map(artist).collect()),
+        // An album coming out in nine days, not pre-saved yet.
+        upcoming: Loadable::Loaded(vec![crate::session_reads::Upcoming {
+            uri: "spotify:prerelease:0kRaNkRxpO16BjxJU0IQAL".into(),
+            album_uri: Some("spotify:album:alb7".into()),
+            name: "Afterglow".into(),
+            image: crate::api::models::pick_image(&album(7).images, 300).map(str::to_owned),
+            release: Some(jiff::Timestamp::now().as_second() + 9 * 86_400 - 3_600),
+            kind: Some("album".into()),
+            saved: Some(false),
+            ..Default::default()
+        }]),
         ..ArtistPage::default()
     };
     let mut albums = PagedList::default();

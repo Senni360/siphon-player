@@ -147,72 +147,7 @@ pub(super) fn show(app: &mut App, ui: &mut egui::Ui, data: &Prerelease) {
     });
     ui.add_space(48.0);
     ui.horizontal(|ui| {
-        let green = Color32::from_rgb(0x1e, 0xd7, 0x60);
-        let saved = data.saved == Some(true);
-        let ink = if saved { palette.text } else { Color32::BLACK };
-        let save_label = if data.saving {
-            gettext(locale, "Saving…")
-        } else if data.saved == Some(true) {
-            gettext(locale, "Pre-saved")
-        } else {
-            gettext(locale, "Pre-save")
-        };
-        let enabled = data.saved.is_some() && !data.saving && app.local_ready;
-        let text_color = if enabled {
-            ink
-        } else {
-            ink.gamma_multiply(0.45)
-        };
-        let label = crate::bidi::layout_line(
-            ui.painter(),
-            save_label.as_ref(),
-            theme::semibold(14.0),
-            text_color,
-        );
-        let content_width = label.size().x + 8.0 + 16.0;
-        let save_button = ui
-            .add_enabled(
-                enabled,
-                egui::Button::new("")
-                    .fill(if saved { palette.surface } else { green })
-                    .stroke(if saved {
-                        Stroke::new(1.0, palette.outline)
-                    } else {
-                        Stroke::NONE
-                    })
-                    .corner_radius(24)
-                    .min_size(vec2(content_width + 48.0, 48.0)),
-            )
-            .on_hover_text(gettext(locale, "Pre-save on Spotify"));
-        save_button.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, save_label.as_ref())
-        });
-        let label_left = save_button.rect.center().x - content_width / 2.0;
-        let icon_left = label_left + label.size().x + 8.0;
-        ui.painter().galley(
-            egui::pos2(
-                label_left,
-                save_button.rect.center().y - label.size().y / 2.0,
-            ),
-            label,
-            text_color,
-        );
-        let icon_rect = egui::Rect::from_min_size(
-            egui::pos2(icon_left, save_button.rect.center().y - 8.0),
-            Vec2::splat(16.0),
-        );
-        theme::paint_icon(
-            ui,
-            if saved {
-                Icon::CircleCheck
-            } else {
-                Icon::CirclePlus
-            },
-            icon_rect,
-            16.0,
-            if saved { green } else { ink },
-        );
-        if save_button.clicked() {
+        if presave_button(ui, app, data.saved, data.saving, 48.0) {
             app.actions.push(Action::SetPrereleaseSaved {
                 uri: data.uri.clone(),
                 saved: data.saved != Some(true),
@@ -471,6 +406,84 @@ fn countdown(ui: &mut egui::Ui, parts: [i64; 4], locale: crate::i18n::Locale, co
                 }
             });
         });
+}
+
+/// The pre-save control, the same wherever an upcoming release shows: Spotify
+/// green to pre-save, a quiet outline with a check once pre-saved. `saved` is
+/// `None` while Spotify has not said, which leaves it disabled. Returns whether
+/// it was pressed.
+pub(super) fn presave_button(
+    ui: &mut egui::Ui,
+    app: &App,
+    saved: Option<bool>,
+    saving: bool,
+    height: f32,
+) -> bool {
+    let palette = app.palette;
+    let locale = app.locale;
+    let green = Color32::from_rgb(0x1e, 0xd7, 0x60);
+    let done = saved == Some(true);
+    let ink = if done { palette.text } else { Color32::BLACK };
+    let save_label = if saving {
+        gettext(locale, "Saving…")
+    } else if done {
+        gettext(locale, "Pre-saved")
+    } else {
+        gettext(locale, "Pre-save")
+    };
+    let enabled = saved.is_some() && !saving && app.local_ready;
+    let text_color = if enabled {
+        ink
+    } else {
+        ink.gamma_multiply(0.45)
+    };
+    let size = if height >= 44.0 { 14.0 } else { 13.0 };
+    let label = crate::bidi::layout_line(
+        ui.painter(),
+        save_label.as_ref(),
+        theme::semibold(size),
+        text_color,
+    );
+    let content_width = label.size().x + 8.0 + 16.0;
+    let button = ui
+        .add_enabled(
+            enabled,
+            egui::Button::new("")
+                .fill(if done { palette.surface } else { green })
+                .stroke(if done {
+                    Stroke::new(1.0, palette.outline)
+                } else {
+                    Stroke::NONE
+                })
+                .corner_radius(height / 2.0)
+                .min_size(vec2(content_width + height, height)),
+        )
+        .on_hover_text(gettext(locale, "Pre-save on Spotify"));
+    button.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, save_label.as_ref())
+    });
+    let label_left = button.rect.center().x - content_width / 2.0;
+    let icon_left = label_left + label.size().x + 8.0;
+    ui.painter().galley(
+        egui::pos2(label_left, button.rect.center().y - label.size().y / 2.0),
+        label,
+        text_color,
+    );
+    theme::paint_icon(
+        ui,
+        if done {
+            Icon::CircleCheck
+        } else {
+            Icon::CirclePlus
+        },
+        egui::Rect::from_min_size(
+            egui::pos2(icon_left, button.rect.center().y - 8.0),
+            Vec2::splat(16.0),
+        ),
+        16.0,
+        if done { green } else { ink },
+    );
+    button.clicked()
 }
 
 #[cfg(test)]

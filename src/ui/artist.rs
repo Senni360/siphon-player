@@ -32,6 +32,9 @@ pub fn show(app: &mut App, ui: &mut egui::Ui, id: &str) {
             artist_hero(app, ui, artist, preview.as_deref(), Some(&page.sources));
             artist_actions(app, ui, artist, Some(&page));
             accounts_row(app, ui, id, artist, &page);
+            if let Loadable::Loaded(releases) = &page.upcoming {
+                upcoming(app, ui, releases);
+            }
 
             // Popular.
             theme::section_title(ui, &palette, &gettext(locale, "Popular"));
@@ -1063,4 +1066,147 @@ fn elsewhere_list(
         }
     }
     ui.add_space(20.0);
+}
+
+/// When an upcoming release comes out, in words: "Out in 9 days · Nov 20",
+/// "Out tomorrow", "Out today". None once it is out or the date is unknown.
+fn release_words(locale: crate::i18n::Locale, release: i64, now: i64) -> Option<String> {
+    let left = release - now;
+    if left <= 0 {
+        return None;
+    }
+    let days = (left + 86_399) / 86_400;
+    let when = jiff::Timestamp::from_second(release)
+        .ok()?
+        .to_zoned(jiff::tz::TimeZone::system())
+        .strftime("%b %-d")
+        .to_string();
+    Some(match days {
+        ..=1 if left < 86_400 / 2 => gettext(locale, "Out today").into_owned(),
+        ..=1 => gettext(locale, "Out tomorrow").into_owned(),
+        _ => format!(
+            "{} · {when}",
+            ngettext(
+                locale,
+                "Out in {count} day",
+                "Out in {count} days",
+                u32::try_from(days).unwrap_or(u32::MAX)
+            )
+            .replace("{count}", &days.to_string())
+        ),
+    })
+}
+
+/// The artist's upcoming release, as Spotify's own artist page shows it: the
+/// cover with its record, when it comes out, and Pre-save. Pressing the card
+/// opens its countdown page.
+fn upcoming(app: &mut App, ui: &mut egui::Ui, releases: &[crate::session_reads::Upcoming]) {
+    let now = jiff::Timestamp::now().as_second();
+    let Some(release) = releases
+        .iter()
+        .find(|release| release.release.is_none_or(|at| at > now))
+    else {
+        return;
+    };
+    let palette = app.palette;
+    let locale = app.locale;
+    theme::section_title(ui, &palette, &gettext(locale, "Upcoming"));
+    ui.add_space(8.0);
+    const HEIGHT: f32 = 136.0;
+    let width = ui.available_width().min(620.0);
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, HEIGHT), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let lit = super::kit::motion::toward(
+            ui.ctx(),
+            response.id.with("lit"),
+            response.hovered(),
+            super::kit::motion::FEEDBACK,
+        );
+        ui.painter()
+            .rect_filled(rect, 14.0, super::glass_fill(&palette, palette.panel));
+        if lit > 0.0 {
+            ui.painter()
+                .rect_filled(rect, 14.0, palette.surface_hover.gamma_multiply(lit * 0.6));
+        }
+        super::glass_sheen(ui, rect, 14.0);
+        let cover = egui::Rect::from_min_size(
+            rect.min + egui::vec2(16.0, 16.0),
+            egui::Vec2::splat(HEIGHT - 32.0),
+        );
+        let art = release.image.as_deref();
+        let tint = app
+            .tint_for(art)
+            .map(super::glow_color)
+            .unwrap_or(palette.surface_active);
+        let reach = super::home::paint_record(
+            ui,
+            &palette,
+            cover,
+            tint.to_opaque(),
+            0.3 + 0.06 * lit,
+            false,
+        );
+        widgets::paint_shadow(ui, &palette, cover, 8.0);
+        widgets::paint_cover(
+            ui,
+            &palette,
+            art,
+            cover,
+            8.0,
+            Icon::Music,
+            Some(app.backend.art()),
+        );
+        let left = cover.right() + reach.max(cover.width() * 0.3) + 22.0;
+        let room = (rect.right() - left - 16.0).max(40.0);
+        let mut y = rect.top() + 20.0;
+        let mut line = |text: &str, font: egui::FontId, color: egui::Color32, gap: f32| {
+            let galley = widgets::ellipsized(ui, text, font, color, room, 1);
+            let height = galley.size().y;
+            ui.painter().galley(egui::pos2(left, y), galley, color);
+            y += height + gap;
+        };
+        if let Some(words) = release
+            .release
+            .and_then(|at| release_words(locale, at, now))
+        {
+            line(&words, theme::medium(12.5), palette.accent, 4.0);
+        }
+        line(&release.name, theme::semibold(19.0), palette.text, 3.0);
+        let kind = match release.kind.as_deref() {
+            Some("single") => gettext(locale, "Single"),
+            Some("ep") => gettext(locale, "EP"),
+            _ => gettext(locale, "Album"),
+        };
+        line(&kind, theme::regular(13.0), palette.secondary, 0.0);
+    }
+    // The button sits in the card's lower right, over the same rect.
+    let mut pressed_save = false;
+    if release.album_uri.is_some() && release.saved.is_some() || release.saving {
+        let area = egui::Rect::from_min_max(
+            egui::pos2(rect.right() - 200.0, rect.bottom() - 52.0),
+            rect.right_bottom() - egui::vec2(16.0, 16.0),
+        );
+        let mut child = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(area)
+                .layout(egui::Layout::right_to_left(egui::Align::Center)),
+        );
+        pressed_save =
+            super::prerelease::presave_button(&mut child, app, release.saved, release.saving, 36.0);
+    }
+    if let Some(error) = &release.save_error {
+        ui.add_space(6.0);
+        theme::subtle(ui, &palette, error);
+    }
+    if pressed_save {
+        if let Some(album_uri) = release.album_uri.clone() {
+            app.actions.push(Action::SetUpcomingSaved {
+                album_uri,
+                saved: release.saved != Some(true),
+            });
+        }
+    } else if response.clicked() {
+        app.actions.push(Action::OpenLink(release.uri.clone()));
+    }
+    ui.add_space(24.0);
 }

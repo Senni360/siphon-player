@@ -543,7 +543,7 @@ const RECORD_OUT_PLAYING: f32 = 0.41;
 /// as a release at a glance and a song stays a bare cover. Grooves, a label in
 /// the cover's own colour, and a reflection that turns while it plays. Returns
 /// how far it reaches past the cover's right edge.
-fn paint_record(
+pub(super) fn paint_record(
     ui: &egui::Ui,
     palette: &theme::Palette,
     cover: egui::Rect,
