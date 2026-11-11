@@ -34,6 +34,29 @@ pub struct MixedTrack {
     /// The upload key of a playlist local file, so the phone can ask the edge
     /// for its audio. Nothing else sets it.
     pub upload: Option<String>,
+    /// A SoundCloud song's own public page, which the edge plays it from.
+    /// Never a private link: see [`public_soundcloud_link`].
+    pub link: Option<String>,
+}
+
+/// A SoundCloud song's page when anyone may open it: `soundcloud.com/artist/song`
+/// and nothing more. A private link carries a secret third part or a query, and
+/// is not something to leave on a server.
+pub fn public_soundcloud_link(link: Option<&str>) -> Option<String> {
+    let link = crate::soundcloud::permalink(link)?;
+    let url = reqwest::Url::parse(link).ok()?;
+    let plain = |part: &str| {
+        !part.is_empty()
+            && part
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+    };
+    let parts: Vec<&str> = url.path().trim_matches('/').split('/').collect();
+    (url.query().is_none()
+        && url.fragment().is_none()
+        && parts.len() == 2
+        && parts.iter().all(|part| plain(part)))
+    .then(|| link.to_owned())
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,6 +101,9 @@ pub fn playlists_doc(spotify: &[PlaylistSummary], mixed: &[MixedPlaylist]) -> Va
                             "album": track.image.as_ref().map(|url| json!({ "images": [{ "url": url }] })),
                         },
                     });
+                    if let Some(link) = &track.link {
+                        entry["track"]["link"] = json!(link);
+                    }
                     if let Some(upload) = &track.upload {
                         entry["upload"] = json!(upload);
                         entry["track"]["upload"] = json!(upload);
@@ -534,6 +560,7 @@ mod tests {
                         duration_ms: 180_000,
                         image: None,
                         upload: Some("local-abc".into()),
+                        link: None,
                     },
                     MixedTrack {
                         id: "e2".into(),
@@ -543,10 +570,16 @@ mod tests {
                         duration_ms: 1_000,
                         image: Some("https://i.example/b".into()),
                         upload: None,
+                        link: Some("https://soundcloud.com/b/cloud".into()),
                     },
                 ],
             }],
         );
+        assert_eq!(
+            doc["mixed"][0]["tracks"][1]["track"]["link"],
+            "https://soundcloud.com/b/cloud"
+        );
+        assert!(doc["mixed"][0]["tracks"][0]["track"].get("link").is_none());
         assert_eq!(doc["playlists"][0]["uri"], "spotify:playlist:abc");
         assert_eq!(doc["playlists"][0]["track_count"], 3);
         let mixed = &doc["mixed"][0];
@@ -889,5 +922,22 @@ mod tests {
         assert_eq!(puts[1].json()["data"]["position_ms"], 10_000);
         drop(writer);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_public_soundcloud_page_is_left_on_the_edge() {
+        let public = |link| public_soundcloud_link(Some(link));
+        assert_eq!(
+            public("https://soundcloud.com/lilgunnr/somuchmore").as_deref(),
+            Some("https://soundcloud.com/lilgunnr/somuchmore")
+        );
+        assert_eq!(public("https://soundcloud.com/artist/song/s-AbCdEf"), None);
+        assert_eq!(
+            public("https://soundcloud.com/artist/song?secret_token=s-x"),
+            None
+        );
+        assert_eq!(public("https://soundcloud.com/artist"), None);
+        assert_eq!(public("https://evil.example/artist/song"), None);
+        assert_eq!(public_soundcloud_link(None), None);
     }
 }

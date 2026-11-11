@@ -373,7 +373,8 @@ fn bpm_popover(app: &mut App, ctx: &egui::Context, id: Id, uri: &str, anchor: Re
                 theme::soft_button(ui, &palette, None, &gettext(locale, "Stop"), false).clicked();
         } else if let Some(error) = &failed {
             theme::text(ui, error, theme::regular(12.5), palette.secondary);
-            retry = ui.button(gettext(locale, "Try again")).clicked();
+            retry = theme::soft_button(ui, &palette, None, &gettext(locale, "Try again"), false)
+                .clicked();
         } else {
             theme::text(
                 ui,

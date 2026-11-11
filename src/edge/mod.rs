@@ -32,7 +32,7 @@ pub mod sync;
 mod upload;
 mod vault;
 
-pub use sync::{MixedPlaylist, MixedTrack, PlaylistSummary};
+pub use sync::{MixedPlaylist, MixedTrack, PlaylistSummary, public_soundcloud_link};
 
 /// The upload key a playlist local file is offered under, named by the sync
 /// record before the file has finished uploading.

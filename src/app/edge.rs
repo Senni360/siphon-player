@@ -221,6 +221,13 @@ impl App {
                             upload: (self.settings.local_files_on_phone
                                 && uri.starts_with("spotify:local:"))
                             .then(|| edge::local_key(&uri)),
+                            link: crate::soundcloud::is_track_uri(&uri)
+                                .then(|| {
+                                    edge::public_soundcloud_link(
+                                        entry.track.external_urls.spotify.as_deref(),
+                                    )
+                                })
+                                .flatten(),
                             uri,
                         }
                     })

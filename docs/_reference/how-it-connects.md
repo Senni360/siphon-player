@@ -201,7 +201,9 @@ before, and reconnects wait 1, 2, 4, 8, 16 and then 30 seconds.
 
 While a phone is linked, this computer also keeps the edge's small per-account store
 current: the playlist rows and the mixed playlists with their songs, the queue and
-where it is, and the saved Spotify-to-YouTube/SoundCloud matches. Each document is
+where it is, and the saved Spotify-to-YouTube/SoundCloud matches. A SoundCloud song in
+a mixed playlist carries its own public page, which the edge plays it from; a private
+link is never sent. Each document is
 offered on its own, so a moving queue does not rewrite the playlists; a change waits
 three seconds, then the snapshot is offered with the revision the edge last returned.
 A `409` means a phone wrote first, so the stored revision is read and the snapshot
