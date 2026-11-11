@@ -10,6 +10,15 @@ import { once } from "node:events";
 const args = process.argv.slice(2);
 const sleep = Number(process.env.FAKE_DELAY_MS ?? 0);
 
+// A tool that refuses before it writes anything, as yt-dlp does for a track it
+// may not fetch: the reason goes to stderr with a non-zero exit.
+const earlyError = process.env.FAKE_STDERR ?? "";
+if (earlyError.length > 0) {
+  process.stderr.write(`${earlyError}\n`);
+  const refused = Number(process.env.FAKE_EXIT_CODE ?? 1);
+  process.exit(refused === 0 ? 1 : refused);
+}
+
 function valueAfter(flag) {
   const index = args.indexOf(flag);
   return index >= 0 ? args[index + 1] : undefined;

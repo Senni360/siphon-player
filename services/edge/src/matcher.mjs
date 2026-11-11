@@ -7,7 +7,9 @@
 // A candidate passes only when its title is the same song and its version is
 // the one that was asked for. Credits, tags and spelling are metadata, never
 // identity: "Sky (Prod. By Art Dealer)" is "Sky", but "Sky (Live)" is another
-// recording. When the evidence is thin the answer is no match.
+// recording. An account that spells the artist's name with no spaces is that
+// artist, and the artist's own upload may inflect one title word. When the
+// evidence is thin the answer is no match.
 
 /** Strong version words: they can only describe another recording. */
 export const QUALIFIERS = Object.freeze([
@@ -99,6 +101,9 @@ export const BOILERPLATE = Object.freeze([
   "video",
   "visualizer",
 ]);
+
+/** An inflected title scores this much below the same title spelled exactly. */
+const INFLECTION_PENALTY = 0.01;
 
 const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const WORD_RUN = /[\p{L}\p{N}\p{M}]+/gu;
@@ -339,6 +344,7 @@ function parseWanted(name) {
   const soft = softTags(tokensOf(name));
   return {
     words: set(tokens),
+    tokens,
     collapsed: collapsed(tokens),
     versions,
     soft,
@@ -391,6 +397,7 @@ function parseCandidate(title, wanted) {
   const soft = softTags(tokensOf(title));
   return {
     words: set(tokens),
+    tokens,
     collapsed: collapsed(tokens),
     versions,
     soft,
@@ -441,6 +448,45 @@ function symbolsOnlyArtist(wanted, candidate) {
   return credits.some((credit) => same(credit));
 }
 
+/** Folded and stripped of spaces and punctuation: "Playboi Carti" is "playboicarti". */
+function accountKey(text) {
+  return fold(text).replace(/[^\p{L}\p{N}\p{M}]+/gu, "");
+}
+
+function sameAccount(left, right) {
+  const key = accountKey(left);
+  return key.length > 0 && key === accountKey(right);
+}
+
+/**
+ * An uploader or credit that spells the artist with no spaces: the account
+ * `playboicarti` is Playboi Carti. Equality only, so an account that merely
+ * contains the name, or a one-word artist inside a longer handle, is not the
+ * artist.
+ */
+function artistAccount(primaryName, candidate) {
+  if (sameAccount(primaryName, candidate?.uploader ?? "")) return true;
+  const credits = Array.isArray(candidate?.credits) ? candidate.credits : [];
+  return credits.some((credit) => sameAccount(primaryName, credit));
+}
+
+/**
+ * One word inflected from another: "go" and "going", "love" and "loved". The
+ * shorter is a prefix of the longer, at least two letters long, and no more
+ * than three letters shorter.
+ */
+function inflected(left, right) {
+  if (left === right) return true;
+  const [shorter, longer] = left.length <= right.length ? [left, right] : [right, left];
+  return shorter.length >= 2 && longer.startsWith(shorter) && longer.length - shorter.length <= 3;
+}
+
+/** The same title with its words inflected; a different word count is a different title. */
+function inflectedTitle(wanted, parsed) {
+  if (wanted.tokens.length === 0 || wanted.tokens.length !== parsed.tokens.length) return false;
+  return wanted.tokens.every((token, index) => inflected(token, parsed.tokens[index]));
+}
+
 function better(left, right) {
   if (left.score !== right.score) return left.score > right.score;
   if (left.isrc !== right.isrc) return left.isrc;
@@ -469,29 +515,39 @@ function evaluate(track, candidate) {
   const primary = set(tokensOf(primaryName));
   const credited = publisherCredit(primary, candidate);
   if (difference > 3 && !(isrc || (identityExact && (candidate?.verified === true || credited)))) return null;
+  // The artist's own account spelling a title with its words inflected is the
+  // same song: "Never Going Down" is "Never Go Down". The versions gate below
+  // must still agree and the uploader itself must be the artist, so a remix, an
+  // instrumental, a fan account or a credit alone cannot ride on this. The
+  // penalty keeps the score just below the same title spelled exactly.
+  const inflectedTitles = sameAccount(primaryName, candidate?.uploader ?? "")
+    && difference <= 1.5
+    && inflectedTitle(wantedTitle, parsed);
   const titleWords = set(tokensOf(candidate?.title ?? ""));
   const evidence = artistEvidence(candidate, titleWords);
   const allArtists = set(tokensOf(artistNames(wanted)));
   const expected = new Set([...wantedTitle.words, ...allArtists]);
   const meaningful = new Set(parsed.words);
   for (const word of BOILERPLATE) if (!expected.has(word)) meaningful.delete(word);
-  const precision = identityExact ? 1 : coverage(meaningful, expected);
+  const precision = identityExact || inflectedTitles ? 1 : coverage(meaningful, expected);
   const artist = coverage(allArtists, evidence);
   const durationPoints = difference <= 3 ? 1 - difference / 3 : 0;
-  const score = 0.5 * precision + 0.35 * artist + 0.15 * durationPoints;
+  const points = 0.5 * precision + 0.35 * artist + 0.15 * durationPoints;
+  const score = inflectedTitles && !identityExact ? Math.max(0, points - INFLECTION_PENALTY) : points;
   const verdict = { score, isrc, verified: candidate?.verified === true, credited };
   if (isrc) return verdict;
   if (primary.size === 0) {
     if (!identityExact || !symbolsOnlyArtist(primaryName, candidate)) return null;
   } else {
     const named = coverage(primary, evidence) >= 1
-      || coverage(set(secondaryTokens(primaryName)), secondaryEvidence(candidate, candidate?.title ?? "")) >= 1;
+      || coverage(set(secondaryTokens(primaryName)), secondaryEvidence(candidate, candidate?.title ?? "")) >= 1
+      || artistAccount(primaryName, candidate);
     if (!named) return null;
   }
   if (!sameSet(parsed.versions, wantedTitle.versions)) return null;
   if (!sameCounts(parsed.identity, wantedTitle.identity)) return null;
   for (const tag of parsed.soft) if (!wantedTitle.soft.has(tag)) return null;
-  if (!identityExact && coverage(wantedTitle.words, parsed.words) < 0.9) return null;
+  if (!identityExact && !inflectedTitles && coverage(wantedTitle.words, parsed.words) < 0.9) return null;
   if (precision < 0.75) return null;
   return verdict;
 }
@@ -506,7 +562,9 @@ function sameSet(left, right) {
  * Returns a score in [0, 1] or null. Every rejection is a gate: a missing
  * duration, a difference over five seconds without the released recording's
  * evidence, a live stream, a missing artist, a different title, a different
- * version, or a title that carries too much extra wording.
+ * version, or a title that carries too much extra wording. An artist's own
+ * account may drop the name's spaces, and its own upload may inflect a title
+ * word; both readings stay narrow and are checked by their own tests.
  */
 export function score(track, candidate) {
   const verdict = evaluate(track, candidate);

@@ -127,15 +127,17 @@ export class MatchService {
   #logger;
   #spawn;
   #now;
+  #unplayable;
   #memo = new Map();
   #running = 0;
   #waiting = [];
 
-  constructor({ config, logger, spawn, now = Date.now }) {
+  constructor({ config, logger, spawn, now = Date.now, unplayable = null }) {
     this.#config = config;
     this.#logger = logger;
     this.#spawn = spawn;
     this.#now = now;
+    this.#unplayable = unplayable;
   }
 
   /** One search at a time on this small machine, with a short line behind it. */
@@ -188,8 +190,15 @@ export class MatchService {
     const memoKey = `${sub}\0${id}`;
     const remembered = this.#memo.get(memoKey);
     if (remembered) {
-      if (remembered.expiresAt === 0 || remembered.expiresAt > this.#now()) return remembered.result;
-      this.#memo.delete(memoKey);
+      // A match whose copy has since proved unplayable is no match at all; the
+      // search below looks for the next one.
+      if (remembered.result.match && this.#unplayable?.has(remembered.result.match.source)) {
+        this.#memo.delete(memoKey);
+      } else if (remembered.expiresAt === 0 || remembered.expiresAt > this.#now()) {
+        return remembered.result;
+      } else {
+        this.#memo.delete(memoKey);
+      }
     }
 
     const primary = wanted.artists[0];
@@ -215,7 +224,13 @@ export class MatchService {
       }
     }
 
-    const candidate = bestMatch(wanted, candidates);
+    // A source that already proved unplayable is not a candidate: the phone
+    // should learn `{match: null}` now and ask the computer, not spend a
+    // resolve on it first.
+    const usable = this.#unplayable
+      ? candidates.filter((candidate) => !this.#unplayable.has(candidate.sourceUri))
+      : candidates;
+    const candidate = bestMatch(wanted, usable);
     const result = candidate
       ? {
           match: {
