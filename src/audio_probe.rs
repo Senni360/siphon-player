@@ -129,6 +129,38 @@ mod tests {
         bytes
     }
 
+    /// A tiny 16-bit stereo WAV of a tone, with the right channel either the
+    /// same tone or its inverse. Averaging the two channels reads silence in
+    /// the inverted one and the tone in the other; taking one channel alone
+    /// cannot do both.
+    fn stereo_wav(rate: u32, seconds: f64, invert: bool) -> Vec<u8> {
+        let frames = (rate as f64 * seconds) as u32;
+        let mut data = Vec::with_capacity(frames as usize * 4);
+        for frame in 0..frames {
+            let t = f64::from(frame) / f64::from(rate);
+            let sample = (std::f64::consts::TAU * 220.0 * t).sin() * 0.5;
+            let left = (sample * f64::from(i16::MAX)) as i16;
+            let right = (if invert { -sample } else { sample } * f64::from(i16::MAX)) as i16;
+            data.extend_from_slice(&left.to_le_bytes());
+            data.extend_from_slice(&right.to_le_bytes());
+        }
+        let mut bytes = Vec::with_capacity(44 + data.len());
+        bytes.extend_from_slice(b"RIFF");
+        bytes.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(b"WAVEfmt ");
+        bytes.extend_from_slice(&16u32.to_le_bytes());
+        bytes.extend_from_slice(&1u16.to_le_bytes());
+        bytes.extend_from_slice(&2u16.to_le_bytes());
+        bytes.extend_from_slice(&rate.to_le_bytes());
+        bytes.extend_from_slice(&(rate * 4).to_le_bytes());
+        bytes.extend_from_slice(&4u16.to_le_bytes());
+        bytes.extend_from_slice(&16u16.to_le_bytes());
+        bytes.extend_from_slice(b"data");
+        bytes.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        bytes.extend_from_slice(&data);
+        bytes
+    }
+
     #[test]
     fn a_wav_file_is_read_as_mono_at_its_own_rate() {
         let dir = crate::test_dirs::temp_dir().join(format!("audio-probe-{}", std::process::id()));
@@ -146,6 +178,32 @@ mod tests {
         // A cancel stops it before the end.
         let cancelled = AtomicBool::new(true);
         assert!(mono(&path, 30.0, &cancelled).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_stereo_file_is_averaged_into_mono() {
+        let dir =
+            crate::test_dirs::temp_dir().join(format!("audio-probe-stereo-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let never = AtomicBool::new(false);
+        // A tone in both channels: the mix keeps it, at one sample per frame.
+        let same = dir.join("same.wav");
+        std::fs::write(&same, stereo_wav(11_025, 1.0, false)).unwrap();
+        let (samples, rate) = mono(&same, 30.0, &never).expect("a stereo WAV reads");
+        assert_eq!(rate, 11_025);
+        assert_eq!(samples.len(), 11_025);
+        assert!(samples.iter().any(|sample| sample.abs() > 0.1));
+        // The same tone inverted on the right: averaging cancels it, while
+        // taking either channel would not.
+        let inverted = dir.join("inverted.wav");
+        std::fs::write(&inverted, stereo_wav(11_025, 1.0, true)).unwrap();
+        let (silent, _) = mono(&inverted, 30.0, &never).expect("a stereo WAV reads");
+        assert_eq!(silent.len(), 11_025);
+        assert!(
+            silent.iter().all(|sample| sample.abs() < 1.0e-3),
+            "the channels did not cancel"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
