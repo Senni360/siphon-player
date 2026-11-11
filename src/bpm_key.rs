@@ -1026,9 +1026,14 @@ mod tests {
     /// A click track: a burst of filtered noise, decaying like a drum
     /// sample, every beat at `bpm`, and nothing between.
     fn clicks(seconds: f64, bpm: f64) -> Vec<f32> {
-        let len = (seconds * f64::from(RATE)).round() as usize;
+        clicks_at(seconds, bpm, RATE)
+    }
+
+    /// As [`clicks`], at a file's own sample rate.
+    fn clicks_at(seconds: f64, bpm: f64, rate: u32) -> Vec<f32> {
+        let len = (seconds * f64::from(rate)).round() as usize;
         let mut out = vec![0.0_f32; len];
-        let period = f64::from(RATE) * 60.0 / bpm;
+        let period = f64::from(rate) * 60.0 / bpm;
         let onset = 512_usize;
         let mut next = 0.0_f64;
         while next < len as f64 {
@@ -1169,6 +1174,44 @@ mod tests {
                 "drums at {bpm}, read {reading:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_boom_bap_pocket_with_sixteenth_hats_is_not_doubled() {
+        // The bench's worst case: a 85ÔÇô90 BPM pocket under 16th hats used to
+        // come back as an exact doubling.
+        for bpm in [85.0, 87.0, 90.0] {
+            let reading = analyze(&drum_pattern(16.0, bpm, 4), RATE)
+                .expect("a drum pattern with hats has an answer");
+            assert!(
+                (f64::from(reading.bpm) - bpm).abs() <= 1.0,
+                "drums at {bpm} with 1/16 hats, read {reading:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn audio_at_a_files_own_rate_is_resampled_before_reading() {
+        // 8 kHz goes up and 48 kHz comes down; both must read the tempo the
+        // file was made at, not a rate-skewed one.
+        for rate in [8_000, 22_050, 44_100, 48_000] {
+            let reading = analyze(&clicks_at(16.0, 120.0, rate), rate)
+                .expect("a resampled click track has an answer");
+            assert!(
+                (f64::from(reading.bpm) - 120.0).abs() <= 1.0,
+                "at {rate} Hz, read {reading:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_rate_of_zero_or_a_buffer_too_small_to_hold_sound_answers_nothing() {
+        let clicks = clicks(4.0, 120.0);
+        assert!(analyze(&clicks, 0).is_none());
+        assert!(analyze(&[0.5], 44_100).is_none());
+        assert!(analyze(&[0.5], 1).is_none());
+        assert!(analyze(&[0.5; 100], 44_100).is_none());
+        assert!(analyze(&vec![0.0; 100], 1).is_none());
     }
 
     #[test]
