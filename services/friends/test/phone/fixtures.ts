@@ -125,6 +125,18 @@ async function serveExternal(route: Route, server: PhoneServer, guard: Navigatio
     await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
     return;
   }
+  if (parsed.hostname === 'lrclib.net') {
+    // The lyrics library: every song has timed words, except one nobody wrote down.
+    const title = parsed.searchParams.get('track_name') ?? '';
+    const record = {
+      trackName: title, artistName: parsed.searchParams.get('artist_name') ?? '',
+      duration: 0, instrumental: false,
+      syncedLyrics: ['[00:05.00] First line', '[00:20.50] Second line', '[01:10.00] Third line'].join('\n'),
+    };
+    const none = title === 'Paper Boats';
+    await route.fulfill({ status: 200, headers: { 'access-control-allow-origin': '*' }, contentType: 'application/json', body: JSON.stringify(none ? [] : [record]) });
+    return;
+  }
   if (request.resourceType() === 'image') {
     await route.fulfill({ status: 200, contentType: 'image/png', body: PIXEL });
     return;

@@ -126,6 +126,10 @@ SoundCloud or Google access, and none is sent from this computer to the phone.
 A Spotify sign-in made on the phone stays that phone's own. This connection only
 runs on a computer that has linked a phone.
 
+The phone reads lyrics itself for a song it plays, and for any song while this computer
+is off: it asks [lrclib.net](https://lrclib.net) with the song's title and artist, and
+nothing else. A song this computer plays keeps this computer's lyrics.
+
 The always-on edge at `edge.encore.senni.dev` is the phone's second answer, for while
 this computer is off. It is spoken to directly and is entirely optional. The phone asks
 the group service (`POST /api/edge/token`) for five-minute tokens carrying its account

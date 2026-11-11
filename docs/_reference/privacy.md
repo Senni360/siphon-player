@@ -35,7 +35,8 @@ Siphon connects only to the services below.
   public and unlisted videos. A connected YouTube account also uses Google's
   API with your own project.
 - **LRCLIB** (`lrclib.net`) for lyrics of SoundCloud and YouTube songs, sending
-  only the artist, title and length.
+  only the artist, title and length. A linked phone asks it too, for the song
+  that phone plays, with the title and artist.
 - **GitHub** for update checks and downloads.
 - **The group service** (`siphon-friends.vercel.app`) when you join a group: the
   shares, replies, hearts and listening state you choose to send.

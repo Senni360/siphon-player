@@ -6,6 +6,7 @@
 // the song owns a sideways drag of its own.
 
 import { art, bones, clock, h, icon, onHold, plural, safeImage, sourceOf, toast } from './dom.js';
+import { findLyrics } from './lyrics.js';
 import { go, over, overClosed } from './navigation.js';
 import {
   chooseTarget, flipShuffle, likePlaying, ownsQueue, placeOf, playFrom, playOnComputer, playsHere, refreshPlayer,
@@ -281,29 +282,44 @@ export function openSheet() {
     queueBox.hidden = next !== 'queue';
     lyricsButton.setAttribute('aria-pressed', String(next === 'lyrics'));
     queueButton.setAttribute('aria-pressed', String(next === 'queue'));
-    if (next === 'lyrics') readLyrics(shown()?.song?.uri);
+    if (next === 'lyrics') readLyrics(shown()?.song);
     if (next === 'queue') { queueKey = null; drawQueue(shown()); }
   }
 
   // ------------------------------------------------------------ lyrics
   let lyrics = { uri: null, lines: [], at: -1, synced: false };
-  async function readLyrics(forUri) {
+  /**
+   * The computer knows the words of the song it plays itself. A song playing on
+   * this phone, or anything while the computer is off, is looked up from here.
+   */
+  async function wordsFor(song) {
+    const state = shown();
+    if (!state?.here && player.online && !player.direct) {
+      try {
+        let found = await ask('lyrics');
+        // Just after a change the computer may still hold the last song's words.
+        for (let tries = 0; found.uri && found.uri !== song.uri && tries < 4; tries++) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+          if (lyrics.uri !== song.uri) return null;
+          found = await ask('lyrics');
+        }
+        if (!found.uri || found.uri === song.uri) return found;
+      } catch { /* the phone's own look is next */ }
+      if (lyrics.uri !== song.uri) return null;
+    }
+    return findLyrics(song);
+  }
+  async function readLyrics(song) {
+    const forUri = song?.uri;
     if (!forUri || lyrics.uri === forUri) return;
     lyrics = { uri: forUri, lines: [], at: -1, synced: false };
     lyricsBox.replaceChildren(bones(5, 'line'));
     try {
-      if (!player.online) throw new Error('Lyrics come from Encore on your computer, and it is off.');
-      let found = await ask('lyrics');
-      // Just after a change the computer may still hold the last song's words.
-      for (let tries = 0; found.uri && found.uri !== forUri && tries < 4; tries++) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        if (lyrics.uri !== forUri) return;
-        found = await ask('lyrics');
-      }
+      const found = await wordsFor(song);
       if (lyrics.uri !== forUri) return;
-      lyrics.lines = found.lines ?? [];
+      lyrics.lines = found?.lines ?? [];
       if (!lyrics.lines.length) {
-        lyricsBox.replaceChildren(h('p', { class: 'quiet-note', text: found.instrumental ? 'This one has no words.' : 'No lyrics for this song.' }));
+        lyricsBox.replaceChildren(h('p', { class: 'quiet-note', text: found?.instrumental ? 'This one has no words.' : 'No lyrics for this song.' }));
         return;
       }
       lyricsBox.replaceChildren(...lyrics.lines.map(line => (found.synced
@@ -312,7 +328,10 @@ export function openSheet() {
       lyrics.synced = !!found.synced;
       lyrics.at = -1;
     } catch (error) {
-      if (lyrics.uri === forUri) lyricsBox.replaceChildren(h('p', { class: 'quiet-note', text: error.message }));
+      if (lyrics.uri !== forUri) return;
+      // Asked again the next time the words are opened, not remembered as missing.
+      lyrics.uri = null;
+      lyricsBox.replaceChildren(h('p', { class: 'quiet-note', text: error.message }));
     }
   }
   function followLyrics(at) {
@@ -547,7 +566,7 @@ export function openSheet() {
       artist.textContent = song.artists.join(', ');
       artist.onclick = song.artist_id ? () => { close(); go({ page: 'artist', id: song.artist_id }); } : null;
       artist.disabled = !song.artist_id;
-      if (panel === 'lyrics') readLyrics(song.uri);
+      if (panel === 'lyrics') readLyrics(song);
     }
     whereName.textContent = state.here ? 'This phone' : state.device || 'Your computer';
     // One line says what is wrong and what can be done about it, never a dialog.

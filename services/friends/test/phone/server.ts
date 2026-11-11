@@ -106,7 +106,7 @@ const PLAYLISTS = [
 // to load itself, Spotify's own sign-in and API, the edge, and images from
 // wherever art is. The local mock edge is this server, on 127.0.0.1.
 const HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https: http://127.0.0.1:*; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://edge.encore.senni.dev wss://edge.encore.senni.dev http://127.0.0.1:* ws://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src https: http://127.0.0.1:*; font-src 'self'; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://lrclib.net https://edge.encore.senni.dev wss://edge.encore.senni.dev http://127.0.0.1:* ws://127.0.0.1:*; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
 };
