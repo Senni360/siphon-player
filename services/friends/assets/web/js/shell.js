@@ -1,6 +1,7 @@
 // The frame around every screen: the tabs, the mini player, and the back step.
 
 import { app, h, icon } from './dom.js';
+import { edgeBrowsing } from './edge-library.js';
 import { current, go, moved, trail } from './navigation.js';
 import { hooks, openedAt, player, WAKE_MS } from './state.js';
 import { hasSpotify } from './spotify.js';
@@ -39,6 +40,12 @@ let bannerTimer = null;
 export function renderBanner() {
   clearTimeout(bannerTimer);
   const waited = Date.now() - openedAt;
+  // With the computer off and the listener's server answering, everything on
+  // the page works, so there is nothing to say.
+  if (!player.online && edgeBrowsing()) {
+    bannerSlot?.replaceChildren();
+    return;
+  }
   if (!player.online && waited < WAKE_MS) {
     const quiet = waited < QUIET_MS;
     bannerSlot?.replaceChildren(...(quiet ? [] : [h('div', { class: 'banner waking', role: 'status' }, h('span', { class: 'dot' }),

@@ -210,6 +210,9 @@ test("a mixed playlist carries a local file's upload key and its details", async
               },
             },
             { id: "e2", track: { uri: "soundcloud:artist/song", name: "Cloud" } },
+            { id: "e3", track: { uri: "soundcloud:track:7", name: "Public", link: "https://soundcloud.com/artist/public-song" } },
+            { id: "e4", track: { uri: "soundcloud:track:8", name: "Private", link: "https://soundcloud.com/artist/private-song/s-AbCdEf" } },
+            { id: "e5", track: { uri: "soundcloud:track:9", name: "Query", link: "https://soundcloud.com/artist/song?secret_token=s-x" } },
           ],
         }],
       },
@@ -217,7 +220,11 @@ test("a mixed playlist carries a local file's upload key and its details", async
   });
   const detail = await (await request(ctx.base, "/v1/library/playlists/m1local", { token: phoneToken() })).json();
   assert.equal(detail.playlist.name, "Locals");
-  assert.equal(detail.items.length, 2);
+  assert.equal(detail.items.length, 5);
+  // Only a song's own public page travels on to the phone.
+  assert.equal(detail.items[2].link, "https://soundcloud.com/artist/public-song");
+  assert.equal(detail.items[3].link, undefined);
+  assert.equal(detail.items[4].link, undefined);
   assert.equal(detail.items[0].upload, "local-abc");
   assert.equal(detail.items[0].name, "Song");
   assert.deepEqual(detail.items[0].artists, [{ id: null, name: "Artist" }]);

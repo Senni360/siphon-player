@@ -141,6 +141,24 @@ export function mapSpotifyPlaylist(playlist) {
   };
 }
 
+/**
+ * A SoundCloud song's own public page, which is what the phone has the edge
+ * resolve. A private link carries a secret path or a query and is never kept.
+ */
+export function publicSoundcloudLink(value) {
+  if (typeof value !== "string" || value.length > 300) return false;
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "https:" && url.username === "" && url.password === ""
+    && ["soundcloud.com", "www.soundcloud.com", "m.soundcloud.com"].includes(url.hostname)
+    && url.search === "" && url.hash === ""
+    && /^\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*\/?$/.test(url.pathname);
+}
+
 function playlistEntries(data) {
   if (Array.isArray(data)) return data;
   if (Array.isArray(data?.playlists)) return data.playlists;
@@ -261,6 +279,7 @@ export class LibraryService {
             image: pickImage(value.album?.images),
             duration_ms: Number.isFinite(value.duration_ms) ? value.duration_ms : null,
             ...(typeof upload === "string" && UPLOAD_KEY.test(upload) ? { upload } : {}),
+            ...(publicSoundcloudLink(value.link) ? { link: value.link } : {}),
           };
         })
         .filter(Boolean);

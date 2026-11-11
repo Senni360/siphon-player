@@ -221,3 +221,10 @@ test('every question answers null without an edge, and never throws', async () =
   assert.equal(await EDGE_DIRECT.playlist({}), null);
   assert.equal(await EDGE_DIRECT.search({ query: '  ' }), null);
 });
+
+test("a SoundCloud song keeps its own public page, which the edge plays it from", () => {
+  const row = { uri: 'soundcloud:track:7', name: 'Public', artists: [{ name: 'Artist' }], link: 'https://soundcloud.com/artist/public-song' };
+  assert.equal(edgeSong(row).link, 'https://soundcloud.com/artist/public-song');
+  assert.equal(edgeSong({ ...row, link: 'https://evil.example/x' }).link, undefined);
+  assert.equal(edgeSong({ ...row, uri: 'spotify:track:abc' }).link, undefined);
+});

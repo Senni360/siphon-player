@@ -26,6 +26,8 @@ export async function load(fill, into, shape = 'rows') {
       into.classList.add('arrived');
       setTimeout(() => into.classList.remove('arrived'), 700);
       hooks.markPlaying?.();
+      // Who answered may have changed what the banner should say.
+      hooks.renderBanner?.();
     } catch (error) {
       if (error instanceof SignedOut) hooks.signedOut?.();
       else if (into.loading === mine) into.replaceChildren(failed(error, run));

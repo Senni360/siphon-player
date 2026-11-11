@@ -52,6 +52,8 @@ export function edgeSong(row) {
   };
   if (first) song.artist_id = first.id;
   if (text(row.upload)) song.upload = row.upload;
+  // A SoundCloud song's own page, which is what the edge plays it from.
+  if (uri.startsWith('soundcloud:') && text(row.link).startsWith('https://soundcloud.com/')) song.link = row.link;
   return song;
 }
 

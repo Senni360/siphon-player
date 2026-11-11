@@ -16,6 +16,8 @@ test('with the computer off, the edge fills home, the library, a playlist, searc
   // Home lands in about a second, not after the wait for a computer that is off.
   await expect(phone.page.locator('main .lead .name')).toHaveText(server.songAt(0).name);
   await expect(phone.page.getByText("Encore isn't open on your computer")).toHaveCount(0);
+  // Everything works from the server, so no banner says the computer is away.
+  await expect(phone.page.locator('.banner')).toHaveCount(0);
 
   // The library: Spotify playlists, and the mixed ones the edge knows beside them.
   await phone.goTab('library');
