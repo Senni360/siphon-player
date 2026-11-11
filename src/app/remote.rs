@@ -5,6 +5,7 @@ use std::time::Instant;
 use serde_json::{Value, json};
 
 use super::*;
+use crate::api::models::{ArtistRef, ExternalUrls, PlayableItem, Track};
 use crate::backend::remote::{RemoteEvent, RemoteRequest};
 use crate::remote::{
     ANSWER_WITHIN, Command as Phone, Incoming, STATE_AT_LEAST, STATE_EVERY, STATE_LOOK, Snapshot,
@@ -146,6 +147,30 @@ pub(super) fn phone_action(command: &Phone) -> Option<Action> {
             uri: uri.clone(),
             label: String::new(),
         }),
+        Phone::Download {
+            uri,
+            name,
+            artists,
+            duration_ms,
+            link,
+        } if allowed_uri(uri) => Some(Action::Download(vec![PlayableItem::Track(Track {
+            uri: uri.clone(),
+            name: name.chars().take(300).collect(),
+            artists: artists
+                .iter()
+                .take(20)
+                .map(|name| ArtistRef {
+                    name: name.chars().take(200).collect(),
+                    ..Default::default()
+                })
+                .collect(),
+            duration_ms: *duration_ms,
+            // Only a SoundCloud song's own page is kept: it is what gets downloaded.
+            external_urls: ExternalUrls {
+                spotify: crate::soundcloud::permalink(link.as_deref()).map(str::to_owned),
+            },
+            ..Default::default()
+        })])),
         // Only a link the app can play: nothing here opens a browser over there.
         Phone::PlayLink { url } => (url.len() <= 2_000 && crate::link::parse(url).is_some())
             .then(|| crate::ui::group::play_action(url)),
@@ -346,6 +371,7 @@ impl App {
             .unwrap_or_default();
         let Some(now) = self.now_playing() else {
             return Snapshot {
+                can: crate::remote::CAN,
                 next: upcoming,
                 repeat: "off",
                 ..Default::default()
@@ -381,6 +407,7 @@ impl App {
                 });
         }
         Snapshot {
+            can: crate::remote::CAN,
             liked: self.is_saved(&now.uri).unwrap_or(false),
             song: Some(song),
             position_ms: now.position_ms,

@@ -33,7 +33,7 @@ export function songActions(song, extra = []) {
       // The computer does the downloading, so this shows while one that can is there to ask.
       player.online && player.state?.can?.includes?.('download') && choice('download', 'Download on your computer', run(() => {
         toast('Downloading on your computer');
-        Promise.resolve(tell('download', { uri: song.uri, name: song.name, artists: (song.artists ?? []).slice(0, 20), duration_ms: Math.round(song.duration_ms ?? 0), image: safeImage(song.image) ?? null }))
+        Promise.resolve(tell('download', { uri: song.uri, name: song.name, artists: (song.artists ?? []).slice(0, 20), duration_ms: Math.round(song.duration_ms ?? 0), ...(song.link ? { link: song.link } : {}) }))
           .catch(() => toast("Couldn't reach Encore."));
       })),
       song.artist_id && choice('person', 'Go to artist', run(() => { hooks.closeSheet?.(); go({ page: 'artist', id: song.artist_id }); })),

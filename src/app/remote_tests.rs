@@ -256,3 +256,61 @@ fn playing_the_phones_song_here_takes_it_over() {
     app.take_from_phone();
     assert!(app.phone.there.is_none(), "it's here now, not there");
 }
+
+#[test]
+fn a_phone_sends_a_song_here_to_download() {
+    let incoming: PhoneIncoming = serde_json::from_str(
+        r#"{"id":"1","kind":"download","uri":"spotify:track:a","name":"Holding","artists":["slayr"],"duration_ms":181000,"image":null}"#,
+    )
+    .unwrap();
+    let Some(Action::Download(items)) = super::remote::phone_action(&incoming.command) else {
+        panic!("it should download");
+    };
+    let [PlayableItem::Track(track)] = items.as_slice() else {
+        panic!("one song");
+    };
+    assert_eq!(track.uri, "spotify:track:a");
+    assert_eq!(track.name, "Holding");
+    assert_eq!(track.artists[0].name, "slayr");
+    assert_eq!(track.duration_ms, 181_000);
+    assert!(crate::downloads::Source::from_item(&items[0]).is_some());
+}
+
+#[test]
+fn a_download_keeps_only_a_soundcloud_songs_own_page() {
+    let download = |uri: &str, link: &str| {
+        super::remote::phone_action(&PhoneCommand::Download {
+            uri: uri.into(),
+            name: "Song".into(),
+            artists: vec!["Someone".into()],
+            duration_ms: 1,
+            link: Some(link.into()),
+        })
+    };
+    let link_of = |action: Option<Action>| match action {
+        Some(Action::Download(items)) => match &items[0] {
+            PlayableItem::Track(track) => track.external_urls.spotify.clone(),
+            _ => None,
+        },
+        _ => panic!("it should download"),
+    };
+    assert_eq!(
+        link_of(download(
+            "soundcloud:track:7",
+            "https://soundcloud.com/someone/song"
+        )),
+        Some("https://soundcloud.com/someone/song".to_owned())
+    );
+    assert_eq!(
+        link_of(download("soundcloud:track:7", "https://evil.example/song")),
+        None
+    );
+    assert!(download("https://evil.example/x", "https://soundcloud.com/a/b").is_none());
+}
+
+#[test]
+fn the_phone_is_told_this_computer_can_download() {
+    let app = test_app("remote-can");
+    let told = serde_json::to_value(app.remote_snapshot()).unwrap();
+    assert_eq!(told["can"], serde_json::json!(["download"]));
+}

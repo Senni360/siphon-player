@@ -126,6 +126,11 @@ SoundCloud or Google access, and none is sent from this computer to the phone.
 A Spotify sign-in made on the phone stays that phone's own. This connection only
 runs on a computer that has linked a phone.
 
+A phone can also send a song here to download. This computer says it can in the
+state it publishes (`can: ["download"]`), the phone's command carries the song's
+address, name, artists and length, and the download then runs here exactly as one
+started on this computer.
+
 The phone reads lyrics itself for a song it plays, and for any song while this computer
 is off: it asks [lrclib.net](https://lrclib.net) with the song's title and artist, and
 nothing else. A song this computer plays keeps this computer's lyrics.

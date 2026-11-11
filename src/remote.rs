@@ -94,6 +94,19 @@ pub enum Command {
     Search {
         query: String,
     },
+    /// A song for this computer to download. It comes with what it's called, so a
+    /// Spotify song can be found, and with its own address where it has one.
+    Download {
+        uri: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        artists: Vec<String>,
+        #[serde(default)]
+        duration_ms: u32,
+        #[serde(default)]
+        link: Option<String>,
+    },
     /// Where a song's audio is, for the phone to play. A Spotify song comes with
     /// what it's called, so the same song can be found on YouTube or SoundCloud.
     Stream {
@@ -185,9 +198,14 @@ pub fn song_of(item: &PlayableItem) -> Option<Song> {
     }
 }
 
+/// What this computer does for a phone beyond playing. A phone only offers what
+/// is named here, so one linked to an older Encore never asks for it.
+pub const CAN: &[&str] = &["download"];
+
 /// How playback is going, for the phone.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct Snapshot {
+    pub can: &'static [&'static str],
     pub song: Option<Song>,
     pub liked: bool,
     pub position_ms: u32,
