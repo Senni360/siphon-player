@@ -111,7 +111,7 @@ main.no-player { padding-bottom: calc(var(--tabs) + var(--bottom) + 28px); }
 .dock { position: fixed; z-index: 3; left: 0; right: 0; bottom: 0; pointer-events: none; }
 .dock > * { pointer-events: auto; }
 nav.tabs { position: relative; height: calc(var(--tabs) + var(--bottom)); padding: 0 max(0px, calc(50% - 280px)) var(--bottom); display: grid; grid-template-columns: repeat(4, 1fr);
-  background: rgb(13 13 15 / 90%); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-top: 1px solid var(--line); }
+  background: rgb(13 13 15 / 94%); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); border-top: 1px solid var(--line); }
 nav.tabs button { position: relative; display: grid; justify-items: center; align-content: center; gap: 3px; color: var(--dim); font-size: 10.5px; font-weight: 500; letter-spacing: .01em; transition: color .2s; }
 nav.tabs button[aria-current="page"] { color: var(--text); }
 nav.tabs button:active svg { transform: scale(.88); }
@@ -275,7 +275,7 @@ button.rows-end { height: auto; margin: 6px 0 0; pointer-events: auto; }
 .find .clear svg { width: 16px; height: 16px; }
 .none-found { color: var(--secondary); text-align: center; padding: 40px 20px; overflow-wrap: anywhere; }
 .bones { animation: fade .2s linear .14s both; }
-.bone { display: block; position: relative; overflow: hidden; background: rgb(255 255 255 / 7%); border-radius: 8px; }
+.bone { display: block; position: relative; overflow: hidden; background: rgb(255 255 255 / 9.5%); border-radius: 8px; }
 .bone::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 6%), transparent); transform: translateX(-100%); animation: light 1.6s ease-in-out infinite; }
 @keyframes light { to { transform: translateX(100%); } }
 .bone-row { display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 6px 0; opacity: calc(1 - var(--i, 0) * .11); }
@@ -510,4 +510,16 @@ body:has(.door-page) .toast { bottom: calc(var(--bottom) + 24px); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-delay: 0s !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
   .bars i { transform: scaleY(.6); }
+}
+
+/* Where the phone draws no blur, with Reduce Transparency on or in a browser
+   without it, the glass is solid, so nothing reads through it. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  nav.tabs, .bar.scrolled { background: var(--window); }
+  .mini, .actions, .toast { background: var(--raised); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  nav.tabs, .bar.scrolled { background: var(--window); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .mini, .actions, .toast { background: var(--raised); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .mini .tint { display: none; }
 }

@@ -28,6 +28,8 @@ test('every screen', async ({ phone, page, server, observed }, info) => {
   mkdirSync(dir, { recursive: true });
   let step = 0;
   const shot = async (name: string) => {
+    // A picture of what has arrived, not of the bones standing in for it.
+    await expect(page.locator('main [aria-busy="true"]')).toHaveCount(0, { timeout: 15_000 });
     await page.waitForTimeout(650);
     await page.screenshot({ path: join(dir, `${String(++step).padStart(2, '0')}-${name}.png`) });
   };
