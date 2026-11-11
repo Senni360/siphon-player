@@ -82,6 +82,11 @@ pub enum Command {
         id: String,
     },
     Liked,
+    /// Which of these songs are liked, so the phone's menu offers the right
+    /// one of Like and Unlike. Unknown ones are left out of the answer.
+    Saved {
+        uris: Vec<String>,
+    },
     SoundcloudLikes,
     YoutubeLikes,
     Artist {

@@ -425,3 +425,20 @@ fn a_phone_adds_a_song_only_to_a_playlist_this_computer_offered() {
     app.remote_command(add(&target, "https://evil.example/x"), &ctx);
     assert!(!app.actions.iter().any(|action| matches!(action, Action::ConfirmAddToPlaylist { .. })));
 }
+
+#[test]
+fn a_phone_asks_which_songs_are_liked() {
+    let mut app = test_app("remote-saved");
+    app.saved.insert("spotify:track:liked".into(), true);
+    app.saved.insert("spotify:track:not".into(), false);
+    let ask = |uris: &[&str]| PhoneCommand::Saved {
+        uris: uris.iter().map(|uri| (*uri).to_owned()).collect(),
+    };
+    let answer = app
+        .remote_answer(&ask(&["spotify:track:liked", "spotify:track:not"]))
+        .unwrap();
+    assert_eq!(answer["saved"]["spotify:track:liked"], true);
+    assert_eq!(answer["saved"]["spotify:track:not"], false);
+    assert!(super::remote::fair_question(&ask(&["spotify:track:liked"])));
+    assert!(!super::remote::fair_question(&ask(&["https://evil.example/x"])));
+}

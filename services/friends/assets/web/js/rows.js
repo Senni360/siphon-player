@@ -22,13 +22,30 @@ export const about = song => h('div', { class: 'about' }, art(song.image),
  */
 export function songActions(song, extra = []) {
   const run = work => () => close(work);
+  // Whether it is liked is asked for as the menu opens; until the answer comes
+  // it reads Like, which is what most songs in a list are waiting for.
+  let liked = null;
+  const like = choice('heart', 'Like', run(() => {
+    const was = liked;
+    Promise.resolve(act('like', { uri: song.uri }))
+      .then(() => toast(was ? 'Removed from your likes' : 'Liked'), () => toast("That didn't go through."));
+  }));
+  if (player.online) {
+    ask('saved', { uris: [song.uri] }, 5000).then(found => {
+      const known = found?.saved?.[song.uri];
+      if (typeof known !== 'boolean') return;
+      liked = known;
+      like.querySelector('.choice-words > span').textContent = known ? 'Remove from your likes' : 'Like';
+      like.classList.toggle('liked', known);
+    }, () => {});
+  }
   const close = openPanel({
     label: `More for ${song.name}`,
     content: [
       about(song),
       choice('next_up', 'Play next', run(() => playNext(song).then(() => toast('Playing next'), error => toast(error.message)))),
       ownsQueue() && choice('last', 'Add to queue', run(() => { hooks.hereActs.last({ song }); toast('Added to the queue'); })),
-      choice('heart', 'Like', run(() => Promise.resolve(act('like', { uri: song.uri })).then(() => toast('Liked'), () => toast("That didn't go through.")))),
+      like,
       song.link && choice('share', 'Share with the group', run(() => shareSong(song))),
       player.online && player.state?.can?.includes?.('add_to_playlist') && choice('plus', 'Add to playlist', run(() => pickPlaylist(song))),
       // The computer does the downloading, so this shows while one that can is there to ask.

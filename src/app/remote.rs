@@ -90,6 +90,7 @@ fn is_question(command: &Phone) -> bool {
             | Phone::Album { .. }
             | Phone::Mixed { .. }
             | Phone::Liked
+            | Phone::Saved { .. }
             | Phone::SoundcloudLikes
             | Phone::YoutubeLikes
             | Phone::Artist { .. }
@@ -137,6 +138,7 @@ pub(super) fn fair_question(command: &Phone) -> bool {
         Phone::Source { uri } => {
             crate::soundcloud::is_page(uri) || crate::youtube::browse::is_page(uri)
         }
+        Phone::Saved { uris } => uris.len() <= 50 && uris.iter().all(|uri| allowed_uri(uri)),
         _ => true,
     }
 }
@@ -665,6 +667,13 @@ impl App {
                     "made_for_you": made,
                     "releases": releases,
                 })
+            }
+            Phone::Saved { uris } => {
+                let saved: serde_json::Map<String, Value> = uris
+                    .iter()
+                    .filter_map(|uri| Some((uri.clone(), Value::Bool(self.is_saved(uri)?))))
+                    .collect();
+                json!({ "saved": saved })
             }
             Phone::Lyrics => match &self.lyrics {
                 Loadable::Loading | Loadable::NotLoaded => return None,

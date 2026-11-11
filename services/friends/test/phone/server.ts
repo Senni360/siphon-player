@@ -1083,6 +1083,10 @@ export class PhoneServer {
       case 'like':
         this.setState({ liked: !this.state.liked });
         return { ok: true };
+      case 'saved': {
+        const uris = Array.isArray(input.uris) ? input.uris.map(String) : [];
+        return { saved: Object.fromEntries(uris.map(uri => [uri, LIKED.some(song => song.uri === uri)])) };
+      }
       case 'add_to_playlist':
         this.added.push(input);
         return { ok: true };
