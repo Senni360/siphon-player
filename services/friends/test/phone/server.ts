@@ -103,6 +103,85 @@ const PLAYLISTS = [
   { id: 'pl-sunday', name: 'Sunday Kitchen', image: SONGS[18]!.image },
 ];
 
+// ---------------------------------------------------------------- the mock edge's library
+// The shapes `services/edge/src/library.mjs` answers with: Spotify ids, artists
+// as `{ id, name }`, and mixed rows that may name a file the edge holds.
+const EDGE_ARTIST_ID = '4dpOu9hZz1pZ0F9vB6mZ0v';
+
+function edgeTrack(song: Song): Record<string, unknown> {
+  const spotify = song.uri.startsWith('spotify:');
+  return {
+    source: spotify ? 'spotify' : song.uri.split(':')[0],
+    uri: song.uri,
+    name: song.name,
+    artists: song.artists.map(name => ({ id: spotify ? EDGE_ARTIST_ID : null, name })),
+    album: null,
+    image: song.image,
+    duration_ms: song.duration_ms,
+  };
+}
+
+function edgeArtist(): Record<string, unknown> {
+  return {
+    source: 'spotify',
+    id: EDGE_ARTIST_ID,
+    uri: `spotify:artist:${EDGE_ARTIST_ID}`,
+    name: 'Neon Harbour',
+    image: imageFor(6, 'spotify'),
+    genres: ['dream pop'],
+    followers: 184_000,
+  };
+}
+
+function edgeAlbum(index: number): Record<string, unknown> {
+  const list = PLAYLISTS[index % PLAYLISTS.length]!;
+  return {
+    source: 'spotify',
+    id: `album${index}`,
+    uri: `spotify:album:album${index}`,
+    name: list.name,
+    image: imageFor(index, 'spotify'),
+    artists: [{ id: EDGE_ARTIST_ID, name: 'Neon Harbour' }],
+    release_date: `202${1 + index}-05-01`,
+    total_tracks: 10,
+    album_type: 'album',
+  };
+}
+
+const EDGE_PLAYLIST_TRACKS = [spotifySongs.slice(0, 60), spotifySongs.slice(0, 12), spotifySongs.slice(12, 24)];
+/** The edge's own ids have no dashes, as a Spotify id never does. */
+const EDGE_PLAYLISTS = PLAYLISTS.map((list, index) => ({
+  source: 'spotify',
+  id: list.id.replaceAll('-', ''),
+  uri: `spotify:playlist:${list.id.replaceAll('-', '')}`,
+  name: list.name,
+  image: list.image,
+  owner: { id: 'user-1', name: 'Sam' },
+  track_count: EDGE_PLAYLIST_TRACKS[index]!.length,
+  collaborative: false,
+}));
+const EDGE_PLAYLIST_ROWS = EDGE_PLAYLIST_TRACKS.map(tracks => tracks.map(edgeTrack));
+
+/** A mixed playlist, with its first song's file held by the edge. */
+const EDGE_MIXED = {
+  source: 'mixed',
+  id: '0123456789abcdef',
+  uri: 'spotifast:playlist:0123456789abcdef',
+  name: 'Everything, 200 Songs',
+  image: SONGS[0]!.image,
+  track_count: 60,
+};
+const EDGE_MIXED_ROWS = SONGS.slice(0, 60).map((song, index) => ({
+  source: 'mixed',
+  uri: index === 0 ? 'spotify:local:Sam:Kitchen:Midnight%20City:214' : song.uri,
+  name: song.name,
+  artists: song.artists.map(name => ({ id: null, name })),
+  album: null,
+  image: song.image,
+  duration_ms: song.duration_ms,
+  ...(index === 0 ? { upload: 'edgeupload01' } : {}),
+}));
+
 // ---------------------------------------------------------------- the page's headers
 // Copied from src/web.ts (HEADERS). Keep the two in step: the page is only meant
 // to load itself, Spotify's own sign-in and API, the edge, and images from
@@ -169,6 +248,13 @@ export interface Failure {
 }
 
 const uuid = (number: number): string => `4d544a6f-8d43-4f1a-9e2c-${String(number).padStart(12, '0')}`;
+
+/** Whether the edge answers this path from its read-only library. */
+const isEdgeLibrary = (pathname: string): boolean => pathname === '/v1/home'
+  || pathname === '/v1/search'
+  || pathname.startsWith('/v1/library/')
+  || pathname.startsWith('/v1/artist/')
+  || pathname.startsWith('/v1/album/');
 
 /** An account in one group, as `/api/account` reports it. */
 const account = {
@@ -284,6 +370,8 @@ export class PhoneServer {
   edgeOn = false;
   /** The token route answers 503, as a service without the shared secret does. */
   edgeDown = false;
+  /** The edge has no library vault: its library routes answer 503, as a fresh edge does. */
+  edgeNoVault = false;
   /** Whether a computer is on the edge's `/v1/live` room. */
   edgeComputerPresent = false;
   /** Sources `/v1/resolve` refuses. */
@@ -359,6 +447,11 @@ export class PhoneServer {
     this.edgeOn = false;
     this.edgeDown = true;
     this.edgeComputerPresent = false;
+  }
+
+  /** The edge is up but has no library vault, so its library routes answer 503. */
+  setEdgeNoVault(noVault: boolean): void {
+    this.edgeNoVault = noVault;
   }
 
   /** A computer joins or leaves the live room, and the page hears either. */
@@ -530,8 +623,27 @@ export class PhoneServer {
       if (auth !== this.edgeSync) return this.edgeError(response, 401, 'unauthorized');
       return this.json(response, 200, { v: 1, doc: 'matches', revision: 1, updatedAt: Date.now(), data: this.edgeSaved });
     }
+    // The library is read with the sync token, and a 503 without a vault.
+    if (isEdgeLibrary(url.pathname)) {
+      if (method !== 'GET' && method !== 'HEAD') return this.edgeError(response, 405, 'method_not_allowed');
+      if (auth !== this.edgeSync) return this.edgeError(response, 401, 'unauthorized');
+      if (this.edgeNoVault) return this.edgeError(response, 503, 'vault_not_configured');
+      return this.edgeLibrary(response, url);
+    }
     // The expired token is the first one the token route handed out.
     if (auth !== this.edgeMedia) return this.edgeError(response, 401, 'unauthorized');
+
+    if (url.pathname === '/v1/media-token' && method === 'POST') {
+      const input = await this.readJson(request) as { key?: unknown } | null;
+      if (typeof input?.key !== 'string' || !input.key) return this.edgeError(response, 400, 'invalid_key');
+      // This mock's media route serves every key it is given.
+      return this.json(response, 200, {
+        v: 1,
+        key: input.key,
+        url: `/v1/media/${encodeURIComponent(input.key)}?token=${encodeURIComponent(auth)}`,
+        expiresIn: 300,
+      });
+    }
 
     if (url.pathname === '/v1/resolve' && method === 'POST') {
       const input = await this.readJson(request) as { source?: unknown } | null;
@@ -567,6 +679,108 @@ export class PhoneServer {
 
   private edgeError(response: ServerResponse, status: number, code: string): void {
     this.json(response, status, { v: 1, error: code });
+  }
+
+  // ------------------------------------------------------------ the mock edge's library
+  /** One page of an edge list, with the base64url cursor the edge itself hands back. */
+  private edgeSlice<T>(rows: T[], url: URL): { offset: number; items: T[]; next: string | null } {
+    const raw = url.searchParams.get('limit');
+    const asked = raw === null ? 50 : Number(raw);
+    const limit = Number.isSafeInteger(asked) ? Math.min(50, Math.max(1, asked)) : 50;
+    let offset = 0;
+    const cursor = url.searchParams.get('cursor');
+    if (cursor) {
+      try {
+        const value = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8')) as { o?: unknown };
+        if (Number.isSafeInteger(value?.o) && (value.o as number) >= 0) offset = value.o as number;
+      } catch { /* an unreadable cursor starts at the top */ }
+    }
+    const after = offset + limit;
+    return {
+      offset,
+      items: rows.slice(offset, after),
+      next: after < rows.length ? Buffer.from(JSON.stringify({ o: after }), 'utf8').toString('base64url') : null,
+    };
+  }
+
+  /** The routes `LibraryService` serves a phone, in its own shapes. */
+  private edgeLibrary(response: ServerResponse, url: URL): void {
+    const path = url.pathname;
+    const id = (prefix: string): string => decodeURIComponent(path.slice(prefix.length));
+
+    if (path === '/v1/home') {
+      return this.json(response, 200, {
+        v: 1,
+        recently_played: SONGS.slice(0, 14).map((song, at) => ({
+          ...edgeTrack(song),
+          played_at: new Date(1_760_000_000_000 + at * 60_000).toISOString(),
+        })),
+        new_releases: [edgeAlbum(0), edgeAlbum(1)],
+        generated_at: new Date().toISOString(),
+      });
+    }
+    if (path === '/v1/search') {
+      const query = (url.searchParams.get('q') ?? '').trim();
+      if (!query) return this.edgeError(response, 400, 'invalid_query');
+      return this.json(response, 200, {
+        v: 1,
+        query,
+        spotify: {
+          tracks: spotifySongs.slice(0, 6).map(edgeTrack),
+          artists: [edgeArtist()],
+          albums: [edgeAlbum(0)],
+          playlists: [EDGE_PLAYLISTS[0]!],
+        },
+        soundcloud: { tracks: soundcloudSongs.slice(0, 6).map(edgeTrack), playlists: [] },
+        next: null,
+      });
+    }
+    if (path === '/v1/library/playlists') {
+      const page = this.edgeSlice(EDGE_PLAYLISTS, url);
+      const items: unknown[] = [...page.items];
+      if (page.offset === 0) items.push(EDGE_MIXED);
+      return this.json(response, 200, { v: 1, items, next: page.next });
+    }
+    if (path.startsWith('/v1/library/playlists/')) {
+      const playlistId = id('/v1/library/playlists/');
+      const at = EDGE_PLAYLISTS.findIndex(list => list.id === playlistId);
+      if (at >= 0) {
+        const page = this.edgeSlice(EDGE_PLAYLIST_ROWS[at]!, url);
+        return this.json(response, 200, { v: 1, playlist: EDGE_PLAYLISTS[at], items: page.items, next: page.next });
+      }
+      if (playlistId === EDGE_MIXED.id) {
+        return this.json(response, 200, { v: 1, source: 'mixed', playlist: EDGE_MIXED, items: EDGE_MIXED_ROWS, next: null });
+      }
+      return this.edgeError(response, 404, 'not_found');
+    }
+    if (path === '/v1/library/liked') {
+      const page = this.edgeSlice(LIKED.map(edgeTrack), url);
+      return this.json(response, 200, { v: 1, items: page.items, next: page.next });
+    }
+    if (path === '/v1/library/soundcloud/likes') {
+      const page = this.edgeSlice(soundcloudSongs.slice(0, 24).map(edgeTrack), url);
+      return this.json(response, 200, { v: 1, items: page.items, next: page.next });
+    }
+    if (path === '/v1/library/albums') {
+      const page = this.edgeSlice([edgeAlbum(0), edgeAlbum(1)], url);
+      return this.json(response, 200, { v: 1, items: page.items, next: page.next });
+    }
+    if (path === '/v1/library/artists') {
+      const page = this.edgeSlice([edgeArtist()], url);
+      return this.json(response, 200, { v: 1, items: page.items, next: page.next });
+    }
+    if (path.startsWith('/v1/artist/')) {
+      if (id('/v1/artist/') !== EDGE_ARTIST_ID) return this.edgeError(response, 404, 'not_found');
+      return this.json(response, 200, { v: 1, artist: edgeArtist(), top_tracks: SONGS.slice(0, 10).map(edgeTrack) });
+    }
+    if (path.startsWith('/v1/album/')) {
+      const found = /^album(\d+)$/.exec(id('/v1/album/'));
+      if (!found) return this.edgeError(response, 404, 'not_found');
+      const album = edgeAlbum(Number(found[1]));
+      const page = this.edgeSlice(EDGE_PLAYLIST_TRACKS[1]!.map(edgeTrack), url);
+      return this.json(response, 200, { v: 1, album, items: page.items, next: page.next });
+    }
+    return this.edgeError(response, 404, 'not_found');
   }
 
   private serveStatic(request: IncomingMessage, response: ServerResponse, url: URL): void {

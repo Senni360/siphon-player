@@ -30,6 +30,20 @@ export const WAKE_MS = 18000;
 export const openedAt = Date.now();
 
 /**
+ * The first look at the computer. Until it lands, no screen knows whether the
+ * computer is there, and the first of them waits on this rather than guessing.
+ */
+const looked = { done: false, waiting: [] };
+export const computerLooked = () => (looked.done ? Promise.resolve()
+  : new Promise(resolve => looked.waiting.push(resolve)));
+/** Says the computer's state has been read once, whatever it said. */
+export function noteFirstLook() {
+  if (looked.done) return;
+  looked.done = true;
+  for (const wake of looked.waiting.splice(0)) wake();
+}
+
+/**
  * Filled in by the module that owns each call, so modules that need it do not
  * import upwards into a cycle. Reading one before it is set is the page asking
  * too early, never something a listener can reach.

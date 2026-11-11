@@ -83,14 +83,26 @@ export async function edgeCall(path, scope, { method = 'POST', body, timeout = E
   return null;
 }
 
+/** One of the edge's own addresses, made full for this page. */
+function edgeUrl(url) {
+  if (typeof url !== 'string' || !edge.tokens) return null;
+  return /^https?:\/\//.test(url) ? url : `${edge.tokens.url}${url.startsWith('/') ? '' : '/'}${url}`;
+}
+
 /** Where the edge says a source's audio is, as this page can fetch it. */
 export async function edgeResolve(source) {
   if (!source) return null;
   const found = await edgeCall('/v1/resolve', 'media', { body: { source } });
-  if (!found || typeof found.url !== 'string' || !edge.tokens) return null;
-  const { url } = found;
-  const full = /^https?:\/\//.test(url) ? url : `${edge.tokens.url}${url.startsWith('/') ? '' : '/'}${url}`;
-  return { url: full, hls: false };
+  const url = edgeUrl(found?.url);
+  return url ? { url, hls: false } : null;
+}
+
+/** A mixed playlist's local file the edge keeps, as this page can play it. */
+export async function edgeUpload(key) {
+  if (!key) return null;
+  const found = await edgeCall('/v1/media-token', 'media', { body: { key } });
+  const url = edgeUrl(found?.url);
+  return url ? { url, hls: false } : null;
 }
 
 /** The public SoundCloud source the edge accepts, when the song names one. */

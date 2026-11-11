@@ -3,9 +3,13 @@
 import { uuid, toast } from './dom.js';
 import { answered } from './errors.js';
 import { edgeAsk, edgeSend } from './edge.js';
+import { EDGE_DIRECT } from './edge-library.js';
 import { api } from './service.js';
 import { DIRECT, DIRECT_ACTS, hasSpotify } from './spotify.js';
-import { events, here, hooks, openedAt, player, readyReplies, replyWaiters, WAKE_MS } from './state.js';
+import { computerLooked, events, here, hooks, openedAt, player, readyReplies, replyWaiters, WAKE_MS } from './state.js';
+
+/** How long the first screen waits to learn whether the computer is there. */
+const LOOK_MS = 1500;
 
 /** Tells the computer to do something, or Spotify when the computer's not there. */
 export async function act(kind, args = {}) {
@@ -32,6 +36,17 @@ export async function tell(kind, args = {}) {
 
 /** Asks the computer something, and waits for it to answer. */
 export async function ask(kind, args = {}, patience = 45000) {
+  // The edge reads the library itself, so a cold open fills the screen at once
+  // instead of waiting out a computer that is off. A computer that is there
+  // keeps answering: the first screen waits just long enough to know which,
+  // and only the edge being unreachable puts the page back on the old path.
+  if (!player.online && EDGE_DIRECT[kind]) {
+    await Promise.race([computerLooked(), new Promise(resolve => setTimeout(resolve, LOOK_MS))]);
+    if (!player.online) {
+      const found = await EDGE_DIRECT[kind](args);
+      if (found !== null) return found;
+    }
+  }
   if (!player.online && hasSpotify() && DIRECT[kind]) return DIRECT[kind](args);
   // Past the time the computer takes to notice, it isn't coming: say so straight away.
   if (!player.online && Date.now() - openedAt > WAKE_MS) throw new Error("Encore isn't open on your computer.");
