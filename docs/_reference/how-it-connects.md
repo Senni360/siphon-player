@@ -161,7 +161,7 @@ computer adds it only to a playlist it listed and only a song it may play, witho
 duplicate question its own window asks, since nobody may be looking at it.
 
 A phone can also send a song here to download. This computer says it can in the
-state it publishes (`can: ["download", "presave"]`), the phone's command carries the song's
+state it publishes (`can: ["download", "presave", "add_to_playlist"]`), the phone's command carries the song's
 address, name, artists and length, and the download then runs here exactly as one
 started on this computer.
 
