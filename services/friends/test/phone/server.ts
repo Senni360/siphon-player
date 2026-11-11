@@ -43,6 +43,8 @@ export interface PlayerState {
   volume: number;
   device: string;
   next: Song[];
+  /** What this computer can do for a phone beyond playing: older ones say nothing. */
+  can?: string[];
   at: number;
 }
 
@@ -270,6 +272,7 @@ export class PhoneServer {
     volume: 62,
     device: 'Studio',
     next: SONGS.slice(1, 6),
+    can: ['download'],
     at: Date.now(),
   };
 
@@ -287,6 +290,8 @@ export class PhoneServer {
   readonly edgeRefused = new Set<string>();
   /** Songs the computer has no audio for, as a Spotify-only match would be. */
   readonly noAudio = new Set<string>();
+  /** Songs the phone asked the computer to download, in the order asked. */
+  readonly downloads: Array<Record<string, unknown>> = [];
   /** The next `/api/edge/token` names a media token that is already expired. */
   edgeExpireNext = false;
   /** What `/v1/match` answers. Null means no match. */
@@ -847,6 +852,9 @@ export class PhoneServer {
         return { ok: true };
       case 'like':
         this.setState({ liked: !this.state.liked });
+        return { ok: true };
+      case 'download':
+        this.downloads.push(input);
         return { ok: true };
       case 'queue':
       case 'play_link':

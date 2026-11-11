@@ -6,9 +6,9 @@ import { shuffled } from './order.js';
 import { ownsQueue, playNext } from './player.js';
 import { api } from './service.js';
 import { choice, openPanel } from './sheet.js';
-import { hooks } from './state.js';
+import { hooks, player } from './state.js';
 import { matching, plain } from './words.js';
-import { act } from './remote.js';
+import { act, tell } from './remote.js';
 
 export { shuffled };
 
@@ -30,6 +30,12 @@ export function songActions(song, extra = []) {
       ownsQueue() && choice('last', 'Add to queue', run(() => { hooks.hereActs.last({ song }); toast('Added to the queue'); })),
       choice('heart', 'Like', run(() => Promise.resolve(act('like', { uri: song.uri })).then(() => toast('Liked'), () => toast("That didn't go through.")))),
       song.link && choice('share', 'Share with the group', run(() => shareSong(song))),
+      // The computer does the downloading, so this shows while one that can is there to ask.
+      player.online && player.state?.can?.includes?.('download') && choice('download', 'Download on your computer', run(() => {
+        toast('Downloading on your computer');
+        Promise.resolve(tell('download', { uri: song.uri, name: song.name, artists: (song.artists ?? []).slice(0, 20), duration_ms: Math.round(song.duration_ms ?? 0), image: safeImage(song.image) ?? null }))
+          .catch(() => toast("Couldn't reach Encore."));
+      })),
       song.artist_id && choice('person', 'Go to artist', run(() => { hooks.closeSheet?.(); go({ page: 'artist', id: song.artist_id }); })),
       extra.map(([name, label, work, options]) => choice(name, label, run(work), options)),
     ],

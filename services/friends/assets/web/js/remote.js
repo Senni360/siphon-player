@@ -24,6 +24,12 @@ export async function act(kind, args = {}) {
   await api('/live/remote/send', 'POST', { id: uuid(), kind, ...args });
 }
 
+/** Tells the computer itself to do something, whichever device is playing. */
+export async function tell(kind, args = {}) {
+  if (edgeSend({ t: 'command', id: uuid(), kind, ...args })) return;
+  await api('/live/remote/send', 'POST', { id: uuid(), kind, ...args });
+}
+
 /** Asks the computer something, and waits for it to answer. */
 export async function ask(kind, args = {}, patience = 45000) {
   if (!player.online && hasSpotify() && DIRECT[kind]) return DIRECT[kind](args);
