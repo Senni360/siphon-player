@@ -171,6 +171,10 @@ impl LocalTrack {
 /// text itself.
 pub const AUDIO_KEY_REFUSED: &str = "Spotify refused the audio key. Try again later";
 
+/// The engine error for a song Spotify will not play at all. It is skipped
+/// like a dead row, because asking for it again cannot change the answer.
+pub const SPOTIFY_TRACK_UNAVAILABLE: &str = "This Spotify track is unavailable";
+
 pub const LOCAL_PLAYBACK_UNAVAILABLE: &str = "Playback on this computer is not ready. Open the device menu and choose \"Set up playback here\" or \"Try again\".";
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1366,9 +1370,9 @@ async fn run_hybrid_events(
             break;
         }
         let completion = match &event {
-            PlayerEvent::Unavailable { .. } => Some(HybridEvent::Failed(
-                "This Spotify track is unavailable".into(),
-            )),
+            PlayerEvent::Unavailable { .. } => {
+                Some(HybridEvent::Failed(SPOTIFY_TRACK_UNAVAILABLE.into()))
+            }
             PlayerEvent::AudioKeyUnavailable { .. } => {
                 Some(HybridEvent::Failed(AUDIO_KEY_REFUSED.into()))
             }

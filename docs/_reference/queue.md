@@ -36,8 +36,10 @@ Pause and Play retain the latest user intent through child-engine errors and
 late transport snapshots. Seeking keeps the selected position visible while
 playback catches up. An end-of-track event while that seek is pending retries
 the same occurrence at the requested position without consuming the next row.
-A Spotify audio-key refusal pauses the current
-occurrence for an explicit retry and keeps every mixed successor queued.
+A Spotify audio-key refusal is a failed row like any other: it is
+skipped and the song after it plays, so nothing stops and nothing asks. Three
+in twenty seconds mean the session's key service is stale rather than the
+songs, and Encore starts a fresh session.
 
 These are the rules the app follows. The queue tests in `src/app.rs`
 check every one of them.

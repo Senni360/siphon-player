@@ -76,6 +76,10 @@ pub(super) struct HybridPlayback {
     audible: bool,
     failed_occurrences: HashSet<crate::hybrid_queue::EntryId>,
     last_added: HashMap<String, Instant>,
+    // A song Spotify refuses is skipped in silence. A run of them is the
+    // session's audio-key service gone bad, so the session is started again.
+    pub(super) refused_at: Vec<Instant>,
+    pub(super) last_refusal_reconnect: Option<Instant>,
 }
 
 #[derive(Clone, Copy)]
@@ -105,6 +109,8 @@ impl Default for HybridPlayback {
             audible: false,
             failed_occurrences: HashSet::new(),
             last_added: HashMap::new(),
+            refused_at: Vec::new(),
+            last_refusal_reconnect: None,
         }
     }
 }
@@ -1520,9 +1526,20 @@ impl App {
             }
             HybridEvent::Failed(error) => {
                 let play = self.hybrid.play_intent;
-                let playback_blocked = error == crate::player::LOCAL_PLAYBACK_UNAVAILABLE
-                    || error == crate::player::AUDIO_KEY_REFUSED;
-                self.toast_error(error);
+                // No output at all is the whole computer's problem: the song
+                // stays, and the device menu explains what to do. A song
+                // Spotify won't hand over is only that song's problem, so it
+                // is skipped without a word: nobody on a bike can answer, and
+                // the next song is what they asked for.
+                let playback_blocked = error == crate::player::LOCAL_PLAYBACK_UNAVAILABLE;
+                let refused = error == crate::player::AUDIO_KEY_REFUSED
+                    || error == crate::player::SPOTIFY_TRACK_UNAVAILABLE;
+                if refused {
+                    log::info!("skipping a song Spotify refused: {error}");
+                    self.note_spotify_refusal();
+                } else {
+                    self.toast_error(error);
+                }
                 self.hybrid.tag = None;
                 if playback_blocked {
                     // Missing output and refused audio keys are playback-wide
@@ -1574,6 +1591,33 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Counts a song Spotify would not hand over. One is the song's own
+    /// problem and is skipped; three within twenty seconds mean the session's
+    /// audio-key service is gone, which leaves librespot feeding the decoder
+    /// nothing it can read. A fresh session cures that, at most once a minute.
+    pub(super) fn note_spotify_refusal(&mut self) {
+        let now = Instant::now();
+        self.hybrid
+            .refused_at
+            .retain(|at| now.duration_since(*at) < Duration::from_secs(20));
+        self.hybrid.refused_at.push(now);
+        if self.hybrid.refused_at.len() < 3
+            || self
+                .hybrid
+                .last_refusal_reconnect
+                .is_some_and(|at| at.elapsed() <= Duration::from_secs(60))
+        {
+            return;
+        }
+        self.hybrid.refused_at.clear();
+        self.hybrid.last_refusal_reconnect = Some(now);
+        self.backend.send(crate::backend::Command::Reconnect);
+        self.toast(gettext(
+            self.locale,
+            "Spotify audio disconnected. Reconnecting local playback",
+        ));
     }
 
     pub(super) fn hybrid_position(&self) -> u32 {
