@@ -521,6 +521,61 @@ impl App {
                 }
                 return;
             }
+            Phone::AddToPlaylist {
+                target,
+                uri,
+                name,
+                artists,
+                duration_ms,
+                image,
+            } => {
+                // Only a playlist this computer offered, and only a song it
+                // may play. Added as it is, without the duplicate question: a
+                // dialog here would wait on a screen nobody is looking at.
+                let destination = self
+                    .editable_playlists()
+                    .into_iter()
+                    .find(|(id, _)| id == target)
+                    .map(|(_, name)| name);
+                let value = match destination {
+                    Some(playlist_name) if allowed_uri(uri) => {
+                        let track = Track {
+                            uri: uri.clone(),
+                            name: name.chars().take(300).collect(),
+                            artists: artists
+                                .iter()
+                                .take(20)
+                                .map(|name| ArtistRef {
+                                    name: name.chars().take(200).collect(),
+                                    ..Default::default()
+                                })
+                                .collect(),
+                            duration_ms: *duration_ms,
+                            album: image
+                                .as_deref()
+                                .filter(|url| url.starts_with("https://"))
+                                .map(|url| crate::api::models::Album {
+                                    images: vec![crate::api::models::Image {
+                                        url: url.to_owned(),
+                                        ..Default::default()
+                                    }],
+                                    ..Default::default()
+                                }),
+                            ..Default::default()
+                        };
+                        self.actions.push(Action::ConfirmAddToPlaylist {
+                            playlist_id: target.clone(),
+                            playlist_name,
+                            items: vec![PlayableItem::Track(track)],
+                            position: None,
+                        });
+                        json!({ "ok": true })
+                    }
+                    _ => json!({ "error": "That playlist can't take songs from here." }),
+                };
+                self.remote_reply(id, value);
+                return;
+            }
             Phone::Search { query } => {
                 let query = query.trim().chars().take(200).collect();
                 self.backend
@@ -660,9 +715,30 @@ impl App {
                         })
                     })
                     .collect();
+                // The playlists a song can be added to: mixed ones, and the
+                // Spotify ones this account may edit.
+                let editable: Vec<Value> = self
+                    .mixed_playlists
+                    .playlists
+                    .iter()
+                    .map(|list| json!({ "id": list.uri(), "name": list.name, "mixed": true }))
+                    .chain(
+                        self.library
+                            .playlists
+                            .get()
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|list| {
+                                self.can_edit_playlist(list).then(
+                                    || json!({ "id": list.id, "name": list.name, "mixed": false }),
+                                )
+                            }),
+                    )
+                    .collect();
                 json!({
                     "playlists": playlists,
                     "mixed": mixed,
+                    "editable": editable,
                     "soundcloud": self.soundcloud_library.snapshot.likes_loaded,
                     "youtube": self.youtube_likes().is_some(),
                 })

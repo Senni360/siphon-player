@@ -1,6 +1,6 @@
 // Rows, cards, shelves, sections, and what a song's own menu does.
 
-import { art, count, h, icon, onHold, safeImage, SOURCE_NAMES, sourceOf, toast } from './dom.js';
+import { art, bones, count, h, icon, onHold, safeImage, SOURCE_NAMES, sourceOf, toast } from './dom.js';
 import { go } from './navigation.js';
 import { shuffled } from './order.js';
 import { ownsQueue, playNext } from './player.js';
@@ -8,7 +8,7 @@ import { api } from './service.js';
 import { choice, openPanel } from './sheet.js';
 import { hooks, player } from './state.js';
 import { matching, plain } from './words.js';
-import { act, tell } from './remote.js';
+import { act, ask, tell } from './remote.js';
 
 export { shuffled };
 
@@ -30,6 +30,7 @@ export function songActions(song, extra = []) {
       ownsQueue() && choice('last', 'Add to queue', run(() => { hooks.hereActs.last({ song }); toast('Added to the queue'); })),
       choice('heart', 'Like', run(() => Promise.resolve(act('like', { uri: song.uri })).then(() => toast('Liked'), () => toast("That didn't go through.")))),
       song.link && choice('share', 'Share with the group', run(() => shareSong(song))),
+      player.online && player.state?.can?.includes?.('add_to_playlist') && choice('plus', 'Add to playlist', run(() => pickPlaylist(song))),
       // The computer does the downloading, so this shows while one that can is there to ask.
       player.online && player.state?.can?.includes?.('download') && choice('download', 'Download on your computer', run(() => {
         toast('Downloading on your computer');
@@ -40,6 +41,41 @@ export function songActions(song, extra = []) {
       extra.map(([name, label, work, options]) => choice(name, label, run(work), options)),
     ],
   });
+}
+
+const RECENT_LISTS = 'encore.recentLists';
+const recentLists = () => { try { return JSON.parse(localStorage.getItem(RECENT_LISTS) ?? '[]').filter(id => typeof id === 'string'); } catch { return []; } };
+const keepRecentList = id => { try { localStorage.setItem(RECENT_LISTS, JSON.stringify([id, ...recentLists().filter(old => old !== id)].slice(0, 5))); } catch { /* only the order is lost */ } };
+
+/**
+ * The playlists a song can go to, the ones used last first, and a field to find
+ * one in a long library. A tap adds it at once: the computer does the adding.
+ */
+export function pickPlaylist(song) {
+  const body = h('div', { class: 'pick' }, bones(4));
+  const close = openPanel({ label: 'Add to playlist', className: 'picker', content: [about(song), body] });
+  const add = list => close(() => {
+    keepRecentList(list.id);
+    toast(`Added to ${list.name}`);
+    Promise.resolve(tell('add_to_playlist', {
+      target: list.id, uri: song.uri, name: song.name, artists: (song.artists ?? []).slice(0, 20),
+      duration_ms: Math.round(song.duration_ms ?? 0), image: safeImage(song.image) ?? null,
+    })).catch(() => toast("Couldn't reach Encore."));
+  });
+  ask('library').then(found => {
+    const lists = found.editable ?? [];
+    if (!lists.length) {
+      body.replaceChildren(h('p', { class: 'note', text: 'No playlist here takes songs. Make one on your computer first.' }));
+      return;
+    }
+    const recent = recentLists();
+    const order = list => { const at = recent.indexOf(list.id); return at < 0 ? recent.length : at; };
+    const sorted = [...lists].sort((first, second) => order(first) - order(second));
+    body.replaceChildren(findable(sorted, {
+      label: 'Find a playlist', textOf: list => list.name,
+      draw: found => found.map(list => choice(list.mixed ? 'library' : 'note', list.name, () => add(list), { note: list.mixed ? 'Mixed playlist' : null })),
+    }));
+  }, error => body.replaceChildren(h('p', { class: 'note', text: error.message })));
 }
 
 /** Shares a song with the group, with a note if there's something to say. */

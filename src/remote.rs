@@ -114,6 +114,22 @@ pub enum Command {
         #[serde(default)]
         link: Option<String>,
     },
+    /// A song for one of the library's playlists, which this computer adds. It
+    /// comes with what it's called, which a mixed playlist keeps beside it.
+    AddToPlaylist {
+        /// A playlist the account may edit, by the id this computer listed it
+        /// under in the library answer's `editable`.
+        target: String,
+        uri: String,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        artists: Vec<String>,
+        #[serde(default)]
+        duration_ms: u32,
+        #[serde(default)]
+        image: Option<String>,
+    },
     /// Where a song's audio is, for the phone to play. A Spotify song comes with
     /// what it's called, so the same song can be found on YouTube or SoundCloud.
     Stream {
@@ -216,7 +232,7 @@ pub fn song_of(item: &PlayableItem) -> Option<Song> {
 
 /// What this computer does for a phone beyond playing. A phone only offers what
 /// is named here, so one linked to an older Encore never asks for it.
-pub const CAN: &[&str] = &["download", "presave"];
+pub const CAN: &[&str] = &["download", "presave", "add_to_playlist"];
 
 /// How playback is going, for the phone.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]

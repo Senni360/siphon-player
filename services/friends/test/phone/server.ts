@@ -358,7 +358,7 @@ export class PhoneServer {
     volume: 62,
     device: 'Studio',
     next: SONGS.slice(1, 6),
-    can: ['download', 'presave'],
+    can: ['download', 'presave', 'add_to_playlist'],
     at: Date.now(),
   };
 
@@ -383,6 +383,8 @@ export class PhoneServer {
   /** Pre-saves the phone sent, and whether the upcoming album is pre-saved. */
   readonly presaves: Array<Record<string, unknown>> = [];
   presaved = false;
+  /** Songs the phone added to a playlist, in the order added. */
+  readonly added: Array<Record<string, unknown>> = [];
   /** The next `/api/edge/token` names a media token that is already expired. */
   edgeExpireNext = false;
   /** What `/v1/match` answers. Null means no match. */
@@ -1001,6 +1003,11 @@ export class PhoneServer {
           direct: false,
           playlists: PLAYLISTS.map(list => ({ id: list.id, name: list.name, image: list.image, uri: `spotify:playlist:${list.id}` })),
           mixed: [{ ...MIXED }, { id: 'mix-sunday', name: 'Sunday Kitchen', image: SONGS[50]!.image, count: 37 }],
+          editable: [
+            { id: 'spotifast:playlist:mix-everything', name: 'Everything, 200 Songs', mixed: true },
+            { id: 'spotifast:playlist:mix-sunday', name: 'Sunday Kitchen', mixed: true },
+            ...PLAYLISTS.slice(0, 2).map(list => ({ id: list.id, name: list.name, mixed: false })),
+          ],
         };
       case 'liked':
         return { name: 'Liked Songs', songs: LIKED };
@@ -1075,6 +1082,9 @@ export class PhoneServer {
         return { ok: true };
       case 'like':
         this.setState({ liked: !this.state.liked });
+        return { ok: true };
+      case 'add_to_playlist':
+        this.added.push(input);
         return { ok: true };
       case 'presave':
         this.presaves.push(input);

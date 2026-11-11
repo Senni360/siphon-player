@@ -154,6 +154,12 @@ made ready the same way ahead of time: one song every few seconds, at most 1,000
 run of the app, a YouTube copy the edge already holds is not downloaded again, and
 nothing is fetched while **Play my local files on my phone** is off.
 
+A phone can add a song to a playlist too. The library answer lists the playlists that
+take songs (`editable`: the mixed playlists, and the Spotify ones this account may
+edit), and the phone's `add_to_playlist` command names one of them and the song. This
+computer adds it only to a playlist it listed and only a song it may play, without the
+duplicate question its own window asks, since nobody may be looking at it.
+
 A phone can also send a song here to download. This computer says it can in the
 state it publishes (`can: ["download", "presave"]`), the phone's command carries the song's
 address, name, artists and length, and the download then runs here exactly as one

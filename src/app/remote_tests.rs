@@ -394,3 +394,34 @@ fn the_phones_home_carries_new_releases_as_what_they_are() {
     assert_eq!(release["artists"][0], "Bonobo");
     assert!(release["song"].is_null());
 }
+
+#[test]
+fn a_phone_adds_a_song_only_to_a_playlist_this_computer_offered() {
+    let mut app = test_app("remote-add-to-playlist");
+    let ctx = egui::Context::default();
+    app.mixed_playlists.create("Road".into(), String::new());
+    let target = app.mixed_playlists.playlists[0].uri();
+    let library = app.remote_answer(&PhoneCommand::Library).unwrap();
+    assert_eq!(library["editable"][0]["id"], target.as_str());
+    assert_eq!(library["editable"][0]["mixed"], true);
+
+    let add = |target: &str, uri: &str| PhoneIncoming {
+        id: "1".into(),
+        command: PhoneCommand::AddToPlaylist {
+            target: target.into(),
+            uri: uri.into(),
+            name: "Holding".into(),
+            artists: vec!["slayr".into()],
+            duration_ms: 154_000,
+            image: None,
+        },
+    };
+    app.remote_command(add(&target, "spotify:track:a"), &ctx);
+    assert!(app.actions.iter().any(|action| matches!(action,
+        Action::ConfirmAddToPlaylist { playlist_id, items, .. }
+            if *playlist_id == target && items[0].uri() == "spotify:track:a")));
+    app.actions.clear();
+    app.remote_command(add("spotify:playlist:not-mine", "spotify:track:a"), &ctx);
+    app.remote_command(add(&target, "https://evil.example/x"), &ctx);
+    assert!(!app.actions.iter().any(|action| matches!(action, Action::ConfirmAddToPlaylist { .. })));
+}
